@@ -2296,7 +2296,7 @@ Check: a new VS Code chat in CLAUDE CONSOLE: `/route-model rename the variable s
 - [x] A turn with 10 or more main-chat reads shows `delegate?`.
 - [x] The strip shows today's model mix and the window runs with their cost.
 - [x] A `/session-handoff` run inside a VS Code chat makes it Done.
-- [x] `route-model`, `session-handoff` and `verifier` work from `~/.claude` in every project; `route-model` reads and writes `~/.claude/console/routing-misses.md` (live: the read; no chat escalated, so the write and the `verifier` run from `~/.claude` after the Verify text fix are not seen live yet).
+- [x] `route-model`, `session-handoff` and `verifier` work from `~/.claude` in every project; `route-model` reads and writes `~/.claude/console/routing-misses.md` (live: the read, and after the Verify text fix and a restart, Verify ran the `~/.claude` verifier: agent row `verifier · claude-sonnet-5-5/low`, PASS; no chat escalated, so the miss write is not seen live yet).
 - [x] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code or by Claude.
 
 ## History
