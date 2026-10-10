@@ -1,5 +1,6 @@
 // Claude Console window: renders /api/stream snapshots; phase 2 adds the prompt box, Prep card and runs;
-// phase 3 the levers (Continue, Verify, Handoff, Escalate), verdicts and the Timeline tab.
+// phase 3 the levers (Continue, Verify, Handoff, Escalate), verdicts and the Timeline tab;
+// phase 4 the rules-size warning, the should-delegate flag and the model-mix strip.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -28,6 +29,7 @@ function dur(sec) {
   const min = Math.round(sec / 60);
   return min < 90 ? min + " min" : Math.floor(min / 60) + " h " + (min % 60) + " min";
 }
+function kb(bytes) { return (bytes / 1000).toFixed(1) + " KB"; }
 function verdictBadge(v) { return v ? `<span class="badge ${v === "PASS" ? "success" : "danger"}">${esc(v)}</span>` : ""; }
 function baseName(p) { return String(p || "").split(/[\\/]/).filter(Boolean).pop() || p; }
 function routeText(s) {
@@ -57,6 +59,8 @@ function sessionRows(s) {
     <span class="title">${esc(s.title)}</span>
     ${verdictBadge(s.verdict)}
     ${s.two_writers ? '<span class="badge warning">2 writers</span>' : ""}
+    ${s.rules_warn ? `<span class="badge warning" title="${esc(s.rules_warn)}">rules ${kb(s.rules_bytes)}</span>` : ""}
+    ${s.delegate_hint ? '<span class="badge warning">delegate?</span>' : ""}
     ${s.handoff_hint && s.ctx_tone !== "red" ? '<span class="badge warning">handoff?</span>' : ""}
     ${gauge(s)}</div>`;
   const ups = s.follow_ups ? ` &middot; ${s.follow_ups} follow-up${s.follow_ups === 1 ? "" : "s"}` : "";
@@ -320,6 +324,12 @@ function renderDetail() {
   if (s.escalated) head += `<div class="row m mut"><span class="title">escalated ${esc(s.escalated)}</span></div>`;
   if (s.forked_from) head += `<div class="row m mut"><span class="title">window copy of <span class="link" data-open="${esc(s.forked_from)}">${esc(s.forked_from.slice(0, 8))}</span></span></div>`;
   if (s.route_reason) head += `<div class="note mut">${esc(s.route_reason)}</div>`;
+  if (s.rules.length) {
+    const files = s.rules.map((r) => `${esc(r.file)} ${r.lines} lines ${kb(r.bytes)}${r.scope ? " (" + esc(r.scope.toLowerCase()) + ")" : ""}`);
+    head += `<div class="note m mut">rules: ${files.join(" &middot; ")}</div>`;
+  }
+  if (s.rules_warn) head += `<div class="note m"><span class="warning">&#9651; rules</span> ${esc(s.rules_warn)}: keep CLAUDE.md short; move procedures to skills and narrow rules to path rules</div>`;
+  if (s.delegate_hint) head += `<div class="note m"><span class="warning">&#8674; delegate</span> ${s.reads} reads in the main chat this turn: heavy reading belongs in a subagent (Explore)</div>`;
   $("d-head").innerHTML = head;
   renderActions(s).catch(() => {});
   renderTabs(s);
@@ -365,6 +375,9 @@ function renderStrip() {
   const c = snap.counts;
   let html = `<span>${live ? "service &#9679; ok" : '<span class="danger">service &#9675; offline</span>'}</span>
     <span>${c.needs} need you &middot; ${c.working} working &middot; ${c.done} done</span>`;
+  const mix = snap.mix;
+  if (mix.models.length) html += `<span>${mix.models.map(([m, n]) => esc(m) + " " + n).join(" &middot; ")}</span>`;
+  if (mix.runs) html += `<span>runs ${mix.runs} &middot; $${Number(mix.cost).toFixed(2)}</span>`;
   for (const w of snap.writers) {
     html += `<span class="warning">2 writers: ${esc(baseName(w.project_dir))}</span>`;
   }

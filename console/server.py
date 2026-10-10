@@ -134,7 +134,8 @@ class Hub:
         else:
             escalate = ""
         handoff = base or ("" if levers.handoff_ready(s["project_dir"], self.user_home) else
-                           "the session-handoff skill is not installed here (phase 4 moves it to ~/.claude)")
+                           "the session-handoff skill is not installed here: copy "
+                           "dotclaude/skills/session-handoff to ~/.claude/skills")
         return {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate,
                 "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
                 "fork": not window, "cwd": cwd or ""}
