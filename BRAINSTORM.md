@@ -185,7 +185,9 @@ Run always starts a new session (one task = one chat).
 
 Segoe UI for text, Cascadia Mono for IDs, routes, numbers and steps; borders instead of cards;
 28 px rows; tabular numbers; light / dark from the system; no decorative animation; buttons stay
-pending until the service confirms; closing the window never stops a run. Mockup:
+pending until the service confirms; closing the window never stops a run. Fred, 2026-10-10: the
+look is very compact; accepted for now, a visual rework comes later (keep styling in one CSS file
+with tokens so it is cheap to redo). Mockup:
 `design/window-style-v2.html` (all brainstorm screens are in `design/`).
 
 ## 8. Error handling
@@ -260,3 +262,4 @@ pending until the service confirms; closing the window never stops a run. Mockup
 
 - 2026-10-10 - Brainstorm with Fred in the Content Manager session; D1-D10 decided; design
   sections 1-4 approved; visual companion mockups copied to `design/`.
+- 2026-10-10 - Fred reviewed the spec: accepted; visual density to be reworked later.
