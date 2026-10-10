@@ -55,9 +55,15 @@ def main(argv=None) -> int:
             return 0
 
     import webview  # imported late: --serve works without pywebview
-    webview.create_window("Claude Console", url, width=420, height=640,
-                          min_size=(360, 400), on_top=True)
-    webview.start()
+    from . import window
+    api = window.WindowApi(paths.home())
+    x, y = api._place()
+    win = webview.create_window("Claude Console", url, js_api=api, width=window.OPEN_W, height=window.OPEN_H,
+                                x=x, y=y, min_size=(window.PILL_W, window.PILL_H), frameless=True,
+                                easy_drag=False, transparent=True, on_top=api.state()["on_top"])
+    api._attach(win)
+    win.events.closing += api._remember_place
+    webview.start(api._restore)
     return 0
 
 
