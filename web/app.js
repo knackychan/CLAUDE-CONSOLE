@@ -81,7 +81,7 @@ function runnable() { return !!cfg && cfg.claude && cfg.projects.includes($("pro
 function hint() {
   if (!cfg) return "";
   if (!cfg.claude) return '<span class="danger">claude.exe not found: set "claude_exe" in config.json</span>';
-  if (!$("project").value) return `<span class="mut">To run: pick a project listed in "projects" of ${esc(cfg.config_path)}</span>`;
+  if (!$("project").value) return '<span class="mut">To run: pick a project in the list at the top (next to "Claude Console")</span>';
   if (!runnable()) return `<span class="mut">Runs are off here: a run uses this repo's hooks and settings without asking.</span>
     <button data-act="allow">Allow runs in ${esc(baseName($("project").value))}</button>`;
   return '<span class="mut">Enter = Prep &middot; Ctrl+Enter = Run raw &middot; Shift+Enter = new line</span>';

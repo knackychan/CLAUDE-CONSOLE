@@ -2639,7 +2639,7 @@ hub.start(); print('http://127.0.0.1:8772/'); httpd.serve_forever()"
 ```
 
 Open `http://127.0.0.1:8772/` and check, in order:
-1. With "All projects" the prompt box is disabled and the hint names `config.json`; pick `proj (runs)`: the box enables, the hint reads `Enter = Prep · Ctrl+Enter = Run raw · Shift+Enter = new line`.
+1. With "All projects" the prompt box is disabled and the hint points to the project list (Task 6b); pick `proj (runs)`: the box enables, the hint reads `Enter = Prep · Ctrl+Enter = Run raw · Shift+Enter = new line`.
 2. Type `fix the add function`, Enter: the hint shows `Prep: Haiku is reading proj ...`, then the Prep card: You typed, `Scouted: calc.py:2`, the editable prompt (`Goal: Fix add() in calc.py` ...), Route `sonnet` / `low` / `mechanical`, the reason, `Prep: $0.030 · 5 turns`.
 3. Run: the detail opens on Chat: `start <7 chars> · 0 file(s) changed since`, then you / claude (echo with the STOP footer) / tool `Read calc.py` / result `success · $0.01 · 2 turns`; the row reads `proj · window · mechanical · sonnet/low`; the button row shows `Open in terminal` (do not click it here).
 4. Back, type `SLOW raw task`, Ctrl+Enter: `▶ Running` with a Stop button; Stop: `○ Idle`, `stopped by you`, Chat ends with note `stopped` and `error_during_execution`.
