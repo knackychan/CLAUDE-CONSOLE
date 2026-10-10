@@ -15,8 +15,8 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.45 var(--font); }
-body { display: flex; flex-direction: column; min-height: 100vh; }
-main { flex: 1; overflow-y: auto; }
+body { display: flex; flex-direction: column; height: 100vh; }  /* only the list scrolls: the strip stays */
+main { flex: 1; min-height: 0; overflow-y: auto; }
 .m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 .row { display: flex; align-items: center; gap: 8px; min-height: var(--row); padding: 0 10px;
        border-bottom: 1px solid var(--bd); }

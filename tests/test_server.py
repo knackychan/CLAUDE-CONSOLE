@@ -204,6 +204,7 @@ class RunServerTest(unittest.TestCase):
                                            "next time start at opus/high."))
         you = [i["text"] for i in self.call(f"/api/chat?session={sid}")[1]["items"] if i["role"] == "you"]
         self.assertTrue(you[1].startswith("Check the work of this session."))
+        self.assertIn("`~/.claude/agents`", you[1])  # the user-level verifier counts too (plan 04 Task 5)
         self.assertTrue(you[2].startswith("The checks failed: test_add - 3 != 4. You now run on opus/high"))
 
     def test_handoff_marks_the_session_done(self):

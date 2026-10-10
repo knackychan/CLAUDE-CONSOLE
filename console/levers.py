@@ -5,7 +5,8 @@ from pathlib import Path
 
 from . import claude_cli, redact
 
-VERIFY_TEXT = ("Check the work of this session. If this project has a `verifier` agent, run it; otherwise "
+VERIFY_TEXT = ("Check the work of this session. If a `verifier` agent is available (the project's "
+               "`.claude/agents` or `~/.claude/agents`), run it with the Agent tool; otherwise "
                "run the project's tests or checks once. Do not edit any file. End your final message "
                "with one line: `VERDICT: PASS` or `VERDICT: FAIL <shortest failing line>`.")
 HANDOFF_TEXT = "/session-handoff"
