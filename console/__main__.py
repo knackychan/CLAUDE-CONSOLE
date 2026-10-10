@@ -6,7 +6,7 @@ import sys
 import threading
 import urllib.request
 
-from . import events, paths, server
+from . import events, paths, runs, server
 
 
 def already_running(port: int) -> bool:
@@ -28,6 +28,7 @@ def main(argv=None) -> int:
         sys.stderr = open(paths.home() / "window-errors.log", "a", encoding="utf-8")
     cfg = paths.ensure_config()
     events.prune(paths.home(), cfg["retention_days"])
+    runs.prune(paths.home(), cfg["retention_days"])
     port = cfg["port"]
     url = f"http://127.0.0.1:{port}/"
 
