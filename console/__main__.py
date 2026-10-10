@@ -58,9 +58,11 @@ def main(argv=None) -> int:
     from . import window
     api = window.WindowApi(paths.home())
     x, y = api._place()
-    win = webview.create_window("Claude Console", url, js_api=api, width=window.OPEN_W, height=window.OPEN_H,
+    # Not transparent: a WinForms form cannot be, its corners showed grey. Windows 11 rounds it instead
+    # (window.round_corners) and the background matches the page.
+    win = webview.create_window(window.TITLE, url, js_api=api, width=window.OPEN_W, height=window.OPEN_H,
                                 x=x, y=y, min_size=(window.PILL_W, window.PILL_H), frameless=True,
-                                easy_drag=False, transparent=True, on_top=api.state()["on_top"])
+                                easy_drag=False, background_color=window.BACKGROUND, on_top=api.state()["on_top"])
     api._attach(win)
     win.events.closing += api._remember_place
     webview.start(api._restore)

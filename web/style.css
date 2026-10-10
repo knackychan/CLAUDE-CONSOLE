@@ -24,7 +24,8 @@
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--page); color: var(--ink); font: 13px/1.45 var(--ui); overflow: hidden; }
-html.native body { background: transparent; }  /* the pywebview window is transparent: the forms draw it */
+html.native body { background: var(--win); }  /* the window itself is rounded (Windows 11, 8 px): the page fills it */
+html.native .win, html.native .peek, html.native .peek.card-on { border-radius: 8px; }
 button, input, select, textarea { font: inherit; color: inherit; }
 /* the focus ring and the selection are ink, not orange: orange stays reserved for "needs you" */
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {

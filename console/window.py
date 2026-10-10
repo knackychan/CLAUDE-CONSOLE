@@ -10,6 +10,21 @@ from . import paths
 PILL_W, PILL_H = 380, 48
 OPEN_W, OPEN_H = 400, 640
 PEEK_MAX_H = 360  # the pill plus one card, never taller
+TITLE = "Claude Console"
+BACKGROUND = "#121315"  # --win in style.css: what the window shows outside the page's own corners
+DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
+
+
+def round_corners(title: str = TITLE) -> bool:
+    """Windows 11 rounds a borderless window (8 px, antialiased) only when asked; a WinForms form cannot
+    be transparent, so without this its square corners show around the page's rounded ones."""
+    try:
+        hwnd = ctypes.windll.user32.FindWindowW(None, title)
+        pref = ctypes.c_int(DWMWCP_ROUND)
+        return bool(hwnd) and ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), DWMWA_WINDOW_CORNER_PREFERENCE, ctypes.byref(pref), ctypes.sizeof(pref)) == 0
+    except (AttributeError, OSError):
+        return False  # before Windows 11: square corners
 
 
 def on_screen(x: int, y: int) -> bool:
@@ -43,6 +58,7 @@ class WindowApi:
 
     def _restore(self) -> None:
         """After the window shows: pywebview sizes a frameless window short of the asked size."""
+        round_corners()
         self.form(self._form)
 
     def _remember_place(self) -> None:
