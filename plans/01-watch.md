@@ -50,9 +50,9 @@ All files are new except `.gitignore` (new too: the repo has only BRAINSTORM.md,
 - [x] Task 3: log reader
 - [x] Task 4: state builder
 - [x] Task 5: guard + service
-- [ ] Task 6: window
-- [ ] Task 7: hook installer + live check (Fred runs the installer)
-- [ ] Task 8: plan history + push nothing (local repo only)
+- [x] Task 6: window
+- [x] Task 7: hook installer + live check (Fred runs the installer)
+- [x] Task 8: plan history + push nothing (local repo only)
 
 ---
 
@@ -1974,11 +1974,18 @@ Expected:
 
 ## History
 
+- 2026-10-10 - Tasks 6-8 done. Window check and live check passed (session, Explore agent row ending in `✓ Done`, red gauge, Steps; no hook-errors.log). Change after the live check: agent rows now show `✓ Done` text and a context bar from their tokens (Fred's request).
 - 2026-10-10 - Tasks 0-7 step 3 executed (files copied from the verified scratch copy, one commit per task, 37 tests OK, installer dry run points at this repo's cc_events.py). Pending: Task 6 step 4 window check, Task 7 steps 4-5 (Fred installs the hooks, live check), Task 8.
 - 2026-10-10 - Plan written. Every code block was run in a scratch copy first: 37 tests OK, hook about 75 ms on a real transcript, service smoke-tested.
 
 ## Troubleshooting
 
+- **Issue:** a session title starts with `<pasted_content id="...">`.
+  **Cause:** the prompt was pasted; Claude Code wraps pasted text in that tag and the hook logs the first 120 characters.
+  **Fix:** plan 02 Task 1 strips the tag from titles.
+- **Issue:** a change to `console/*.py` does not show in the open window.
+  **Cause:** the window process loaded the old code (static files are read per request, Python is not).
+  **Fix:** close the window and start `run.bat` again.
 - **Issue:** a console window flashes on every hook event.
   **Cause:** Claude Code starts `python.exe` for the hook.
   **Fix:** `py install_hooks.py --write --python "C:\Users\DEROK137\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe"` (replaces our entries; `pythonw.exe` has no console and still reads the piped stdin). Check one event still lands in the log afterwards.

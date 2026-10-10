@@ -11,7 +11,7 @@ ends with working, tested software.
 
 | # | Sub-plan | State |
 |---|---|---|
-| 1 | [plans/01-watch.md](plans/01-watch.md) - hooks, service, tree, gauge, Steps, Needs you, Quiet / Stall?, 2 writers | written 2026-10-10, not started |
+| 1 | [plans/01-watch.md](plans/01-watch.md) - hooks, service, tree, gauge, Steps, Needs you, Quiet / Stall?, 2 writers | done 2026-10-10 |
 | 2 | Run - prompt box, Prep card, Run / Run raw, Chat, Stop, Open in terminal, crash recovery, STOP answers | to write after phase 1 |
 | 3 | Levers - Continue, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | to write |
 | 4 | Polish - rules-size warning, should-delegate flag, model-mix strip, move skills to ~/.claude | to write |
@@ -38,3 +38,4 @@ ends with working, tested software.
   service smoke-tested with curl (state, static, SSE, foreign Host refused).
 - 2026-10-10 - Phase 1 code placed (tasks 0-7, 37 tests OK); Fred ran `install_hooks.py --write`; live: sessions, Steps and the red gauge (this chat at 337.5K) show; hooks also apply to already-open chats. Open: agent-row live check, then Task 8.
 - 2026-10-10 - Fred asked for prompting from the window: that is phase 2 (Run); write plans/02-run.md after phase 1 closes.
+- 2026-10-10 - Phase 1 done: 37 tests OK; live check passed (an Explore agent row appeared under its session while running, then `✓ Done` with model, steps and tokens; no hook-errors.log). Differed from 01: Fred asked for agent rows to show their state text and a green context bar (`State.gauge(tokens)` now serves sessions and agents; one assertion added, still 37 tests).
