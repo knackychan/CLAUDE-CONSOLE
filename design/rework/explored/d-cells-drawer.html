@@ -1,0 +1,948 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; }</style>
+<title>Cells Drawer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: proposal page = stage (window mock: pill, or one full-width list with a session page behind it) + notes. Console Cells tokens unchanged; no rail. */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 28px 16px 48px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 26px; }
+header h1 { font: 700 34px/1 var(--dot); margin: 0 0 8px; letter-spacing: .02em; }
+header p { margin: 0; color: var(--mut); max-width: 64ch; }
+.grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 36px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.views { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; min-height: 40px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+/* focus ring in ink, not orange: orange stays reserved for "needs you" */
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+::selection { background: color-mix(in srgb, var(--ink) 22%, transparent); }
+.sample { font: 11px var(--mono); color: var(--mut); margin: 0 0 12px; }
+.stage { min-height: 660px; }
+.cap { font-size: 12px; color: var(--mut); max-width: 400px; margin: 12px 0 0; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mut { color: var(--mut); }
+.lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+
+/* cells */
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); }
+.cells i.y { background: var(--you); }
+.cells i.r { background: var(--bad); }
+.cells i.g { background: var(--ok); }
+.cells i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+.cells i.mk { box-shadow: inset 0 0 0 1px var(--you); }
+.cells i.l1 { background: color-mix(in srgb, var(--ink) 22%, var(--off)); }
+.cells i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.cells i.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+.cells i.l4 { background: var(--ink); }
+@media (prefers-reduced-motion: no-preference) { .cells i.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+@keyframes blink { 50% { background: var(--off); } }
+
+/* folded: cell pill (unchanged from Console Cells) */
+.pill { width: min(380px, 100%); height: 48px; background: var(--win); border-radius: 24px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 6px; padding: 0 6px 0 14px; user-select: none; }
+.grip { color: var(--mut); letter-spacing: -2px; font-size: 12px; cursor: grab; margin-right: 2px; }
+.chipcell { position: relative; display: grid; justify-items: center; gap: 1px; border: 0; background: transparent; padding: 3px 4px; border-radius: 6px; cursor: pointer; color: var(--ink); }
+.chipcell:hover { background: var(--raise); }
+.chipcell .cells { grid-template-columns: repeat(5, 3px); }
+.chipcell .gl { font: 600 9px/1 var(--mono); color: var(--mut); }
+.chipcell .gl.y { color: var(--you); } .chipcell .gl.r { color: var(--bad); }
+.chipcell .dot { position: absolute; top: 1px; right: 0; width: 6px; height: 6px; background: var(--you); border-radius: 1px; }
+.chipcell .dot.r { background: var(--bad); }
+.pill .sp { flex: 1; align-self: stretch; cursor: grab; }
+.pill .big { font: 700 20px/1 var(--dot); letter-spacing: .02em; padding: 0 4px; }
+.tb { width: 34px; height: 34px; border: 0; border-radius: 17px; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); display: grid; place-items: center; }
+.tb:hover { background: var(--raise); color: var(--ink); }
+.peek { width: min(380px, 100%); background: var(--win); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.peek .pill { box-shadow: none; border-bottom: 1px solid var(--line); border-radius: 0; width: 100%; }
+.peek .askbox { margin: 8px; }
+
+/* shared pieces */
+.askbox { padding: 10px; border-radius: 8px; background: color-mix(in srgb, var(--you) 9%, var(--win)); border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); display: grid; gap: 6px; }
+.l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.t { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.age { color: var(--mut); white-space: nowrap; }
+.st { font: 600 11px var(--mono); white-space: nowrap; letter-spacing: .02em; }
+.st.y { color: var(--you); } .st.r { color: var(--bad); } .st.g { color: var(--ok); } .st.n { color: var(--ink); } .st.q { color: var(--mut); }
+.lr { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.lr input, textarea.in { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+textarea.in { width: 100%; resize: none; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.you { background: var(--you); border-color: var(--you); color: #1a0d00; }
+.btn.stop { color: var(--bad); }
+.btn.sm { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+
+/* open window: one column, no rail. Spacing scale: 4 / 8 / 12 / 16 / 24. The window is a container so the
+   mock adapts between 400 and 340 px by width, not by viewport. */
+.win { width: min(400px, 100%); height: 640px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
+.top { height: 36px; flex: none; display: flex; align-items: center; gap: 4px; padding-left: 10px; border-bottom: 1px solid var(--line); user-select: none; }
+.top .brand { font: 600 13px var(--ui); margin-left: 4px; }
+.top .sp { flex: 1; align-self: stretch; cursor: grab; min-width: 8px; }
+.top .crumb { color: var(--mut); white-space: nowrap; }
+.rb { width: 34px; height: 36px; border: 0; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); display: grid; place-items: center; flex: none; }
+.rb:hover { background: var(--raise); color: var(--ink); }
+.rb.on { color: var(--ink); }
+.rb.x:hover { background: #c42b1c; color: #fff; }
+.rb:disabled { opacity: .35; cursor: default; background: transparent; }
+.needs { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); background: transparent; border-radius: 4px; padding: 1px 7px; cursor: pointer; white-space: nowrap; margin-left: 4px; flex: none; }
+.needs:hover { background: color-mix(in srgb, var(--you) 10%, transparent); }
+.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
+/* 340 px: the scope keeps its full name; window buttons, the route on cards and the picker's sort note give way */
+@container (max-width: 372px) {
+  .top { padding-left: 8px; }
+  .top .grip { display: none; }
+  .top .rb { width: 26px; }
+  .needs { padding: 1px 5px; margin-left: 2px; }
+  .today .usd { display: none; }
+  .l2 .route { display: none; }
+  .pop .foot .sort { display: none; }
+}
+/* single-column grids must never grow past the window: long one-line texts ellipsize instead */
+.body, .card, .blk, .askbox, .compose, .levers, .todaymore, .empty { grid-template-columns: minmax(0, 1fr); }
+.where .btn { flex: none; }
+.banner { flex: none; display: flex; gap: 8px; align-items: center; padding: 6px 12px; background: color-mix(in srgb, var(--bad) 12%, var(--win)); font: 12px var(--ui); border-bottom: 1px solid var(--line); }
+.banner b { color: var(--bad); font: 600 11px var(--mono); }
+
+/* today strip: one row of 30 cells = the soft limit */
+.today { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: center; width: 100%; padding: 10px 12px; background: transparent; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.today:hover { background: color-mix(in srgb, var(--raise) 60%, transparent); }
+.today .big { font: 700 30px/.9 var(--dot); letter-spacing: .02em; grid-row: span 2; }
+.today .row30 { grid-template-columns: repeat(30, minmax(0, 1fr)); }
+.today .sub { display: flex; justify-content: space-between; gap: 8px; color: var(--mut); min-width: 0; }
+.today .sub span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.today .sub span:last-child { flex: none; }
+.todaymore { padding: 2px 12px 10px; display: grid; gap: 6px; border-bottom: 1px solid var(--line); }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font: 10.5px var(--mono); color: var(--mut); }
+.legend span { display: inline-flex; gap: 5px; align-items: center; }
+.legend i { width: 8px; height: 8px; display: inline-block; border-radius: 1px; background: var(--off); }
+.legend i.f { background: var(--ink); }
+.legend i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+.legend i.mk { box-shadow: inset 0 0 0 1px var(--you); }
+
+/* the list: tight inside a group (6 px between cards), generous between groups (20 px above a section label) */
+.sec { display: flex; justify-content: space-between; align-items: baseline; padding: 20px 12px 6px; }
+#list > .sec:first-child { padding-top: 12px; }
+.sec .m { color: var(--mut); }
+.card { margin: 0 8px 6px; padding: 8px 10px; border-radius: 8px; background: var(--raise); border: 1px solid transparent; display: grid; gap: 4px; cursor: pointer; }
+.card:hover { border-color: var(--line); }
+.card.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 7%, var(--raise)); }
+.card.r { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.card.quiet { background: transparent; padding-block: 3px; gap: 0; }
+.card.quiet .t { font-weight: 400; }
+/* line 2 is the instrument line, one size down (11 px) so project and route keep their words at 400 px;
+   cost and context sit in fixed columns and line up down the list */
+.l2 { display: grid; grid-template-columns: minmax(0, 1fr) 38px 98px; gap: 6px; align-items: center; color: var(--mut); font-size: 11px; }
+.l2 .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.l2 .cost { text-align: right; color: var(--ink); }
+.ctx { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.ctx .cells { grid-template-columns: repeat(15, 3px); }
+.ctx b { font-weight: 400; width: 30px; text-align: right; }
+.ctx b.y { color: var(--you); } .ctx b.r { color: var(--bad); }
+.doing { display: flex; align-items: center; gap: 6px; color: var(--mut); white-space: nowrap; overflow: hidden; }
+.doing .cells { grid-template-columns: 6px; flex: none; }
+.doing span:last-child { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.q { font-size: 13px; }
+
+/* composer: the task box takes the whole width; the target project sits under it as a chip of the same family as the header scope */
+.compose { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+.tgt { display: inline-flex; align-items: center; gap: 5px; height: 24px; font: 600 11px var(--mono); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 5px; padding: 0 7px; cursor: pointer; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tgt:hover { border-color: var(--ink); }
+.tgt .car { color: var(--mut); font-size: 9px; }
+
+/* project picker: a page-drawn popover under the header, never a native select */
+.scope { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 170px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 600 12px var(--mono); cursor: pointer; flex: 0 1 auto; }
+.scope:hover, .scope[aria-expanded="true"] { border-color: var(--ink); }
+.scope .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scope .car { color: var(--mut); font-size: 10px; }
+.win { position: relative; }
+.pop { position: absolute; top: 40px; left: 8px; right: 8px; z-index: 5; max-height: 470px; display: flex; flex-direction: column; background: var(--win); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+.pop .find { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.pop .find input { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid transparent; border-radius: 6px; padding: 6px 9px; }
+.pop .rows { overflow-y: auto; padding: 4px 0 6px; }
+.pop .grp { padding: 8px 12px 3px; }
+.prow { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 44px; gap: 8px; align-items: center; width: 100%; padding: 5px 12px; border: 0; background: transparent; color: var(--ink); font: 13px var(--ui); text-align: left; cursor: pointer; }
+.prow:hover, .prow.hi { background: var(--raise); }
+.prow .ck { font: 11px var(--mono); color: var(--ink); }
+.prow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prow .meta { font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.prow .meta.y { color: var(--you); }
+.prow .c { font: 11px var(--mono); text-align: right; color: var(--mut); }
+.prow.off .nm { color: var(--mut); }
+.pop .none { padding: 10px 12px; color: var(--mut); font-size: 13px; }
+.pop .foot { flex: none; border-top: 1px solid var(--line); padding: 6px 12px; display: flex; gap: 12px; font: 10.5px var(--mono); color: var(--mut); }
+.pop .foot span { white-space: nowrap; }
+.pop .foot .sort { margin-left: auto; }
+.compose textarea { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid transparent; border-radius: 6px; padding: 7px 9px; resize: none; }
+.compose textarea:disabled { opacity: .55; }
+.kbd { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.say { font-size: 12px; color: var(--mut); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-height: 24px; }
+.say .hint { margin-left: auto; font: 11px var(--mono); white-space: nowrap; }
+.say .hint .kbd { margin-right: 4px; }
+.loading { display: flex; gap: 8px; align-items: center; color: var(--mut); font-size: 13px; }
+.loading .cells { grid-template-columns: repeat(6, 6px); }
+
+/* session page: the head reads first, then the ask (or the denial), then one brief that folds the instruments,
+   then the process, which takes the rest of the height. Rhythm: 4 px inside the head, 12 px between blocks. */
+.scroll.sess { display: flex; flex-direction: column; }
+.body { padding: 12px 12px 0; display: grid; gap: 12px; align-content: start; flex: none; }
+.head { display: grid; gap: 4px; }
+h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; }
+.where { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-top: 2px; min-width: 0; }
+.where .m { flex: 1; min-width: 0; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the brief: one button, read in one glance (path, then one line of figures in fixed columns).
+   Click or Space opens the details in the same block; nothing in them changes meaning */
+.bwrap { border-radius: 8px; background: var(--raise); border: 1px solid transparent; }
+.bwrap:hover { border-color: var(--line); }
+.brief { display: grid; gap: 10px; width: 100%; padding: 8px 10px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.path { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 12px; gap: 6px; align-items: end; }
+.path > span { display: grid; gap: 4px; min-width: 0; font: 500 11px/1.2 var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.path .cells { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.path .cells i { aspect-ratio: auto; height: 4px; }
+.path .cur { color: var(--ink); font-weight: 600; } .path .ok { color: var(--ok); }
+.path > .car { font: 11px/1.2 var(--mono); text-align: right; }
+.brief:hover .car, .brief[aria-expanded="true"] .car { color: var(--ink); }
+.stats { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 0 10px; align-items: end; }
+.stats > span { display: grid; gap: 4px; min-width: 0; }
+.stats small { font: 10.5px/1 var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats small.y { color: var(--you); } .stats small.r { color: var(--bad); }
+.stats b { font: 500 12px/18px var(--mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stats b.usd { font: 700 22px/18px var(--dot); letter-spacing: .02em; }
+.stats b.usd .est { font: 500 13px var(--mono); color: var(--mut); margin-right: 1px; }
+.stats .cx { display: flex; align-items: center; gap: 5px; min-width: 0; height: 18px; }
+.stats .cx .cells { flex: 1; min-width: 0; grid-template-columns: repeat(30, minmax(0, 1fr)); }
+.stats .cx .cells i { aspect-ratio: auto; height: 7px; }
+.stats .cx b { flex: none; width: 30px; text-align: right; }
+.stats b.y { color: var(--you); } .stats b.r { color: var(--bad); }
+.more { border-top: 1px solid var(--line); padding: 10px 10px 12px; display: grid; gap: 14px; }
+.blk { display: grid; gap: 5px; }
+.blk .hd, .tl .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.blk .hd .m, .tl .hd .m { color: var(--mut); white-space: nowrap; }
+.scale { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--mut); }
+.agents { display: grid; gap: 6px; }
+.agent { display: grid; grid-template-columns: 96px minmax(0, 1fr) 30px 40px; gap: 8px; align-items: center; }
+.agent .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent .cells { grid-template-columns: repeat(24, minmax(0, 1fr)); }
+.agent span:nth-child(n+3) { text-align: right; color: var(--mut); }
+.agent span.c { color: var(--ink); }
+.act30 { grid-template-columns: repeat(30, minmax(0, 1fr)); }
+/* the process: tabs as in direction A, then one pane that scrolls on its own and never drops below 200 px */
+.proc { flex: 1 1 0; min-height: 200px; display: flex; flex-direction: column; margin-top: 8px; }
+.tabs { flex: none; display: flex; gap: 16px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.tabs button { font: 12px var(--ui); color: var(--mut); background: transparent; border: 0; padding: 0; min-height: 32px; cursor: pointer; white-space: nowrap; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px var(--ink); }
+.tabs .n { font: 11px var(--mono); }
+.pane { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 12px 12px; scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
+.pane .none { margin: 4px 0 0; color: var(--mut); font-size: 13px; }
+.log { display: grid; gap: 1px; }
+.log > div { display: grid; grid-template-columns: 8px 58px 80px minmax(0, 1fr); gap: 8px; align-items: center; font: 11.5px/19px var(--mono); color: var(--mut); font-variant-numeric: tabular-nums; }
+.log > div > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log > div > span:last-child { color: var(--ink); }
+.log > div.r > span:last-child { color: var(--bad); }
+.log .cells { grid-template-columns: 6px; }
+.log .st { font-size: 11px; }
+.alist { display: grid; gap: 12px; }
+.arow { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto 34px; gap: 2px 8px; align-items: center; }
+.arow .cells { grid-template-columns: 6px; }
+.arow .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arow .m { color: var(--mut); white-space: nowrap; }
+.arow .m.c { color: var(--ink); text-align: right; }
+.arow .last { grid-column: 2 / -1; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arow .last span { color: var(--ink); }
+.tl { display: grid; gap: 6px; }
+.tl .mins { display: grid; grid-template-columns: repeat(30, minmax(0, 1fr)); gap: 2px; }
+.tl .mins button { display: block; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 2px; }
+.tl .mins i { display: block; height: 22px; border-radius: 1px; background: var(--off); }
+.tl .mins i.l1 { background: color-mix(in srgb, var(--ink) 22%, var(--off)); }
+.tl .mins i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.tl .mins i.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+.tl .mins i.l4 { background: var(--ink); }
+.tl .mins button[aria-pressed="true"] { outline: 1px solid var(--ink); outline-offset: 1px; }
+.tl .mins button:focus-visible { outline-width: 2px; }
+.tl .hd.at { margin-top: 8px; }
+.chat { display: grid; gap: 12px; }
+.turn { display: grid; gap: 3px; }
+.turn p { margin: 0; font-size: 13px; line-height: 1.45; text-wrap: pretty; }
+.turn.you { padding-left: 9px; border-left: 2px solid var(--line); }
+.chat .src { font: 11px var(--mono); color: var(--mut); margin: 0; }
+/* 340 px: the brief keeps its five columns. Context falls back to the card's 15 x 2 cells, time drops its seconds */
+@container (max-width: 372px) {
+  .stats { gap: 0 8px; }
+  .stats .cx .cells { flex: none; grid-template-columns: repeat(15, 3px); }
+  .stats .cx .cells i { aspect-ratio: 1; height: auto; }
+  .stats .ss { display: none; }
+  .log > div { grid-template-columns: 8px 54px 64px minmax(0, 1fr); gap: 6px; font-size: 11px; }
+  .tabs { gap: 14px; }
+}
+.levers { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+/* states: the empty list leads; a Prep failure sits right above the composer that started it */
+.scroll.states { display: flex; flex-direction: column; }
+.scroll.states .card { margin-top: auto; margin-bottom: 8px; }
+.empty { display: grid; gap: 10px; justify-items: start; padding: 16px 12px 8px; }
+.empty .cells { grid-template-columns: repeat(15, 10px); }
+.empty p { margin: 0; color: var(--mut); font-size: 13px; max-width: 40ch; text-wrap: pretty; }
+
+/* notes */
+.notes { display: grid; gap: 22px; }
+.notes section { display: grid; gap: 6px; }
+.notes h3 { font: 600 15px var(--ui); margin: 0; }
+.notes p, .notes li { margin: 0; max-width: 64ch; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.read { font: 13px/1.5 var(--mono); background: var(--raise); border-radius: 8px; padding: 10px 12px; }
+.tbl { overflow-x: auto; }
+.tbl table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.tbl th, .tbl td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl th { font: 500 11px var(--mono); color: var(--mut); }
+code { font: 12px var(--mono); background: var(--raise); border-radius: 4px; padding: 1px 4px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Cells Drawer</h1>
+    <p>A variant of Console Cells without the session rail. The open window is one plain list, like direction A: what needs you, what is working, what is done, each session a card you can read in words. Click a card and the session gets the whole window, with C's focus content in cells. A project picker in the header, drawn by the page and searchable, scopes the list and sets where a new task runs.</p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="views" role="group" aria-label="Mock view">
+        <button data-v="pill" aria-pressed="false">Pill</button>
+        <button data-v="peek" aria-pressed="false">Peek</button>
+        <button data-v="list" aria-pressed="true">List</button>
+        <button data-v="session" aria-pressed="false">Session</button>
+        <button data-v="ask" aria-pressed="false">Asks you</button>
+        <button data-v="states" aria-pressed="false">Empty / offline</button>
+      </div>
+      <p class="sample">Every session, figure and cost in this mock is sample data.</p>
+
+      <div class="stage">
+        <div data-view="pill" hidden>
+          <div class="pill" data-strip></div>
+          <p class="cap">Folded form, unchanged from Console Cells: one cell chip per live session and today's spend. Click a chip to open that session, the arrow to open the list.</p>
+        </div>
+
+        <div data-view="peek" hidden>
+          <div class="peek">
+            <div class="pill" data-strip></div>
+            <div class="askbox">
+              <div class="l1"><span class="st y">? ASKS YOU</span><span class="t">Fix updater retry on 429</span><span class="age m">14m</span></div>
+              <div class="q">Keep the old cache key, or migrate entries to the v2 key?</div>
+              <div class="lr"><input id="pk" aria-label="Answer" placeholder="Type your answer"><button class="btn you">Send answer</button></div>
+            </div>
+          </div>
+          <p class="cap">Unchanged: a new question opens one card under the pill, oldest first. Send or Esc folds it back.</p>
+        </div>
+
+        <div data-view="win" class="win">
+          <!-- LIST: the home view -->
+          <section data-pane="list" style="display:contents">
+            <div class="top">
+              <span class="grip" title="Drag to move">⋮⋮</span>
+              <button class="scope" id="scope" aria-haspopup="listbox" aria-expanded="false" title="Project (Ctrl+P)"><span class="nm" id="scopenm">All projects</span><span class="car">▾</span></button>
+              <button class="needs" id="needsbtn" title="Show what needs you, in every project">2 need you</button>
+              <span class="sp" title="Drag to move"></span>
+              <button class="rb on" title="Always on top (on)" aria-label="Always on top">⊤</button>
+              <button class="rb" data-go="pill" title="Fold to pill (double-click this bar)" aria-label="Fold to pill">⌃</button>
+              <button class="rb" aria-label="Minimize">–</button>
+              <button class="rb x" aria-label="Close" title="Close window (runs keep going)">✕</button>
+            </div>
+            <div class="scroll" id="listscroll">
+              <button class="today" id="today" aria-expanded="false" title="Show today's breakdown">
+                <span class="big">8.73</span>
+                <span class="cells row30" data-spend></span>
+                <span class="sub m"><span>today<span class="usd">, USD</span> · $0.61 / min</span><span>limit $15</span></span>
+              </button>
+              <div class="todaymore" id="todaymore" hidden>
+                <div class="legend"><span><i class="f"></i>exact $3.20</span><span><i class="h"></i>estimated $5.53</span><span><i class="mk"></i>80 % of limit</span></div>
+                <div class="legend"><span>1 cell = $0.50</span><span>opus 38 %</span><span>sonnet 55 %</span><span>haiku 7 %</span><span>window runs 3</span></div>
+              </div>
+              <div id="list"></div>
+            </div>
+            <div class="compose" data-compose></div>
+            <div class="pop" id="pop" role="dialog" aria-label="Pick a project" hidden>
+              <div class="find"><input id="pfind" aria-label="Find a project" placeholder="Find a project" autocomplete="off"><span class="kbd">Esc</span></div>
+              <div class="rows" id="prows" role="listbox"></div>
+              <div class="foot"><span>↑ ↓ move</span><span>Enter pick</span><span class="sort">sorted: needs you, live, recent</span></div>
+            </div>
+          </section>
+
+          <!-- SESSION: one session, full width -->
+          <section data-pane="session" style="display:contents" hidden>
+            <div class="top">
+              <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">←</button>
+              <span class="crumb m" id="pos">3 of 5</span>
+              <button class="rb" id="prev" title="Previous session (Up)" aria-label="Previous session">‹</button>
+              <button class="rb" id="next" title="Next session (Down)" aria-label="Next session">›</button>
+              <span class="sp" title="Drag to move"></span>
+              <button class="rb on" title="Always on top (on)" aria-label="Always on top">⊤</button>
+              <button class="rb" data-go="pill" title="Fold to pill" aria-label="Fold to pill">⌃</button>
+              <button class="rb x" aria-label="Close" title="Close window (runs keep going)">✕</button>
+            </div>
+            <div class="scroll sess" id="sscroll"><div class="body" id="sbody"></div><div class="proc" id="proc"></div></div>
+            <div class="levers" id="levers"></div>
+          </section>
+
+          <!-- STATES -->
+          <section data-pane="states" style="display:contents" hidden>
+            <div class="banner"><b>OFFLINE</b> The service stopped answering. Runs keep going; the window reconnects by itself.</div>
+            <div class="top">
+              <span class="grip">⋮⋮</span><span class="brand">Console</span><span class="sp"></span>
+              <button class="rb on" aria-label="Always on top">⊤</button><button class="rb" data-go="pill" aria-label="Fold to pill">⌃</button>
+              <button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button>
+            </div>
+            <div class="scroll states">
+              <div class="empty">
+                <div class="cells" data-blank="30"></div>
+                <p>No Claude Code session in the last 24 hours. Start one in VS Code or a terminal, or type a task below.</p>
+              </div>
+              <div class="card r" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">Prep failed</span><span class="age m">just now</span></div><div class="m mut">claude.exe not found. Set "claude_exe" in config.json, then try again.</div><div class="lr"><button class="btn go sm">Try again</button><button class="btn sm">Open config.json</button></div></div>
+            </div>
+            <div class="compose">
+              <div class="lr"><textarea id="nt2" rows="1" disabled aria-label="New task">Add a dark mode toggle to the settings page</textarea></div>
+              <div class="say"><span class="loading"><span class="cells" data-load></span>Haiku is reading CLAUDE CONSOLE, 10 to 30 s</span></div>
+            </div>
+          </section>
+        </div>
+        <p class="cap" id="cap"></p>
+      </div>
+    </div>
+
+    <div class="notes">
+      <section>
+        <h3>Design read</h3>
+        <p class="read">Reading this as: an always-on-top companion for one developer running several Claude Code sessions, read as a list of named tasks first and as instruments second, dial ENERGY 2 / RHYTHM 2 / MOTION 1.</p>
+        <ul>
+          <li>Same tokens, type and cell motif as the locked Console Cells. Only the structure of the open window changes</li>
+          <li>ENERGY 2: one Doto figure per screen (today's spend on the list, the session's spend in its brief, smaller)</li>
+          <li>MOTION 1: the one blinking cell, on the "doing" line of each working card and on the live step of the session's process</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What changes from Console Cells</h3>
+        <div class="tbl"><table>
+          <thead><tr><th>Locked</th><th>This variant</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>56 px rail of unlabeled chips</td><td>Removed. The list is the home view</td><td>A chip with 3 letters and a glyph does not say which task it is; a card title does</td></tr>
+            <tr><td>Overview as one rail target among others</td><td>Today strip at the top of the list, one click for the breakdown</td><td>Spend is a glance, not a destination</td></tr>
+            <tr><td>Focus pane next to the rail</td><td>Session page with Back, and ‹ › to step through sessions</td><td>Moving between sessions stays one click without a rail</td></tr>
+            <tr><td>Session instruments as stacked blocks</td><td>One brief that folds them, then the process</td><td>See "Session page: brief and process"</td></tr>
+            <tr><td>Native project dropdown in the composer</td><td>Searchable project picker in the header</td><td>See "Picking a project"</td></tr>
+            <tr><td>Pill and peek card</td><td>Unchanged</td><td>They work: the fold is where the cell chips belong</td></tr>
+            <tr><td>Orange focus ring</td><td>Ink focus ring</td><td>Orange means "needs you" and nothing else</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+      <section>
+        <h3>Reading order on a card</h3>
+        <ul>
+          <li>State word with its glyph (ASKS YOU, BLOCKED, RUNNING, IDLE), task title, age. The title owns the line: nothing else on it grows</li>
+          <li>Second line, one size down, in fixed columns: project and route, cost, context as 30 small cells plus the figure. Costs and context line up down the list, so you compare by scanning one column</li>
+          <li>Third line by state: the question with an answer box, the denied command with Open in terminal, or "doing" with the live step</li>
+          <li>Done sessions fold to one quiet line each</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Layout pass (2026-10-10)</h3>
+        <ul>
+          <li>Spacing scale 4 / 8 / 12 / 16 / 24: 6 px between cards of one group, 20 px above the next group label, so the groups read before the cards do</li>
+          <li>Session page reads top down: state and age, title, then project / source / route with New task here. The Doto figure comes after the head, not before the title. The steps list has a label like the other blocks</li>
+          <li>Composer: the task box takes the full width; "in CLAUDE CONSOLE" is a chip of the same family as the header scope, with the Enter = Prep hint on its right</li>
+          <li>340 px: the window is a CSS container. Below 372 px the window buttons narrow to 28 px so "All projects" keeps its full name, the route leaves the card's second line (it stays on the session page), and the picker footer drops its sort note. Nothing scrolls sideways</li>
+          <li>Focus ring and text selection are ink, not orange, so orange keeps meaning "needs you" only. Scrollbars are thin and tinted from the tokens</li>
+          <li>States: the Empty and Error headings were mock labels dressed as UI and are gone. The empty list leads; a failed Prep card sits right above the composer that started it and offers Try again</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Session page: brief and process</h3>
+        <ul>
+          <li>What folded: the 40 px spend figure, the context scale, the path, the agent lanes and the activity row were five stacked blocks that filled most of the 640 px and drew the eye before anything said what the session was doing. They are now one brief, 84 px at 400 px wide</li>
+          <li>The brief reads in one glance: the path as one row (✓ Prep, ▶ Run, Verify, Hand off), then one line of figures in fixed columns: spent (Doto 22 px, the only Doto figure on the page; an estimate shows its ~ in plain mono), $ / min, context as 30 cells plus the figure, time, steps. The columns stay put from session to session, so ‹ › compares in place</li>
+          <li>The brief is one button: click or Space opens the details in the same block (context with the hand-off marks, agent lanes with steps and cost, activity for the last 30 min), again folds them. Folded is the default, and the choice holds for the window, not per session: stepping with ‹ › keeps it. The app would keep it with the window form in window.json; the mock uses browser storage</li>
+          <li>Warnings do not fold away: from 150K the context label in the brief turns into "hand off soon" (orange), from 300K "hand off now" (red), in words next to the cells</li>
+          <li>The process takes the rest of the height: tabs Steps / Agents N / Timeline / Chat as in direction A, Steps first. Folded at 400 x 640 its pane is about 300 px, 14 step rows, where the old page showed three. Opened, the process keeps at least 200 px and the page scrolls</li>
+          <li>Steps is the live feed, newest first: time with seconds, agent, step. The one blinking cell marks the live step; a question gets ?, a denial ■ and its step in red. Agents: each agent with its state in words, steps, cost and last step. Timeline: one cell per minute, click a minute (or ← →) for its steps. Chat: the last turns in words, oldest to newest, scrolled to the end</li>
+          <li>One blinking cell per screen: it moved from the live agent's lane to the live step, and the lanes mark the live agent with ▶ instead</li>
+          <li>Every count agrees: the steps figure, the agent lanes, the Timeline cells and the Steps feed come from one sample log</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Picking a project</h3>
+        <ul>
+          <li>Likely causes of today's trouble, to confirm before building: the native <code>&lt;select&gt;</code> opens an OS popup that a frameless, always-on-top WebView2 window handles poorly; the list mixes runnable projects with "(off)" ones, and picking an off one silently disables the task box; the chosen project is not visible where you type</li>
+          <li>The picker is drawn by the page, not the OS: it opens under the header, inside the window, and never closes when a new snapshot arrives</li>
+          <li>Built for many projects: a find box with focus on open (type two letters), Up / Down / Enter / Esc, Ctrl+P from anywhere. Rows sort by needs you, then live, then last activity; "Runs allowed" and "Runs off" are separate groups. Each row says what is going on there and what it cost today</li>
+          <li>One choice, two effects: a project scopes the list and becomes the target of a new task. All projects shows everything and keeps the last target</li>
+          <li>The target is always named under the task box ("in CLAUDE CONSOLE ▾") and opens the same picker. Opening a session sets it too, and the session page has "New task here"</li>
+          <li>The "need you" chip counts every project; clicking it clears the scope, so a filter never hides a question</li>
+          <li>Picking a project with runs off says why in words and offers "Allow runs" on the spot, instead of a greyed box</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Kept and dropped</h3>
+        <ul>
+          <li>From A: list grouped by state, answer in place on the card, fixed columns, the drawer title bar, and on the session page the brief (head, path as one row, one row of figures) and the Steps / Agents / Timeline / Chat tabs</li>
+          <li>From C: the session page content (spend with burn rate, context against the hand-off marks, path, agents, activity, steps) and the levers bar. The instruments now sit folded under the brief, unchanged in meaning</li>
+          <li>Dropped: the rail, the rail-only strip, the session by minute heatmap (each card now carries its own state and cost; the session page keeps its activity row). On the session page: the 40 px Doto figure, the "doing" line under it (the Steps tab says it), and the Last steps block (now the Steps tab)</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What it would touch</h3>
+        <p><code>web/app.js</code> (list renderer instead of <code>renderRail</code>, session page with prev and next, header picker instead of the <code>c-project</code> select), <code>web/style.css</code>, <code>web/index.html</code>. The service and <code>state.py</code> stay as they are for the list and the brief: every figure there is already in the snapshot, and the Steps and Timeline tabs read the step log with its timestamps. One new read: the last chat turns of a VS Code or terminal chat, from the transcript the service already reads for the estimate. If chosen, BRAINSTORM 7.5 and the locked file change with it.</p>
+      </section>
+      <section>
+        <h3>Trade-offs</h3>
+        <ul>
+          <li>Two sessions are no longer visible side by side with the open one; ‹ › and the pill cover that</li>
+          <li>Past about 8 live sessions the list scrolls; Needs you stays first, so the important part never scrolls away</li>
+          <li>The scope is one more state to keep in mind; the header always names it, and the spend strip stays global</li>
+          <li>The hand-off scale and the agent lanes are one click away. The brief keeps the context cells and says "hand off soon / now" in words, so the warning never folds with them</li>
+          <li>Opened while a question is showing, the process drops to its 200 px floor and the page scrolls; that is why folded is the default</li>
+          <li>At 340 px the brief keeps its five columns by giving way: context goes back to the card's 15 x 2 cells and time drops its seconds. Timeline minutes are about 9 px wide there; ← → moves between them</li>
+          <li>Chat for VS Code and terminal chats needs the last turns read from the transcript (today Chat is for window runs only); it shows words only, tool output stays in Steps</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+// act: steps per minute over the last 30 minutes, the last cell is 19:05. feed: the newest steps, hand-written
+// (agent, step, "r" for a denial); pool fills the older minutes. agents: name, cost, "live" or "done"
+const S = [
+  { id: "cm", word: "ASKS YOU", gl: "?", tone: "y", title: "Fix updater retry on 429", proj: "CONTENT MANAGER", src: "vscode", route: "sonnet medium", age: "14m", cost: "~0.84", ctx: 182,
+    q: "Keep the old cache key, or migrate entries to the v2 key?", rate: "0.00", time: "29m 05s", doing: "waiting since 18:51", path: 1,
+    agents: [["main", "0.84"]], act: "1,2,2,1,2,3,2,2,1,2,3,2,1,1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+    feed: [["main", "AskUserQuestion: keep the cache key, or migrate to v2?"], ["main", "Bash pytest tests/test_updater.py"], ["main", "Edit src/updater.py"],
+      ["main", "Grep \"cache_key\" src/"], ["main", "Read src/cache.py"], ["main", "Edit src/updater.py"], ["main", "Read src/updater.py"]],
+    pool: [["main", "Read tests/test_updater.py"], ["main", "Grep \"429\" src/"], ["main", "Read src/http.py"], ["main", "Edit src/http.py"], ["main", "Bash pytest -q"], ["main", "Read CHANGELOG.md"]],
+    chat: [["You", "18:36", "The updater keeps retrying on 429 and hammers the API. Make it back off and respect Retry-After."],
+      ["Claude", "18:44", "Retry now backs off exponentially and waits for Retry-After when the server sends it. Tests for both cases are in tests/test_updater.py."],
+      ["Claude", "18:51", "One choice left before I finish: cached entries still use the old key format. Keep the old cache key, or migrate entries to the v2 key?"]] },
+  { id: "br", word: "BLOCKED", gl: "■", tone: "r", title: "Add transcript search endpoint", proj: "BRAINAMP", src: "window", route: "sonnet medium", age: "3m", cost: "0.41", ctx: 54,
+    denied: "Bash git push origin main", rate: "0.00", time: "9m 10s", doing: "denied: Bash git push origin main", path: 1,
+    agents: [["main", "0.41"]], act: "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,2,2,3,1,0,0,0",
+    feed: [["main", "Bash git push origin main (denied)", "r"], ["main", "Bash git commit -m \"Add search endpoint\""], ["main", "Bash py -m unittest"],
+      ["main", "Edit server.py"], ["main", "Edit search.py"], ["main", "Read server.py"]],
+    pool: [["main", "Read tests/test_search.py"], ["main", "Grep \"route\" server.py"], ["main", "Edit tests/test_search.py"], ["main", "Read README.md"]],
+    chat: [["You", "18:56", "Add a /search endpoint over the transcripts, with tests, then push."],
+      ["Claude", "19:02", "The endpoint and its tests are in and 14 tests pass. The push to main was denied by your settings, so the commit is only local."]] },
+  { id: "cc", word: "RUNNING", gl: "▶", tone: "n", title: "Redesign proposal for the window", proj: "CLAUDE CONSOLE", src: "vscode", route: "opus high", age: "6m", cost: "~1.92", ctx: 96,
+    rate: "0.29", time: "6m 40s", doing: "Read web/app.js", who: "gen-purpose", live: true, path: 1,
+    agents: [["main", "1.10"], ["Explore", "0.31", "done"], ["gen-purpose", "0.51", "live"]], act: "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,2,3,4,3",
+    feed: [["gen-purpose", "Read web/app.js"], ["gen-purpose", "Read web/style.css"], ["gen-purpose", "Grep \"renderSession\" web/"],
+      ["gen-purpose", "Read design/rework/README.md"], ["main", "Agent general-purpose"], ["Explore", "Done: report to main, 38K"], ["Explore", "Read console/state.py"],
+      ["Explore", "Grep \"ctx_tokens\" console/"], ["Explore", "Read BRAINSTORM.md"], ["Explore", "Glob web/*"],
+      ["main", "Agent Explore"], ["main", "Read design/rework/locked/console-cells.html"],
+      ["main", "Read PLAN.md"], ["main", "Bash git status"], ["main", "Read CLAUDE.md"],
+      ["main", "Read BRAINSTORM.md"], ["main", "Skill impeccable"], ["main", "Prompt: draft a redesign proposal"]],
+    pool: [],
+    chat: [["You", "18:59", "Draft a redesign proposal for the window in design/rework/explored. Keep the Console Cells tokens."],
+      ["Claude", "19:02", "Reading the locked mockup and the plan first, then an Explore agent will find where the context figures come from."],
+      ["Claude", "19:04", "Explore is done. A general-purpose agent is now reading web/app.js and style.css to see what the session page renders today."]] },
+  { id: "fpa", word: "RUNNING", gl: "▶", tone: "n", title: "Batch prepare launch split", proj: "fashion_packshots_ai", src: "terminal", route: "sonnet high", age: "42m", cost: "~3.10", ctx: 312,
+    rate: "0.07", time: "42m 30s", doing: "Edit batch/prepare.py", who: "main", live: true, path: 1, handoff: true,
+    agents: [["main", "2.40"], ["Explore", "0.70", "done"]], act: "2,1,2,2,1,2,2,1,2,2,1,2,2,2,1,2,2,1,2,2,1,2,2,1,2,3,2,1,2,2",
+    feed: [["main", "Edit batch/prepare.py"], ["main", "Read batch/launch.py"], ["main", "Bash pytest tests/test_batch.py"], ["main", "Edit batch/split.py"],
+      ["main", "Read batch/split.py"], ["Explore", "Done: report to main, 41K"], ["Explore", "Read batch/__init__.py"], ["Explore", "Grep \"launch_split\" batch/"]],
+    pool: [["main", "Read batch/prepare.py"], ["main", "Edit batch/prepare.py"], ["main", "Bash pytest -q tests/"], ["main", "Read batch/split.py"], ["main", "Grep \"manifest\" batch/"], ["main", "Edit batch/launch.py"]],
+    chat: [["You", "18:23", "Split batch prepare and launch so a failed prepare never starts a launch."],
+      ["Claude", "18:40", "prepare.py and launch.py are split; launch now reads a manifest that prepare writes."],
+      ["You", "18:52", "Keep the old CLI flags working."],
+      ["Claude", "19:01", "Kept: --prepare-only maps to the new prepare step. 41 of 42 tests pass; fixing the last one in prepare.py."]] },
+  { id: "lv", word: "IDLE", gl: "○", tone: "q", title: "Phase 3 levers live check", proj: "CLAUDE CONSOLE", src: "window", route: "sonnet medium · 2 follow-ups", age: "21m", cost: "0.28", ctx: 71,
+    rate: "0.00", time: "27m 15s", doing: "finished a turn at 18:44", path: 2,
+    agents: [["main", "0.28"]], act: "0,0,1,2,2,1,2,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+    feed: [["main", "Stop: turn answered"], ["main", "Bash py -m unittest discover -s tests"], ["main", "Read console/server.py"], ["main", "Edit console/levers.py"], ["main", "Read console/levers.py"]],
+    pool: [["main", "Read tests/test_levers.py"], ["main", "Bash py -m unittest tests.test_levers"], ["main", "Grep \"levers\" console/"]],
+    chat: [["You", "18:38", "Check that Continue, Verify and Hand off light up at the right time."],
+      ["Claude", "18:44", "All three follow server.Hub.levers: Continue after a Stop, Verify once per turn, Hand off from 300K. The tests pass."]] },
+];
+const DONE = [["✓ PASS", "g", "Verify routing table", "0.06", "CLAUDE CONSOLE"], ["✓ DONE", "g", "Docs cleanup", "~0.39", "SQUARE LAB"],
+  ["✓ DONE", "g", "Rename hook fields", "0.12", "CLAUDE CONSOLE"], ["✓ DONE", "g", "Doto woff2 bundle", "~0.14", "CLAUDE CONSOLE"]];
+// sample: 16 projects, as a heavy user would have. on = runs allowed, last = minutes since last activity, cost = today
+const PROJECTS = [
+  { n: "CLAUDE CONSOLE", on: true, last: 1, cost: "~2.50" }, { n: "CONTENT MANAGER", on: true, last: 14, cost: "~0.84" },
+  { n: "BRAINAMP", on: true, last: 3, cost: "0.41" }, { n: "fashion_packshots_ai", on: false, last: 0, cost: "~3.10" },
+  { n: "SQUARE LAB", on: true, last: 95, cost: "~0.39" }, { n: "PORTFOLIO SITE", on: true, last: 1440, cost: "" },
+  { n: "INVOICE TOOL", on: true, last: 2880, cost: "" }, { n: "BRAND KIT", on: true, last: 4320, cost: "" },
+  { n: "HOME SERVER", on: true, last: 7200, cost: "" }, { n: "THESIS NOTES", on: true, last: 10080, cost: "" },
+  { n: "PHOTO ARCHIVE", on: true, last: 20160, cost: "" }, { n: "MUSIC TAGGER", on: true, last: 30240, cost: "" },
+  { n: "packshot-qc-scripts", on: true, last: 43200, cost: "" }, { n: "OLD BLOG", on: false, last: 86400, cost: "" },
+  { n: "DOTFILES", on: false, last: 129600, cost: "" }, { n: "AI TOOLS / experiments", on: false, last: 200000, cost: "" },
+];
+let scope = "", project = "CLAUDE CONSOLE", cur = 2, doneOpen = false, prepTimer = null, hi = 0;
+const proj = (n) => PROJECTS.find((p) => p.n === n);
+
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const cellsHtml = (classes) => classes.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("");
+const lv = (v) => ["", "l1", "l2", "l3", "l4"][Number(v)];
+const ctxTone = (ctx) => ctx >= 300 ? "r" : ctx >= 150 ? "y" : "";
+function ctxClasses(ctx, total, half) {
+  const n = Math.min(total, Math.round(ctx / 10)), over = ctx >= 300;
+  return Array.from({ length: total }, (_, k) => k < n ? (over ? "r" : k >= half ? "y" : "f") : "");
+}
+function chipGrid(ctx) {  // 5 x 6, filled from the bottom row up
+  const order = ctxClasses(ctx, 30, 15), rows = [];
+  for (let r = 0; r < 6; r++) rows.unshift(order.slice(r * 5, r * 5 + 5));
+  return cellsHtml(rows.flat());
+}
+function miniCtx(ctx) {  // 15 x 2, first row then hand-off row
+  return `<span class="ctx"><span class="cells">${cellsHtml(ctxClasses(ctx, 30, 15))}</span><b class="${ctxTone(ctx)}">${ctx}K</b></span>`;
+}
+
+// pill
+document.querySelectorAll("[data-strip]").forEach((el) => {
+  el.innerHTML = `<span class="grip" title="Drag to move">⋮⋮</span>${S.map((s, k) => `<button class="chipcell" data-open="${k}" title="${esc(s.word + ": " + s.title)}">
+    <span class="cells">${chipGrid(s.ctx)}</span><span class="gl ${s.tone}">${s.gl}</span>${s.tone === "y" || s.tone === "r" ? `<span class="dot ${s.tone === "r" ? "r" : ""}"></span>` : ""}</button>`).join("")}
+    <span class="sp"></span><span class="big">8.73</span><button class="tb" data-go="list" aria-label="Open" title="Open (double-click the pill)">⌄</button>`;
+});
+
+// today strip: 30 cells of $0.50 = the $15 soft limit
+document.querySelector("[data-spend]").innerHTML = cellsHtml(Array.from({ length: 30 }, (_, k) =>
+  [k < 6 ? "f" : k < 17 ? "h" : "", k === 23 ? "mk" : ""].filter(Boolean).join(" ")));
+document.getElementById("today").addEventListener("click", (e) => {
+  const open = e.currentTarget.getAttribute("aria-expanded") !== "true";
+  e.currentTarget.setAttribute("aria-expanded", String(open));
+  document.getElementById("todaymore").hidden = !open;
+});
+
+// list
+function cardHtml(s, k) {
+  let third = "";
+  if (s.q) third = `<div class="q">${esc(s.q)}</div><div class="lr" data-stay><input id="a-${s.id}" aria-label="Answer" placeholder="Type your answer"><button class="btn you sm">Send</button></div>`;
+  else if (s.denied) third = `<div class="m mut">denied: ${esc(s.denied)}</div><div class="lr" data-stay><button class="btn go sm">Open in terminal</button><button class="btn sm">Dismiss</button></div>`;
+  else if (s.live) third = `<div class="doing m"><span class="cells"><i class="f live"></i></span><span>${esc(s.who)}</span><span>${esc(s.doing)}</span></div>`;
+  return `<div class="card ${s.tone === "y" || s.tone === "r" ? s.tone : ""}" data-open="${k}" tabindex="0" role="button" aria-label="${esc(s.word + ": " + s.title)}">
+    <div class="l1"><span class="st ${s.tone}">${s.gl} ${s.word}${s.handoff ? ' <span class="st r">· HAND OFF</span>' : ""}</span><span class="t">${esc(s.title)}</span><span class="age m">${s.age}</span></div>
+    <div class="l2 m"><span class="who">${esc(s.proj)}<span class="route"> · ${esc(s.route)}</span></span><span class="cost">${s.cost}</span>${miniCtx(s.ctx)}</div>${third}</div>`;
+}
+function renderList() {
+  const mine = S.map((s, k) => [s, k]).filter(([s]) => !scope || s.proj === scope);
+  const needs = mine.filter(([s]) => s.tone === "y" || s.tone === "r");
+  const work = mine.filter(([s]) => !(s.tone === "y" || s.tone === "r"));
+  const done = DONE.filter((d) => !scope || d[4] === scope);
+  const shown = doneOpen ? done : done.slice(0, 2);
+  const sec = (label, list, extra = "", id = "") => list.length ? `<div class="sec"${id ? ` id="${id}"` : ""}>${label}${extra}</div>` : "";
+  let html = sec(`<span class="lbl" style="color:var(--you)">Needs you · ${needs.length}</span>`, needs, "", "needsec") + needs.map(([s, k]) => cardHtml(s, k)).join("")
+    + sec(`<span class="lbl">Working · ${work.length}</span>`, work) + work.map(([s, k]) => cardHtml(s, k)).join("")
+    + sec(`<span class="lbl">Done today · ${done.length}</span>`, done)
+    + shown.map(([w, t, title, c, p]) => `<div class="card quiet"><div class="l1"><span class="st ${t}">${w}</span><span class="t">${esc(title)}${scope ? "" : ` <span class="m mut">· ${esc(p)}</span>`}</span><span class="age m">${c}</span></div></div>`).join("")
+    + (done.length > 2 && !doneOpen ? `<div style="padding:0 12px 12px"><button class="btn sm" id="moredone">Show ${done.length - 2} more</button></div>` : "");
+  if (!mine.length && !done.length) html = `<div class="sec"><span class="lbl">${esc(scope)}</span></div><div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
+    <p>No session in ${esc(scope)} today. Type a task below, or pick All projects.</p></div>`;
+  document.getElementById("list").innerHTML = html;
+  const more = document.getElementById("moredone");
+  if (more) more.addEventListener("click", () => { doneOpen = true; renderList(); });
+}
+
+// composer: the target project is always named, and opens the same picker
+function renderCompose() {
+  const el = document.querySelector("[data-compose]"), on = proj(project).on;
+  const typed = document.getElementById("nt") ? document.getElementById("nt").value : "";
+  el.innerHTML = `<div class="lr"><textarea id="nt" rows="1" aria-label="New task" ${on ? "" : "disabled"}
+      placeholder="${on ? "New task" : "Allow runs first"}">${esc(typed)}</textarea></div>
+    <div class="say" id="say">${on ? `<span>in</span><button class="tgt" data-pick title="Change project (Ctrl+P)">${esc(project)}<span class="car">▾</span></button><span class="hint"><span class="kbd">Enter</span>Prep</span>`
+      : `<span>Runs are off in <button class="tgt" data-pick>${esc(project)}<span class="car">▾</span></button>: a run would use this repo's hooks and settings without asking.</span><button class="btn sm" id="allow">Allow runs</button>`}</div>`;
+}
+
+// header project picker
+function ago(min) {
+  if (min < 60) return min + "m ago"; if (min < 1440) return Math.round(min / 60) + "h ago";
+  if (min < 10080) return Math.round(min / 1440) + "d ago"; return Math.round(min / 10080) + "w ago";
+}
+function pickRows() {
+  const q = document.getElementById("pfind").value.trim().toLowerCase();
+  const stat = (p) => ({ live: S.filter((s) => s.proj === p.n).length, needs: S.filter((s) => s.proj === p.n && (s.tone === "y" || s.tone === "r")).length });
+  const order = (a, b) => (stat(b).needs - stat(a).needs) || (stat(b).live - stat(a).live) || (a.last - b.last);
+  const match = PROJECTS.filter((p) => !q || p.n.toLowerCase().includes(q));
+  const row = (p) => {
+    const st = stat(p), meta = st.needs ? `<span class="meta y">${st.needs} needs you</span>` : st.live ? `<span class="meta">${st.live} live</span>`
+      : `<span class="meta">${p.on ? ago(p.last) : "runs off"}</span>`;
+    return `<button class="prow${p.on ? "" : " off"}" role="option" aria-selected="${scope === p.n}" data-proj="${esc(p.n)}">
+      <span class="ck">${scope === p.n ? "✓" : ""}</span><span class="nm">${esc(p.n)}</span>${meta}<span class="c">${p.cost || "-"}</span></button>`;
+  };
+  const on = match.filter((p) => p.on).sort(order), off = match.filter((p) => !p.on).sort(order);
+  let html = q ? "" : `<button class="prow" role="option" aria-selected="${!scope}" data-proj=""><span class="ck">${scope ? "" : "✓"}</span>
+    <span class="nm">All projects</span><span class="meta">${S.length} live</span><span class="c">8.73</span></button>`;
+  if (on.length) html += `<div class="grp lbl">Runs allowed · ${on.length}</div>${on.map(row).join("")}`;
+  if (off.length) html += `<div class="grp lbl">Runs off · ${off.length}</div>${off.map(row).join("")}`;
+  if (!match.length) html = `<div class="none">No project matches "${esc(q)}". Projects appear here once a Claude Code session runs in them.</div>`;
+  document.getElementById("prows").innerHTML = html;
+  hi = 0; markHi();
+}
+function markHi() {
+  const rows = [...document.querySelectorAll("#prows .prow")];
+  rows.forEach((r, k) => r.classList.toggle("hi", k === hi));
+  if (rows[hi]) rows[hi].scrollIntoView({ block: "nearest" });
+}
+function openPicker() {
+  if (document.querySelector('[data-pane="list"]').hidden) show("list");
+  document.getElementById("pop").hidden = false;
+  document.getElementById("scope").setAttribute("aria-expanded", "true");
+  document.getElementById("pfind").value = "";
+  pickRows();
+  document.getElementById("pfind").focus();
+}
+function closePicker() {
+  document.getElementById("pop").hidden = true;
+  document.getElementById("scope").setAttribute("aria-expanded", "false");
+}
+function pick(n) {  // a project scopes the list and becomes the task target; All projects keeps the target
+  scope = n; if (n) project = n;
+  document.getElementById("scopenm").textContent = n || "All projects";
+  doneOpen = false; closePicker(); renderList(); renderCompose();
+}
+document.getElementById("scope").addEventListener("click", (e) => { e.stopPropagation(); document.getElementById("pop").hidden ? openPicker() : closePicker(); });
+document.getElementById("pfind").addEventListener("input", pickRows);
+document.getElementById("pfind").addEventListener("keydown", (e) => {
+  const rows = document.querySelectorAll("#prows .prow");
+  if (e.key === "ArrowDown") { hi = Math.min(rows.length - 1, hi + 1); markHi(); e.preventDefault(); }
+  if (e.key === "ArrowUp") { hi = Math.max(0, hi - 1); markHi(); e.preventDefault(); }
+  if (e.key === "Enter" && rows[hi]) { pick(rows[hi].dataset.proj); e.preventDefault(); }
+  if (e.key === "Escape") { closePicker(); document.getElementById("scope").focus(); e.stopPropagation(); }
+});
+document.addEventListener("keydown", (e) => { if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); } });
+document.addEventListener("click", (e) => {
+  if (!document.getElementById("pop").hidden && !e.target.closest("#pop") && !e.target.closest("[data-pick]")) closePicker();
+  const pj = e.target.closest("[data-proj]");
+  if (pj) { pick(pj.dataset.proj); return; }
+  if (e.target.closest("[data-pick]")) { e.stopPropagation(); openPicker(); return; }
+  if (e.target.id === "allow") { proj(project).on = true; renderCompose(); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.target.id !== "nt" || e.key !== "Enter" || e.shiftKey) return;
+  e.preventDefault();
+  if (!e.target.value.trim()) return;
+  const say = document.getElementById("say");
+  say.innerHTML = `<span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>Haiku is reading ${esc(project)}, 10 to 30 s</span>`;
+  clearTimeout(prepTimer);
+  prepTimer = setTimeout(() => { say.textContent = "Prep card opens here (unchanged from today's Prep sheet)."; }, 1800);
+});
+
+// session page: the brief is folded or open for the whole window (the app would keep it next to the window form in
+// window.json; the mock uses browser storage), the process tab stays as you step through sessions
+const BRIEF_KEY = "cells-drawer.brief-open";
+let briefOpen = false, tab = "steps", tlMin = -1;
+try { briefOpen = localStorage.getItem(BRIEF_KEY) === "1"; } catch (e) { /* storage off: folded */ }
+const NOW = 19 * 60 + 5;  // 19:05, the last activity cell
+const two = (n) => String(n).padStart(2, "0");
+const hhmm = (m) => `${two(Math.floor(m / 60))}:${two(m % 60)}`;
+function stepLog(s) {  // newest first; act says how many steps each minute holds, so the feed, the timeline and every count agree
+  if (s.log) return s.log;
+  const act = s.act.split(",").map(Number), out = [];
+  for (let m = 29; m >= 0; m--) for (let j = 0; j < act[m]; j++) {
+    const k = out.length, [agent, what, cls] = k < s.feed.length ? s.feed[k] : s.pool[(k - s.feed.length) % s.pool.length] || ["main", "step"];
+    const sec = 52 - Math.floor(j * 48 / act[m]) - (m * 7) % 5;
+    out.push({ m, t: `${hhmm(NOW - 29 + m)}:${two(sec)}`, agent, what, cls });
+  }
+  return (s.log = out);
+}
+function agentsOf(s) {
+  const log = stepLog(s);
+  return s.agents.map(([nm, cost, kind]) => {
+    const mine = log.filter((x) => x.agent === nm);
+    const word = kind === "live" ? "working" : kind === "done" ? "done" : s.live ? (s.who === nm ? "working" : "waiting") : s.word.toLowerCase();
+    return { nm, cost, kind, word, steps: mine.length, last: mine[0] };
+  });
+}
+const LIVE = `<span class="cells"><i class="f live"></i></span>`;
+function stepMark(s) {  // the newest step carries the session's state: the one blinking cell when live, ? or ■ otherwise
+  return s.live ? LIVE : s.q ? `<span class="st y">?</span>` : s.denied ? `<span class="st r">■</span>` : "";
+}
+function agentMark(s, a) {
+  if (a.word === "working") return LIVE;
+  if (a.word === "done") return `<span class="st g">✓</span>`;
+  return `<span class="st ${s.tone}">${a.word === "waiting" ? "○" : s.gl}</span>`;
+}
+const logRow = (x, mark = "") => `<div${x.cls ? ` class="${x.cls}"` : ""}><span>${mark}</span><span>${x.t}</span><span>${esc(x.agent)}</span><span>${esc(x.what)}</span></div>`;
+const TABS = [["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"], ["chat", "Chat"]];
+function renderProc(focus) {
+  const s = S[cur], ags = agentsOf(s), log = stepLog(s), act = s.act.split(",").map(Number);
+  let body = "";
+  if (tab === "steps") body = log.length ? `<div class="log">${log.map((x, k) => logRow(x, k === 0 ? stepMark(s) : "")).join("")}</div>` : `<p class="none">No step yet.</p>`;
+  if (tab === "agents") body = `<div class="alist">${ags.map((a) => `<div class="arow">${agentMark(s, a)}<span class="nm">${esc(a.nm)}</span>
+      <span class="m">${a.word}</span><span class="m">${a.steps} steps</span><span class="m c">${a.cost}</span>
+      <span class="last m">${a.last ? `${a.last.t} <span>${esc(a.last.what)}</span>` : "no step yet"}</span></div>`).join("")}</div>`;
+  if (tab === "timeline") {
+    if (tlMin < 0) tlMin = Math.max(0, act.findLastIndex((v) => v > 0));
+    const inMin = log.filter((x) => x.m === tlMin);
+    body = `<div class="tl"><div class="hd"><span class="lbl">Last 30 min</span><span class="m">1 cell = 1 min</span></div>
+      <div class="mins" role="group" aria-label="Steps per minute">${act.map((v, k) => `<button data-min="${k}" aria-pressed="${k === tlMin}" tabindex="${k === tlMin ? 0 : -1}"
+        aria-label="${hhmm(NOW - 29 + k)}, ${v} step${v === 1 ? "" : "s"}" title="${hhmm(NOW - 29 + k)}, ${v} step${v === 1 ? "" : "s"}"><i class="${lv(v)}"></i></button>`).join("")}</div>
+      <div class="scale"><span>${hhmm(NOW - 29)}</span><span>${hhmm(NOW - 14)}</span><span>${hhmm(NOW)}</span></div>
+      <div class="hd at"><span class="lbl">${hhmm(NOW - 29 + tlMin)} · ${inMin.length} step${inMin.length === 1 ? "" : "s"}</span><span class="m">← → other minutes</span></div>
+      ${inMin.length ? `<div class="log">${inMin.map((x) => logRow(x)).join("")}</div>` : `<p class="none">No step in this minute.</p>`}</div>`;
+  }
+  if (tab === "chat") body = `<div class="chat">${s.chat.map(([who, t, text]) => `<div class="turn${who === "You" ? " you" : ""}"><span class="lbl">${who} · ${t}</span><p>${esc(text)}</p></div>`).join("")}
+    <p class="src">${s.src === "window" ? "Streamed from this window run." : `Read from the ${s.src} transcript, in words; tool output stays in Steps.`}</p></div>`;
+  document.getElementById("proc").innerHTML = `<div class="tabs" role="tablist" aria-label="Process">${TABS.map(([id, nm]) =>
+    `<button role="tab" id="tab-${id}" data-tab="${id}" aria-selected="${tab === id}" aria-controls="pane" tabindex="${tab === id ? 0 : -1}">${nm}${id === "agents" ? ` <span class="n">${ags.length}</span>` : ""}</button>`).join("")}</div>
+    <div class="pane" id="pane" role="tabpanel" aria-labelledby="tab-${tab}" tabindex="0">${body}</div>`;
+  const pane = document.getElementById("pane");
+  if (tab === "chat") pane.scrollTop = pane.scrollHeight;
+  if (focus) { const f = document.querySelector(focus); if (f) f.focus(); }
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("#brief");
+  if (b) {
+    briefOpen = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", String(briefOpen));
+    b.querySelector(".car").textContent = briefOpen ? "▴" : "▾";
+    document.getElementById("more").hidden = !briefOpen;
+    try { localStorage.setItem(BRIEF_KEY, briefOpen ? "1" : "0"); } catch (err) { /* kept for this page only */ }
+    return;
+  }
+  const tb = e.target.closest("[data-tab]");
+  if (tb) { tab = tb.dataset.tab; renderProc(`#tab-${tab}`); return; }
+  const mn = e.target.closest("[data-min]");
+  if (mn) { tlMin = Number(mn.dataset.min); renderProc(`[data-min="${tlMin}"]`); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  const d = e.key === "ArrowRight" ? 1 : -1;
+  if (e.target.matches("[data-tab]")) {
+    const k = TABS.findIndex(([id]) => id === tab);
+    tab = TABS[(k + d + TABS.length) % TABS.length][0]; renderProc(`#tab-${tab}`); e.preventDefault();
+  } else if (e.target.matches("[data-min]")) {
+    tlMin = Math.min(29, Math.max(0, tlMin + d)); renderProc(`[data-min="${tlMin}"]`); e.preventDefault();
+  }
+});
+function renderSession() {
+  const s = S[cur];
+  tlMin = -1;
+  document.getElementById("pos").textContent = `${cur + 1} of ${S.length}`;
+  document.getElementById("prev").disabled = cur === 0;
+  document.getElementById("next").disabled = cur === S.length - 1;
+  const t = ctxTone(s.ctx), path = [["Prep", "ok"], ["Run", s.path === 1 ? "cur" : "ok"], ["Verify", s.path === 2 ? "cur" : ""], ["Hand off", ""]];
+  const ags = agentsOf(s), [mins, secs] = s.time.split(" ");
+  let top = "";
+  if (s.q) top = `<div class="askbox"><div style="font:600 15px/1.4 var(--ui)">${esc(s.q)}</div>
+    <textarea class="in" id="an" rows="3" aria-label="Answer" placeholder="Your answer runs in a window copy of this chat. The VS Code chat stays as it is."></textarea>
+    <div class="lr"><button class="btn you">Send answer</button><button class="btn">Open in terminal</button></div></div>`;
+  if (s.denied) top = `<div class="card r" style="margin:0;cursor:default"><div class="m">denied: ${esc(s.denied)}</div>
+    <div class="lr"><button class="btn go sm">Open in terminal</button><button class="btn sm">Dismiss</button></div></div>`;
+  document.getElementById("sbody").innerHTML = `
+    <div class="head"><span class="st ${s.tone}">${s.gl} ${s.word} · ${s.age}</span><h2>${esc(s.title)}</h2>
+      <div class="where"><span class="m">${esc(s.proj)} / ${s.src} / ${esc(s.route)}</span><button class="btn sm" data-here="${esc(s.proj)}">New task here</button></div></div>
+    ${top}
+    <div class="bwrap">
+      <button class="brief" id="brief" aria-expanded="${briefOpen}" aria-controls="more" title="Context, agents and activity (click or Space)">
+        <span class="path">${path.map(([n, c]) => `<span class="${c}"><span class="cells">${cellsHtml(Array(6).fill(c === "ok" ? "g" : c === "cur" ? "f" : ""))}</span>${c === "ok" ? "✓ " : c === "cur" ? "▶ " : ""}${n}</span>`).join("")}<span class="car" aria-hidden="true">${briefOpen ? "▴" : "▾"}</span></span>
+        <span class="stats">
+          <span><small>spent</small><b class="usd">${s.cost.startsWith("~") ? `<span class="est" title="estimated">~</span>${s.cost.slice(1)}` : s.cost}</b></span>
+          <span><small>$ / min</small><b>${s.rate}</b></span>
+          <span><small class="${t}">${t === "y" ? "hand off soon" : t === "r" ? "hand off now" : "context"}</small><span class="cx"><span class="cells">${cellsHtml(ctxClasses(s.ctx, 30, 15))}</span><b class="${t}">${s.ctx}K</b></span></span>
+          <span><small>time</small><b>${mins}<span class="ss"> ${secs}</span></b></span>
+          <span><small>steps</small><b>${stepLog(s).length}</b></span>
+        </span>
+      </button>
+      <div class="more" id="more"${briefOpen ? "" : " hidden"}>
+        <div class="blk"><div class="hd"><span class="lbl"${t ? ` style="color:var(--${t === "r" ? "bad" : "you"})"` : ""}>Context${t === "y" ? " · hand off soon" : t === "r" ? " · hand off now" : ""}</span><span class="m">1 cell = 10K</span></div>
+          <div class="cells act30">${cellsHtml(ctxClasses(s.ctx, 30, 15))}</div><div class="scale"><span>0</span><span>150K hand off soon</span><span>300K hand off</span></div></div>
+        <div class="blk"><div class="hd"><span class="lbl">Agents · 1 cell = 2 steps</span><span class="m">steps / cost</span></div><div class="agents">
+          ${ags.map((a) => `<div class="agent"><span class="nm m">${a.word === "done" ? "✓ " : a.word === "working" ? "▶ " : ""}${esc(a.nm)}</span><span class="cells">${cellsHtml(Array.from({ length: 24 }, (_, k) =>
+            k < Math.ceil(a.steps / 2) ? "f" : ""))}</span><span class="m">${a.steps}</span><span class="m c">${a.cost}</span></div>`).join("")}</div></div>
+        <div class="blk"><div class="hd"><span class="lbl">Activity · last 30 min</span><span class="m">1 cell = 1 min</span></div><div class="cells act30">${cellsHtml(s.act.split(",").map(lv))}</div></div>
+      </div>
+    </div>`;
+  renderProc();
+  document.getElementById("sscroll").scrollTop = 0;
+  document.getElementById("levers").hidden = !!s.q;
+  document.getElementById("levers").innerHTML = `
+    <div class="lr"><input id="fu" aria-label="Follow-up" placeholder="Follow-up (runs in a window copy)"><button class="btn go">Continue</button></div>
+    <div class="lr"><button class="btn">Verify</button><button class="btn">Hand off</button><button class="btn">Terminal</button><button class="btn stop" id="stopbtn">Stop</button></div>`;
+}
+document.getElementById("prev").addEventListener("click", () => { if (cur > 0) { cur--; renderSession(); } });
+document.getElementById("next").addEventListener("click", () => { if (cur < S.length - 1) { cur++; renderSession(); } });
+
+// stop confirms in place
+let stopT;
+document.addEventListener("click", (e) => {
+  const stop = e.target.closest("#stopbtn");
+  if (!stop) return;
+  if (stop.dataset.armed) { stop.textContent = "Stopping…"; stop.disabled = true; return; }
+  stop.dataset.armed = "1"; stop.textContent = "Stop run? Click again"; clearTimeout(stopT);
+  stopT = setTimeout(() => { delete stop.dataset.armed; stop.textContent = "Stop"; stop.disabled = false; }, 3000);
+});
+
+// states
+document.querySelectorAll("[data-blank]").forEach((el) => { el.innerHTML = cellsHtml(Array(Number(el.dataset.blank)).fill("")); });
+document.querySelectorAll("[data-load]").forEach((el) => {
+  el.innerHTML = cellsHtml(Array(6).fill(""));
+  const cells = el.querySelectorAll("i"); let k = 0;
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) setInterval(() => { cells.forEach((c, j) => { c.className = j === k % 6 ? "f" : ""; }); k++; }, 300);
+  else cells[0].className = "f";
+});
+
+// views
+const caps = {
+  pill: "", peek: "",
+  list: "Home view. Click a card to open the session, answer or unblock in place, click the spend strip for today's breakdown. Open the project picker in the header (or Ctrl+P): type to filter 16 sample projects; fashion_packshots_ai shows the runs-off case.",
+  session: "One session, full width. The brief under the head is one button: click it or press Space for context, agents and activity, again to fold; it stays folded or open for the window. The process below: Steps, Agents, Timeline (click a minute), Chat. ‹ › (or Up / Down) steps through the sessions, Esc goes back.",
+  ask: "A session that asks shows the question first and says where the answer runs. Orange stays reserved for this. The brief and the process stay under it, so the question reads with what led to it.",
+  states: "Four states on one screen for the mock: the offline banner, the empty list, a failed Prep card pinned above the composer that started it, and Prep loading in the composer."
+};
+function show(v) {
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  if (v === "ask") cur = 0;
+  closePicker();
+  const pane = v === "ask" ? "session" : v;
+  document.querySelector('[data-view="pill"]').hidden = v !== "pill";
+  document.querySelector('[data-view="peek"]').hidden = v !== "peek";
+  document.querySelector('[data-view="win"]').hidden = !["list", "session", "ask", "states"].includes(v);
+  document.querySelectorAll("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== pane; });
+  if (pane === "session") renderSession();
+  const cap = document.getElementById("cap"); cap.textContent = caps[v]; cap.hidden = !caps[v];
+}
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-stay]")) return;
+  const here = e.target.closest("[data-here]");
+  if (here) { pick(here.dataset.here); show("list"); document.getElementById("nt").focus(); return; }
+  const o = e.target.closest("[data-open]");
+  if (o) { cur = Number(o.dataset.open); if (proj(S[cur].proj)) project = S[cur].proj; renderCompose(); show("session"); return; }
+  const g = e.target.closest("[data-go]");
+  if (g) show(g.dataset.go);
+});
+document.getElementById("needsbtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (scope) pick("");  // the chip counts every project, so it clears the filter
+  document.getElementById("listscroll").scrollTo({ top: document.getElementById("needsec").offsetTop - 40, behavior: "smooth" });
+});
+document.addEventListener("keydown", (e) => {
+  const inField = ["INPUT", "TEXTAREA"].includes(e.target.tagName);
+  const inSession = !document.querySelector('[data-pane="session"]').hidden && !document.querySelector('[data-view="win"]').hidden;
+  if (e.key === "Escape" && inSession) show("list");
+  if (inField || !inSession) return;
+  if (e.key === "ArrowUp" && cur > 0) { cur--; renderSession(); e.preventDefault(); }
+  if (e.key === "ArrowDown" && cur < S.length - 1) { cur++; renderSession(); e.preventDefault(); }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches(".card[data-open]")) e.target.click(); });
+
+renderList();
+renderCompose();
+show("list");
+</script>

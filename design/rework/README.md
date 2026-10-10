@@ -17,6 +17,7 @@ through its views; each page has the window mock on the left and its reasoning o
 | [explored/a-pill-and-drawer.html](explored/a-pill-and-drawer.html) | https://claude.ai/artifact/Ac61ay92bKkBbKVfLNCpxz | A: kept the folding pill and the answer-in-place peek card |
 | [explored/b-triage-board.html](explored/b-triage-board.html) | https://claude.ai/artifact/TLUve8h6ZWkS6sSDoc1Nn3 | B: not chosen; the sparkline idea became the activity cells |
 | [explored/c-rail-and-focus.html](explored/c-rail-and-focus.html) | https://claude.ai/artifact/9x9mZUKL84WztY2xpRS9b4 | C: kept the session rail, focus pane, burn rate and agent lanes |
+| [explored/d-cells-drawer.html](explored/d-cells-drawer.html) | https://claude.ai/artifact/SqX2KpJqpnV6Q7FA7zhVzn | D: proposal under review. Console Cells without the rail: A's list as home, C's focus content on a full-width session page, a searchable project picker in the header |
 | [explored/ca-rings-and-pill.html](explored/ca-rings-and-pill.html) | https://claude.ai/artifact/5jcCWoKfExdC7ncBJjvgCL | C + A merge; Console Cells is its alternate. Written before the anti-slop pass (has an eyebrow label, no sample-data note) |
 
 ## Notes for the build
