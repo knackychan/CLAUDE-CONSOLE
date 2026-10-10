@@ -40,6 +40,16 @@ class LogReader:
         return out
 
 
+def append(folder: Path, rec: dict) -> None:
+    """The service's own lines (run_started, run_ended), same format and file as the hook's."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    day = time.strftime("%Y-%m-%d", time.localtime(rec["ts"]))
+    line = json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n"
+    with open(folder / f"events-{day}.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(line)
+
+
 def prune(folder: Path, retention_days: int, now: float = None) -> list:
     """Delete events-YYYY-MM-DD.jsonl files older than `retention_days`. Returns names."""
     cutoff = time.strftime("%Y-%m-%d", time.localtime((now or time.time()) - retention_days * 86400))
