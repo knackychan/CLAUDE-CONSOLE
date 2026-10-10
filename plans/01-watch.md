@@ -44,12 +44,12 @@ All files are new except `.gitignore` (new too: the repo has only BRAINSTORM.md,
 
 ## TODO
 
-- [ ] Task 0: repo scaffolding
-- [ ] Task 1: paths + redact
-- [ ] Task 2: the hook script
-- [ ] Task 3: log reader
-- [ ] Task 4: state builder
-- [ ] Task 5: guard + service
+- [x] Task 0: repo scaffolding
+- [x] Task 1: paths + redact
+- [x] Task 2: the hook script
+- [x] Task 3: log reader
+- [x] Task 4: state builder
+- [x] Task 5: guard + service
 - [ ] Task 6: window
 - [ ] Task 7: hook installer + live check (Fred runs the installer)
 - [ ] Task 8: plan history + push nothing (local repo only)
@@ -1974,6 +1974,7 @@ Expected:
 
 ## History
 
+- 2026-10-10 - Tasks 0-7 step 3 executed (files copied from the verified scratch copy, one commit per task, 37 tests OK, installer dry run points at this repo's cc_events.py). Pending: Task 6 step 4 window check, Task 7 steps 4-5 (Fred installs the hooks, live check), Task 8.
 - 2026-10-10 - Plan written. Every code block was run in a scratch copy first: 37 tests OK, hook about 75 ms on a real transcript, service smoke-tested.
 
 ## Troubleshooting
