@@ -12,28 +12,58 @@
     <div id="peek"></div>
   </div>
   <div id="open" class="win">
-    <nav id="rail" class="rail" aria-label="Sessions">
-      <div class="drag pywebview-drag-region" title="Drag to move">&#8943;</div>
-      <button class="rb" data-go="overview" title="Overview (Esc)" aria-label="Overview">&#9638;</button>
-      <div class="sep"></div>
-      <div id="chips" class="chips"></div>
-      <div class="sep"></div>
-      <button class="rb" data-go="new" title="New task (Ctrl+N)" aria-label="New task">&#65291;</button>
-      <div class="grow pywebview-drag-region" title="Drag to move"></div>
-      <div id="total" class="total"></div>
-      <button id="ontop" class="rb on native-only" data-go="ontop" title="Always on top (on)" aria-label="Always on top">&#8868;</button>
-      <button class="rb" data-go="fold" title="Fold to pill" aria-label="Fold to pill">&#8963;</button>
-    </nav>
-    <section class="pane">
-      <div id="banner" class="banner" hidden><b>OFFLINE</b> The service stopped answering. Runs keep going; the window reconnects by itself.</div>
-      <div class="ptop">
-        <span id="crumb" class="crumb m pywebview-drag-region"></span>
-        <button class="rb native-only" data-go="minimize" aria-label="Minimize">&ndash;</button>
-        <button class="rb x native-only" data-go="close" aria-label="Close" title="Close window (runs keep going)">&#10005;</button>
+    <div id="banner" class="banner" hidden><b>OFFLINE</b> The service stopped answering. Runs keep going; the window reconnects by itself.</div>
+
+    <section data-page="list">
+      <div class="top">
+        <span class="grip pywebview-drag-region" title="Drag to move">&#8942;&#8942;</span>
+        <button id="scope" class="scope" data-pick aria-haspopup="listbox" aria-expanded="false" title="Project (Ctrl+P)"><span id="scopenm" class="nm">All projects</span><span class="car">&#9662;</span></button>
+        <button id="needsbtn" class="needs" data-go="needs" title="Show what needs you, in every project" hidden></button>
+        <span class="sp pywebview-drag-region" title="Drag to move; double-click to fold"></span>
+        <span data-winbtns></span>
       </div>
-      <div id="scroll" class="scroll"></div>
-      <div id="bar"></div>
+      <div id="listscroll" class="scroll">
+        <button id="today" class="today" aria-expanded="false" title="Show today's breakdown"></button>
+        <div id="todaymore" class="todaymore" hidden></div>
+        <div id="list"></div>
+      </div>
+      <div id="prepfail"></div>
+      <div class="compose">
+        <div class="lr"><textarea id="c-prompt" rows="1" spellcheck="false" aria-label="New task"
+          title="Enter = Prep · Ctrl+Enter = Run raw · Shift+Enter = new line"></textarea></div>
+        <div id="c-say" class="say"></div>
+      </div>
     </section>
+
+    <section data-page="session" hidden>
+      <div class="top">
+        <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">&#8592;</button>
+        <span id="pos" class="crumb m"></span>
+        <button id="prev" class="rb" data-step="-1" title="Previous session (Up)" aria-label="Previous session">&#8249;</button>
+        <button id="next" class="rb" data-step="1" title="Next session (Down)" aria-label="Next session">&#8250;</button>
+        <span class="sp pywebview-drag-region" title="Drag to move; double-click to fold"></span>
+        <span data-winbtns></span>
+      </div>
+      <div id="sscroll" class="scroll sess"><div id="sbody" class="body"></div><div id="proc" class="proc"></div></div>
+      <div id="levers" class="levers"></div>
+    </section>
+
+    <section data-page="prep" hidden>
+      <div class="top">
+        <button class="rb" data-pact="edit" title="Back to the list, keeping the text" aria-label="Back">&#8592;</button>
+        <span id="crumb" class="crumb m"></span>
+        <span class="sp pywebview-drag-region" title="Drag to move; double-click to fold"></span>
+        <span data-winbtns></span>
+      </div>
+      <div id="pscroll" class="scroll stack"></div>
+      <div id="pbar" class="levers"></div>
+    </section>
+
+    <div id="pop" class="pop" role="dialog" aria-label="Pick a project" hidden>
+      <div class="find"><input id="pfind" aria-label="Find a project" placeholder="Find a project" autocomplete="off"><span class="kbd">Esc</span></div>
+      <div id="prows" class="rows" role="listbox"></div>
+      <div class="foot"><span>&#8593; &#8595; move</span><span>Enter pick</span><span class="sort">sorted: needs you, live, recent</span></div>
+    </div>
   </div>
   <script src="/app.js"></script>
 </body>
