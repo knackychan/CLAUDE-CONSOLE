@@ -115,6 +115,23 @@ class BuildRecordTest(unittest.TestCase):
         self.assertEqual(rec["verdict_detail"], "token=*** broke")
         self.assertNotIn("verdict", cc_events.build_record(self.base("Stop", last_assistant_message="all good")))
 
+    def test_instructions_loaded_measures_the_file(self):
+        rules = self.repo / "CLAUDE.md"
+        rules.write_bytes(b"# Rules\n" + b"- one rule\n" * 4 + b"last line")
+        rec = cc_events.build_record(self.base("InstructionsLoaded", file_path=str(rules),
+                                               memory_type="Project", load_reason="session_start"))
+        self.assertEqual((rec["file"], rec["lines"], rec["bytes"], rec["scope"], rec["load_reason"]),
+                         ("CLAUDE.md", 6, 61, "Project", "session_start"))
+        mine = Path(self.tmp.name) / ".claude" / "CLAUDE.md"
+        mine.parent.mkdir()
+        mine.write_bytes(b"one\ntwo\n")
+        with mock.patch.object(Path, "home", return_value=Path(self.tmp.name)):
+            rec = cc_events.build_record(self.base("InstructionsLoaded", file_path=str(mine), memory_type="User"))
+        self.assertEqual((rec["file"], rec["lines"], rec["bytes"]), ("~/.claude/CLAUDE.md", 2, 8))
+        rec = cc_events.build_record(self.base("InstructionsLoaded", file_path=str(self.repo / "gone.md")))
+        self.assertEqual(rec["file"], "gone.md")
+        self.assertNotIn("lines", rec)
+
     def test_permission_denied_keeps_reason(self):
         rec = cc_events.build_record(self.base("PermissionDenied", tool_name="Bash",
                                                tool_input={"command": "git push"}, reason="[Push]"))

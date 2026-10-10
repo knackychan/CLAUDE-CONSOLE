@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from console import paths, redact  # noqa: E402
 
 TAIL_BYTES = 512 * 1024
+RULES_READ_MAX = 4 * 1024 * 1024  # a rules file bigger than this is counted by size only
 _ROUTE = re.compile(r"^[\s`*>\-]*Route:\s*(.+?)[\s`*]*$", re.M)
 _STOP = re.compile(r"^[\s`*>\-]*STOP:\s*(.+?)[\s`*]*$", re.M)
 # A model that obeys the STOP footer with nothing to ask writes `STOP: none`: not a question.
@@ -66,6 +67,27 @@ def verdict(text: str) -> dict:
     out = {"verdict": word}
     if detail:
         out["verdict_detail"] = redact.clip(redact.mask(detail), 160)
+    return out
+
+
+def rules_file(path, root) -> dict:
+    """A loaded CLAUDE.md / rules file: a short name (inside the project, or ~/...), lines, bytes."""
+    if not path:
+        return {}
+    p = Path(path)
+    name = p.as_posix()
+    for base, prefix in ((root, ""), (Path.home(), "~/")):
+        if base and p.is_relative_to(base):
+            name = prefix + p.relative_to(base).as_posix()
+            break
+    out = {"file": name}
+    try:
+        out["bytes"] = p.stat().st_size
+        with open(p, "rb") as fh:
+            data = fh.read(RULES_READ_MAX)
+    except OSError:
+        return out
+    out["lines"] = data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
     return out
 
 
@@ -158,6 +180,10 @@ def build_record(data: dict, now: float = None) -> dict:
         rec["trigger"] = data.get("trigger")
     elif event == "SessionEnd":
         rec["reason"] = data.get("reason")
+    elif event == "InstructionsLoaded":
+        rec.update(rules_file(data.get("file_path"), root))
+        rec["scope"] = data.get("memory_type")
+        rec["load_reason"] = data.get("load_reason")
     return {k: v for k, v in rec.items() if v not in (None, "")}
 
 

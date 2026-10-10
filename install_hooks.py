@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 
 EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "SubagentStart", "SubagentStop",
-          "PermissionDenied", "Stop", "StopFailure", "PostCompact", "SessionEnd"]
+          "PermissionDenied", "Stop", "StopFailure", "PostCompact", "SessionEnd",
+          "InstructionsLoaded"]
 SCRIPT = str(Path(__file__).resolve().parent / "cc_events.py")
 
 
