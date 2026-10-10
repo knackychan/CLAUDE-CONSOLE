@@ -17,6 +17,8 @@ from console import paths, redact  # noqa: E402
 TAIL_BYTES = 512 * 1024
 _ROUTE = re.compile(r"^[\s`*>\-]*Route:\s*(.+?)[\s`*]*$", re.M)
 _STOP = re.compile(r"^[\s`*>\-]*STOP:\s*(.+?)[\s`*]*$", re.M)
+# A model that obeys the STOP footer with nothing to ask writes `STOP: none`: not a question.
+_NO_QUESTION = {"none", "n/a", "-", ""}
 # The verifier agent's report: `VERDICT: PASS | FAIL`, then `failing: <file:line> - <error>` lines.
 _VERDICT = re.compile(r"^[\s`*>\-]*VERDICT:\s*(PASS|FAIL)\b[ \t`*:\-]*(.*?)[ \t`*]*$", re.M)
 _FAILING = re.compile(r"^[\s`*>\-]*failing:\s*(.+?)[\s`*]*$", re.M)
@@ -143,7 +145,7 @@ def build_record(data: dict, now: float = None) -> dict:
         question = last_match(_STOP, message)
         if route:
             rec["route"] = redact.clip(route, 80)
-        if question:
+        if question.rstrip(".").lower() not in _NO_QUESTION:
             rec["stop_question"] = redact.clip(redact.mask(question), 200)
         rec.update(verdict(message))
     elif event == "StopFailure":

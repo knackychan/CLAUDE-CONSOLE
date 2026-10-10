@@ -96,6 +96,11 @@ class BuildRecordTest(unittest.TestCase):
         self.assertEqual(rec["route"], "mechanical, low effort, cavecrew-builder on sonnet")
         self.assertEqual(rec["stop_question"], "how many retries?")
 
+    def test_stop_none_is_no_question(self):
+        for answer in ("none", "None.", "n/a", "-"):
+            rec = cc_events.build_record(self.base("Stop", last_assistant_message=f"Done.\nSTOP: {answer}"))
+            self.assertNotIn("stop_question", rec, answer)
+
     def test_verdict_from_stop_and_subagent_stop(self):
         msg = ("Checked.\nVERDICT: FAIL\nchecks: py -m unittest -> 1 failed\n"
                "failing: tests/test_calc.py:9 - AssertionError: 3 != 4")

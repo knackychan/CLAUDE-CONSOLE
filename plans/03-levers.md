@@ -3533,3 +3533,9 @@ Add `"D:\\MY DOCS\\MY TOOLS\\cc-levers"` to `"projects"` in `%USERPROFILE%\.clau
 - **Issue:** no `PASS` / `FAIL` badge after Verify.
   **Cause:** the reply had no line starting with `VERDICT: PASS` or `VERDICT: FAIL` (the hook only reads that shape).
   **Fix:** Continue with `end with one line: VERDICT: PASS or VERDICT: FAIL <line>`.
+- **Issue:** a window run sat in Needs you with the STOP question `none` (Task 7 check 3).
+  **Cause:** the prompt asked for exact lines and the service's STOP footer asked for a STOP line; Claude obeyed both and wrote `STOP: none`, which the hook read as a question.
+  **Fix:** `cc_events.py` ignores `STOP: none`, `n/a` and `-` (1 new test in `tests/test_cc_events.py`, 79 tests).
+- **Issue:** a VS Code chat that already ran `/session-handoff` itself keeps the `handoff` hint and is not Done.
+  **Cause:** only a Handoff run started by the window (`kind: handoff`) marks a session Done; a skill call inside the chat is just a `Skill session-handoff` step.
+  **Fix:** none in phase 3; do not click Handoff there (it would fork the whole context and write the notes twice). The row goes Stale? on its own.
