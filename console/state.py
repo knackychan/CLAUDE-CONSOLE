@@ -1,4 +1,5 @@
 """Sessions -> agents -> steps, built from event records; states computed at snapshot time."""
+import re
 from dataclasses import dataclass, field
 
 from . import redact
@@ -13,14 +14,23 @@ STATES = {
     "failed": ("×", "Failed", "danger"),
     "idle": ("○", "Idle", "info"),
     "stale": ("△", "Stale?", "warning"),
+    "interrupted": ("‖", "Interrupted", "warning"),
     "done": ("✓", "Done", "success"),
 }
-NEEDS_YOU = {"stop", "blocked", "stall", "failed"}
+NEEDS_YOU = {"stop", "blocked", "stall", "failed", "interrupted"}
 DONE = {"done", "stale"}
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SOURCES = {"claude-vscode": "vscode", "cli": "terminal", "claude-desktop": "desktop"}
 MAX_STEPS = 500
 SHOW_FOR_S = 86400
+_PASTED = re.compile(r"</?pasted_content[^>]*>")
+
+
+def norm_dir(path: str) -> str:
+    """One spelling per folder: VS Code reports the drive as d:, terminals as D:."""
+    if len(path) > 1 and path[1] == ":":
+        return path[0].upper() + path[1:]
+    return path
 
 
 @dataclass
@@ -62,6 +72,14 @@ class Session:
     last_write_ts: float = 0.0
     agents: dict = field(default_factory=dict)
     steps: list = field(default_factory=list)
+    window: bool = False
+    run_live: bool = False
+    interrupted: bool = False
+    stopped: bool = False
+    cost: float = 0.0
+    route_reason: str = ""
+    prep: str = ""
+    start_commit: str = ""
 
 
 class State:
@@ -80,7 +98,7 @@ class State:
         s.last_ts = max(s.last_ts, ts)
         for key in ("project", "project_dir", "cwd"):
             if rec.get(key):
-                setattr(s, key, rec[key])
+                setattr(s, key, norm_dir(rec[key]) if key == "project_dir" else rec[key])
         agent = None
         aid = rec.get("agent_id")
         if aid:
@@ -104,9 +122,10 @@ class State:
             s.in_turn, s.ended = True, False
             s.prompts += 1
             if not s.title:
-                s.title = redact.clip(rec.get("prompt", ""), 60)
+                s.title = redact.clip(_PASTED.sub(" ", rec.get("prompt", "")), 60)
             s.denied = s.failed = None
             s.stop_question = ""
+            s.interrupted = s.stopped = False
         elif event == "PreToolUse":
             s.in_turn = True
             tool, what = rec.get("tool", ""), rec.get("what", "")
@@ -134,7 +153,7 @@ class State:
             s.model = rec.get("model") or s.model
             if rec.get("context_tokens") is not None:
                 s.ctx_tokens = rec["context_tokens"]
-            if rec.get("entrypoint"):
+            if rec.get("entrypoint") and not s.window:
                 s.source = SOURCES.get(rec["entrypoint"], rec["entrypoint"])
             if rec.get("route"):
                 s.route = rec["route"]
@@ -146,7 +165,34 @@ class State:
             s.ctx_tokens = None
             s.compactions += 1
         elif event == "SessionEnd":
-            s.ended, s.in_turn = True, False
+            s.in_turn = False
+            s.ended = not s.window  # a window run's process ends after every turn; it can resume
+        elif event == "run_started":
+            s.window, s.run_live, s.source = True, True, "window"
+            s.in_turn, s.ended = True, False
+            s.interrupted = s.stopped = False
+            s.denied = s.failed = None
+            s.stop_question = ""
+            if rec.get("title") and not s.title:
+                s.title = redact.clip(rec["title"], 60)
+            if rec.get("route"):
+                s.route, s.route_reason = rec["route"], rec.get("reason", "")
+            if rec.get("prep"):
+                s.prep = rec["prep"]
+            if rec.get("start_commit") and not s.start_commit:
+                s.start_commit = rec["start_commit"]
+            if rec.get("model") and not s.model:
+                s.model = rec["model"]
+        elif event == "run_ended":
+            s.window, s.run_live, s.in_turn = True, False, False
+            s.doing = ""
+            s.cost += float(rec.get("cost") or 0)
+            s.stopped = bool(rec.get("stopped"))
+            s.interrupted = bool(rec.get("interrupted"))
+            if rec.get("denials") and not s.denied:
+                first = rec["denials"][0]
+                s.denied = {"tool": first.get("tool", ""), "what": first.get("what", ""),
+                            "reason": "window runs cannot ask: open in terminal", "ts": ts}
 
     def _step(self, s, ts, aid, tool, what, denied=False):
         s.steps.append({"ts": ts, "agent": aid or "", "tool": tool, "what": what, "denied": denied})
@@ -161,6 +207,8 @@ class State:
             return "failed"
         if s.denied:
             return "blocked"
+        if s.interrupted:
+            return "interrupted"
         age = now - s.last_ts
         if s.in_turn:
             if age >= self.cfg["stall_after_s"]:
@@ -224,6 +272,9 @@ class State:
                 "ctx_tone": tone, "compactions": s.compactions,
                 "stop_question": s.stop_question, "denied": s.denied, "failed": s.failed,
                 "two_writers": s.id in writer_ids,
+                "window": s.window, "run_live": s.run_live, "stopped": s.stopped,
+                "cost": round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,
+                "start_commit": s.start_commit, "cwd": s.cwd,
                 "started_ts": s.started_ts, "last_ts": s.last_ts,
                 "agents": [self._agent_row(a, s) for a in
                            sorted(s.agents.values(), key=lambda a: a.started_ts)],

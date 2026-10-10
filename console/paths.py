@@ -13,6 +13,12 @@ DEFAULTS = {
     "writers_window_s": 600,
     "gauge_yellow_tokens": 150000,
     "gauge_red_tokens": 300000,
+    "projects": [],
+    "claude_exe": "",
+    "prep_model": "haiku",
+    "prep_timeout_s": 180,
+    "default_model": "sonnet",
+    "default_effort": "medium",
 }
 
 

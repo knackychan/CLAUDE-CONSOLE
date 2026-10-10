@@ -98,6 +98,37 @@ class StateTest(unittest.TestCase):
         ids = [r["id"] for r in self.state.snapshot(T0 + 90003)["sessions"]]
         self.assertEqual(ids, ["new1", "new2"])
 
+    def test_window_run_lifecycle(self):
+        self.feed(ev("run_started", T0, title="Fix add() in calc.py", route="mechanical",
+                     reason="small", prep="p1", start_commit="abc", model="sonnet", effort="low"),
+                  ev("UserPromptSubmit", T0 + 1, prompt="Goal: Fix add()"),
+                  ev("Stop", T0 + 5, entrypoint="claude-vscode", model="claude-sonnet-5-5"),
+                  ev("SessionEnd", T0 + 6),
+                  ev("run_ended", T0 + 6, cost=0.25, subtype="success"))
+        row = self.row(T0 + 7)
+        self.assertEqual((row["state"], row["source"], row["title"], row["route"]),
+                         ("idle", "window", "Fix add() in calc.py", "mechanical"))
+        self.assertEqual((row["window"], row["run_live"], row["cost"], row["prep"], row["start_commit"]),
+                         (True, False, 0.25, "p1", "abc"))
+        self.assertEqual(row["model"], "claude-sonnet-5-5")
+
+    def test_interrupted_stopped_and_denied_runs(self):
+        self.feed(ev("run_started", T0), ev("run_ended", T0 + 5, interrupted=True))
+        row = self.row(T0 + 6)
+        self.assertEqual((row["state"], row["symbol"], row["group"]), ("interrupted", "‖", "needs"))
+        self.feed(ev("run_started", T0 + 10), ev("run_ended", T0 + 12, stopped=True))
+        self.assertEqual((self.row(T0 + 13)["state"], self.row(T0 + 13)["stopped"]), ("idle", True))
+        self.feed(ev("run_started", T0 + 20),
+                  ev("run_ended", T0 + 22, denials=[{"tool": "Bash", "what": "git push"}]))
+        row = self.row(T0 + 23)
+        self.assertEqual((row["state"], row["denied"]["what"]), ("blocked", "git push"))
+
+    def test_pasted_prompt_title_and_drive_letter(self):
+        self.feed(ev("UserPromptSubmit", T0, prompt='<pasted_content id="9a1c"> Project: D:/x', project_dir="d:/repo"),
+                  ev("Stop", T0 + 1, sid="s2", project_dir="D:/repo"))
+        self.assertEqual(self.row(T0 + 2)["title"], "Project: D:/x")
+        self.assertEqual({r["project_dir"] for r in self.state.snapshot(T0 + 2)["sessions"]}, {"D:/repo"})
+
 
 if __name__ == "__main__":
     unittest.main()
