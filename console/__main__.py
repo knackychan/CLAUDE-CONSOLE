@@ -1,5 +1,5 @@
 """py -m console          open the window (service runs inside it)
-py -m console --serve  service only; open http://127.0.0.1:8770/ in a browser"""
+py -m console --serve  service only; open http://127.0.0.1:47770/ in a browser"""
 import argparse
 import json
 import sys

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 DEFAULTS = {
-    "port": 8770,
+    "port": 47770,
     "retention_days": 14,
     "quiet_after_s": 180,
     "stall_after_s": 600,
