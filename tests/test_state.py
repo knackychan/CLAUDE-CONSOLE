@@ -291,6 +291,25 @@ class StateTest(unittest.TestCase):
                                          "runs": 1, "models": [["opus", 0.667], ["sonnet", 0.167], ["haiku", 0.167]]})
         self.assertEqual(self.state.snapshot(T0)["spend"]["today"], 1.25)  # no reader: exact only
 
+    def test_projects_for_the_picker(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        chat = str(Path(tmp.name) / "a.jsonl")
+        Path(chat).write_text(line("m1", T0 - 60, "claude-opus-5-5", input_tokens=1_000_000), encoding="utf-8")
+        self.feed(ev("UserPromptSubmit", T0 - 4 * 86400, sid="o", project="OLD", project_dir="D:/old"),
+                  ev("UserPromptSubmit", T0 - 100, sid="a", transcript_path=chat),
+                  ev("run_started", T0 - 50, sid="b", model="sonnet"),
+                  ev("run_ended", T0 - 10, sid="b", cost=1.25, subtype="success"))
+        reader = usage.Usage(paths.DEFAULTS["prices"])
+        for f in self.state.transcripts(T0):
+            reader.poll(f)
+        snap = self.state.snapshot(T0, reader)
+        self.assertEqual([r["id"] for r in snap["sessions"]], ["a", "b"])  # the old session is not shown ...
+        self.assertEqual(snap["projects"], [  # ... but its project still is a choice
+            {"dir": "D:/old", "name": "OLD", "last_ts": T0 - 4 * 86400, "today": 0.0},
+            {"dir": "D:/repo", "name": "repo", "last_ts": T0 - 10, "today": 5.25}])
+        self.assertEqual(self.state.snapshot(T0)["projects"][1]["today"], 1.25)  # no reader: exact only
+
     def test_activity_cells_per_minute(self):
         now = 1_000_020.0  # a minute boundary
         recs = [ev("UserPromptSubmit", now - 1900)]

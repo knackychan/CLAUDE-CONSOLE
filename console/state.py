@@ -420,12 +420,14 @@ class State:
                 "agents": [self._agent_row(a, s, cost) for a in
                            sorted(s.agents.values(), key=lambda a: a.started_ts)],
             })
+        shown = [self.sessions[r["id"]] for r in rows]
         return {
             "now": now,
             "sessions": rows,
             "writers": [{"project_dir": p, "sessions": ids} for p, ids in sorted(writers.items())],
             "counts": {g: sum(1 for r in rows if r["group"] == g) for g in ("needs", "working", "done")},
-            "spend": self.spend([self.sessions[r["id"]] for r in rows], now, usage),
+            "spend": self.spend(shown, now, usage),
+            "projects": self.projects(shown, now, usage),
         }
 
     def rules_warn(self, rules: dict) -> str:
@@ -449,7 +451,7 @@ class State:
         estimated = burn = 0.0
         families = {}
         if usage:
-            estimated = usage.cost([f for s in sessions if not s.window for f in self.files(s)], start)
+            estimated = sum(self.day_cost(s, start, usage) for s in sessions if not s.window)
             burn = usage.cost(every, now - BURN_S) / (BURN_S / 60)
             families = usage.families(every, start)
         total = sum(families.values())
@@ -459,6 +461,27 @@ class State:
         return {"today": round(exact + estimated, 4), "exact": round(exact, 4),
                 "estimated": round(estimated, 4), "burn": round(burn, 4),
                 "budget": self.cfg["daily_budget_usd"], "runs": runs, "models": models}
+
+    def day_cost(self, s: Session, start: float, usage=None) -> float:
+        """What one session cost since `start`: a window session's finished runs (exact), else the
+        transcript estimate (0 without a reader)."""
+        if s.window:
+            return sum(c for ts, c in s.run_costs if ts >= start)
+        return usage.cost(self.files(s), start) if usage else 0.0
+
+    def projects(self, shown: list, now: float, usage=None) -> list:
+        """Every project a session ran in (also one older than SHOW_FOR_S): when it was last active and
+        what today's shown sessions cost there. The window's project picker reads this."""
+        start, today, found = midnight(now), {}, {}
+        for s in shown:
+            if s.project_dir:
+                today[s.project_dir] = today.get(s.project_dir, 0.0) + self.day_cost(s, start, usage)
+        for s in self.sessions.values():
+            if s.project_dir:
+                p = found.setdefault(s.project_dir, {"dir": s.project_dir, "name": s.project, "last_ts": 0.0})
+                p["last_ts"] = max(p["last_ts"], s.last_ts)
+                p["name"] = s.project or p["name"]
+        return [dict(p, today=round(today.get(d, 0.0), 4)) for d, p in sorted(found.items())]
 
     def _agent_row(self, a: Agent, s: Session, cost=None) -> dict:
         if a.done:
