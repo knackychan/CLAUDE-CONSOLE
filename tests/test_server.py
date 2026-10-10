@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 
-from console import guard, paths, server
+from console import events, guard, paths, server
 
 
 class GuardTest(unittest.TestCase):
@@ -147,6 +147,28 @@ class RunServerTest(unittest.TestCase):
             time.sleep(0.1)
         self.assertEqual(self.session(sid)["stopped"], True)
         self.assertEqual(self.call("/api/answer", {"session": sid, "text": "go on"}), (200, {"session": sid}))
+
+    def test_allow_adds_a_folder_claude_code_ran_in(self):
+        other = Path(self.tmp.name) / "other"
+        other.mkdir()
+        self.folder.mkdir(parents=True)
+        (self.folder / "config.json").write_text('{"port": 8770, "projects": []}', encoding="utf-8")
+        events.append(self.folder, {"event": "Stop", "ts": time.time(), "session_id": "v1",
+                                    "project": "other", "project_dir": str(other)})
+        self.hub.poll_once()
+        run = {"project_dir": str(other), "prompt": "x"}
+        self.assertEqual(self.call("/api/run", dict(run, model="gpt-9"))[0], 403)
+        self.assertEqual(self.call("/api/allow", {"project_dir": self.tmp.name})[0], 403)  # no session there
+        self.assertEqual(self.call("/api/allow", {"project_dir": str(other / "nope")})[0], 400)
+        status, data = self.call("/api/allow", {"project_dir": str(other)})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["projects"], self.call("/api/config")[1]["projects"])
+        self.assertEqual(len(data["projects"]), 2)
+        saved = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual((saved["port"], len(saved["projects"])), (8770, 1))
+        self.assertEqual(self.call("/api/allow", {"project_dir": str(other)})[0], 200)  # twice: no duplicate
+        self.assertEqual(len(json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["projects"]), 1)
+        self.assertEqual(self.call("/api/run", dict(run, model="gpt-9"))[0], 400)  # past the folder check
 
     def test_draft_and_config(self):
         self.assertEqual(self.call("/api/draft", {"text": "half a prompt"}), (200, {"ok": True}))

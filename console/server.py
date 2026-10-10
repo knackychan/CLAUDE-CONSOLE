@@ -94,6 +94,29 @@ class Hub:
                 return folder
         return ""
 
+    def seen(self, project_dir: str) -> bool:
+        """True when a Claude Code session already ran in `project_dir` (the event log saw it)."""
+        want = os.path.normcase(os.path.abspath(project_dir))
+        with self.lock:
+            return any(s.project_dir and os.path.normcase(os.path.abspath(s.project_dir)) == want
+                       for s in self.state.sessions.values())
+
+    def allow(self, project_dir: str) -> list:
+        """Fred's "Allow runs here": add the folder to config.json and to the live config."""
+        folder = norm_dir(os.path.normpath(os.path.abspath(project_dir)))
+        with self.lock:
+            paths.add_project(self.folder, folder)
+            projects = list(self.cfg.get("projects") or [])
+            if not self.allowed(folder):
+                projects.append(folder)
+            self.cfg["projects"] = projects
+            return projects
+
+
+def project_list(cfg: dict) -> list:
+    """config.json "projects" spelled like the sessions' project_dir, so the window can match them."""
+    return [norm_dir(os.path.normpath(p)) for p in cfg.get("projects") or []]
+
 
 class Handler(BaseHTTPRequestHandler):
     hub: Hub = None  # set by make_server
@@ -135,8 +158,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.hub.steps(query.get("session", [""])[0]))
         if url.path == "/api/config":
             cfg = self.hub.cfg
-            projects = [norm_dir(os.path.normpath(p)) for p in cfg.get("projects") or []]
-            return self._json({"projects": projects, "models": claude_cli.MODELS,
+            return self._json({"projects": project_list(cfg), "models": claude_cli.MODELS,
                                "efforts": claude_cli.EFFORTS, "default_model": cfg["default_model"],
                                "default_effort": cfg["default_effort"], "claude": bool(self.hub.runs.exe),
                                "config_path": str(self.hub.folder / "config.json")})
@@ -156,7 +178,8 @@ class Handler(BaseHTTPRequestHandler):
         if not guard.host_ok(self.headers.get("Host"), self._port()) or not guard.post_ok(self.headers):
             return self._send(403, b"forbidden", "text/plain")
         routes = {"/api/prep": self._prep, "/api/run": self._run, "/api/stop": self._stop,
-                  "/api/answer": self._answer, "/api/terminal": self._terminal, "/api/draft": self._draft}
+                  "/api/answer": self._answer, "/api/terminal": self._terminal, "/api/draft": self._draft,
+                  "/api/allow": self._allow}
         handler = routes.get(urlparse(self.path).path)
         if handler is None:
             return self._send(404, b"not found", "text/plain")
@@ -254,6 +277,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "not a window run")
         self.hub.runs.open_terminal(sid)
         return self._json({"ok": True})
+
+    def _allow(self, body):
+        """Only folders Claude Code already ran in: the page cannot add an arbitrary path."""
+        want = body.get("project_dir")
+        if not isinstance(want, str) or not want or not os.path.isdir(want):
+            return self._error(400, "not a folder")
+        if not self.hub.seen(want):
+            return self._error(403, "only a folder with a Claude Code session can be allowed")
+        try:
+            self.hub.allow(want)
+        except ValueError as exc:
+            return self._error(409, str(exc))
+        return self._json({"projects": project_list(self.hub.cfg)})
 
     def _draft(self, body):
         text = body.get("text")

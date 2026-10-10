@@ -46,6 +46,8 @@ ends with working, tested software.
 - **STOP footer added by the service** to every window-run prompt; the global CLAUDE.md line for VS
   Code sessions is an optional Fred step (Claude does not edit it).
 - **Answer / Resume only for window runs** in phase 2; Continue for any session stays in phase 3.
+- **Allow runs here** (Fred, after tasks 1-6): the window can add a folder to `config.json`
+  `"projects"` with one click, only for a folder a Claude Code session already ran in (plan 02 Task 6b).
 
 ## History
 

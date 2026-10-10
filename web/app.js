@@ -81,7 +81,9 @@ function runnable() { return !!cfg && cfg.claude && cfg.projects.includes($("pro
 function hint() {
   if (!cfg) return "";
   if (!cfg.claude) return '<span class="danger">claude.exe not found: set "claude_exe" in config.json</span>';
-  if (!runnable()) return `<span class="mut">To run: pick a project listed in "projects" of ${esc(cfg.config_path)}</span>`;
+  if (!$("project").value) return `<span class="mut">To run: pick a project listed in "projects" of ${esc(cfg.config_path)}</span>`;
+  if (!runnable()) return `<span class="mut">Runs are off here: a run uses this repo's hooks and settings without asking.</span>
+    <button data-act="allow">Allow runs in ${esc(baseName($("project").value))}</button>`;
   return '<span class="mut">Enter = Prep &middot; Ctrl+Enter = Run raw &middot; Shift+Enter = new line</span>';
 }
 
@@ -137,6 +139,19 @@ function runRaw() {
   const text = $("prompt").value.trim();
   if (text && runnable()) doRun($("project").value, text, cfg.default_model, cfg.default_effort, "");
 }
+
+$("msg").addEventListener("click", async (e) => {
+  if (e.target.dataset.act !== "allow" || busy) return;
+  e.target.disabled = true;
+  try {
+    cfg.projects = (await api("/api/allow", { project_dir: $("project").value })).projects;
+    note = "";
+    render();
+    $("prompt").focus();
+  } catch (err) {
+    say(`<span class="danger">Allow failed: ${esc(err.message)}</span>`);
+  }
+});
 
 function saveDraft() {
   clearTimeout(draftTimer);
@@ -291,7 +306,9 @@ function renderStrip() {
 
 function addProject(dir, label) {
   const select = $("project");
-  if (dir && ![...select.options].some((o) => o.value === dir)) select.add(new Option(label, dir));
+  const opt = [...select.options].find((o) => o.value === dir);
+  if (opt) { if (label.endsWith("(runs)")) opt.text = label; }  // just allowed
+  else if (dir) select.add(new Option(label, dir));
 }
 
 function renderProjects() {

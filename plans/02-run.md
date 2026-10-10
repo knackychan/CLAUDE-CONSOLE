@@ -24,7 +24,7 @@
 5. **Prep command:** `claude.exe -p --model haiku --effort low --tools Read,Grep,Glob --permission-mode dontAsk --disable-slash-commands --strict-mcp-config --settings {"disableAllHooks": true} --no-session-persistence --output-format json --json-schema <schema>`, prompt on stdin. `--json-schema` works together with tool use: the answer is in `structured_output` (verified). Measured: 10-22 s, $0.03-0.04, 5-9 turns. `disableAllHooks` keeps Prep out of the event log (verified: 0 lines), so Prep never appears in the tree. Without `--tools` Haiku tried Bash and paid $0.11.
 6. **Child environment:** a Claude Code session exports `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID` and others to its children; a test run started from a VS Code session inherited them and was logged as `vscode`. Runs and Prep get `os.environ` minus the 12 names in `claude_cli.SESSION_ENV`. The session's source comes from `run_started` (`window`), never from the transcript entrypoint.
 7. **Never run the npm `claude.cmd` shim** (batch files re-parse arguments). `find_exe` uses `config.json` `claude_exe`, then `claude.exe` on PATH, then `<npm dir>\node_modules\@anthropic-ai\claude-code\bin\claude.exe` next to the shim (this machine: `C:\Users\DEROK137\AppData\Roaming\npm\...`).
-8. **Runs only in folders listed in `config.json` `"projects"`** (BRAINSTORM 10: `claude -p` runs a project's hooks without a trust prompt). Fred adds them by hand (Task 7). The project picker marks them `(runs)`.
+8. **Runs only in folders listed in `config.json` `"projects"`** (BRAINSTORM 10: `claude -p` runs a project's hooks without a trust prompt). Fred adds them by hand (Task 7) or with the window's `Allow runs in <name>` button (Task 6b), which only accepts a folder a Claude Code session already ran in (seen in the event log). The project picker marks them `(runs)`.
 9. **Prep prompt lives in `console/prep_prompt.md`** (`$raw` placeholder, `string.Template`). Fred's own prompter text is not in either repo; he can replace the file as long as `$raw` and the field list stay.
 10. **STOP convention:** the service appends one footer line to every window-run prompt: `If you must stop for a decision only Fred can make, end your final message with one line: STOP: <question>`. Nothing in `route-model` or any CLAUDE.md is edited by code; Task 7 has an optional Fred step for VS Code sessions.
 11. **Answer and Resume use one endpoint** (`POST /api/answer`), for window runs only and only when the run is not live. Resume sends the fixed text `You were interrupted. Check \`git diff\` first, then finish the task.` (`CLAUDE_CODE_RESUME_INTERRUPTED_TURN` is not used: not verified). Continue for any session is phase 3.
@@ -69,6 +69,7 @@ Dependencies point one way: `claude_cli -> (stdlib)`; `prep -> claude_cli, redac
 - [ ] Task 4: runs
 - [ ] Task 5: service routes
 - [ ] Task 6: window
+- [ ] Task 6b: Allow runs here (added 2026-10-10, Fred)
 - [ ] Task 7: Fred: projects in config.json + live check
 - [ ] Task 8: close the phase
 
@@ -2656,11 +2657,26 @@ git commit -m "feat: window prompt box, Prep card, run actions and Chat tab"
 
 ---
 
+### Task 6b: Allow runs here
+
+Added 2026-10-10 after Tasks 1-6: Fred asked not to edit `config.json` by hand for every project. The code is in the repo (commit `feat: Allow runs here button`), not repeated here.
+
+- `paths.add_project(folder, project)`: adds one folder to `config.json` `"projects"`, keeps every other key, no duplicate (case and slash spelling ignored), writes through `config.json.tmp` + `os.replace`. A `config.json` that exists but cannot be parsed is never overwritten: ValueError -> 409.
+- `POST /api/allow {"project_dir"}`: 400 if not a folder, 403 if no session in the event log has that `project_dir` (the page cannot add an arbitrary path), else adds it to `config.json` and to the live config; returns `{"projects": [...]}` spelled like `/api/config`.
+- Window: a project that is picked but not listed shows `Runs are off here: a run uses this repo's hooks and settings without asking.` and a button `Allow runs in <name>`; after the click the option reads `<name> (runs)` and the prompt box enables. `All projects` keeps the Task 6 hint.
+- Test: `test_allow_adds_a_folder_claude_code_ran_in` (61 tests). Browser check with the fake claude passed (button, option label, `config.json` kept `port`).
+- Claude cannot fill the real `projects` list: the auto-mode classifier refuses it (it grants permissions). Fred uses the button or edits the file.
+
+**DONE WHEN**
+- [ ] 61 tests OK; `git status --short` empty.
+
+---
+
 ### Task 7: Fred: projects + live check
 
 Claude cannot do this task: its auto-mode classifier refuses to let Claude start an autonomous `claude -p --permission-mode auto` run, and Open in terminal opens a console on Fred's screen.
 
-- [ ] **Step 1 (Fred): list the folders runs may use** in `%USERPROFILE%\.claude\console\config.json` (keep the other keys), for example:
+- [ ] **Step 1 (Fred): allow the folders runs may use.** In the window pick the project and click `Allow runs in <name>` (after Step 3's restart), or list them in `%USERPROFILE%\.claude\console\config.json` (keep the other keys), for example:
 
 ```json
   "projects": [
@@ -2704,7 +2720,7 @@ Claude cannot do this task: its auto-mode classifier refuses to let Claude start
 
 ## DONE WHEN (whole plan)
 
-- [ ] `py -m unittest discover -s tests` -> 60 tests OK.
+- [ ] `py -m unittest discover -s tests` -> 61 tests OK (60 + Task 6b).
 - [ ] A prompt typed in the window goes Prep card -> Run -> a live `window` session with Steps and Chat; Stop, Answer, Resume and Open in terminal work.
 - [ ] Closing the window never stops a run; a run cut by a crash shows Interrupted after restart.
 - [ ] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code.

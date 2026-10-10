@@ -45,6 +45,30 @@ def load_config() -> dict:
     return cfg
 
 
+def add_project(folder: Path, project: str) -> None:
+    """Add `project` to "projects" in <folder>/config.json; every other key stays as written.
+    Raises ValueError when config.json exists but cannot be read (never overwrite Fred's file)."""
+    path = Path(folder) / "config.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            raise ValueError(f"cannot read {path}: fix it by hand")
+    else:
+        data = copy.deepcopy(DEFAULTS)
+    projects = data.get("projects") if isinstance(data.get("projects"), list) else []
+    key = os.path.normcase(os.path.abspath(project))
+    if all(os.path.normcase(os.path.abspath(p)) != key for p in projects if isinstance(p, str)):
+        projects.append(project)
+    data["projects"] = projects
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name("config.json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def ensure_config() -> dict:
     """Write config.json with the defaults if it does not exist, then load it."""
     path = home() / "config.json"

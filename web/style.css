@@ -51,6 +51,7 @@ main { flex: 1; overflow-y: auto; }
 #composer textarea:focus, .edit:focus, .answer input:focus { outline: 1px solid var(--info); }
 .edit { display: block; margin: 4px 10px; width: calc(100% - 20px); }
 #msg { min-height: 18px; font-size: 11px; }
+#msg button { margin-left: 6px; padding: 0 8px; font-size: 11px; }
 select { background: transparent; color: var(--fg); border: 1px solid var(--bd); }
 .actions { display: flex; gap: 6px; padding: 6px 10px; flex-wrap: wrap; }
 button { font: 12px var(--font); color: var(--fg); background: transparent; border: 1px solid var(--bd);
