@@ -20,6 +20,9 @@ DEFAULTS = {
     "default_model": "sonnet",
     "default_effort": "medium",
     "handoff_after_followups": 2,
+    "rules_max_lines": 200,
+    "rules_max_kb": 16,
+    "delegate_after_reads": 10,
 }
 
 

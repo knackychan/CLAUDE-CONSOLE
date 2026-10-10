@@ -2,7 +2,7 @@
 import re
 from dataclasses import dataclass, field
 
-from . import redact
+from . import claude_cli, redact
 
 # state -> (symbol, text, tone). Colour never carries a state alone.
 STATES = {
@@ -20,6 +20,8 @@ STATES = {
 NEEDS_YOU = {"stop", "blocked", "stall", "failed", "interrupted"}
 DONE = {"done", "stale"}
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+READ_TOOLS = {"Read", "Grep", "Glob", "WebFetch", "WebSearch"}  # main-chat reads: "should delegate"
+HANDOFF_SKILL = "session-handoff"
 SOURCES = {"claude-vscode": "vscode", "cli": "terminal", "claude-desktop": "desktop"}
 MAX_STEPS = 500
 MAX_TURNS = 200
@@ -94,6 +96,15 @@ class Session:
     forked_from: str = ""
     forks: list = field(default_factory=list)
     turns: list = field(default_factory=list)  # [start, end or None] per turn, for the Timeline
+    rules: dict = field(default_factory=dict)  # file -> {scope, lines, bytes}: CLAUDE.md / rules loaded
+    reads: int = 0             # main-chat Read / Grep / Glob / WebFetch / WebSearch steps this turn
+    chat_handoff: bool = False  # this turn ran /session-handoff inside the chat: its Stop makes it Done
+    runs: int = 0              # window runs (run_started lines), for the model-mix strip
+
+
+def family(model: str) -> str:
+    """claude-sonnet-5-5 -> sonnet; another model keeps its own name."""
+    return claude_cli.model_alias(model) or str(model or "")
 
 
 class State:
@@ -143,6 +154,9 @@ class State:
             s.denied = s.failed = None
             s.stop_question = ""
             s.interrupted = s.stopped = s.handed_off = False
+            s.reads = 0
+            words = rec.get("prompt", "").split()
+            s.chat_handoff = bool(words) and words[0] == "/" + HANDOFF_SKILL  # typed: no Skill step
             self._turn_open(s, ts)
         elif event == "PreToolUse":
             s.in_turn = True
@@ -155,6 +169,9 @@ class State:
                 agent.steps += 1
             else:
                 s.doing = doing
+                s.reads += tool in READ_TOOLS
+                if tool == "Skill" and what.split(":")[-1] == HANDOFF_SKILL:  # Claude ran the skill itself
+                    s.chat_handoff = True
             if tool in WRITE_TOOLS:
                 s.last_write_ts = ts
         elif event == "SubagentStop" and agent:
@@ -183,10 +200,16 @@ class State:
             s.stop_question = rec.get("stop_question", "")
             if rec.get("verdict"):
                 self._verdict(s, rec)
+            if s.chat_handoff:  # /session-handoff ran in this turn: Done, like a window Handoff
+                s.handed_off, s.chat_handoff = True, False
         elif event == "StopFailure":
             s.in_turn = False
+            s.chat_handoff = False
             self._turn_close(s, ts)
             s.failed = {"error": rec.get("error", "unknown"), "details": rec.get("error_details", "")}
+        elif event == "InstructionsLoaded" and not agent and rec.get("file"):
+            s.rules[rec["file"]] = {"scope": rec.get("scope", ""), "lines": int(rec.get("lines") or 0),
+                                    "bytes": int(rec.get("bytes") or 0)}
         elif event == "PostCompact":
             s.ctx_tokens = None
             s.compactions += 1
@@ -197,6 +220,7 @@ class State:
         elif event == "run_started":
             s.window, s.run_live, s.source = True, True, "window"
             s.in_turn, s.ended = True, False
+            s.runs += 1
             self._turn_open(s, ts)
             s.interrupted = s.stopped = s.handed_off = False
             s.denied = s.failed = None
@@ -349,6 +373,11 @@ class State:
                 "follow_ups": follow_ups,
                 "handoff_hint": state not in DONE and (
                     tone == "red" or follow_ups >= self.cfg["handoff_after_followups"]),
+                "rules": [dict(r, file=f) for f, r in s.rules.items()],
+                "rules_bytes": sum(r["bytes"] for r in s.rules.values()),
+                "rules_warn": self.rules_warn(s.rules),
+                "reads": s.reads,
+                "delegate_hint": state not in DONE and s.reads >= self.cfg["delegate_after_reads"],
                 "agents": [self._agent_row(a, s) for a in
                            sorted(s.agents.values(), key=lambda a: a.started_ts)],
             })
@@ -357,7 +386,31 @@ class State:
             "sessions": rows,
             "writers": [{"project_dir": p, "sessions": ids} for p, ids in sorted(writers.items())],
             "counts": {g: sum(1 for r in rows if r["group"] == g) for g in ("needs", "working", "done")},
+            "mix": self.mix([self.sessions[r["id"]] for r in rows]),
         }
+
+    def rules_warn(self, rules: dict) -> str:
+        """Why the loaded rules are too big ("" = fine): a file over rules_max_lines, or all of
+        them together over rules_max_kb (docs: "target under 200 lines per CLAUDE.md file")."""
+        max_lines, max_kb = self.cfg["rules_max_lines"], self.cfg["rules_max_kb"]
+        out = [f"{name} {r['lines']} lines (over {max_lines})"
+               for name, r in rules.items() if r["lines"] > max_lines]
+        total = sum(r["bytes"] for r in rules.values()) / 1000
+        if total > max_kb:
+            out.append(f"{total:.1f} KB in all (over {max_kb} KB)")
+        return "; ".join(out)
+
+    def mix(self, sessions: list) -> dict:
+        """The model-mix strip: shown sessions and agent runs per model family, window runs, cost."""
+        counts = {}
+        for s in sessions:
+            for model in [s.model] + [a.model for a in s.agents.values()]:
+                if model:
+                    counts[family(model)] = counts.get(family(model), 0) + 1
+        rank = {m: i for i, m in enumerate(claude_cli.MODELS[::-1])}  # biggest first, then others by name
+        models = sorted(counts.items(), key=lambda kv: (rank.get(kv[0], len(rank)), kv[0]))
+        return {"models": [list(kv) for kv in models], "runs": sum(s.runs for s in sessions),
+                "cost": round(sum(s.cost for s in sessions), 4)}
 
     def _agent_row(self, a: Agent, s: Session) -> dict:
         if a.done:

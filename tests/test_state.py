@@ -205,6 +205,65 @@ class StateTest(unittest.TestCase):
         self.assertEqual(t["lanes"][2]["spans"], [[T0 + 21, T0 + 30]])
         self.assertIsNone(self.state.timeline("nope", T0))
 
+    def test_rules_size_warning(self):
+        self.feed(ev("InstructionsLoaded", T0, file="~/.claude/CLAUDE.md", scope="User", lines=3, bytes=229,
+                     load_reason="session_start"),
+                  ev("InstructionsLoaded", T0, file="CLAUDE.md", scope="Project", lines=149, bytes=20791),
+                  ev("InstructionsLoaded", T0 + 1, agent_id="a1", file="web/CLAUDE.md", lines=900, bytes=1),
+                  ev("UserPromptSubmit", T0 + 2, prompt="fix it"))
+        row = self.row(T0 + 3)
+        self.assertEqual([r["file"] for r in row["rules"]], ["~/.claude/CLAUDE.md", "CLAUDE.md"])  # not the agent's
+        self.assertEqual((row["rules_bytes"], row["rules_warn"]), (21020, "21.0 KB in all (over 16 KB)"))
+        self.feed(ev("InstructionsLoaded", T0 + 4, file="CLAUDE.md", scope="Project", lines=230, bytes=9000),
+                  ev("InstructionsLoaded", T0 + 4, sid="small", file="CLAUDE.md", lines=33, bytes=2085))
+        self.assertEqual(self.row(T0 + 5)["rules_warn"], "CLAUDE.md 230 lines (over 200)")
+        self.assertEqual(self.row(T0 + 5, "small")["rules_warn"], "")
+
+    def test_should_delegate_flag(self):
+        self.feed(ev("UserPromptSubmit", T0))
+        for i in range(9):
+            self.feed(ev("PreToolUse", T0 + 1 + i, tool="Read", what=f"f{i}.py"))
+        self.feed(ev("PreToolUse", T0 + 10, agent_id="a1", agent_type="Explore", tool="Read"),
+                  ev("PreToolUse", T0 + 11, tool="Edit", what="f1.py"))
+        self.assertEqual((self.row(T0 + 12)["reads"], self.row(T0 + 12)["delegate_hint"]), (9, False))
+        self.feed(ev("PreToolUse", T0 + 13, tool="Grep", what="def x"), ev("Stop", T0 + 14))
+        self.assertEqual((self.row(T0 + 15)["reads"], self.row(T0 + 15)["delegate_hint"]), (10, True))
+        self.feed(ev("UserPromptSubmit", T0 + 16))
+        self.assertEqual((self.row(T0 + 17)["reads"], self.row(T0 + 17)["delegate_hint"]), (0, False))
+
+    def test_handoff_typed_or_called_in_a_chat(self):
+        self.feed(ev("UserPromptSubmit", T0, sid="typed", prompt="/session-handoff"),
+                  ev("Stop", T0 + 5, sid="typed"),
+                  ev("UserPromptSubmit", T0, sid="called", prompt="its time to handoff, give me the prompt"),
+                  ev("PreToolUse", T0 + 1, sid="called", tool="Skill", what="session-handoff"),
+                  ev("UserPromptSubmit", T0, sid="failed", prompt="/session-handoff"),
+                  ev("StopFailure", T0 + 2, sid="failed", error="rate_limit"),
+                  ev("UserPromptSubmit", T0, sid="agent", prompt="go"),
+                  ev("PreToolUse", T0 + 1, sid="agent", agent_id="a1", tool="Skill", what="session-handoff"),
+                  ev("Stop", T0 + 2, sid="agent"))
+        self.assertEqual(self.row(T0 + 6, "typed")["state"], "done")
+        self.assertEqual(self.row(T0 + 2, "called")["state"], "running")  # Done only once the turn ends
+        self.feed(ev("Stop", T0 + 3, sid="called"))
+        self.assertEqual((self.row(T0 + 4, "called")["state"], self.row(T0 + 4, "called")["group"]), ("done", "done"))
+        self.assertEqual(self.row(T0 + 3, "failed")["state"], "failed")
+        self.assertEqual(self.row(T0 + 3, "agent")["state"], "idle")
+        self.feed(ev("UserPromptSubmit", T0 + 7, sid="typed", prompt="one more thing"), ev("Stop", T0 + 8, sid="typed"))
+        self.assertEqual(self.row(T0 + 9, "typed")["state"], "idle")  # a new prompt reopens it
+
+    def test_model_mix(self):
+        self.feed(ev("Stop", T0, sid="a", model="claude-opus-5-5"),
+                  ev("SubagentStop", T0 + 1, sid="a", agent_id="x1", model="claude-haiku-5-5"),
+                  ev("SubagentStop", T0 + 2, sid="a", agent_id="x2", model="claude-haiku-5-5"),
+                  ev("SubagentStart", T0 + 3, sid="a", agent_id="x3"),
+                  ev("run_started", T0 + 4, sid="b", model="sonnet"),
+                  ev("run_ended", T0 + 5, sid="b", cost=0.25, subtype="success"),
+                  ev("run_started", T0 + 6, sid="b"),
+                  ev("run_ended", T0 + 7, sid="b", cost=0.5, subtype="success"),
+                  ev("Stop", T0 + 8, sid="c", model="gpt-5"),
+                  ev("Stop", T0 - 90000, sid="old", model="claude-fable-5-1"))
+        self.assertEqual(self.state.snapshot(T0 + 9)["mix"],
+                         {"models": [["opus", 1], ["sonnet", 1], ["haiku", 2], ["gpt-5", 1]], "runs": 2, "cost": 0.75})
+
 
 if __name__ == "__main__":
     unittest.main()
