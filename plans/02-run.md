@@ -63,15 +63,15 @@ Dependencies point one way: `claude_cli -> (stdlib)`; `prep -> claude_cli, redac
 
 ## TODO
 
-- [ ] Task 1: config keys + state (window runs, Interrupted, titles)
-- [ ] Task 2: claude_cli
-- [ ] Task 3: Prep
-- [ ] Task 4: runs
-- [ ] Task 5: service routes
-- [ ] Task 6: window
-- [ ] Task 6b: Allow runs here (added 2026-10-10, Fred)
-- [ ] Task 7: Fred: projects in config.json + live check
-- [ ] Task 8: close the phase
+- [x] Task 1: config keys + state (window runs, Interrupted, titles)
+- [x] Task 2: claude_cli
+- [x] Task 3: Prep
+- [x] Task 4: runs
+- [x] Task 5: service routes
+- [x] Task 6: window
+- [x] Task 6b: Allow runs here (added 2026-10-10, Fred)
+- [x] Task 7: Fred: projects in config.json + live check
+- [x] Task 8: close the phase
 
 ---
 
@@ -81,7 +81,7 @@ Dependencies point one way: `claude_cli -> (stdlib)`; `prep -> claude_cli, redac
 - Modify: `console/paths.py`, `console/state.py` (full files below)
 - Test: `tests/test_state.py` (full file below; 3 new tests)
 
-- [ ] **Step 1: Replace `tests/test_state.py`** with:
+- [x] **Step 1: Replace `tests/test_state.py`** with:
 
 ```python
 import copy
@@ -220,12 +220,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `py -m unittest tests.test_state -v`
 Expected: the 3 new tests fail (`KeyError: 'window'`, title still holds `<pasted_content ...>`); the 7 old ones pass.
 
-- [ ] **Step 3: Replace `console/paths.py`** with:
+- [x] **Step 3: Replace `console/paths.py`** with:
 
 ```python
 """Where Claude Console keeps its files, and its config with defaults."""
@@ -284,7 +284,7 @@ def ensure_config() -> dict:
     return load_config()
 ```
 
-- [ ] **Step 4: Replace `console/state.py`** with:
+- [x] **Step 4: Replace `console/state.py`** with:
 
 ```python
 """Sessions -> agents -> steps, built from event records; states computed at snapshot time."""
@@ -597,12 +597,12 @@ class State:
                 for step in s.steps[-limit:]]
 ```
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Run: `py -m unittest discover -s tests`
 Expected: `Ran 40 tests ... OK`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add console/paths.py console/state.py tests/test_state.py
@@ -610,7 +610,7 @@ git commit -m "feat: window-run states, Interrupted, clean pasted titles, one dr
 ```
 
 **DONE WHEN**
-- [ ] 40 tests OK; `git status --short` empty.
+- [x] 40 tests OK; `git status --short` empty.
 
 ---
 
@@ -620,7 +620,7 @@ git commit -m "feat: window-run states, Interrupted, clean pasted titles, one dr
 - Create: `console/claude_cli.py`
 - Test: `tests/test_claude_cli.py`
 
-- [ ] **Step 1: Create `tests/test_claude_cli.py`**
+- [x] **Step 1: Create `tests/test_claude_cli.py`**
 
 ```python
 import json
@@ -680,12 +680,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `py -m unittest tests.test_claude_cli -v`
 Expected: ERROR, `ImportError: cannot import name 'claude_cli' from 'console'`.
 
-- [ ] **Step 3: Create `console/claude_cli.py`**
+- [x] **Step 3: Create `console/claude_cli.py`**
 
 ```python
 """Everything about the `claude` executable: where it is, the commands we run, the child environment,
@@ -819,12 +819,12 @@ def git_changed(cwd: str, commit: str):
     return len(names)
 ```
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `py -m unittest discover -s tests`
 Expected: `Ran 46 tests ... OK`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add console/claude_cli.py tests/test_claude_cli.py
@@ -832,7 +832,7 @@ git commit -m "feat: claude command builder, child env, Windows process helpers"
 ```
 
 **DONE WHEN**
-- [ ] 46 tests OK; `git status --short` empty.
+- [x] 46 tests OK; `git status --short` empty.
 
 ---
 
@@ -842,7 +842,7 @@ git commit -m "feat: claude command builder, child env, Windows process helpers"
 - Create: `console/prep.py`, `console/prep_prompt.md`, `tests/fake_claude.py`
 - Test: `tests/test_prep.py`
 
-- [ ] **Step 1: Create `tests/fake_claude.py`** (used by Tasks 3-5; `unittest discover` skips it: its name does not start with `test`)
+- [x] **Step 1: Create `tests/fake_claude.py`** (used by Tasks 3-5; `unittest discover` skips it: its name does not start with `test`)
 
 ```python
 """A stand-in for claude.exe in tests: same flags, same JSON shapes (recorded from Claude Code 2.1.288).
@@ -915,7 +915,7 @@ if __name__ == "__main__":
     sys.exit(prep() if "--json-schema" in sys.argv else run())
 ```
 
-- [ ] **Step 2: Create `tests/test_prep.py`**
+- [x] **Step 2: Create `tests/test_prep.py`**
 
 ```python
 import copy
@@ -967,12 +967,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 3: Run it to see it fail**
+- [x] **Step 3: Run it to see it fail**
 
 Run: `py -m unittest tests.test_prep -v`
 Expected: ERROR, `ImportError: cannot import name 'prep' from 'console'`.
 
-- [ ] **Step 4: Create `console/prep_prompt.md`**
+- [x] **Step 4: Create `console/prep_prompt.md`**
 
 ````markdown
 You are a prompt formatter for Claude Code. Fred typed the request at the end for the project in the
@@ -1003,7 +1003,7 @@ Request:
 $raw
 ````
 
-- [ ] **Step 5: Create `console/prep.py`**
+- [x] **Step 5: Create `console/prep.py`**
 
 ```python
 """Prep (D3, D4): a read-only Haiku pass scouts the project, rewrites the prompt and picks a route.
@@ -1111,12 +1111,12 @@ def load(folder: Path, prep_id: str):
         return None
 ```
 
-- [ ] **Step 6: Run all tests**
+- [x] **Step 6: Run all tests**
 
 Run: `py -m unittest discover -s tests`
 Expected: `Ran 50 tests ... OK`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add console/prep.py console/prep_prompt.md tests/fake_claude.py tests/test_prep.py
@@ -1124,7 +1124,7 @@ git commit -m "feat: Prep - read-only Haiku pass that rewrites the prompt and pi
 ```
 
 **DONE WHEN**
-- [ ] 50 tests OK; `git status --short` empty.
+- [x] 50 tests OK; `git status --short` empty.
 
 ---
 
@@ -1135,7 +1135,7 @@ git commit -m "feat: Prep - read-only Haiku pass that rewrites the prompt and pi
 - Modify: `console/events.py` (full file below: adds `append`)
 - Test: `tests/test_runs.py`
 
-- [ ] **Step 1: Create `tests/test_runs.py`**
+- [x] **Step 1: Create `tests/test_runs.py`**
 
 ```python
 import copy
@@ -1246,12 +1246,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `py -m unittest tests.test_runs -v`
 Expected: ERROR, `ImportError: cannot import name 'runs' from 'console'`.
 
-- [ ] **Step 3: Replace `console/events.py`** with:
+- [x] **Step 3: Replace `console/events.py`** with:
 
 ```python
 """Read the daily event files incrementally and prune old ones."""
@@ -1321,7 +1321,7 @@ def prune(folder: Path, retention_days: int, now: float = None) -> list:
     return removed
 ```
 
-- [ ] **Step 4: Create `console/runs.py`**
+- [x] **Step 4: Create `console/runs.py`**
 
 ```python
 """Window runs: start `claude -p` detached, copy its stream to runs/<id>.jsonl, stop it, find
@@ -1607,12 +1607,12 @@ def prune(folder: Path, retention_days: int, now: float = None) -> list:
     return removed
 ```
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Run: `py -m unittest discover -s tests`
 Expected: `Ran 56 tests ... OK` (about 3 s more: the run tests start the fake claude).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add console/events.py console/runs.py tests/test_runs.py
@@ -1620,7 +1620,7 @@ git commit -m "feat: window runs - detached claude -p, stream copy, interrupt, i
 ```
 
 **DONE WHEN**
-- [ ] 56 tests OK; `git status --short` empty.
+- [x] 56 tests OK; `git status --short` empty.
 
 ---
 
@@ -1630,7 +1630,7 @@ git commit -m "feat: window runs - detached claude -p, stream copy, interrupt, i
 - Modify: `console/server.py` (full file below), `console/__main__.py` (two edits)
 - Test: `tests/test_server.py` (full file below; 4 new tests)
 
-- [ ] **Step 1: Replace `tests/test_server.py`** with:
+- [x] **Step 1: Replace `tests/test_server.py`** with:
 
 ```python
 import http.client
@@ -1794,12 +1794,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `py -m unittest tests.test_server -v`
 Expected: ERROR in `RunServerTest` (`make_server() got an unexpected keyword argument 'exe'`); the 6 old tests pass.
 
-- [ ] **Step 3: Replace `console/server.py`** with:
+- [x] **Step 3: Replace `console/server.py`** with:
 
 ```python
 """The console service: reads the event log, keeps the state, serves the window over HTTP + SSE,
@@ -2113,7 +2113,7 @@ def make_server(cfg: dict, port: int = None, folder: Path = None, exe: list = No
     return httpd, hub
 ```
 
-- [ ] **Step 4: Edit `console/__main__.py`**
+- [x] **Step 4: Edit `console/__main__.py`**
 
 Find:
 ```python
@@ -2133,12 +2133,12 @@ Replace with:
     runs.prune(paths.home(), cfg["retention_days"])
 ```
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Run: `py -m unittest discover -s tests`
 Expected: `Ran 60 tests ... OK`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add console/server.py console/__main__.py tests/test_server.py
@@ -2146,7 +2146,7 @@ git commit -m "feat: service routes for Prep, Run, Stop, Answer, Open in termina
 ```
 
 **DONE WHEN**
-- [ ] 60 tests OK; `git status --short` empty.
+- [x] 60 tests OK; `git status --short` empty.
 
 ---
 
@@ -2155,7 +2155,7 @@ git commit -m "feat: service routes for Prep, Run, Stop, Answer, Open in termina
 **Files:**
 - Modify: `web/index.html`, `web/app.js`, `web/style.css` (full files below)
 
-- [ ] **Step 1: Replace `web/index.html`** with:
+- [x] **Step 1: Replace `web/index.html`** with:
 
 ```html
 <!doctype html>
@@ -2191,7 +2191,7 @@ git commit -m "feat: service routes for Prep, Run, Stop, Answer, Open in termina
 </html>
 ```
 
-- [ ] **Step 2: Replace `web/app.js`** with:
+- [x] **Step 2: Replace `web/app.js`** with:
 
 ```javascript
 // Claude Console window: renders /api/stream snapshots; phase 2 adds the prompt box, Prep card and runs.
@@ -2541,7 +2541,7 @@ function connect() {
 })();
 ```
 
-- [ ] **Step 3: Replace `web/style.css`** with:
+- [x] **Step 3: Replace `web/style.css`** with:
 
 ```css
 /* All styling lives here, as tokens first, so a visual rework only touches this file. */
@@ -2617,12 +2617,12 @@ button:disabled { opacity: .5; cursor: progress; }
 .chat.note .text { color: var(--warning); }
 ```
 
-- [ ] **Step 4: Syntax check**
+- [x] **Step 4: Syntax check**
 
 Run: `node --check web/app.js && echo ok`
 Expected: `ok`. Then `py -m unittest discover -s tests` -> `Ran 60 tests ... OK`.
 
-- [ ] **Step 5: Browser check with the fake claude** (no real model calls)
+- [x] **Step 5: Browser check with the fake claude** (no real model calls)
 
 In Git Bash from the repo root (the fake needs an absolute path: runs start in the project folder):
 
@@ -2645,7 +2645,7 @@ Open `http://127.0.0.1:8772/` and check, in order:
 4. Back, type `SLOW raw task`, Ctrl+Enter: `▶ Running` with a Stop button; Stop: `○ Idle`, `stopped by you`, Chat ends with note `stopped` and `error_during_execution`.
 5. Stop the server (Ctrl+C) and delete the folder: `rm -rf "$TEMP/cc-smoke"`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add web/index.html web/app.js web/style.css
@@ -2653,7 +2653,7 @@ git commit -m "feat: window prompt box, Prep card, run actions and Chat tab"
 ```
 
 **DONE WHEN**
-- [ ] The 5 browser checks pass; 60 tests OK; `git status --short` empty.
+- [x] The 5 browser checks pass; 60 tests OK; `git status --short` empty.
 
 ---
 
@@ -2668,7 +2668,7 @@ Added 2026-10-10 after Tasks 1-6: Fred asked not to edit `config.json` by hand f
 - Claude cannot fill the real `projects` list: the auto-mode classifier refuses it (it grants permissions). Fred uses the button or edits the file.
 
 **DONE WHEN**
-- [ ] 61 tests OK; `git status --short` empty.
+- [x] 61 tests OK; `git status --short` empty.
 
 ---
 
@@ -2676,7 +2676,7 @@ Added 2026-10-10 after Tasks 1-6: Fred asked not to edit `config.json` by hand f
 
 Claude cannot do this task: its auto-mode classifier refuses to let Claude start an autonomous `claude -p --permission-mode auto` run, and Open in terminal opens a console on Fred's screen.
 
-- [ ] **Step 1 (Fred): allow the folders runs may use.** In the window pick the project and click `Allow runs in <name>` (after Step 3's restart), or list them in `%USERPROFILE%\.claude\console\config.json` (keep the other keys), for example:
+- [x] **Step 1 (Fred): allow the folders runs may use.** In the window pick the project and click `Allow runs in <name>` (after Step 3's restart), or list them in `%USERPROFILE%\.claude\console\config.json` (keep the other keys), for example:
 
 ```json
   "projects": [
@@ -2685,15 +2685,15 @@ Claude cannot do this task: its auto-mode classifier refuses to let Claude start
   ],
 ```
 
-- [ ] **Step 2 (Fred, optional): STOP rule for VS Code sessions.** Window runs already get the footer. For VS Code / terminal sessions to show `? STOP` too, add this line to `%USERPROFILE%\.claude\CLAUDE.md`:
+- [x] **Step 2 (Fred, optional): STOP rule for VS Code sessions.** Window runs already get the footer. For VS Code / terminal sessions to show `? STOP` too, add this line to `%USERPROFILE%\.claude\CLAUDE.md`:
 
 ```markdown
 - When you must stop for a decision only Fred can make, end your final message with one line: `STOP: <question>`.
 ```
 
-- [ ] **Step 3: Restart the window** (close it, `run.bat`: the open window still runs the phase 1 Python code).
+- [x] **Step 3: Restart the window** (close it, `run.bat`: the open window still runs the phase 1 Python code).
 
-- [ ] **Step 4: Live check** in the Claude Console repo (pick `CLAUDE CONSOLE (runs)`):
+- [x] **Step 4: Live check** in the Claude Console repo (pick `CLAUDE CONSOLE (runs)`):
 1. Prompt `list the Python files in console/ and count their lines; do not edit anything`, Enter. Expected: card in 10-30 s with route `lookup` / `haiku` / `low` (or close), cost about $0.03-0.04.
 2. Run. Expected: a `window` row under Working, `▶ Running`, Steps fill from the hooks (Glob / Bash ...), Chat shows Claude's text, then `○ Idle` with model, ctx gauge and a cost; the row does not turn Done.
 3. Prompt `write a 900-word story about a lighthouse keeper in story.txt`, Ctrl+Enter (Run raw), then Stop within 10 s. Expected: `stopped by you`, Chat note `stopped`. Delete `story.txt` if it was written.
@@ -2702,32 +2702,36 @@ Claude cannot do this task: its auto-mode classifier refuses to let Claude start
 6. `~/.claude/console/hook-errors.log` and `window-errors.log` have no new lines.
 
 **DONE WHEN**
-- [ ] Fred listed the projects; checks 1-6 pass (note anything that differed in History / Troubleshooting).
+- [x] Fred listed the projects; checks 1-6 pass (note anything that differed in History / Troubleshooting).
 
 ---
 
 ### Task 8: Close the phase
 
-- [ ] **Step 1:** In `../PLAN.md`, set sub-plan 2 to "done <date>" and add a dated History line (what was built, test count, anything that differed).
-- [ ] **Step 2:** In this file, tick the TODO list, add the History line, add any bug + fix to Troubleshooting.
-- [ ] **Step 3:** In `../CLAUDE.md`, add under Rules: `- Window runs: commands come only from console/claude_cli.py; runs only in config.json "projects"; Stop is the stream-json interrupt, never a kill of a run this service owns.`
-- [ ] **Step 4:** Commit: `git add PLAN.md CLAUDE.md plans/02-run.md && git commit -m "docs: phase 2 done"`.
+- [x] **Step 1:** In `../PLAN.md`, set sub-plan 2 to "done <date>" and add a dated History line (what was built, test count, anything that differed).
+- [x] **Step 2:** In this file, tick the TODO list, add the History line, add any bug + fix to Troubleshooting.
+- [x] **Step 3:** In `../CLAUDE.md`, add under Rules: `- Window runs: commands come only from console/claude_cli.py; runs only in config.json "projects"; Stop is the stream-json interrupt, never a kill of a run this service owns.`
+- [x] **Step 4:** Commit: `git add PLAN.md CLAUDE.md plans/02-run.md && git commit -m "docs: phase 2 done"`.
+- [x] **Added by Fred after the live check** (own commit, 63 tests): Open in terminal passes the run's `--model` / `--effort` (it opened on Fred's default Opus 5.5 / high); the hook drops injected blocks at the start of a prompt (`<browser_instruction>`, `<task-notification>`, `<agent-message>`; `<pasted_content>` stays) before clipping, and State never takes a title that still starts with a tag (older log lines).
 
 **DONE WHEN**
-- [ ] `git status --short` is empty and `git log --oneline` shows one commit per task.
+- [x] `git status --short` is empty and `git log --oneline` shows one commit per task.
 
 ---
 
 ## DONE WHEN (whole plan)
 
-- [ ] `py -m unittest discover -s tests` -> 61 tests OK (60 + Task 6b).
-- [ ] A prompt typed in the window goes Prep card -> Run -> a live `window` session with Steps and Chat; Stop, Answer, Resume and Open in terminal work.
-- [ ] Closing the window never stops a run; a run cut by a crash shows Interrupted after restart.
-- [ ] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code.
+- [x] `py -m unittest discover -s tests` -> 61 tests OK (60 + Task 6b).
+- [x] A prompt typed in the window goes Prep card -> Run -> a live `window` session with Steps and Chat; Stop, Answer, Resume and Open in terminal work.
+- [x] Closing the window never stops a run; a run cut by a crash shows Interrupted after restart.
+- [x] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code.
 
 ## History
 
 - 2026-10-10 - Plan written. All code was run in a scratch clone first: 60 tests OK; real Prep through the service (22 s, $0.039, card with route mechanical / sonnet / low); window flows checked in a browser with the fake claude (Prep card, Run, Chat, Stop, STOP answer, Interrupted + Resume; no console errors). CLI facts from `claude --help` 2.1.288 and experiments (interrupt, EOF, `--session-id`, `--resume`, hook-free Prep).
+- 2026-10-10 - Tasks 1-6 placed from this plan unchanged (60 tests OK, the 5 browser checks passed with the fake claude). Then, asked by Fred: Task 6b `Allow runs in <name>` button (Claude could not fill `projects` itself: its auto-mode classifier refused), default port 47770 (8770 clashed with Fred's dev apps), hint points to the project picker.
+- 2026-10-10 - Task 7 live check passed: Prep 10-30 s, route lookup / haiku / low; the run showed Steps and Chat and ended Idle ($0.11, 56.8K); Stop gave `stopped by you` and no `story.txt`; Open in terminal resumed the same conversation; closing the window mid-run let the run finish on its own (stdin EOF), shown Idle after restart; no error-log lines. Differed: auto mode denied 2 tool calls of the lookup run, Haiku used Read instead and succeeded, yet the session showed Blocked; decision 14 changed (success + denials = Idle with a note). Task 8 additions: see Task 8. 63 tests OK.
+- Open: `--model haiku` resolves to `claude-haiku-4-5-20251001` on CLI 2.1.288 (Prep and lookup runs); full model ids would need MODELS and the route table changed. Chat shows Claude's markdown as plain text (visual rework).
 
 ## Troubleshooting
 
@@ -2743,3 +2747,12 @@ Claude cannot do this task: its auto-mode classifier refuses to let Claude start
 - **Issue:** Stop says `killed` instead of stopping cleanly.
   **Cause:** the run was started by an earlier service (window restarted), so there was no stdin to send the interrupt to.
   **Fix:** none; the conversation is kept and can be resumed.
+- **Issue:** a run that finished fine showed `■ Blocked`.
+  **Cause:** auto mode denied a tool call (here `find -exec wc` and a PowerShell loop); Claude used another tool and succeeded, but every denial made the session Blocked.
+  **Fix:** decision 14 changed: a `success` result with denials stays Idle with a `△ N denied` note (commit `fix: a window run that succeeded despite denials ...`).
+- **Issue:** a session title reads `<browser_instruction>...` (or `<task-notification>`, `<agent-message>`).
+  **Cause:** an extension or Claude Code put a block before Fred's text and the hook clipped the prompt to 120 characters inside it.
+  **Fix:** the hook drops such leading blocks before clipping; State skips a title that still starts with a tag.
+- **Issue:** `Allow runs in <name>` is not shown.
+  **Cause:** the button appears only once a project is picked in the list at the top (`All projects` shows a hint instead).
+  **Fix:** pick the project.

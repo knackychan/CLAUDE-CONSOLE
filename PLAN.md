@@ -12,7 +12,7 @@ ends with working, tested software.
 | # | Sub-plan | State |
 |---|---|---|
 | 1 | [plans/01-watch.md](plans/01-watch.md) - hooks, service, tree, gauge, Steps, Needs you, Quiet / Stall?, 2 writers | done 2026-10-10 |
-| 2 | [plans/02-run.md](plans/02-run.md) - prompt box, Prep card, Run / Run raw, Chat, Stop, Open in terminal, crash recovery, STOP answers | written 2026-10-10, not started |
+| 2 | [plans/02-run.md](plans/02-run.md) - prompt box, Prep card, Run / Run raw, Chat, Stop, Open in terminal, crash recovery, STOP answers | done 2026-10-10 |
 | 3 | Levers - Continue, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | to write |
 | 4 | Polish - rules-size warning, should-delegate flag, model-mix strip, move skills to ~/.claude | to write |
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
@@ -58,3 +58,4 @@ ends with working, tested software.
 - 2026-10-10 - Fred asked for prompting from the window: that is phase 2 (Run); write plans/02-run.md after phase 1 closes.
 - 2026-10-10 - Phase 1 done: 37 tests OK; live check passed (an Explore agent row appeared under its session while running, then `✓ Done` with model, steps and tokens; no hook-errors.log). Differed from 01: Fred asked for agent rows to show their state text and a green context bar (`State.gauge(tokens)` now serves sessions and agents; one assertion added, still 37 tests).
 - 2026-10-10 - Sub-plan 02 written (zero-decision, final code): verified in a scratch clone (60 tests OK, real Prep through the service, window flows in a browser with a fake claude); the plan re-applied to a fresh clone reproduces that code. Claude could not start a live auto-mode run (its classifier refuses): Task 7 live check is Fred's.
+- 2026-10-10 - Phase 2 done: 63 tests OK; live check passed (Prep card, Run with Steps and Chat, Stop, Open in terminal, a run survived closing the window, no error-log lines). Differed from 02: `Allow runs in <name>` button (Task 6b), port 47770, a run that succeeded despite auto-mode denials stays Idle with a note, injected prompt blocks no longer become titles, Open in terminal keeps the run's model and effort. Open: `--model haiku` gives Haiku 4.5 on CLI 2.1.288.

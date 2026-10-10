@@ -17,6 +17,7 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
   anywhere else, and never edit `~/.claude/settings.json` from code that Claude runs: Fred runs
   `install_hooks.py` himself.
 - All styling is in `web/style.css`, tokens first (a visual rework is planned).
+- Window runs: commands come only from console/claude_cli.py; runs only in config.json "projects"; Stop is the stream-json interrupt, never a kill of a run this service owns.
 - No emojis or em-dashes in prose. Verify CLI flags and hook fields against code.claude.com docs
   before relying on them.
 
