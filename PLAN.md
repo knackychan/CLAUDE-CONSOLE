@@ -16,7 +16,7 @@ ends with working, tested software.
 | 3 | [plans/03-levers.md](plans/03-levers.md) - Continue, Verify, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | done 2026-10-10 |
 | 4 | [plans/04-polish.md](plans/04-polish.md) - rules-size warning, should-delegate flag, model-mix strip, in-chat handoff Done, move skills to ~/.claude | done 2026-10-10 |
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
-| 6 | Visual rework - Console Cells (BRAINSTORM 7.5, `design/rework/locked/console-cells.html`): borderless pill + rail + focus pane, cell motif, estimated cost, activity buckets | design locked 2026-10-10; plan to write after phase 4 |
+| 6 | [plans/06-rework.md](plans/06-rework.md) - Visual rework, Console Cells (BRAINSTORM 7.5, `design/rework/locked/console-cells.html`): borderless pill + rail + focus pane, cell motif, estimated cost, activity buckets | written 2026-10-10 |
 
 ## Changes to the design made while planning phase 1
 
@@ -84,6 +84,18 @@ ends with working, tested software.
 - **route-model writes chat misses to `~/.claude/console/routing-misses.md`** (Fred), in the
   console's format, so Prep reads them; its table is Prep's table (a test checks it).
 
+## Changes to the design made while planning phase 6
+
+- **Estimated cost from the transcripts, read by the service** (Fred): the hook logs `transcript_path`
+  on turn lines; `console/usage.py` prices each message once (API list prices in `config.json`
+  `"prices"`, fast mode 2x). Window runs stay exact (their result line).
+- **Spend** (Fred): `daily_budget_usd` 15, $0.50 cells in a growing 30 x 5 grid; the model mix becomes
+  each model's share of today's spend (the phase 4 counts and the bottom strip go).
+- **Window** (Fred): rail = Needs you + Working (Done in the Overview), the Prep card takes the pane,
+  Steps | Timeline | Chat as a seg control, the compose row picks the project, one notes block, the
+  form and place remembered in `~/.claude/console/window.json`, a peek card only for new events.
+- **Open check closed:** a frameless pywebview window resizes exactly from code on Windows.
+
 ## History
 
 - 2026-10-10 - Master plan and sub-plan 01 written. All phase 1 code was run once in a scratch folder
@@ -98,3 +110,4 @@ ends with working, tested software.
 - 2026-10-10 - Phase 3 done: 79 tests OK; live check passed (Verify PASS badge, Continue with the follow-up hint, Escalate sonnet/medium -> sonnet/high with its routing-misses line, which the next Prep read, a fork of this VS Code chat answered from its context and left it untouched, `haiku` ran as claude-haiku-5-5, no error-log lines; Handoff in CONTENT MANAGER not tried). Differed from 03: `STOP: none` was read as a STOP question (fixed in the hook, 1 test); with the skill missing there is no Handoff button, only the off note; a `/session-handoff` typed inside a VS Code chat does not make it Done.
 - 2026-10-10 - Sub-plan 04 written (zero-decision, final code): Fred decided the rules limits (200 lines per file or 16 KB in all, via the InstructionsLoaded hook, row badge + detail list), "should delegate" at 10 main-chat reads per turn, the model mix (sessions + agents per model, window runs and cost) in the bottom strip, Done after a handoff inside a chat, the skill move through `dotclaude/` with Fred's copies (handoff, verifier, route-model), chat misses in `~/.claude/console/routing-misses.md`, CONTENT MANAGER keeping its verifier. Verified in a scratch clone: 87 tests OK, tasks replayed in a fresh clone (80, 84, 84, 87), window checked in a browser with the fake claude, InstructionsLoaded fields and the generic skills checked with real `claude -p` calls on 2.1.296. Task 5 (hooks, copies into ~/.claude, live check) is Fred's.
 - 2026-10-10 - Phase 4 done: 87 tests OK. Tasks 1-4 placed exactly as written (80, 84, 84, 87); Fred re-installed the hooks, copied the three `dotclaude/` files to `~/.claude` and removed CONTENT MANAGER's two skill copies. Live: `rules 21.0 KB` on a new CONTENT MANAGER chat, `delegate?` after 27 main-chat reads, window Handoff and a typed `/session-handoff` made sessions Done, Verify PASS badge, `/route-model` set the row's route and read the console misses file, no error-log lines. Differed from 04: Verify ignored `~/.claude/agents` and the strip sat below the scrolling page (both fixed, still 87 tests); after the restart Verify ran the `~/.claude` verifier (agent row, PASS); not seen live yet: a route-model miss write.
+- 2026-10-10 - Sub-plan 06 written (zero-decision, final code): Fred decided the estimate from transcripts read by the service, list prices, a $15 soft limit with $0.50 cells, activity levels 1-2 / 3-5 / 6-9 / 10+ steps per minute, rail = needs + working, Prep in the pane, a seg control for Steps / Timeline / Chat, a project select in the compose row, one notes block, model shares of spend, a remembered form and place, a peek card for new events only. Verified in a scratch clone: 95 tests OK, the frameless resize and a second start as the pill checked on this machine, the estimate on this project's transcripts; tasks replayed in a fresh clone (88, 91, 92, 93, 95, 95, files equal to the scratch code), the fresh clone checked in a browser at 420 px with the fake claude. Task 7 (the real window on Fred's screen) is Fred's.
