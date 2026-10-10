@@ -23,6 +23,15 @@ DEFAULTS = {
     "rules_max_lines": 200,
     "rules_max_kb": 16,
     "delegate_after_reads": 10,
+    "daily_budget_usd": 15,
+    # USD per million tokens, API list prices (claude-api skill, 2026-10-06); fast mode costs 2x.
+    # Haiku's higher price for prompts over 100K tokens is left out.
+    "prices": {
+        "fable": {"input": 10, "output": 50, "cache_read": 0.25, "cache_write_5m": 12.5, "cache_write_1h": 20},
+        "opus": {"input": 4, "output": 20, "cache_read": 0.2, "cache_write_5m": 5, "cache_write_1h": 8},
+        "sonnet": {"input": 2, "output": 10, "cache_read": 0.2, "cache_write_5m": 2.5, "cache_write_1h": 4},
+        "haiku": {"input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write_5m": 0.125, "cache_write_1h": 0.2},
+    },
 }
 
 
