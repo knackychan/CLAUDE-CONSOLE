@@ -36,3 +36,5 @@ ends with working, tested software.
 - 2026-10-10 - Master plan and sub-plan 01 written. All phase 1 code was run once in a scratch folder
   before being pasted into 01: 37 tests OK, the hook timed on a real transcript (about 75 ms), the
   service smoke-tested with curl (state, static, SSE, foreign Host refused).
+- 2026-10-10 - Phase 1 code placed (tasks 0-7, 37 tests OK); Fred ran `install_hooks.py --write`; live: sessions, Steps and the red gauge (this chat at 337.5K) show; hooks also apply to already-open chats. Open: agent-row live check, then Task 8.
+- 2026-10-10 - Fred asked for prompting from the window: that is phase 2 (Run); write plans/02-run.md after phase 1 closes.
