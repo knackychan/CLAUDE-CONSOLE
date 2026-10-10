@@ -68,12 +68,12 @@ Dependencies point one way: `state -> claude_cli, redact, usage`; `usage -> clau
 
 ## TODO
 
-- [ ] Task 1: hook logs the transcript path
-- [ ] Task 2: estimated cost from transcripts
-- [ ] Task 3: state (spend, activity, agent cost)
-- [ ] Task 4: service (reads transcripts, serves Doto, keeps the compose project)
-- [ ] Task 5: borderless window
-- [ ] Task 6: Console Cells window
+- [x] Task 1: hook logs the transcript path
+- [x] Task 2: estimated cost from transcripts
+- [x] Task 3: state (spend, activity, agent cost)
+- [x] Task 4: service (reads transcripts, serves Doto, keeps the compose project)
+- [x] Task 5: borderless window
+- [x] Task 6: Console Cells window
 - [ ] Task 7: Fred: live check in the real window
 - [ ] Task 8: close the phase
 
@@ -2741,6 +2741,7 @@ Claude cannot see Fred's screen or VS Code chats. Close the running window first
 ## History
 
 - 2026-10-10 - Plan written. Fred decided: the service reads the transcripts for the estimated cost (hook adds `transcript_path`), API list prices in `config.json`, `daily_budget_usd` 15 with a growing $0.50 grid, activity levels 1-2 / 3-5 / 6-9 / 10+ steps per minute, rail = needs + working (Done in the Overview), the Prep card takes the pane, a Steps | Timeline | Chat seg control, a project select in the compose row, one notes block plus the same lever bar, model shares of today's spend, the window remembers its form and place, a peek card only for new events. All code was run in a scratch clone first: 95 tests OK; the frameless resize checked on this machine (open check closed: 380 x 48, 380 x 200, 400 x 640 exactly; a second start came back as the pill at the saved place); the estimate checked on this project's real transcripts (19 files, 0.05 s); the plan was then replayed in a fresh clone (each task's new tests fail as written, then pass: 88, 91, 92, 93, 95, 95; every file equal to the scratch code; both downloads matched their SHA-256), and the fresh clone was checked in a browser at 420 px with the fake claude (Overview, focus, asks-you pane, pill and a peek card from a new event answered in place, Prep, Run, two-click Stop, Timeline, Verify, offline banner; no console errors from the page).
+- 2026-10-10 - Tasks 1-6 placed as written, one commit each (88, 91, 92, 93, 95, 95 tests OK; every find block matched, both Doto SHA-256 values matched). Task 6 browser check at 420 x 640 (an iframe of that size, fake claude, scratch data in `$TEMP`, files deleted after): checks 1-8 passed. Differed: the Timeline in check 6 shows one lane (`main`) with two bars (three after Verify), not "two lanes" (the fake claude runs no agents); the burn figure read `$0.94 / min now` (the plan says `$0.xx`); the page console showed only warnings from a Chrome extension, none from the page. The window itself (Task 7) was not started. Task 7 is Fred's.
 
 ## Troubleshooting
 
