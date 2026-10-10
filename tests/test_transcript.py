@@ -1,0 +1,67 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from console import transcript
+
+
+def user(content, **extra):
+    return {"type": "user", "timestamp": "2026-10-10T10:00:00Z", "message": {"role": "user", "content": content},
+            **extra}
+
+
+def claude(blocks):
+    return {"type": "assistant", "timestamp": "2026-10-10T10:00:05Z", "message": {"role": "assistant", "content": blocks}}
+
+
+class TranscriptTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "s1.jsonl"
+
+    def write(self, *recs, raw=""):
+        self.path.write_text("".join(json.dumps(r) + "\n" for r in recs) + raw, encoding="utf-8")
+
+    def test_words_only(self):
+        self.write(
+            user("fix the retry"),
+            claude([{"type": "thinking", "thinking": "hmm"}, {"type": "text", "text": "Looking."},
+                    {"type": "tool_use", "name": "Read", "input": {"file_path": "a.py"}}]),
+            user([{"type": "tool_result", "tool_use_id": "t1", "content": "file body"}]),
+            user([{"type": "text", "text": "<system-reminder>skills</system-reminder>"},
+                  {"type": "text", "text": "now the tests"}]),
+            user([{"type": "text", "text": "Base directory for this skill: x"}], isMeta=True),
+            claude([{"type": "text", "text": "side"}]) | {"isSidechain": True},
+            {"type": "ai-title", "title": "x"},
+            user("<pasted_content id=\"ab\">keep this</pasted_content>"),
+            user([{"type": "text", "text": "[Request interrupted by user]"}]),
+        )
+        got = transcript.turns(self.path)
+        self.assertEqual([(t["role"], t["text"]) for t in got], [
+            ("you", "fix the retry"), ("claude", "Looking."), ("you", "now the tests"),
+            ("you", "keep this"), ("note", "stopped")])
+        self.assertEqual(got[0]["ts"], 1791626400.0)
+
+    def test_last_six_and_a_cut_first_line(self):
+        self.write(*[user(f"turn {k} " + "x" * 200) for k in range(40)], raw='{"type": "user", "mess')
+        got = transcript.turns(self.path)
+        self.assertEqual([t["text"][:8] for t in got], [f"turn {k} " for k in range(34, 40)])
+        old = transcript.TAIL_BYTES
+        transcript.TAIL_BYTES = 3000  # reads from the middle of a line: that line is dropped
+        self.addCleanup(setattr, transcript, "TAIL_BYTES", old)
+        got = transcript.turns(self.path, limit=50)
+        self.assertTrue(0 < len(got) < 40 and got[-1]["text"].startswith("turn 39"))
+
+    def test_masks_and_ignores_other_files(self):
+        self.write(user("use key sk-abcdefghijkl1234 now"))
+        self.assertEqual(transcript.turns(self.path)[0]["text"], "use key *** now")
+        self.assertEqual(transcript.turns(Path(self.tmp.name) / "none.jsonl"), [])
+        (Path(self.tmp.name) / "notes.txt").write_text("{}", encoding="utf-8")
+        self.assertEqual(transcript.turns(Path(self.tmp.name) / "notes.txt"), [])
+        self.assertEqual(transcript.turns(None), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
