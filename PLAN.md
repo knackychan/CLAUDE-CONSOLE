@@ -14,7 +14,7 @@ ends with working, tested software.
 | 1 | [plans/01-watch.md](plans/01-watch.md) - hooks, service, tree, gauge, Steps, Needs you, Quiet / Stall?, 2 writers | done 2026-10-10 |
 | 2 | [plans/02-run.md](plans/02-run.md) - prompt box, Prep card, Run / Run raw, Chat, Stop, Open in terminal, crash recovery, STOP answers | done 2026-10-10 |
 | 3 | [plans/03-levers.md](plans/03-levers.md) - Continue, Verify, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | done 2026-10-10 |
-| 4 | Polish - rules-size warning, should-delegate flag, model-mix strip, move skills to ~/.claude | to write |
+| 4 | [plans/04-polish.md](plans/04-polish.md) - rules-size warning, should-delegate flag, model-mix strip, in-chat handoff Done, move skills to ~/.claude | written 2026-10-10 |
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
 
 ## Changes to the design made while planning phase 1
@@ -66,6 +66,23 @@ ends with working, tested software.
 - **Handoff only where the `session-handoff` skill is installed** (Fred): CONTENT MANAGER now,
   everywhere after phase 4.
 
+## Changes to the design made while planning phase 4
+
+- **Rules size from a new hook event** (Fred): `InstructionsLoaded` logs every CLAUDE.md / rules file a
+  session loads, with lines and bytes. Warning at 200 lines in one file (docs target) or 16 KB in all;
+  a row badge plus the file list in the detail. Fred re-runs `install_hooks.py --write` once.
+- **Should delegate** (Fred): 10 or more main-chat Read / Grep / Glob / WebFetch / WebSearch steps in
+  one turn give a `delegate?` badge; never a Needs-you state.
+- **Model mix** (Fred): sessions and agent runs per model family plus window runs and their cost, in
+  the bottom status strip.
+- **A handoff inside a chat makes it Done** (Fred): a typed `/session-handoff` (logged as the prompt;
+  a typed skill bypasses PreToolUse) or Claude's own `Skill session-handoff` step, then Stop.
+- **Skills move through the repo** (Fred): generic `route-model`, `session-handoff` and `verifier`
+  live in `dotclaude/`; Fred copies them to `~/.claude` (a protected path for Claude) in that order and
+  deletes CONTENT MANAGER's two skill copies; its verifier stays as a project override.
+- **route-model writes chat misses to `~/.claude/console/routing-misses.md`** (Fred), in the
+  console's format, so Prep reads them; its table is Prep's table (a test checks it).
+
 ## History
 
 - 2026-10-10 - Master plan and sub-plan 01 written. All phase 1 code was run once in a scratch folder
@@ -78,3 +95,4 @@ ends with working, tested software.
 - 2026-10-10 - Phase 2 done: 63 tests OK; live check passed (Prep card, Run with Steps and Chat, Stop, Open in terminal, a run survived closing the window, no error-log lines). Differed from 02: `Allow runs in <name>` button (Task 6b), port 47770, a run that succeeded despite auto-mode denials stays Idle with a note, injected prompt blocks no longer become titles, Open in terminal keeps the run's model and effort. Open: `--model haiku` gives Haiku 4.5 on CLI 2.1.288.
 - 2026-10-10 - Sub-plan 03 written (zero-decision, final code): Fred decided fork for VS Code chats, Handoff where the skill is, a Verify button, ladder "effort to high, then model", keep the `haiku` alias (verified Haiku 5.5 on CLI 2.1.296). Verified in a scratch clone: 78 tests OK, tasks replayed in a fresh clone (64, 69, 74, 75, 78), window flows in a browser with the fake claude, fork and `/skill` over stream-json checked with real `claude -p` calls. Task 7 live check is Fred's (Claude cannot start auto-mode runs).
 - 2026-10-10 - Phase 3 done: 79 tests OK; live check passed (Verify PASS badge, Continue with the follow-up hint, Escalate sonnet/medium -> sonnet/high with its routing-misses line, which the next Prep read, a fork of this VS Code chat answered from its context and left it untouched, `haiku` ran as claude-haiku-5-5, no error-log lines; Handoff in CONTENT MANAGER not tried). Differed from 03: `STOP: none` was read as a STOP question (fixed in the hook, 1 test); with the skill missing there is no Handoff button, only the off note; a `/session-handoff` typed inside a VS Code chat does not make it Done.
+- 2026-10-10 - Sub-plan 04 written (zero-decision, final code): Fred decided the rules limits (200 lines per file or 16 KB in all, via the InstructionsLoaded hook, row badge + detail list), "should delegate" at 10 main-chat reads per turn, the model mix (sessions + agents per model, window runs and cost) in the bottom strip, Done after a handoff inside a chat, the skill move through `dotclaude/` with Fred's copies (handoff, verifier, route-model), chat misses in `~/.claude/console/routing-misses.md`, CONTENT MANAGER keeping its verifier. Verified in a scratch clone: 87 tests OK, tasks replayed in a fresh clone (80, 84, 84, 87), window checked in a browser with the fake claude, InstructionsLoaded fields and the generic skills checked with real `claude -p` calls on 2.1.296. Task 5 (hooks, copies into ~/.claude, live check) is Fred's.
