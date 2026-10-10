@@ -99,7 +99,7 @@ class Session:
     handed_off: bool = False   # a Handoff run succeeded: Done
     forked_from: str = ""
     forks: list = field(default_factory=list)
-    turns: list = field(default_factory=list)  # [start, end or None] per turn, for the Timeline
+    turns: list = field(default_factory=list)  # [start, end or None] per turn; the last start is turn_ts
     rules: dict = field(default_factory=dict)  # file -> {scope, lines, bytes}: CLAUDE.md / rules loaded
     reads: int = 0             # main-chat Read / Grep / Glob / WebFetch / WebSearch steps this turn
     chat_handoff: bool = False  # this turn ran /session-handoff inside the chat: its Stop makes it Done
@@ -505,19 +505,3 @@ class State:
         types = {a.id: a.type for a in s.agents.values()}
         return [dict(step, agent_type=types.get(step["agent"], "") if step["agent"] else "main")
                 for step in s.steps[-limit:]]
-
-    def timeline(self, session_id: str, now: float):
-        """Bars over time (D7 C): the main thread's turns, then one bar per agent run."""
-        s = self.sessions.get(session_id)
-        if not s:
-            return None
-        live = s.in_turn or s.run_live
-        end = now if live else s.last_ts
-        lanes = [{"label": "main", "tone": "info", "verdict": "",
-                  "spans": [[a, end if b is None else b] for a, b in s.turns]}]
-        for a in sorted(s.agents.values(), key=lambda x: x.started_ts):
-            stop = a.last_ts if a.done or not live else end
-            lanes.append({"label": a.type or "agent", "tone": "success" if a.done else "info",
-                          "verdict": a.verdict, "spans": [[a.started_ts, stop]]})
-        start = min([s.started_ts] + [sp[0] for lane in lanes for sp in lane["spans"]])
-        return {"start": start, "end": max(end, start), "lanes": lanes}

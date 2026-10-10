@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import claude_cli, events, guard, levers, paths, prep, runs, usage
+from . import claude_cli, events, guard, levers, paths, prep, runs, transcript, usage
 from .state import State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -94,10 +94,6 @@ class Hub:
         with self.lock:
             return self.state.steps(session_id)
 
-    def timeline(self, session_id: str):
-        with self.lock:
-            return self.state.timeline(session_id, time.time())
-
     def session(self, session_id: str):
         with self.lock:
             s = self.state.sessions.get(session_id)
@@ -107,7 +103,8 @@ class Hub:
                     "model": s.model, "effort": s.effort, "prep": s.prep, "start_commit": s.start_commit,
                     "project": s.project, "project_dir": s.project_dir, "route": s.route,
                     "run_live": s.run_live, "state": self.state.state_of(s, time.time()),
-                    "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated}
+                    "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
+                    "transcript_path": s.transcript_path}
 
     def route_of(self, session_id: str, s: dict) -> tuple:
         """(model, effort) the session runs on: a window run's own route, else the model last seen."""
@@ -228,18 +225,17 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/steps":
             return self._json(self.hub.steps(query.get("session", [""])[0]))
         if url.path == "/api/config":
-            cfg = self.hub.cfg
+            cfg, window = self.hub.cfg, paths.load_window(self.hub.folder)
             return self._json({"projects": project_list(cfg), "models": claude_cli.MODELS,
                                "efforts": claude_cli.EFFORTS, "default_model": cfg["default_model"],
                                "default_effort": cfg["default_effort"], "claude": bool(self.hub.runs.exe),
                                "config_path": str(self.hub.folder / "config.json"),
                                "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
-                               "project": paths.load_window(self.hub.folder).get("project", "")})
+                               "project": window.get("project", ""), "brief": window.get("brief") is True})
         if url.path == "/api/chat":
             return self._chat(query.get("session", [""])[0])
-        if url.path in ("/api/levers", "/api/timeline"):
-            sid = query.get("session", [""])[0]
-            data = self.hub.levers(sid) if url.path == "/api/levers" else self.hub.timeline(sid)
+        if url.path == "/api/levers":
+            data = self.hub.levers(query.get("session", [""])[0])
             return self._json(data) if data else self._error(404, "unknown session")
         if url.path == "/api/draft":
             try:
@@ -391,27 +387,34 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"projects": project_list(self.hub.cfg)})
 
     def _draft(self, body):
-        """The unsent prompt (draft.txt) and, when given, the compose project (window.json)."""
-        text, project = body.get("text"), body.get("project")
+        """The unsent prompt (draft.txt) and, when given, the compose project and whether the session
+        page keeps its brief open (window.json)."""
+        text, project, brief = body.get("text"), body.get("project"), body.get("brief")
         if not isinstance(text, str) or len(text) > MAX_PROMPT:
             return self._error(400, "bad draft")
         if project is not None and (not isinstance(project, str) or len(project) > 1000):
             return self._error(400, "bad project")
+        if brief is not None and not isinstance(brief, bool):
+            return self._error(400, "bad brief")
         self.hub.folder.mkdir(parents=True, exist_ok=True)
         (self.hub.folder / "draft.txt").write_text(text, encoding="utf-8")
-        if project is not None:
-            paths.save_window(self.hub.folder, project=project)
+        fields = {k: v for k, v in (("project", project), ("brief", brief)) if v is not None}
+        if fields:
+            paths.save_window(self.hub.folder, **fields)
         return self._json({"ok": True})
 
     # -- GET helpers -----------------------------------------------------------------
     def _chat(self, sid: str):
+        """A window run's stream, or for a VS Code / terminal chat the last turns of its transcript."""
         meta = self.hub.runs.meta(sid) if sid and all(c.isalnum() or c == "-" for c in sid) else None
         if not meta:
-            return self._json({"items": [], "changed": None, "live": False})
+            info = self.hub.session(sid)
+            items = transcript.turns(info["transcript_path"]) if info else []
+            return self._json({"items": items, "source": "transcript", "changed": None, "live": False})
         items = runs.chat(self.hub.runs.stream_path(sid), meta.get("cwd", ""))
         changed = claude_cli.git_changed(meta["cwd"], meta.get("start_commit", ""))
-        return self._json({"items": items, "changed": changed, "live": self.hub.runs.is_live(sid),
-                           "start_commit": meta.get("start_commit", "")})
+        return self._json({"items": items, "source": "window", "changed": changed,
+                           "live": self.hub.runs.is_live(sid), "start_commit": meta.get("start_commit", "")})
 
     def _stream(self):
         self.send_response(200)

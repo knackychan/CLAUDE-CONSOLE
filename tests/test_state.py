@@ -201,21 +201,6 @@ class StateTest(unittest.TestCase):
         self.assertTrue(self.row(T0 + 1, "big")["handoff_hint"])
         self.assertFalse(self.row(T0 + 4000, "big")["handoff_hint"])  # Stale?: no hint
 
-    def test_timeline_turns_and_agents(self):
-        self.feed(ev("UserPromptSubmit", T0),
-                  ev("SubagentStart", T0 + 2, agent_id="a1", agent_type="Explore"),
-                  ev("SubagentStop", T0 + 6, agent_id="a1"),
-                  ev("Stop", T0 + 8),
-                  ev("UserPromptSubmit", T0 + 20),
-                  ev("PreToolUse", T0 + 21, agent_id="a2", agent_type="verifier", tool="Bash"))
-        t = self.state.timeline("s1", T0 + 30)
-        self.assertEqual((t["start"], t["end"]), (T0, T0 + 30))
-        self.assertEqual([lane["label"] for lane in t["lanes"]], ["main", "Explore", "verifier"])
-        self.assertEqual(t["lanes"][0]["spans"], [[T0, T0 + 8], [T0 + 20, T0 + 30]])
-        self.assertEqual(t["lanes"][1]["spans"], [[T0 + 2, T0 + 6]])
-        self.assertEqual(t["lanes"][2]["spans"], [[T0 + 21, T0 + 30]])
-        self.assertIsNone(self.state.timeline("nope", T0))
-
     def test_rules_size_warning(self):
         self.feed(ev("InstructionsLoaded", T0, file="~/.claude/CLAUDE.md", scope="User", lines=3, bytes=229,
                      load_reason="session_start"),

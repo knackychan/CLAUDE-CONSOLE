@@ -195,9 +195,22 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.session("v1")["forks"], [fork])
         self.assertEqual((self.hub.runs.meta(fork)["model"], self.hub.runs.meta(fork)["effort"]), ("sonnet", "medium"))
         self.wait_idle(fork)
-        timeline = self.call(f"/api/timeline?session={fork}")[1]
-        self.assertEqual([lane["label"] for lane in timeline["lanes"]], ["main"])
-        self.assertEqual(len(timeline["lanes"][0]["spans"]), 1)
+
+    def test_chat_of_a_vscode_chat_reads_its_transcript(self):
+        transcript = Path(self.tmp.name) / "v2.jsonl"
+        transcript.write_text("".join(json.dumps(rec) + "\n" for rec in (
+            {"type": "user", "timestamp": "2026-10-10T10:00:00Z", "message": {"role": "user", "content": "hello"}},
+            {"type": "assistant", "timestamp": "2026-10-10T10:00:05Z", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "Hi."}, {"type": "tool_use", "name": "Read", "input": {}}]}})),
+            encoding="utf-8")
+        events.append(self.folder, {"event": "UserPromptSubmit", "ts": time.time(), "session_id": "v2",
+                                    "project": "proj", "project_dir": str(self.project), "prompt": "hello",
+                                    "transcript_path": str(transcript)})
+        self.hub.poll_once()
+        chat = self.call("/api/chat?session=v2")[1]
+        self.assertEqual((chat["source"], [(i["role"], i["text"]) for i in chat["items"]]),
+                         ("transcript", [("you", "hello"), ("claude", "Hi.")]))
+        self.assertEqual(self.call("/api/chat?session=nope")[1]["items"], [])
 
     def test_verify_then_escalate_once(self):
         sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
@@ -267,6 +280,11 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.call("/api/config")[1]["project"], str(self.project))
         self.assertEqual(cfg["gauge"], [150000, 300000])
         self.assertEqual(self.call("/api/draft", {"text": "", "project": 3})[0], 400)
+        self.assertIs(cfg["brief"], False)
+        self.assertEqual(self.call("/api/draft", {"text": "", "brief": True})[0], 200)
+        config = self.call("/api/config")[1]
+        self.assertEqual((config["brief"], config["project"]), (True, str(self.project)))  # project kept
+        self.assertEqual(self.call("/api/draft", {"text": "", "brief": "yes"})[0], 400)
 
 
 if __name__ == "__main__":
