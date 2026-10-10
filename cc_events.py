@@ -17,6 +17,9 @@ from console import paths, redact  # noqa: E402
 TAIL_BYTES = 512 * 1024
 _ROUTE = re.compile(r"^[\s`*>\-]*Route:\s*(.+?)[\s`*]*$", re.M)
 _STOP = re.compile(r"^[\s`*>\-]*STOP:\s*(.+?)[\s`*]*$", re.M)
+# The verifier agent's report: `VERDICT: PASS | FAIL`, then `failing: <file:line> - <error>` lines.
+_VERDICT = re.compile(r"^[\s`*>\-]*VERDICT:\s*(PASS|FAIL)\b[ \t`*:\-]*(.*?)[ \t`*]*$", re.M)
+_FAILING = re.compile(r"^[\s`*>\-]*failing:\s*(.+?)[\s`*]*$", re.M)
 # A block Claude Code or an extension puts before (or instead of) Fred's text, e.g.
 # <browser_instruction>, <task-notification>. Fred's own pastes (<pasted_content>) stay.
 _INJECTED = re.compile(r"\s*<(?!pasted_content\b)([A-Za-z][\w-]*)[^>]*>.*?</\1>\s*", re.S)
@@ -47,6 +50,21 @@ def project_root(cwd: str):
 def last_match(rx, text: str) -> str:
     found = rx.findall(text or "")
     return found[-1].strip() if found else ""
+
+
+def verdict(text: str) -> dict:
+    """The last `VERDICT: PASS|FAIL` line, with its detail (else the first `failing:` line)."""
+    found = _VERDICT.findall(text or "")
+    if not found:
+        return {}
+    word, detail = found[-1]
+    if not detail and word == "FAIL":
+        m = _FAILING.search(text)
+        detail = m.group(1) if m else ""
+    out = {"verdict": word}
+    if detail:
+        out["verdict_detail"] = redact.clip(redact.mask(detail), 160)
+    return out
 
 
 def transcript_tail(path, sidechain: bool = False) -> dict:
@@ -117,6 +135,7 @@ def build_record(data: dict, now: float = None) -> dict:
         tail = transcript_tail(data.get("agent_transcript_path"), sidechain=True)
         rec["model"] = tail.get("model")
         rec["context_tokens"] = tail.get("context_tokens")
+        rec.update(verdict(data.get("last_assistant_message")))
     elif event == "Stop":
         rec.update(transcript_tail(data.get("transcript_path")))
         message = data.get("last_assistant_message") or ""
@@ -126,6 +145,7 @@ def build_record(data: dict, now: float = None) -> dict:
             rec["route"] = redact.clip(route, 80)
         if question:
             rec["stop_question"] = redact.clip(redact.mask(question), 200)
+        rec.update(verdict(message))
     elif event == "StopFailure":
         rec["error"] = data.get("error") or "unknown"
         rec["error_details"] = redact.clip(redact.mask(data.get("error_details", "")), 120)

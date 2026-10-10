@@ -96,6 +96,20 @@ class BuildRecordTest(unittest.TestCase):
         self.assertEqual(rec["route"], "mechanical, low effort, cavecrew-builder on sonnet")
         self.assertEqual(rec["stop_question"], "how many retries?")
 
+    def test_verdict_from_stop_and_subagent_stop(self):
+        msg = ("Checked.\nVERDICT: FAIL\nchecks: py -m unittest -> 1 failed\n"
+               "failing: tests/test_calc.py:9 - AssertionError: 3 != 4")
+        rec = cc_events.build_record(self.base("Stop", transcript_path="", last_assistant_message=msg))
+        self.assertEqual((rec["verdict"], rec["verdict_detail"]),
+                         ("FAIL", "tests/test_calc.py:9 - AssertionError: 3 != 4"))
+        rec = cc_events.build_record(self.base("SubagentStop", agent_id="a1", agent_type="verifier",
+                                               last_assistant_message="**VERDICT: PASS**\nchecks: ok"))
+        self.assertEqual(rec["verdict"], "PASS")
+        self.assertNotIn("verdict_detail", rec)
+        rec = cc_events.build_record(self.base("Stop", last_assistant_message="VERDICT: FAIL token=abc broke"))
+        self.assertEqual(rec["verdict_detail"], "token=*** broke")
+        self.assertNotIn("verdict", cc_events.build_record(self.base("Stop", last_assistant_message="all good")))
+
     def test_permission_denied_keeps_reason(self):
         rec = cc_events.build_record(self.base("PermissionDenied", tool_name="Bash",
                                                tool_input={"command": "git push"}, reason="[Push]"))
