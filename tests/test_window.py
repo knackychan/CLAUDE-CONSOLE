@@ -28,6 +28,12 @@ class WindowApiTest(unittest.TestCase):
         self.win = FakeWindow()
         self.api = window.WindowApi(self.folder)
         self.api._attach(self.win)
+        # never touch the real Claude Console window while testing
+        self.topmost = []
+        for name, fake in (("set_topmost", lambda on: self.topmost.append(on) or True),
+                           ("round_corners", lambda: True)):
+            self.addCleanup(setattr, window, name, getattr(window, name))
+            setattr(window, name, fake)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -42,7 +48,7 @@ class WindowApiTest(unittest.TestCase):
                                           ("resize", 400, 640)])
         self.api.form("pill")
         self.assertFalse(self.api.on_top(False))
-        self.assertFalse(self.win.on_top)
+        self.assertEqual(self.topmost, [False])  # SetWindowPos, not pywebview's cross-thread TopMost
         again = window.WindowApi(self.folder)
         self.assertEqual(again.state(), {"form": "pill", "on_top": False})
         again._attach(self.win)
