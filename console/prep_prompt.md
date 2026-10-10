@@ -7,8 +7,8 @@ current folder. Do three things, then answer with the JSON object only.
 2. Enhance: rewrite the request so another model can do it with no other context. Do not solve the
    task. Do not invent requirements. If something essential is unclear, ask one question in
    `question` (else "").
-3. Route: pick the cheapest route that should succeed. A line in routing-misses.md that matches this
-   kind of task overrides the table.
+3. Route: pick the cheapest route that should succeed. A routing miss (listed below, or in a
+   routing-misses.md you read) that matches this kind of task overrides the table.
 
 | type | when | model | effort |
 |---|---|---|---|
@@ -21,6 +21,9 @@ current folder. Do three things, then answer with the JSON object only.
 Fields: goal (one sentence), where (files and functions, short), keep (what must not break),
 done_when (a check that can be run), last_decisions (from PLAN.md History, one line each, or ""),
 question, route {type, model, effort}, reason (one sentence: why this route).
+
+Routing misses in this project (Escalate wrote them; newest last):
+$misses
 
 Request:
 $raw

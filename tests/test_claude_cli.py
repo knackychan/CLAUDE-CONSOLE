@@ -22,6 +22,16 @@ class CommandTest(unittest.TestCase):
         self.assertNotIn("--session-id", resumed)
         self.assertNotIn("--name", resumed)
 
+    def test_run_command_fork(self):
+        cmd = claude_cli.run_command(["claude.exe"], "sonnet", "low", "new", name="↳ x", fork="old")
+        i = cmd.index("--resume")
+        self.assertEqual(cmd[i:i + 5], ["--resume", "old", "--fork-session", "--session-id", "new"])
+        self.assertEqual(cmd[cmd.index("--name") + 1], "↳ x")
+
+    def test_model_alias(self):
+        names = ("claude-sonnet-5-5", "claude-haiku-4-5-20251001", "opus", "gpt-9", None)
+        self.assertEqual([claude_cli.model_alias(m) for m in names], ["sonnet", "haiku", "opus", "", ""])
+
     def test_prep_command_is_read_only_and_hookless(self):
         cmd = claude_cli.prep_command(["claude.exe"], "haiku", {"type": "object"})
         self.assertEqual(cmd[cmd.index("--tools") + 1], "Read,Grep,Glob")

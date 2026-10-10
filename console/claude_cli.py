@@ -53,15 +53,27 @@ def prep_command(exe: list, model: str, schema: dict) -> list:
 
 
 def run_command(exe: list, model: str, effort: str, session_id: str, resume: bool = False,
-                name: str = "") -> list:
-    """D5: auto mode, nobody answers prompts (a denial ends up in the result). Prompts go in on stdin."""
+                name: str = "", fork: str = "") -> list:
+    """D5: auto mode, nobody answers prompts (a denial ends up in the result). Prompts go in on stdin.
+    `fork`: start `session_id` as a copy of that chat (its context, a new id; the original is not touched)."""
     cmd = exe + ["-p", "--model", model, "--effort", effort, "--permission-mode", "auto",
                  "--permission-prompts", "none", "--input-format", "stream-json",
                  "--output-format", "stream-json", "--verbose"]
-    cmd += ["--resume", session_id] if resume else ["--session-id", session_id]
+    if fork:
+        cmd += ["--resume", fork, "--fork-session", "--session-id", session_id]
+    elif resume:
+        cmd += ["--resume", session_id]
+    else:
+        cmd += ["--session-id", session_id]
     if name and not resume:
         cmd += ["--name", name]
     return cmd
+
+
+def model_alias(model: str) -> str:
+    """claude-sonnet-5-5 -> sonnet (the names routes use); "" when unknown."""
+    low = str(model or "").lower()
+    return next((m for m in MODELS if m in low), "")
 
 
 def terminal_command(exe: list, session_id: str, model: str = "", effort: str = "") -> list:

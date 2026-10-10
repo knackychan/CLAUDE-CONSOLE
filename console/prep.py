@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, redact
+from . import claude_cli, levers, redact
 
 PROMPT_FILE = Path(__file__).resolve().parent / "prep_prompt.md"
 TYPES = ["mechanical", "lookup", "normal", "risky", "vague"]
@@ -33,8 +33,10 @@ class PrepError(Exception):
     pass
 
 
-def build_prompt(raw: str) -> str:
-    return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(raw=raw.strip())
+def build_prompt(raw: str, misses=()) -> str:
+    """The Prep instructions with Fred's request and this project's routing misses filled in."""
+    return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
+        raw=raw.strip(), misses="\n".join(misses) or "(none)")
 
 
 def format_prompt(fields: dict) -> str:
@@ -73,8 +75,9 @@ def new_id() -> str:
 def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list) -> dict:
     """Blocking (about 10-30 s). Saves preps/<id>.json and returns the card."""
     cmd = claude_cli.prep_command(exe, cfg["prep_model"], SCHEMA)
+    prompt = build_prompt(raw, levers.read_misses(folder, Path(project_dir).name))
     try:
-        out = subprocess.run(cmd, cwd=project_dir, input=build_prompt(raw).encode("utf-8"),
+        out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"),
                              capture_output=True, timeout=cfg["prep_timeout_s"], env=claude_cli.child_env(),
                              creationflags=claude_cli.NO_WINDOW)
     except subprocess.TimeoutExpired:
