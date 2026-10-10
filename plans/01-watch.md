@@ -1932,7 +1932,7 @@ py install_hooks.py
 py install_hooks.py --write
 ```
 
-The first command only prints the hooks; the second backs up `~/.claude/settings.json` to `settings.json.bak-<date>` and adds them. Hooks load when a session starts: open a **new** Claude Code chat (or restart VS Code) after this.
+The first command only prints the hooks; the second backs up `~/.claude/settings.json` to `settings.json.bak-<date>` and adds them. Open sessions pick the hooks up too (seen 2026-10-10); a session whose prompt was sent before the install shows "(prompt not seen) <id>" until its next prompt.
 
 - [ ] **Step 5: Live check** (any project)
 
@@ -1982,6 +1982,9 @@ Expected:
 - **Issue:** a console window flashes on every hook event.
   **Cause:** Claude Code starts `python.exe` for the hook.
   **Fix:** `py install_hooks.py --write --python "C:\Users\DEROK137\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe"` (replaces our entries; `pythonw.exe` has no console and still reads the piped stdin). Check one event still lands in the log afterwards.
+- **Issue:** a session shows "(prompt not seen)" and source "?".
+  **Cause:** its prompt was sent before the hooks were installed; source is only known after its first Stop.
+  **Fix:** none needed; the next prompt and Stop fill both.
 - **Issue:** the window shows nothing although hooks are installed.
   **Cause:** hooks load at session start.
   **Fix:** start a new chat or restart VS Code; then check `~/.claude/console/events-<today>.jsonl` grows.

@@ -216,7 +216,7 @@ class State:
             symbol, text, state_tone = STATES[state]
             rows.append({
                 "id": s.id, "project": s.project, "project_dir": s.project_dir,
-                "title": s.title or "(no prompt yet)", "source": s.source or "?",
+                "title": s.title or f"(prompt not seen) {s.id[:8]}", "source": s.source or "?",
                 "model": s.model, "effort": s.effort, "route": s.route or "unrouted",
                 "state": state, "symbol": symbol, "text": text, "tone": state_tone,
                 "group": group, "doing": s.doing, "prompts": s.prompts,
