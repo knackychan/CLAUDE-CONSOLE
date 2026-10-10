@@ -174,18 +174,18 @@ class State:
             return "stale"
         return "idle"
 
-    def gauge(self, s: Session):
-        """(fill, tone): fill is ctx_tokens / gauge_red_tokens, capped at 1.0.
+    def gauge(self, tokens):
+        """(fill, tone): fill is tokens / gauge_red_tokens, capped at 1.0.
 
         Token thresholds, not % of the window: the 5.x models have a 1M window, and a chat
         degrades long before it is full (Context Playbook)."""
-        if s.ctx_tokens is None:
+        if tokens is None:
             return None, None
         red, yellow = self.cfg["gauge_red_tokens"], self.cfg["gauge_yellow_tokens"]
-        fill = min(s.ctx_tokens / red, 1.0)
-        if s.ctx_tokens >= red:
+        fill = min(tokens / red, 1.0)
+        if tokens >= red:
             return fill, "red"
-        if s.ctx_tokens >= yellow:
+        if tokens >= yellow:
             return fill, "yellow"
         return fill, "green"
 
@@ -206,7 +206,7 @@ class State:
             if now - s.last_ts > SHOW_FOR_S:
                 continue
             state = self.state_of(s, now)
-            pct, tone = self.gauge(s)
+            pct, tone = self.gauge(s.ctx_tokens)
             if state in NEEDS_YOU or (tone == "red" and state not in DONE):
                 group = "needs"
             elif state in DONE:
@@ -242,9 +242,11 @@ class State:
             symbol, text, tone = STATES["running"]
         else:
             symbol, text, tone = "…", "No stop seen", "info"
+        fill, ctx_tone = self.gauge(a.tokens or None)
         return {"id": a.id, "type": a.type or "agent", "model": a.model, "effort": a.effort,
                 "tokens": a.tokens, "steps": a.steps, "doing": a.doing,
-                "symbol": symbol, "text": text, "tone": tone}
+                "symbol": symbol, "text": text, "tone": tone,
+                "ctx_fill": None if fill is None else round(fill, 3), "ctx_tone": ctx_tone}
 
     def steps(self, session_id: str, limit: int = 200) -> list:
         s = self.sessions.get(session_id)

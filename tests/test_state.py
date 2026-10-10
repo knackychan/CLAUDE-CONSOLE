@@ -78,6 +78,7 @@ class StateTest(unittest.TestCase):
         self.feed(ev("SubagentStop", T0 + 5, agent_id="a1", model="claude-sonnet-5-5", context_tokens=9100))
         agent = self.row(T0 + 6)["agents"][0]
         self.assertEqual((agent["text"], agent["model"], agent["tokens"]), ("Done", "claude-sonnet-5-5", 9100))
+        self.assertEqual((agent["ctx_fill"], agent["ctx_tone"]), (0.03, "green"))
         steps = self.state.steps("s1")
         self.assertEqual([s["agent_type"] for s in steps], ["verifier", "main"])
 

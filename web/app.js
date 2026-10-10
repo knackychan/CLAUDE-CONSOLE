@@ -18,10 +18,10 @@ function routeText(s) {
   return run ? s.route + " · " + run : s.route;
 }
 
-function gauge(s) {
+function gauge(s, tokens = s.ctx_tokens) {
   if (s.ctx_fill == null) return '<span class="mut">ctx ?</span>';
   const hint = s.ctx_tone === "red" ? " handoff" : s.ctx_tone === "yellow" ? " soon" : "";
-  return `<span class="${s.ctx_tone}">ctx <span class="bar"><i style="width:${Math.round(s.ctx_fill * 100)}%"></i></span> ${kTokens(s.ctx_tokens)}${hint}</span>`;
+  return `<span class="${s.ctx_tone}">ctx <span class="bar"><i style="width:${Math.max(2, Math.round(s.ctx_fill * 100))}%"></i></span> ${kTokens(tokens)}${hint}</span>`;
 }
 
 function sessionRows(s) {
@@ -35,9 +35,10 @@ function sessionRows(s) {
   if (s.denied) html += `<div class="note m"><span class="danger">&#9632; denied</span> ${esc(s.denied.tool)} ${esc(s.denied.what)} <span class="mut">${esc(s.denied.reason)}</span></div>`;
   if (s.failed) html += `<div class="note m"><span class="danger">&times; ${esc(s.failed.error)}</span> <span class="mut">${esc(s.failed.details)}</span></div>`;
   for (const a of s.agents) {
-    html += `<div class="row m ind"><span class="${a.tone}">${a.symbol}</span>
+    html += `<div class="row m ind"><span class="${a.tone}">${a.symbol} ${esc(a.text)}</span>
       <span class="title">${esc(a.type)}${a.model ? " &middot; " + esc(a.model) : ""}${a.effort ? "/" + esc(a.effort) : ""}
-      &middot; ${a.doing ? esc(a.doing) : a.steps + (a.steps === 1 ? " step" : " steps")}${a.tokens ? " &middot; " + kTokens(a.tokens) : ""}</span></div>`;
+      &middot; ${a.doing ? esc(a.doing) : a.steps + (a.steps === 1 ? " step" : " steps")}</span>
+      ${a.tokens ? gauge(a, a.tokens) : ""}</div>`;
   }
   return html;
 }
