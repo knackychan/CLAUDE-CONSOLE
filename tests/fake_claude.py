@@ -1,0 +1,68 @@
+"""A stand-in for claude.exe in tests: same flags, same JSON shapes (recorded from Claude Code 2.1.288).
+
+Prep (--json-schema): reads the prompt on stdin, prints one result object.
+Run (--input-format stream-json): per user message prints init / assistant / result.
+  "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
+  "DENY" in the message: the result carries one permission denial.
+"""
+import json
+import sys
+
+
+def out(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def arg(name):
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else ""
+
+
+def result(sid, subtype="success", denials=()):
+    return {"type": "result", "subtype": subtype, "session_id": sid, "total_cost_usd": 0.01,
+            "num_turns": 2, "permission_denials": list(denials), "is_error": subtype != "success"}
+
+
+def prep():
+    raw = sys.stdin.read()
+    fields = {"goal": "Fix add() in calc.py", "where": "calc.py:2", "keep": "the signature",
+              "done_when": "py -m unittest passes", "last_decisions": "", "question": "",
+              "route": {"type": "mechanical", "model": "sonnet", "effort": "low"},
+              "reason": "one-line fix with a clear spec"}
+    if "BROKEN" in raw:
+        print("not json")
+        return 0
+    out({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.03,
+         "num_turns": 5, "result": json.dumps(fields), "structured_output": fields})
+    return 0
+
+
+def run():
+    sid = arg("--session-id") or arg("--resume")
+    for line in sys.stdin:
+        msg = json.loads(line)
+        if msg.get("type") != "user":
+            continue
+        text = msg["message"]["content"]
+        out({"type": "system", "subtype": "init", "session_id": sid, "cwd": "."})
+        out({"type": "assistant", "session_id": sid, "parent_tool_use_id": None, "message": {
+            "role": "assistant", "content": [
+                {"type": "text", "text": "echo: " + text},
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "calc.py"}}]}})
+        if "SLOW" in text:
+            nxt = sys.stdin.readline()
+            if nxt and json.loads(nxt).get("type") == "control_request":
+                req = json.loads(nxt)
+                out({"type": "control_response", "response": {"subtype": "success",
+                                                              "request_id": req["request_id"]}})
+                out({"type": "user", "session_id": sid, "parent_tool_use_id": None, "message": {
+                    "role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]}})
+                out(result(sid, "error_during_execution"))
+                return 1
+        denials = [{"tool_name": "Bash", "tool_input": {"command": "git push"}}] if "DENY" in text else []
+        out(result(sid, denials=denials))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(prep() if "--json-schema" in sys.argv else run())
