@@ -1,0 +1,112 @@
+import io
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import cc_events
+
+
+def assistant_line(model="claude-sonnet-5-5", inp=10, read=1000, create=90, side=False, entry="claude-vscode"):
+    return json.dumps({"type": "assistant", "isSidechain": side, "entrypoint": entry,
+                       "message": {"model": model, "usage": {"input_tokens": inp,
+                                   "cache_read_input_tokens": read,
+                                   "cache_creation_input_tokens": create}}})
+
+
+class TranscriptTailTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "t.jsonl"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_reads_last_main_assistant_line(self):
+        self.path.write_text("\n".join([
+            assistant_line(read=5),
+            json.dumps({"type": "user"}),
+            assistant_line(model="claude-haiku-5-5", read=9999, side=True),
+            assistant_line(read=2000),
+            "{broken",
+        ]) + "\n", encoding="utf-8")
+        out = cc_events.transcript_tail(self.path)
+        self.assertEqual(out, {"model": "claude-sonnet-5-5", "context_tokens": 2100,
+                               "entrypoint": "claude-vscode"})
+
+    def test_sidechain_for_agent_transcripts(self):
+        self.path.write_text(assistant_line(model="claude-haiku-5-5", side=True) + "\n", encoding="utf-8")
+        self.assertEqual(cc_events.transcript_tail(self.path, sidechain=True)["model"], "claude-haiku-5-5")
+
+    def test_missing_file_gives_empty(self):
+        self.assertEqual(cc_events.transcript_tail(self.path), {})
+        self.assertEqual(cc_events.transcript_tail(None), {})
+
+
+class BuildRecordTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name) / "myrepo"
+        (self.repo / ".git").mkdir(parents=True)
+        (self.repo / "src").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def base(self, event, **extra):
+        data = {"hook_event_name": event, "session_id": "s1", "cwd": str(self.repo / "src"),
+                "permission_mode": "auto", "effort": {"level": "medium"}}
+        data.update(extra)
+        return data
+
+    def test_project_is_git_root(self):
+        rec = cc_events.build_record(self.base("SessionStart", source="startup"), now=100.0)
+        self.assertEqual(rec["project"], "myrepo")
+        self.assertEqual(rec["project_dir"], str(self.repo))
+        self.assertEqual(rec["effort"], "medium")
+        self.assertEqual(rec["ts"], 100.0)
+        self.assertNotIn("agent_id", rec)
+
+    def test_prompt_is_masked_and_clipped(self):
+        rec = cc_events.build_record(self.base("UserPromptSubmit", prompt="token=abc " + "y" * 300))
+        self.assertTrue(rec["prompt"].startswith("token=***"))
+        self.assertEqual(len(rec["prompt"]), 120)
+
+    def test_pre_tool_use_has_summary_not_input(self):
+        rec = cc_events.build_record(self.base("PreToolUse", tool_name="Read", tool_use_id="t1",
+                                               tool_input={"file_path": str(self.repo / "src" / "a.py")},
+                                               agent_id="ag1", agent_type="Explore"))
+        self.assertEqual((rec["tool"], rec["what"], rec["agent_id"]), ("Read", "a.py", "ag1"))
+        self.assertNotIn("tool_input", rec)
+
+    def test_stop_reads_route_and_stop_question(self):
+        msg = "Done.\n`Route: mechanical, low effort, cavecrew-builder on sonnet`\nSTOP: how many retries?"
+        rec = cc_events.build_record(self.base("Stop", last_assistant_message=msg, transcript_path=""))
+        self.assertEqual(rec["route"], "mechanical, low effort, cavecrew-builder on sonnet")
+        self.assertEqual(rec["stop_question"], "how many retries?")
+
+    def test_permission_denied_keeps_reason(self):
+        rec = cc_events.build_record(self.base("PermissionDenied", tool_name="Bash",
+                                               tool_input={"command": "git push"}, reason="[Push]"))
+        self.assertEqual((rec["what"], rec["reason"]), ("git push", "[Push]"))
+
+
+class MainTest(unittest.TestCase):
+    def test_main_appends_one_line_and_never_raises(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": tmp}):
+            payload = json.dumps({"hook_event_name": "SessionEnd", "session_id": "s9", "reason": "other"})
+            with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(payload.encode()))):
+                self.assertEqual(cc_events.main(), 0)
+            with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(b"not json"))):
+                self.assertEqual(cc_events.main(), 0)
+            files = list(Path(tmp).glob("events-*.jsonl"))
+            self.assertEqual(len(files), 1)
+            lines = files[0].read_text(encoding="utf-8").splitlines()
+            self.assertEqual(json.loads(lines[0])["reason"], "other")
+            self.assertTrue((Path(tmp) / "hook-errors.log").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
