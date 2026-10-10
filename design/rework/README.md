@@ -8,7 +8,8 @@ through its views; each page has the window mock on the left and its reasoning o
 
 | File | Artifact | What it is |
 |---|---|---|
-| [locked/console-cells.html](locked/console-cells.html) | https://claude.ai/artifact/9s2oCibRMRPYqdRC8ZAt5d | Console Cells: Rings and Pill redrawn from `../references/` in a cell-grid language, refined with the anti-slop filter. Views: pill, peek, focus, asks you, overview, empty / offline / loading / error |
+| [locked/cells-drawer.html](locked/cells-drawer.html) | https://claude.ai/artifact/SqX2KpJqpnV6Q7FA7zhVzn | **The target** (locked 2026-10-10, plan 07). Cells Drawer: Console Cells without the rail. The open window is one list (needs you / working / done today) with answer and unblock in place, a searchable project picker in the header, and a full-width session page (head, brief, Steps / Agents / Timeline / Chat). Views: pill, peek, list, session, asks you, empty / offline |
+| [locked/console-cells.html](locked/console-cells.html) | https://claude.ai/artifact/9s2oCibRMRPYqdRC8ZAt5d | Console Cells: the tokens, type and cell motif that Cells Drawer keeps (plan 06 built its pill, peek and cells). Its rail, focus pane and Overview are replaced by Cells Drawer. Views: pill, peek, focus, asks you, overview, empty / offline / loading / error |
 
 ## Explored (not targets)
 
@@ -17,7 +18,7 @@ through its views; each page has the window mock on the left and its reasoning o
 | [explored/a-pill-and-drawer.html](explored/a-pill-and-drawer.html) | https://claude.ai/artifact/Ac61ay92bKkBbKVfLNCpxz | A: kept the folding pill and the answer-in-place peek card |
 | [explored/b-triage-board.html](explored/b-triage-board.html) | https://claude.ai/artifact/TLUve8h6ZWkS6sSDoc1Nn3 | B: not chosen; the sparkline idea became the activity cells |
 | [explored/c-rail-and-focus.html](explored/c-rail-and-focus.html) | https://claude.ai/artifact/9x9mZUKL84WztY2xpRS9b4 | C: kept the session rail, focus pane, burn rate and agent lanes |
-| [explored/d-cells-drawer.html](explored/d-cells-drawer.html) | https://claude.ai/artifact/SqX2KpJqpnV6Q7FA7zhVzn | D: proposal under review. Console Cells without the rail: A's list as home, C's focus content on a full-width session page, a searchable project picker in the header |
+| [explored/d-cells-drawer.html](explored/d-cells-drawer.html) | https://claude.ai/artifact/SqX2KpJqpnV6Q7FA7zhVzn | D: locked as [locked/cells-drawer.html](locked/cells-drawer.html) (this file is the proposal that was reviewed). Console Cells without the rail: A's list as home, C's focus content on a full-width session page, a searchable project picker in the header |
 | [explored/ca-rings-and-pill.html](explored/ca-rings-and-pill.html) | https://claude.ai/artifact/5jcCWoKfExdC7ncBJjvgCL | C + A merge; Console Cells is its alternate. Written before the anti-slop pass (has an eyebrow label, no sample-data note) |
 
 ## Notes for the build

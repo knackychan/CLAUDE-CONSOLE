@@ -96,6 +96,22 @@ ends with working, tested software.
   form and place remembered in `~/.claude/console/window.json`, a peek card only for new events.
 - **Open check closed:** a frameless pywebview window resizes exactly from code on Windows.
 
+## Changes to the design made while planning phase 7
+
+- **Cells Drawer is the target** (Fred, 2026-10-10): `design/rework/locked/cells-drawer.html` (BRAINSTORM D12,
+  7.5) replaces the rail, the focus pane and the Overview of plan 06; `console-cells.html` stays the
+  reference for tokens and the cell motif. The pill, peek card, states, borderless window and form memory
+  stay as plan 06 built them.
+- **Chat for VS Code and terminal chats** (Fred): the service reads the last 6 turns (text blocks only)
+  from the transcript it already reads for the estimate; window runs keep their stream.
+- **Timeline** (Fred): the bar timeline (`Hub.timeline`, `/api/timeline`) goes; the tab shows the activity
+  buckets (1-2 / 3-5 / 6-9 / 10+ steps) as one cell per minute, and a click shows that minute's steps from
+  `/api/steps`.
+- **The Prep card is its own page** (Fred), like the session page, with Back to the list.
+- **Notes** (Fred): one muted line under the session head, only when there is a note.
+- **Brief open or folded** (Fred): remembered for the window in `~/.claude/console/window.json` (`brief`),
+  next to the form, through `/api/draft`.
+
 ## History
 
 - 2026-10-10 - Master plan and sub-plan 01 written. All phase 1 code was run once in a scratch folder

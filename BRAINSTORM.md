@@ -46,6 +46,7 @@ No cloud, no network calls of its own.
 | D9 | square-orchestrator ideas | Take 1-8 of section 9; leave the rest (section 2) |
 | D10 | Visual style | Borrow the square-orchestrator UI (section 7.4) |
 | D11 | Visual rework (2026-10-10) | Locked: "Console Cells", `design/rework/locked/console-cells.html` (section 7.5) |
+| D12 | Open window layout (2026-10-10) | Locked: "Cells Drawer", `design/rework/locked/cells-drawer.html` (section 7.5): a list instead of the rail, a full-width session page, a searchable project picker. Console Cells stays the reference for tokens and the cell motif |
 
 ## 4. Architecture
 
@@ -194,12 +195,26 @@ Replaced by 7.5 once the rework sub-plan is done.
 
 ### 7.5 Visual rework: Console Cells (locked by Fred, 2026-10-10)
 
-Locked mockup: `design/rework/locked/console-cells.html`. The explored directions and how they
-were chosen are in `design/rework/README.md`; the image references are in `design/references/`.
+Locked mockup: `design/rework/locked/cells-drawer.html` (D12, Cells Drawer). The tokens, type and
+cell motif come from `design/rework/locked/console-cells.html` (D11), which Cells Drawer builds on. The
+explored directions and how they were chosen are in `design/rework/README.md`; the image references are
+in `design/references/`.
 
 - Borderless window with two forms. Folded: a 380 x 48 pill with one cell chip per live session
   and today's spend; a new question, denial or failure opens one card under it (answer in place).
-  Open: 400 x 640, a 56 px rail of session chips plus a focus pane (one session) or the Overview.
+  Open: 400 x 640, one column and no rail, three pages:
+  - The list: a header with a searchable project picker (a page-drawn popover; Ctrl+P; groups Runs
+    allowed / Runs off, Allow runs in place) and the "N need you" chip; today's spend as one row of
+    cells with its breakdown one click away; sessions grouped Needs you / Working / Done today, each a
+    card in words (state, title, project, route, cost, context) with the answer or the unblock in
+    place; the composer with its target project named under the task box.
+  - The session page (Back, ‹ › and Up / Down between sessions): head, the ask or denial, one muted
+    note line, the brief (path, then spent / $ per min / context / time / steps; click or Space opens
+    context, agent lanes and activity), the process tabs Steps / Agents / Timeline (one cell per minute,
+    click a minute for its steps) / Chat (the last turns in words, also for VS Code and terminal
+    chats), and the levers bar.
+  - The Prep page, with Back to the list.
+  The window is a CSS container: no horizontal scroll at 400 or 340 px.
 - Motif: every quantity is counted in cells. Context: 30 cells of 10K (two rows of 15; the second
   row is the hand-off zone). Spend: cells of $0.50, solid = exact, hatched = estimated, orange
   outline at 80 % of a soft daily limit. Activity: one cell per minute, four intensity steps.
