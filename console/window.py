@@ -15,11 +15,32 @@ BACKGROUND = "#121315"  # --win in style.css: what the window shows outside the 
 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
 
 
+HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+SWP_KEEP = 0x0001 | 0x0002 | 0x0010 | 0x4000  # NOSIZE | NOMOVE | NOACTIVATE | ASYNCWINDOWPOS
+
+
+def _hwnd(title: str = TITLE) -> int:
+    try:
+        return ctypes.windll.user32.FindWindowW(None, title) or 0
+    except (AttributeError, OSError):
+        return 0
+
+
+def set_topmost(on: bool, title: str = TITLE) -> bool:
+    """Always on top, without blocking: pywebview sets Form.TopMost from the page's call thread, which
+    froze the window; SetWindowPos with ASYNCWINDOWPOS hands the change to the window's own thread."""
+    hwnd = _hwnd(title)
+    if not hwnd:
+        return False
+    after = HWND_TOPMOST if on else HWND_NOTOPMOST
+    return bool(ctypes.windll.user32.SetWindowPos(wintypes.HWND(hwnd), wintypes.HWND(after), 0, 0, 0, 0, SWP_KEEP))
+
+
 def round_corners(title: str = TITLE) -> bool:
     """Windows 11 rounds a borderless window (8 px, antialiased) only when asked; a WinForms form cannot
     be transparent, so without this its square corners show around the page's rounded ones."""
     try:
-        hwnd = ctypes.windll.user32.FindWindowW(None, title)
+        hwnd = _hwnd(title)
         pref = ctypes.c_int(DWMWCP_ROUND)
         return bool(hwnd) and ctypes.windll.dwmapi.DwmSetWindowAttribute(
             wintypes.HWND(hwnd), DWMWA_WINDOW_CORNER_PREFERENCE, ctypes.byref(pref), ctypes.sizeof(pref)) == 0
@@ -80,7 +101,7 @@ class WindowApi:
 
     def on_top(self, on: bool) -> bool:
         self._on_top = bool(on)
-        self._window.on_top = self._on_top
+        set_topmost(self._on_top)
         paths.save_window(self._folder, on_top=self._on_top)
         return self._on_top
 
