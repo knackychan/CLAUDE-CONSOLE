@@ -122,6 +122,14 @@ class StateTest(unittest.TestCase):
                   ev("run_ended", T0 + 22, denials=[{"tool": "Bash", "what": "git push"}]))
         row = self.row(T0 + 23)
         self.assertEqual((row["state"], row["denied"]["what"]), ("blocked", "git push"))
+        self.feed(ev("run_started", T0 + 30),  # it still succeeded: Idle, the denials only as a note
+                  ev("run_ended", T0 + 32, subtype="success",
+                     denials=[{"tool": "Bash", "what": "find ."}, {"tool": "PowerShell", "what": "ls"}]))
+        row = self.row(T0 + 33)
+        self.assertEqual((row["state"], row["group"], row["denied"]), ("idle", "working", None))
+        self.assertEqual([d["tool"] for d in row["denials"]], ["Bash", "PowerShell"])
+        self.feed(ev("run_started", T0 + 40))
+        self.assertEqual(self.row(T0 + 41)["denials"], [])
 
     def test_pasted_prompt_title_and_drive_letter(self):
         self.feed(ev("UserPromptSubmit", T0, prompt='<pasted_content id="9a1c"> Project: D:/x', project_dir="d:/repo"),

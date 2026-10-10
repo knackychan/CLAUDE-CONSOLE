@@ -80,6 +80,7 @@ class Session:
     route_reason: str = ""
     prep: str = ""
     start_commit: str = ""
+    denials: list = field(default_factory=list)  # a run that still succeeded: shown as a note
 
 
 class State:
@@ -172,6 +173,7 @@ class State:
             s.in_turn, s.ended = True, False
             s.interrupted = s.stopped = False
             s.denied = s.failed = None
+            s.denials = []
             s.stop_question = ""
             if rec.get("title") and not s.title:
                 s.title = redact.clip(rec["title"], 60)
@@ -189,7 +191,9 @@ class State:
             s.cost += float(rec.get("cost") or 0)
             s.stopped = bool(rec.get("stopped"))
             s.interrupted = bool(rec.get("interrupted"))
-            if rec.get("denials") and not s.denied:
+            if rec.get("denials") and rec.get("subtype") == "success":
+                s.denials = [{"tool": d.get("tool", ""), "what": d.get("what", "")} for d in rec["denials"]]
+            elif rec.get("denials") and not s.denied:
                 first = rec["denials"][0]
                 s.denied = {"tool": first.get("tool", ""), "what": first.get("what", ""),
                             "reason": "window runs cannot ask: open in terminal", "ts": ts}
@@ -271,6 +275,7 @@ class State:
                 "ctx_tokens": s.ctx_tokens, "ctx_fill": None if pct is None else round(pct, 3),
                 "ctx_tone": tone, "compactions": s.compactions,
                 "stop_question": s.stop_question, "denied": s.denied, "failed": s.failed,
+                "denials": s.denials,
                 "two_writers": s.id in writer_ids,
                 "window": s.window, "run_live": s.run_live, "stopped": s.stopped,
                 "cost": round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,

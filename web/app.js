@@ -52,6 +52,10 @@ function sessionRows(s) {
   html += `<div class="row m ind mut"><span class="title">${esc(s.project)} &middot; ${esc(s.source)} &middot; ${esc(routeText(s))}${s.doing ? " &middot; " + esc(s.doing) : ""}</span></div>`;
   if (s.stop_question) html += `<div class="note ask"><span class="warning">? STOP</span> ${esc(s.stop_question)}</div>`;
   if (s.denied) html += `<div class="note m"><span class="danger">&#9632; denied</span> ${esc(s.denied.tool)} ${esc(s.denied.what)} <span class="mut">${esc(s.denied.reason)}</span></div>`;
+  if (s.denials && s.denials.length) {
+    const d = s.denials[0], more = s.denials.length > 1 ? ` (+${s.denials.length - 1})` : "";
+    html += `<div class="note m"><span class="warning">&#9651; ${s.denials.length} denied</span> ${esc(d.tool)} ${esc(d.what)}${more} <span class="mut">the run still finished; open in terminal to allow</span></div>`;
+  }
   if (s.failed) html += `<div class="note m"><span class="danger">&times; ${esc(s.failed.error)}</span> <span class="mut">${esc(s.failed.details)}</span></div>`;
   for (const a of s.agents) {
     html += `<div class="row m ind"><span class="${a.tone}">${a.symbol} ${esc(a.text)}</span>
