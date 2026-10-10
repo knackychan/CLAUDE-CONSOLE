@@ -70,3 +70,9 @@ button:disabled { opacity: .5; cursor: progress; }
 .chat.you .text { color: var(--info); }
 .chat.tool .text, .chat.result .text { color: var(--mut); }
 .chat.note .text { color: var(--warning); }
+
+/* phase 3: levers, verdicts, Timeline */
+.tl-name { flex: 0 0 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-track { flex: 1; position: relative; height: 10px; border-bottom: 1px dotted var(--bd); }
+.tl-track i { position: absolute; top: 1px; bottom: 1px; min-width: 2px; background: currentColor; }
+.tl-axis { flex: 1; display: flex; justify-content: space-between; font-size: 11px; }
