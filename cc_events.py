@@ -26,6 +26,8 @@ _FAILING = re.compile(r"^[\s`*>\-]*failing:\s*(.+?)[\s`*]*$", re.M)
 # A block Claude Code or an extension puts before (or instead of) Fred's text, e.g.
 # <browser_instruction>, <task-notification>. Fred's own pastes (<pasted_content>) stay.
 _INJECTED = re.compile(r"\s*<(?!pasted_content\b)([A-Za-z][\w-]*)[^>]*>.*?</\1>\s*", re.S)
+# The service reads the transcript for the estimated cost (console/usage.py): a path, never content.
+TRANSCRIPT_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop")
 
 
 def strip_injected(text: str) -> str:
@@ -184,6 +186,8 @@ def build_record(data: dict, now: float = None) -> dict:
         rec.update(rules_file(data.get("file_path"), root))
         rec["scope"] = data.get("memory_type")
         rec["load_reason"] = data.get("load_reason")
+    if event in TRANSCRIPT_EVENTS:
+        rec["transcript_path"] = data.get("transcript_path")
     return {k: v for k, v in rec.items() if v not in (None, "")}
 
 

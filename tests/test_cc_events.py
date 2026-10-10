@@ -132,6 +132,13 @@ class BuildRecordTest(unittest.TestCase):
         self.assertEqual(rec["file"], "gone.md")
         self.assertNotIn("lines", rec)
 
+    def test_turn_events_carry_the_transcript_path(self):
+        for event in ("SessionStart", "UserPromptSubmit", "Stop"):
+            rec = cc_events.build_record(self.base(event, transcript_path="C:/t/s1.jsonl"))
+            self.assertEqual(rec["transcript_path"], "C:/t/s1.jsonl", event)
+        rec = cc_events.build_record(self.base("PreToolUse", tool_name="Read", transcript_path="C:/t/s1.jsonl"))
+        self.assertNotIn("transcript_path", rec)
+
     def test_permission_denied_keeps_reason(self):
         rec = cc_events.build_record(self.base("PermissionDenied", tool_name="Bash",
                                                tool_input={"command": "git push"}, reason="[Push]"))
