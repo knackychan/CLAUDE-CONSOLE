@@ -140,6 +140,71 @@ class StateTest(unittest.TestCase):
                   ev("UserPromptSubmit", T0 + 4, sid="s3", prompt="fix the title"))
         self.assertEqual(self.row(T0 + 5, "s3")["title"], "fix the title")
 
+    def test_verdict_from_agent_and_main(self):
+        self.feed(ev("UserPromptSubmit", T0),
+                  ev("SubagentStart", T0 + 1, agent_id="v1", agent_type="verifier"),
+                  ev("SubagentStop", T0 + 5, agent_id="v1", verdict="FAIL", verdict_detail="test_calc.py:9 - 3 != 4"),
+                  ev("Stop", T0 + 6))
+        row = self.row(T0 + 7)
+        self.assertEqual((row["verdict"], row["verdict_detail"], row["agents"][0]["verdict"]),
+                         ("FAIL", "test_calc.py:9 - 3 != 4", "FAIL"))
+        self.feed(ev("UserPromptSubmit", T0 + 8), ev("Stop", T0 + 9, verdict="PASS"))
+        self.assertEqual((self.row(T0 + 10)["verdict"], self.row(T0 + 10)["verdict_detail"]), ("PASS", ""))
+
+    def test_escalate_and_handoff_runs(self):
+        self.feed(ev("run_started", T0, kind="run", model="sonnet", effort="low"),
+                  ev("run_ended", T0 + 5, subtype="success"),
+                  ev("run_started", T0 + 6, kind="escalate", escalated="sonnet/low -> sonnet/medium"),
+                  ev("run_ended", T0 + 9, subtype="success"))
+        row = self.row(T0 + 10)
+        self.assertEqual((row["escalated"], row["kind"]), ("sonnet/low -> sonnet/medium", "escalate"))
+        self.feed(ev("run_started", T0 + 11, kind="handoff"))
+        self.assertEqual((self.row(T0 + 12)["state"], self.row(T0 + 12)["handoff"]), ("running", True))
+        self.feed(ev("run_ended", T0 + 13, subtype="error_during_execution"))
+        self.assertEqual(self.row(T0 + 14)["state"], "idle")  # a failed handoff is not Done
+        self.feed(ev("run_started", T0 + 15, kind="handoff"), ev("run_ended", T0 + 16, subtype="success"))
+        self.assertEqual((self.row(T0 + 17)["state"], self.row(T0 + 17)["group"]), ("done", "done"))
+        self.feed(ev("run_started", T0 + 18, kind="continue"))
+        self.assertEqual(self.row(T0 + 19)["state"], "running")
+
+    def test_fork_of_a_vscode_session(self):
+        self.feed(ev("UserPromptSubmit", T0, sid="v", prompt="fix the updater"),
+                  ev("UserPromptSubmit", T0 + 1, sid="v"),
+                  ev("Stop", T0 + 2, sid="v", context_tokens=1000, entrypoint="claude-vscode"),
+                  ev("run_started", T0 + 3, sid="f", kind="handoff", forked_from="v", title="↳ fix the updater"),
+                  ev("UserPromptSubmit", T0 + 4, sid="f", prompt="/session-handoff"),
+                  ev("run_ended", T0 + 6, sid="f", subtype="success"))
+        parent, fork = self.row(T0 + 7, "v"), self.row(T0 + 7, "f")
+        self.assertEqual((parent["forks"], parent["state"], parent["source"]), (["f"], "done", "vscode"))
+        self.assertEqual((fork["forked_from"], fork["title"], fork["follow_ups"], fork["source"]),
+                         ("v", "↳ fix the updater", 2, "window"))
+        self.feed(ev("UserPromptSubmit", T0 + 8, sid="v"))  # Fred typed in VS Code again
+        self.assertEqual(self.row(T0 + 9, "v")["state"], "running")
+
+    def test_follow_up_hint(self):
+        self.feed(ev("UserPromptSubmit", T0), ev("Stop", T0 + 1), ev("UserPromptSubmit", T0 + 2), ev("Stop", T0 + 3))
+        self.assertEqual((self.row(T0 + 4)["follow_ups"], self.row(T0 + 4)["handoff_hint"]), (1, False))
+        self.feed(ev("UserPromptSubmit", T0 + 5), ev("Stop", T0 + 6))
+        self.assertEqual((self.row(T0 + 7)["follow_ups"], self.row(T0 + 7)["handoff_hint"]), (2, True))
+        self.feed(ev("Stop", T0, sid="big", context_tokens=400000))
+        self.assertTrue(self.row(T0 + 1, "big")["handoff_hint"])
+        self.assertFalse(self.row(T0 + 4000, "big")["handoff_hint"])  # Stale?: no hint
+
+    def test_timeline_turns_and_agents(self):
+        self.feed(ev("UserPromptSubmit", T0),
+                  ev("SubagentStart", T0 + 2, agent_id="a1", agent_type="Explore"),
+                  ev("SubagentStop", T0 + 6, agent_id="a1"),
+                  ev("Stop", T0 + 8),
+                  ev("UserPromptSubmit", T0 + 20),
+                  ev("PreToolUse", T0 + 21, agent_id="a2", agent_type="verifier", tool="Bash"))
+        t = self.state.timeline("s1", T0 + 30)
+        self.assertEqual((t["start"], t["end"]), (T0, T0 + 30))
+        self.assertEqual([lane["label"] for lane in t["lanes"]], ["main", "Explore", "verifier"])
+        self.assertEqual(t["lanes"][0]["spans"], [[T0, T0 + 8], [T0 + 20, T0 + 30]])
+        self.assertEqual(t["lanes"][1]["spans"], [[T0 + 2, T0 + 6]])
+        self.assertEqual(t["lanes"][2]["spans"], [[T0 + 21, T0 + 30]])
+        self.assertIsNone(self.state.timeline("nope", T0))
+
 
 if __name__ == "__main__":
     unittest.main()

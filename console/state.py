@@ -22,6 +22,7 @@ DONE = {"done", "stale"}
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SOURCES = {"claude-vscode": "vscode", "cli": "terminal", "claude-desktop": "desktop"}
 MAX_STEPS = 500
+MAX_TURNS = 200
 SHOW_FOR_S = 86400
 _PASTED = re.compile(r"</?pasted_content[^>]*>")
 _TAGGED = re.compile(r"<[A-Za-z]")  # an injected block the hook clipped before it closed: not a title
@@ -46,6 +47,7 @@ class Agent:
     steps: int = 0
     doing: str = ""
     done: bool = False
+    verdict: str = ""
 
 
 @dataclass
@@ -56,6 +58,7 @@ class Session:
     project: str = ""
     project_dir: str = ""
     cwd: str = ""
+    first_cwd: str = ""  # where the chat started: Claude Code files it under this folder (resume / fork)
     title: str = ""
     source: str = ""
     model: str = ""
@@ -82,6 +85,15 @@ class Session:
     prep: str = ""
     start_commit: str = ""
     denials: list = field(default_factory=list)  # a run that still succeeded: shown as a note
+    verdict: str = ""          # PASS / FAIL from the last VERDICT: line (verifier or main)
+    verdict_detail: str = ""
+    escalated: str = ""        # "sonnet/medium -> sonnet/high" once Escalate ran (once per task)
+    kind: str = ""             # the last window run: run, continue, verify, handoff, escalate
+    handoff: bool = False      # a Handoff run is going
+    handed_off: bool = False   # a Handoff run succeeded: Done
+    forked_from: str = ""
+    forks: list = field(default_factory=list)
+    turns: list = field(default_factory=list)  # [start, end or None] per turn, for the Timeline
 
 
 class State:
@@ -101,6 +113,8 @@ class State:
         for key in ("project", "project_dir", "cwd"):
             if rec.get(key):
                 setattr(s, key, norm_dir(rec[key]) if key == "project_dir" else rec[key])
+        if rec.get("cwd") and not s.first_cwd:
+            s.first_cwd = rec["cwd"]
         agent = None
         aid = rec.get("agent_id")
         if aid:
@@ -128,9 +142,11 @@ class State:
                 s.title = text
             s.denied = s.failed = None
             s.stop_question = ""
-            s.interrupted = s.stopped = False
+            s.interrupted = s.stopped = s.handed_off = False
+            self._turn_open(s, ts)
         elif event == "PreToolUse":
             s.in_turn = True
+            self._turn_open(s, ts)
             tool, what = rec.get("tool", ""), rec.get("what", "")
             self._step(s, ts, aid, tool, what)
             doing = f"{tool} {what}".strip()
@@ -146,6 +162,9 @@ class State:
             agent.doing = ""
             agent.model = rec.get("model") or agent.model
             agent.tokens = rec.get("context_tokens") or agent.tokens
+            if rec.get("verdict"):
+                agent.verdict = rec["verdict"]
+                self._verdict(s, rec)
         elif event == "PermissionDenied":
             s.denied = {"tool": rec.get("tool", ""), "what": rec.get("what", ""),
                         "reason": rec.get("reason", ""), "ts": ts}
@@ -153,6 +172,7 @@ class State:
         elif event == "Stop":
             s.in_turn = False
             s.doing = ""
+            self._turn_close(s, ts)
             s.model = rec.get("model") or s.model
             if rec.get("context_tokens") is not None:
                 s.ctx_tokens = rec["context_tokens"]
@@ -161,22 +181,42 @@ class State:
             if rec.get("route"):
                 s.route = rec["route"]
             s.stop_question = rec.get("stop_question", "")
+            if rec.get("verdict"):
+                self._verdict(s, rec)
         elif event == "StopFailure":
             s.in_turn = False
+            self._turn_close(s, ts)
             s.failed = {"error": rec.get("error", "unknown"), "details": rec.get("error_details", "")}
         elif event == "PostCompact":
             s.ctx_tokens = None
             s.compactions += 1
         elif event == "SessionEnd":
             s.in_turn = False
+            self._turn_close(s, ts)
             s.ended = not s.window  # a window run's process ends after every turn; it can resume
         elif event == "run_started":
             s.window, s.run_live, s.source = True, True, "window"
             s.in_turn, s.ended = True, False
-            s.interrupted = s.stopped = False
+            self._turn_open(s, ts)
+            s.interrupted = s.stopped = s.handed_off = False
             s.denied = s.failed = None
             s.denials = []
             s.stop_question = ""
+            s.kind = rec.get("kind") or "run"
+            s.handoff = s.kind == "handoff"
+            if rec.get("escalated"):
+                s.escalated = rec["escalated"]
+            parent = self.sessions.get(rec.get("forked_from") or "")
+            if parent and parent is not s:
+                s.forked_from = parent.id
+                if s.id not in parent.forks:
+                    parent.forks.append(s.id)
+                if not s.prompts:  # the copy carries the parent's context: same follow-up count
+                    s.prompts, s.ctx_tokens = parent.prompts, parent.ctx_tokens
+                if s.escalated:
+                    parent.escalated = s.escalated  # once per task, whichever copy escalated
+                elif parent.escalated:
+                    s.escalated = parent.escalated
             if rec.get("title") and not s.title:
                 s.title = redact.clip(rec["title"], 60)
             if rec.get("route"):
@@ -190,9 +230,16 @@ class State:
         elif event == "run_ended":
             s.window, s.run_live, s.in_turn = True, False, False
             s.doing = ""
+            self._turn_close(s, ts)
             s.cost += float(rec.get("cost") or 0)
             s.stopped = bool(rec.get("stopped"))
             s.interrupted = bool(rec.get("interrupted"))
+            if s.handoff and rec.get("subtype") == "success":
+                s.handed_off = True
+                parent = self.sessions.get(s.forked_from)
+                if parent:
+                    parent.handed_off = True
+            s.handoff = False
             if rec.get("denials") and rec.get("subtype") == "success":
                 s.denials = [{"tool": d.get("tool", ""), "what": d.get("what", "")} for d in rec["denials"]]
             elif rec.get("denials") and not s.denied:
@@ -205,9 +252,22 @@ class State:
         if len(s.steps) > MAX_STEPS:
             del s.steps[: len(s.steps) - MAX_STEPS]
 
+    def _verdict(self, s, rec):
+        s.verdict, s.verdict_detail = rec["verdict"], rec.get("verdict_detail", "")
+
+    def _turn_open(self, s, ts):
+        if not s.turns or s.turns[-1][1] is not None:
+            s.turns.append([ts, None])
+            if len(s.turns) > MAX_TURNS:
+                del s.turns[0]
+
+    def _turn_close(self, s, ts):
+        if s.turns and s.turns[-1][1] is None:
+            s.turns[-1][1] = ts
+
     # -- snapshot -----------------------------------------------------------------
     def state_of(self, s: Session, now: float) -> str:
-        if s.ended:
+        if s.ended or s.handed_off:
             return "done"
         if s.failed:
             return "failed"
@@ -268,6 +328,7 @@ class State:
             else:
                 group = "working"
             symbol, text, state_tone = STATES[state]
+            follow_ups = max(0, s.prompts - 1)
             rows.append({
                 "id": s.id, "project": s.project, "project_dir": s.project_dir,
                 "title": s.title or f"(prompt not seen) {s.id[:8]}", "source": s.source or "?",
@@ -283,6 +344,11 @@ class State:
                 "cost": round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,
                 "start_commit": s.start_commit, "cwd": s.cwd,
                 "started_ts": s.started_ts, "last_ts": s.last_ts,
+                "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
+                "kind": s.kind, "handoff": s.handoff, "forked_from": s.forked_from, "forks": list(s.forks),
+                "follow_ups": follow_ups,
+                "handoff_hint": state not in DONE and (
+                    tone == "red" or follow_ups >= self.cfg["handoff_after_followups"]),
                 "agents": [self._agent_row(a, s) for a in
                            sorted(s.agents.values(), key=lambda a: a.started_ts)],
             })
@@ -302,7 +368,7 @@ class State:
             symbol, text, tone = "…", "No stop seen", "info"
         fill, ctx_tone = self.gauge(a.tokens or None)
         return {"id": a.id, "type": a.type or "agent", "model": a.model, "effort": a.effort,
-                "tokens": a.tokens, "steps": a.steps, "doing": a.doing,
+                "tokens": a.tokens, "steps": a.steps, "doing": a.doing, "verdict": a.verdict,
                 "symbol": symbol, "text": text, "tone": tone,
                 "ctx_fill": None if fill is None else round(fill, 3), "ctx_tone": ctx_tone}
 
@@ -313,3 +379,19 @@ class State:
         types = {a.id: a.type for a in s.agents.values()}
         return [dict(step, agent_type=types.get(step["agent"], "") if step["agent"] else "main")
                 for step in s.steps[-limit:]]
+
+    def timeline(self, session_id: str, now: float):
+        """Bars over time (D7 C): the main thread's turns, then one bar per agent run."""
+        s = self.sessions.get(session_id)
+        if not s:
+            return None
+        live = s.in_turn or s.run_live
+        end = now if live else s.last_ts
+        lanes = [{"label": "main", "tone": "info", "verdict": "",
+                  "spans": [[a, end if b is None else b] for a, b in s.turns]}]
+        for a in sorted(s.agents.values(), key=lambda x: x.started_ts):
+            stop = a.last_ts if a.done or not live else end
+            lanes.append({"label": a.type or "agent", "tone": "success" if a.done else "info",
+                          "verdict": a.verdict, "spans": [[a.started_ts, stop]]})
+        start = min([s.started_ts] + [sp[0] for lane in lanes for sp in lane["spans"]])
+        return {"start": start, "end": max(end, start), "lanes": lanes}

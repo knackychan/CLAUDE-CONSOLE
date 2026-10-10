@@ -19,6 +19,7 @@ DEFAULTS = {
     "prep_timeout_s": 180,
     "default_model": "sonnet",
     "default_effort": "medium",
+    "handoff_after_followups": 2,
 }
 
 
