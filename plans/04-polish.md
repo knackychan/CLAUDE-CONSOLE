@@ -58,12 +58,12 @@ Dependencies point one way: `state -> claude_cli, redact` (new: `claude_cli.mode
 
 ## TODO
 
-- [ ] Task 1: hook logs loaded rules files
-- [ ] Task 2: state (rules, delegate, chat handoff, model mix)
-- [ ] Task 3: window
-- [ ] Task 4: dotclaude skills and agent
-- [ ] Task 5: Fred: hooks, skill moves, live check
-- [ ] Task 6: close the phase
+- [x] Task 1: hook logs loaded rules files
+- [x] Task 2: state (rules, delegate, chat handoff, model mix)
+- [x] Task 3: window
+- [x] Task 4: dotclaude skills and agent
+- [x] Task 5: Fred: hooks, skill moves, live check
+- [x] Task 6: close the phase
 
 ---
 
@@ -1891,7 +1891,7 @@ Expected: `ok`. Then `py -m unittest discover -s tests` -> `Ran 84 tests ... OK`
 Save this as `$TEMP/cc-smoke4.py` (outside the repo). It logs two VS Code sessions (`v1`: CONTENT MANAGER-sized rules, 12 main-chat reads, a haiku Explore agent, opus; `v2`: Claude ran `session-handoff` in the chat) and serves on port 8774:
 
 ```python
-"""Phase 4 browser check: the service with the fake claude and three logged VS Code sessions."""
+"""Phase 4 browser check: the service with the fake claude and two logged VS Code sessions."""
 import os
 import subprocess
 import sys
@@ -2291,17 +2291,18 @@ Check: a new VS Code chat in CLAUDE CONSOLE: `/route-model rename the variable s
 
 ## DONE WHEN (whole plan)
 
-- [ ] `py -m unittest discover -s tests` -> 87 tests OK.
-- [ ] A session whose rules are over 200 lines in one file or 16 KB in all shows a `rules` badge and the file list.
-- [ ] A turn with 10 or more main-chat reads shows `delegate?`.
-- [ ] The strip shows today's model mix and the window runs with their cost.
-- [ ] A `/session-handoff` run inside a VS Code chat makes it Done.
-- [ ] `route-model`, `session-handoff` and `verifier` work from `~/.claude` in every project; `route-model` reads and writes `~/.claude/console/routing-misses.md`.
-- [ ] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code or by Claude.
+- [x] `py -m unittest discover -s tests` -> 87 tests OK.
+- [x] A session whose rules are over 200 lines in one file or 16 KB in all shows a `rules` badge and the file list.
+- [x] A turn with 10 or more main-chat reads shows `delegate?`.
+- [x] The strip shows today's model mix and the window runs with their cost.
+- [x] A `/session-handoff` run inside a VS Code chat makes it Done.
+- [x] `route-model`, `session-handoff` and `verifier` work from `~/.claude` in every project; `route-model` reads and writes `~/.claude/console/routing-misses.md` (live: the read; no chat escalated, so the write and the `verifier` run from `~/.claude` after the Verify text fix are not seen live yet).
+- [x] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code or by Claude.
 
 ## History
 
 - 2026-10-10 - Plan written. Fred decided: rules limits 200 lines per file or 16 KB in all, measured with the `InstructionsLoaded` hook and shown as a row badge plus a detail list; "should delegate" at 10 main-chat reads in a turn; the model mix counts sessions and agent runs per model plus window runs and cost, in the bottom strip; a handoff inside a chat makes it Done; the three files go through `dotclaude/` and Fred copies them (handoff, then verifier, then route-model); route-model writes chat misses to `~/.claude/console/routing-misses.md`; CONTENT MANAGER keeps its verifier as an override. All code was run in a scratch clone first: 87 tests OK; the tasks were replayed in a fresh clone (each task's new tests fail as written, then pass: 80, 84, 84, 87); the window checked in a browser with the fake claude (badges, notes, strip, a window run in the mix, no console errors). CLI facts from real `claude -p` calls on 2.1.296 (InstructionsLoaded fields, a typed `/skill` logs only UserPromptSubmit, the generic verifier's FAIL verdict, route-model's Route line and misses read, session-handoff's "nothing to hand off"; about $0.05 in all).
+- 2026-10-10 - Tasks 1-4 placed exactly as written (80, 84, 84, 87 tests; the 4 browser checks passed with the fake claude). Task 5 by Fred: hooks re-installed, the three files copied to `~/.claude`, CONTENT MANAGER's two skill copies removed; live: `rules 21.0 KB` on a new CONTENT MANAGER chat (149 lines, 20,791 bytes + 229), `delegate?` after 27 main-chat reads, window Handoff and a typed `/session-handoff` both made the session Done, Verify gave a PASS badge, `/route-model` set the row's route and read the console misses file, no error-log lines. Differed: Fred first copied the old CONTENT MANAGER skill versions (replaced by the generic ones); Verify ran the tests itself instead of the `~/.claude` verifier, and the strip was below the scrolling page: both fixed in one commit (87 tests, see Troubleshooting).
 
 ## Troubleshooting
 
@@ -2317,3 +2318,12 @@ Check: a new VS Code chat in CLAUDE CONSOLE: `/route-model rename the variable s
 - **Issue:** a row turned `✓ Done` after Claude ran `session-handoff` on its own.
   **Cause:** the skill is model-invocable; a main-thread `Skill session-handoff` step counts as a handoff (fixed decision 5).
   **Fix:** type the next prompt in that chat: it reopens.
+- **Issue:** Verify ran the tests itself and showed no `verifier` agent row, although `~/.claude/agents/verifier.md` existed (Task 5 Step 4).
+  **Cause:** `levers.VERIFY_TEXT` said "If this project has a `verifier` agent"; Claude looked only in the repo's `.claude/agents`.
+  **Fix:** the text now names both places and the Agent tool (`the project's .claude/agents or ~/.claude/agents`); `tests/test_server.py` checks it (still 87 tests).
+- **Issue:** the model-mix strip was not visible in the window.
+  **Cause:** `body` had `min-height: 100vh`, so the whole page scrolled and the strip sat under the last row.
+  **Fix:** `body { height: 100vh; }` and `main { min-height: 0; }` in `web/style.css`: only the list scrolls, the prompt box and strip stay at the bottom.
+- **Issue:** `~/.claude/skills` held the CONTENT MANAGER versions (Content Manager paths, misses in auto memory) after the move.
+  **Cause:** they were copied from CONTENT MANAGER before Task 4 had created `dotclaude/`.
+  **Fix:** copy the three `dotclaude/` files over them (Task 5 Steps 3-5 commands).
