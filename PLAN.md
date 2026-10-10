@@ -13,7 +13,7 @@ ends with working, tested software.
 |---|---|---|
 | 1 | [plans/01-watch.md](plans/01-watch.md) - hooks, service, tree, gauge, Steps, Needs you, Quiet / Stall?, 2 writers | done 2026-10-10 |
 | 2 | [plans/02-run.md](plans/02-run.md) - prompt box, Prep card, Run / Run raw, Chat, Stop, Open in terminal, crash recovery, STOP answers | done 2026-10-10 |
-| 3 | Levers - Continue, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | to write |
+| 3 | [plans/03-levers.md](plans/03-levers.md) - Continue, Verify, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | written |
 | 4 | Polish - rules-size warning, should-delegate flag, model-mix strip, move skills to ~/.claude | to write |
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
 
@@ -49,6 +49,23 @@ ends with working, tested software.
 - **Allow runs here** (Fred, after tasks 1-6): the window can add a folder to `config.json`
   `"projects"` with one click, only for a folder a Claude Code session already ran in (plan 02 Task 6b).
 
+## Changes to the design made while planning phase 3
+
+- **`haiku` stays an alias.** On CLI 2.1.296 it resolves to `claude-haiku-5-5` (verified); the Haiku
+  4.5 of phase 2 came from CLI 2.1.288 (Haiku 5.5 needs 2.1.293+). No full model ids.
+- **VS Code / terminal chats are forked, never resumed in place** (Fred): `--resume <id>
+  --fork-session --session-id <new>` gives a window copy with the old context; the original chat is
+  not touched. Window runs keep resuming their own id.
+- **Verify is a button** (Fred) that asks for a `VERDICT: PASS|FAIL` line; the hook reads verdicts
+  from `last_assistant_message` on Stop and SubagentStop, so the service writes no `verdict` line.
+- **Escalate ladder** (Fred): effort +1 up to high, then the next model at the same effort; once per
+  task; `escalated` is a field of `run_started`, not its own event line.
+- **routing-misses.md lives in `~/.claude/console/`** (CLAUDE.md data rule), one line per Escalate
+  tagged with the project; Prep reads the project's lines. The `route-model` skill keeps its own file
+  until phase 4 moves it.
+- **Handoff only where the `session-handoff` skill is installed** (Fred): CONTENT MANAGER now,
+  everywhere after phase 4.
+
 ## History
 
 - 2026-10-10 - Master plan and sub-plan 01 written. All phase 1 code was run once in a scratch folder
@@ -59,3 +76,4 @@ ends with working, tested software.
 - 2026-10-10 - Phase 1 done: 37 tests OK; live check passed (an Explore agent row appeared under its session while running, then `✓ Done` with model, steps and tokens; no hook-errors.log). Differed from 01: Fred asked for agent rows to show their state text and a green context bar (`State.gauge(tokens)` now serves sessions and agents; one assertion added, still 37 tests).
 - 2026-10-10 - Sub-plan 02 written (zero-decision, final code): verified in a scratch clone (60 tests OK, real Prep through the service, window flows in a browser with a fake claude); the plan re-applied to a fresh clone reproduces that code. Claude could not start a live auto-mode run (its classifier refuses): Task 7 live check is Fred's.
 - 2026-10-10 - Phase 2 done: 63 tests OK; live check passed (Prep card, Run with Steps and Chat, Stop, Open in terminal, a run survived closing the window, no error-log lines). Differed from 02: `Allow runs in <name>` button (Task 6b), port 47770, a run that succeeded despite auto-mode denials stays Idle with a note, injected prompt blocks no longer become titles, Open in terminal keeps the run's model and effort. Open: `--model haiku` gives Haiku 4.5 on CLI 2.1.288.
+- 2026-10-10 - Sub-plan 03 written (zero-decision, final code): Fred decided fork for VS Code chats, Handoff where the skill is, a Verify button, ladder "effort to high, then model", keep the `haiku` alias (verified Haiku 5.5 on CLI 2.1.296). Verified in a scratch clone: 78 tests OK, tasks replayed in a fresh clone (64, 69, 74, 75, 78), window flows in a browser with the fake claude, fork and `/skill` over stream-json checked with real `claude -p` calls. Task 7 live check is Fred's (Claude cannot start auto-mode runs).
