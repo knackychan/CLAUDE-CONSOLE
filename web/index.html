@@ -7,25 +7,34 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header class="row hd">
-    <span id="back" class="link" hidden>&larr;</span>
-    <span class="name">Claude Console</span>
-    <select id="project" class="m"><option value="">All projects</option></select>
-    <span id="counts" class="m"></span>
-  </header>
-  <main id="home"></main>
-  <main id="prep" hidden></main>
-  <main id="detail" hidden>
-    <div id="d-head"></div>
-    <div id="d-actions"></div>
-    <div id="d-tabs" class="row m tabs"></div>
-    <div id="d-body"></div>
-  </main>
-  <footer id="composer">
-    <textarea id="prompt" class="m" rows="3" spellcheck="false"></textarea>
-    <div id="msg" class="m"></div>
-  </footer>
-  <footer id="strip" class="strip m"></footer>
+  <div id="folded" class="peek" hidden>
+    <div id="pill" class="pill"></div>
+    <div id="peek"></div>
+  </div>
+  <div id="open" class="win">
+    <nav id="rail" class="rail" aria-label="Sessions">
+      <div class="drag pywebview-drag-region" title="Drag to move">&#8943;</div>
+      <button class="rb" data-go="overview" title="Overview (Esc)" aria-label="Overview">&#9638;</button>
+      <div class="sep"></div>
+      <div id="chips" class="chips"></div>
+      <div class="sep"></div>
+      <button class="rb" data-go="new" title="New task (Ctrl+N)" aria-label="New task">&#65291;</button>
+      <div class="grow pywebview-drag-region" title="Drag to move"></div>
+      <div id="total" class="total"></div>
+      <button id="ontop" class="rb on native-only" data-go="ontop" title="Always on top (on)" aria-label="Always on top">&#8868;</button>
+      <button class="rb" data-go="fold" title="Fold to pill" aria-label="Fold to pill">&#8963;</button>
+    </nav>
+    <section class="pane">
+      <div id="banner" class="banner" hidden><b>OFFLINE</b> The service stopped answering. Runs keep going; the window reconnects by itself.</div>
+      <div class="ptop">
+        <span id="crumb" class="crumb m pywebview-drag-region"></span>
+        <button class="rb native-only" data-go="minimize" aria-label="Minimize">&ndash;</button>
+        <button class="rb x native-only" data-go="close" aria-label="Close" title="Close window (runs keep going)">&#10005;</button>
+      </div>
+      <div id="scroll" class="scroll"></div>
+      <div id="bar"></div>
+    </section>
+  </div>
   <script src="/app.js"></script>
 </body>
 </html>
