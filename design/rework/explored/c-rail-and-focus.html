@@ -1,0 +1,363 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; }</style>
+<title>Console C: Rail and Focus</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: proposal page = stage (borderless window: session rail on the left, focus pane on the right) + notes; dark first, stacks on phones. */
+:root {
+  --page: #0c0e13; --win: #151821; --rail: #10131a; --raise: #1d212c; --ink: #e6e8ef; --mut: #8a90a2; --line: #262b38;
+  --acc: #a3b1ff; --amber: #f2b552; --red: #ff7b6e; --green: #5fd09a; --track: #2a3040;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 2px 6px rgb(0 0 0 / 45%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --disp: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #e4e6ec; --win: #fbfbfd; --rail: #eff0f5; --raise: #f0f1f6; --ink: #171a24; --mut: #626a7d; --line: #dcdfe8;
+  --acc: #3f51c9; --amber: #a35f00; --red: #c0352b; --green: #1a7d4c; --track: #e1e4ec;
+  --shadow: 0 24px 60px rgb(20 24 40 / 22%), 0 2px 6px rgb(20 24 40 / 12%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #e4e6ec; --win: #fbfbfd; --rail: #eff0f5; --raise: #f0f1f6; --ink: #171a24; --mut: #626a7d; --line: #dcdfe8;
+  --acc: #3f51c9; --amber: #a35f00; --red: #c0352b; --green: #1a7d4c; --track: #e1e4ec;
+  --shadow: 0 24px 60px rgb(20 24 40 / 22%), 0 2px 6px rgb(20 24 40 / 12%); color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 28px 16px 48px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 28px; }
+header h1 { font: 600 28px/1.15 var(--disp); margin: 0 0 6px; letter-spacing: -.015em; text-wrap: balance; }
+header p { margin: 0; color: var(--mut); max-width: 62ch; }
+.eyebrow { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--acc); }
+.grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 36px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.views { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; }
+.views button { font: 500 12px var(--ui); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 4px 11px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--acc); background: color-mix(in srgb, var(--acc) 12%, transparent); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.cap { font-size: 12px; color: var(--mut); max-width: 400px; margin: 12px 0 0; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* window */
+.win { width: min(400px, 100%); height: 640px; background: var(--win); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); display: grid; grid-template-columns: 58px minmax(0, 1fr); overflow: hidden; }
+.win.slim { width: 64px; grid-template-columns: 1fr; }
+.win.slim .pane { display: none; }
+.rail { background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0; user-select: none; }
+.rail .drag { width: 28px; height: 14px; color: var(--mut); text-align: center; line-height: 10px; letter-spacing: -1px; cursor: grab; font-size: 12px; }
+.rail .sep { width: 26px; height: 1px; background: var(--line); margin: 2px 0; }
+.rail .grow { flex: 1; }
+.ses { position: relative; width: 44px; display: grid; justify-items: center; gap: 1px; cursor: pointer; border-radius: 8px; padding: 3px 0 2px; border: 0; background: transparent; color: var(--ink); font: inherit; }
+.ses:hover { background: var(--raise); }
+.ses.sel { background: var(--raise); box-shadow: inset 2px 0 var(--acc); }
+.ses svg { width: 36px; height: 36px; display: block; }
+.ses .g { position: absolute; top: 3px; left: 4px; width: 36px; height: 36px; display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+.ses .lab { font: 500 9px var(--mono); color: var(--mut); letter-spacing: .02em; max-width: 44px; overflow: hidden; white-space: nowrap; text-overflow: clip; }
+.ses .bd { position: absolute; top: 1px; right: 2px; min-width: 14px; height: 14px; border-radius: 7px; background: var(--amber); color: #1b1300; font: 700 9px/14px var(--ui); text-align: center; padding: 0 3px; box-shadow: 0 0 0 2px var(--rail); }
+.ses .bd.r { background: var(--red); color: #1f0603; }
+.rb { width: 34px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); }
+.rb:hover { background: var(--raise); color: var(--ink); }
+.rb.on { color: var(--acc); }
+.rb.x:hover { background: #c42b1c; color: #fff; }
+.total { font: 600 11px var(--mono); color: var(--ink); text-align: center; line-height: 1.2; }
+.total small { display: block; font-weight: 400; color: var(--mut); font-size: 9px; }
+
+.pane { display: flex; flex-direction: column; min-width: 0; }
+.ptop { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 0 0 12px; border-bottom: 1px solid var(--line); cursor: grab; }
+.ptop .crumb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mut); }
+.ptop .rb { width: 34px; height: 34px; border-radius: 0; }
+.scroll { flex: 1; overflow-y: auto; padding: 12px; display: grid; gap: 14px; align-content: start; }
+.state { font: 600 12px var(--ui); display: inline-flex; gap: 6px; align-items: center; }
+.state.blue { color: var(--acc); } .state.amber { color: var(--amber); } .state.red { color: var(--red); } .state.green { color: var(--green); }
+h2 { font: 600 17px/1.25 var(--disp); margin: 2px 0 2px; text-wrap: balance; letter-spacing: -.01em; }
+.meta { color: var(--mut); }
+.now { background: var(--raise); border-radius: 8px; padding: 8px 10px; display: grid; gap: 2px; }
+.now small { font-size: 11px; color: var(--mut); text-transform: uppercase; letter-spacing: .07em; }
+.now b { font: 500 13px var(--mono); overflow-wrap: anywhere; }
+.figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.figs div { display: grid; }
+.figs small { font-size: 11px; color: var(--mut); }
+.figs b { font: 500 18px var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.figs i { font: 11px var(--mono); color: var(--mut); font-style: normal; }
+.ctxbar { display: grid; gap: 4px; }
+.ctxbar .lbl { display: flex; justify-content: space-between; color: var(--mut); }
+.ctxbar .tr { position: relative; height: 8px; border-radius: 4px; background: var(--track); }
+.ctxbar .tr i { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--green); }
+.ctxbar .tr i.y { background: var(--amber); } .ctxbar .tr i.r { background: var(--red); }
+.ctxbar .tr b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--mut); }
+.ctxbar .ticks { position: relative; height: 14px; color: var(--mut); font: 10px var(--mono); }
+.ctxbar .ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.path { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.path span { display: grid; justify-items: start; gap: 3px; font-size: 11px; color: var(--mut); }
+.path span::before { content: ""; width: 100%; height: 3px; border-radius: 2px; background: var(--track); }
+.path .ok { color: var(--green); } .path .ok::before { background: var(--green); }
+.path .cur { color: var(--ink); font-weight: 600; } .path .cur::before { background: var(--acc); }
+.lanes { display: grid; gap: 5px; }
+.lane { display: grid; grid-template-columns: 70px minmax(0, 1fr) 46px; gap: 8px; align-items: center; }
+.lane .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mut); }
+.lane .tk { position: relative; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--track) 55%, transparent); }
+.lane .tk i { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--acc); opacity: .85; }
+.lane .tk i.g { background: var(--green); } .lane .tk i.a { background: var(--amber); } .lane .tk i.r { background: var(--red); }
+.lane .tk i.dim { opacity: .35; }
+.lane .c { text-align: right; }
+.lane.hi .nm { color: var(--amber); }
+.axis { display: grid; grid-template-columns: 70px minmax(0, 1fr) 46px; gap: 8px; color: var(--mut); font: 10px var(--mono); }
+.axis span:nth-child(2) { display: flex; justify-content: space-between; }
+.sh { font-size: 11px; color: var(--mut); text-transform: uppercase; letter-spacing: .08em; display: flex; justify-content: space-between; }
+.sh a { color: var(--acc); text-transform: none; letter-spacing: 0; cursor: pointer; }
+.feed { display: grid; gap: 2px; color: var(--mut); }
+.feed div { display: grid; grid-template-columns: 40px 64px minmax(0, 1fr); gap: 8px; }
+.feed div span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.levers { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+.lr { display: flex; gap: 6px; flex-wrap: wrap; }
+.lr input, .ask textarea { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 7px; padding: 5px 11px; cursor: pointer; white-space: nowrap; min-height: 30px; }
+.btn:hover { border-color: var(--acc); }
+.btn.go { background: var(--acc); border-color: var(--acc); color: var(--win); }
+.btn.stop { color: var(--red); }
+.ask { border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); background: color-mix(in srgb, var(--amber) 8%, transparent); border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+.ask .qq { font: 500 15px/1.4 var(--disp); }
+.ask textarea { width: 100%; resize: none; }
+.tot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.tot div { display: grid; } .tot small { font-size: 11px; color: var(--mut); } .tot b { font: 500 16px var(--mono); }
+.list { display: grid; gap: 1px; }
+.list button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 5px 6px; color: var(--ink); font: 13px var(--ui); cursor: pointer; }
+.list button:hover { background: var(--raise); }
+.list .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* notes */
+.notes { display: grid; gap: 22px; }
+.notes section { display: grid; gap: 6px; }
+.notes h3 { font-size: 12px; margin: 0; letter-spacing: .08em; text-transform: uppercase; color: var(--mut); }
+.notes p, .notes li { margin: 0; max-width: 64ch; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+.spec dt { color: var(--mut); } .spec dd { margin: 0; }
+code { font: 12px var(--mono); background: var(--raise); border-radius: 4px; padding: 1px 4px; }
+.flag { color: var(--amber); font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Direction C of 3 &middot; follow one task</div>
+    <h1>Rail and Focus</h1>
+    <p>Every session is a ring on a slim rail: the ring fills with context, the centre shows the state, a badge says it needs you. Pick one and the focus pane shows that task live: what it is doing now, spend and burn rate, context against the hand-off marks, and its lanes over time. Fold the pane and the rail alone is a 64 px strip on the screen edge.</p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="views" role="group" aria-label="Mock view">
+        <button data-v="focus" aria-pressed="true">Focus: running</button>
+        <button data-v="ask" aria-pressed="false">Focus: asks you</button>
+        <button data-v="all" aria-pressed="false">Overview</button>
+        <button data-v="slim" aria-pressed="false">Rail only</button>
+      </div>
+
+      <div class="win" id="win">
+        <nav class="rail" aria-label="Sessions">
+          <div class="drag" title="Drag to move">⋯</div>
+          <button class="rb" data-go="all" title="Overview of all sessions" aria-label="Overview">▦</button>
+          <div class="sep"></div>
+          <button class="ses" data-go="ask" data-ring="0.61,y" title="Asks you: Fix updater retry on 429"><svg></svg><span class="g" style="color:var(--amber)">?</span><span class="bd">1</span><span class="lab">CM</span></button>
+          <button class="ses" data-go="focus" data-ring="0.18,g" title="Blocked: Add transcript search endpoint"><svg></svg><span class="g" style="color:var(--red)">■</span><span class="bd r">!</span><span class="lab">BRAIN</span></button>
+          <button class="ses sel" data-go="focus" data-ring="0.32,g" title="Running: Redesign proposal for the window"><svg></svg><span class="g" style="color:var(--acc)">▶</span><span class="lab">CC</span></button>
+          <button class="ses" data-go="focus" data-ring="1,r" title="Running, hand off: Batch prepare launch split"><svg></svg><span class="g" style="color:var(--acc)">▶</span><span class="lab">FPA</span></button>
+          <button class="ses" data-go="focus" data-ring="0.24,g" title="Idle: Phase 3 levers live check"><svg></svg><span class="g" style="color:var(--mut)">○</span><span class="lab">CC</span></button>
+          <div class="sep"></div>
+          <button class="rb" title="New task (Ctrl+N)" aria-label="New task">＋</button>
+          <div class="grow"></div>
+          <div class="total">$8.73<small>today</small></div>
+          <button class="rb on" title="Always on top (on)" aria-label="Always on top">⊤</button>
+          <button class="rb" data-go="fold" title="Fold to rail / open pane" aria-label="Fold">⇤</button>
+        </nav>
+
+        <section class="pane">
+          <!-- FOCUS -->
+          <div class="pane" data-view="focus" style="flex:1">
+            <div class="ptop"><span class="crumb m">CLAUDE CONSOLE · vscode · opus/high</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close" title="Close window (runs keep going)">✕</button></div>
+            <div class="scroll">
+              <div>
+                <span class="state blue">▶ Running · 6m 40s</span>
+                <h2>Redesign proposal for the window</h2>
+              </div>
+              <div class="now"><small>Doing now · general-purpose agent</small><b>Read web/app.js</b></div>
+              <div class="figs">
+                <div><small>Spent</small><b>~$1.92</b><i>$0.29 / min</i></div>
+                <div><small>Steps</small><b>41</b><i>8 / min</i></div>
+                <div><small>Agents</small><b>1 / 2</b><i>done / started</i></div>
+              </div>
+              <div class="ctxbar">
+                <div class="lbl m"><span>Context 96K</span><span>hand off at 300K</span></div>
+                <div class="tr"><i style="width:32%"></i><b style="left:50%"></b><b style="left:calc(100% - 2px)"></b></div>
+                <div class="ticks"><span style="left:50%">150K soon</span><span style="left:calc(100% - 14px)">300K</span></div>
+              </div>
+              <div class="path" aria-label="Task progress"><span class="ok">Prep</span><span class="cur">Run</span><span>Verify</span><span>Hand off</span></div>
+              <div class="lanes m">
+                <div class="sh"><span>Last 10 minutes</span><a>Timeline ›</a></div>
+                <div class="lane"><span class="nm">main</span><span class="tk"><i style="left:4%;width:22%"></i><i style="left:30%;width:6%"></i><i style="left:88%;width:12%"></i></span><span class="c">$1.10</span></div>
+                <div class="lane"><span class="nm">Explore</span><span class="tk"><i class="g" style="left:34%;width:28%"></i></span><span class="c">$0.31</span></div>
+                <div class="lane"><span class="nm">gen-purpose</span><span class="tk"><i style="left:60%;width:40%"></i></span><span class="c">$0.51</span></div>
+                <div class="axis"><span></span><span><span>18:58</span><span>19:04</span></span><span></span></div>
+              </div>
+              <div class="feed m">
+                <div class="sh" style="font-family:var(--ui)"><span>Steps</span><a>All 41 ›</a></div>
+                <div><span>19:04</span><span>gen-purp</span><span>Read web/app.js</span></div>
+                <div><span>19:04</span><span>gen-purp</span><span>Read web/style.css</span></div>
+                <div><span>19:03</span><span>Explore</span><span>✓ done · 12 steps · 38K</span></div>
+              </div>
+            </div>
+            <div class="levers">
+              <div class="lr"><input id="c1" aria-label="Follow-up" placeholder="Follow-up (runs in a window copy)"><button class="btn go">Continue</button></div>
+              <div class="lr"><button class="btn">Verify</button><button class="btn">Hand off</button><button class="btn">Terminal</button><button class="btn stop" id="stopbtn">Stop</button></div>
+            </div>
+          </div>
+
+          <!-- ASK -->
+          <div class="pane" data-view="ask" style="flex:1" hidden>
+            <div class="ptop"><span class="crumb m">CONTENT MANAGER · vscode · sonnet/med</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button></div>
+            <div class="scroll">
+              <div>
+                <span class="state amber">? Asks you · waiting 14m</span>
+                <h2>Fix updater retry on 429</h2>
+              </div>
+              <div class="ask">
+                <div class="qq">Keep the old cache key, or migrate entries to the v2 key?</div>
+                <textarea id="c2" rows="3" aria-label="Answer" placeholder="Your answer. It runs in a window copy of this chat; the VS Code chat stays as it is."></textarea>
+                <div class="lr"><button class="btn go">Send answer</button><button class="btn">Open in terminal</button></div>
+              </div>
+              <div class="figs">
+                <div><small>Spent</small><b>~$0.84</b><i>idle, $0 / min</i></div>
+                <div><small>Steps</small><b>63</b><i>before asking</i></div>
+                <div><small>Follow-ups</small><b>1</b><i>hand off at 2</i></div>
+              </div>
+              <div class="ctxbar">
+                <div class="lbl m"><span style="color:var(--amber)">Context 182K · hand off soon</span><span>300K</span></div>
+                <div class="tr"><i class="y" style="width:61%"></i><b style="left:50%"></b><b style="left:calc(100% - 2px)"></b></div>
+                <div class="ticks"><span style="left:50%">150K soon</span><span style="left:calc(100% - 14px)">300K</span></div>
+              </div>
+              <div class="feed m">
+                <div class="sh" style="font-family:var(--ui)"><span>Last steps before the question</span><a>All ›</a></div>
+                <div><span>18:49</span><span>main</span><span>Edit updater.py</span></div>
+                <div><span>18:48</span><span>main</span><span>Grep "cache_key" src/</span></div>
+                <div><span>18:47</span><span>main</span><span>Read src/cache.py</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- OVERVIEW -->
+          <div class="pane" data-view="all" style="flex:1" hidden>
+            <div class="ptop"><span class="crumb m">All projects · last 60 min</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button></div>
+            <div class="scroll">
+              <div class="tot">
+                <div><small>Today</small><b>$8.73</b></div>
+                <div><small>Of which est.</small><b>~$5.53</b></div>
+                <div><small>Now</small><b>$0.61/m</b></div>
+              </div>
+              <div class="lanes m">
+                <div class="sh"><span>Sessions over time</span><span>cost</span></div>
+                <div class="lane hi"><span class="nm">? updater</span><span class="tk"><i style="left:8%;width:40%"></i><i class="a dim" style="left:48%;width:52%"></i></span><span class="c">~0.84</span></div>
+                <div class="lane"><span class="nm" style="color:var(--red)">■ search</span><span class="tk"><i style="left:84%;width:11%"></i><i class="r dim" style="left:95%;width:5%"></i></span><span class="c">0.41</span></div>
+                <div class="lane"><span class="nm">▶ redesign</span><span class="tk"><i style="left:89%;width:11%"></i></span><span class="c">~1.92</span></div>
+                <div class="lane"><span class="nm">▶ batch split</span><span class="tk"><i style="left:30%;width:70%"></i></span><span class="c">~3.10</span></div>
+                <div class="lane"><span class="nm">○ levers</span><span class="tk"><i style="left:52%;width:13%"></i></span><span class="c">0.28</span></div>
+                <div class="lane"><span class="nm">✓ routing</span><span class="tk"><i class="g" style="left:2%;width:6%"></i></span><span class="c">0.06</span></div>
+                <div class="axis"><span></span><span><span>18:05</span><span>18:35</span><span>19:05</span></span><span></span></div>
+              </div>
+              <div class="list">
+                <div class="sh"><span>Needs you</span><span>2</span></div>
+                <button data-go="ask"><span style="color:var(--amber)">?</span><span class="t">Fix updater retry on 429</span><span class="m" style="color:var(--mut)">14m</span></button>
+                <button data-go="focus"><span style="color:var(--red)">■</span><span class="t">Add transcript search endpoint</span><span class="m" style="color:var(--mut)">3m</span></button>
+              </div>
+              <div class="feed m"><div class="sh" style="font-family:var(--ui)"><span>Model mix today</span><span>opus 38 · sonnet 55 · haiku 7 %</span></div></div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <p class="cap" id="cap">Ring = context (fills toward the 300K hand-off mark, turns amber at 150K, red at 300K). Centre glyph = state. Badge = needs you. Hover a ring for the task title.</p>
+    </div>
+
+    <div class="notes">
+      <section>
+        <h3>Why this shape</h3>
+        <p>The other two directions treat sessions as a list. When one task matters (a long run you want to watch, a routing you doubt), you want one task big and the rest reduced to a glance. The rail keeps every session visible at 58 px without words; the pane gives the selected one the full height, so progress, spend and context are readable at a distance.</p>
+      </section>
+      <section>
+        <h3>Window</h3>
+        <dl class="spec">
+          <dt>Frame</dt><dd>Borderless, 12 px corners; drag from the rail grip or the pane's top bar</dd>
+          <dt>Sizes</dt><dd>Rail only 64 x 640, full 400 x 640, wider pane up to 560 for the Timeline</dd>
+          <dt>Fold</dt><dd>Rail-only strip docks to the screen edge, like a second taskbar; clicking a ring opens the pane on that task</dd>
+          <dt>Select</dt><dd>Auto-follows the session that just started asking, unless you picked one in the last 2 minutes (no focus stealing)</dd>
+        </dl>
+      </section>
+      <section>
+        <h3>Following progress and cost</h3>
+        <ul>
+          <li><b>Doing now</b> line in large mono, with which agent is doing it</li>
+          <li>Spend with burn rate ($ per minute over the last 5 min) and steps per minute: a dropping rate shows a stall before the Stall? rule</li>
+          <li>Context bar labelled with both marks ("150K soon", "300K hand off"), not a bare colour</li>
+          <li>Lanes per agent with cost at the end of each lane, promoted from the Timeline tab</li>
+          <li>Overview: all sessions as lanes over 60 min, today's exact and estimated spend, current burn</li>
+          <li><span class="flag">New data:</span> estimated cost per session and per agent from transcript usage; per-minute buckets for the rates</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Human-proof rules</h3>
+        <ul>
+          <li>Rings are never the only signal: glyph inside, badge outside, tooltip with the full state and title, and the same state in words in the pane</li>
+          <li>Project labels under each ring (short names from config, editable), so two rings are never told apart by colour</li>
+          <li>Asks-you view says exactly where the answer goes ("runs in a window copy; the VS Code chat stays as it is")</li>
+          <li>Stop confirms in place; close says runs continue; keyboard: Up / Down moves along the rail, Enter opens, Esc returns to Overview</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What it would touch</h3>
+        <p><code>__main__.py</code> (frameless, resize between rail and full through js_api), <code>style.css</code>, <code>app.js</code> (rail, focus pane, overview lanes reusing <code>timelineHtml</code>), <code>state.py</code> (rates, estimated cost, per-agent cost). The detail view and Timeline tab become the main view instead of a second page.</p>
+      </section>
+      <section>
+        <h3>Trade-offs</h3>
+        <ul>
+          <li>Rings carry a lot of meaning; needs a week to learn, then the fastest to read</li>
+          <li>Past 9 sessions the rail scrolls; Done sessions leave the rail and live in Overview</li>
+          <li>Window width changes on fold, same pywebview frameless resize check as Direction A</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll(".ses").forEach((b) => {
+  const [f, tone] = b.dataset.ring.split(","), r = 15, c = 2 * Math.PI * r, col = { g: "var(--green)", y: "var(--amber)", r: "var(--red)" }[tone];
+  b.querySelector("svg").innerHTML = `<svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="${r}" fill="none" stroke="var(--track)" stroke-width="3"/>
+    <circle cx="18" cy="18" r="${r}" fill="none" stroke="${col}" stroke-width="3" stroke-linecap="round"
+      stroke-dasharray="${(c * Math.max(0.04, Number(f))).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 18 18)"/></svg>`;
+});
+const caps = {
+  focus: "Ring = context (fills toward the 300K hand-off mark, turns amber at 150K, red at 300K). Centre glyph = state. Badge = needs you. Hover a ring for the task title.",
+  ask: "A session that asks shows its question first, with the answer box and where the answer will run. The ring keeps its badge until the answer is sent.",
+  all: "Overview replaces the old Home list: lanes show when each task ran and what it cost; the Needs you list sits underneath.",
+  slim: "Rail only: a 64 px strip on the screen edge. Badges and rings still tell you which task needs you; today's spend stays at the bottom."
+};
+const win = document.getElementById("win");
+function show(v) {
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  win.classList.toggle("slim", v === "slim");
+  if (v !== "slim") document.querySelectorAll("[data-view]").forEach((el) => { el.hidden = el.dataset.view !== v; });
+  document.getElementById("cap").textContent = caps[v];
+}
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
+document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => {
+  const g = b.dataset.go;
+  if (g === "fold") { show(win.classList.contains("slim") ? "focus" : "slim"); return; }
+  if (b.classList.contains("ses")) { document.querySelectorAll(".ses").forEach((s) => s.classList.toggle("sel", s === b)); }
+  show(g);
+}));
+const stop = document.getElementById("stopbtn"); let t;
+stop.addEventListener("click", () => {
+  if (stop.dataset.armed) { stop.textContent = "Stopping…"; stop.disabled = true; return; }
+  stop.dataset.armed = "1"; stop.textContent = "Stop run? Click again"; clearTimeout(t);
+  t = setTimeout(() => { delete stop.dataset.armed; stop.textContent = "Stop"; stop.disabled = false; }, 3000);
+});
+</script>

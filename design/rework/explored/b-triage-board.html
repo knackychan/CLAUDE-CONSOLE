@@ -1,0 +1,338 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; }</style>
+<title>Console B: Triage Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: proposal page = stage (borderless window mock, one column, inline accordions) + notes; stacks on phones. */
+:root {
+  --page: #dfe3e8; --win: #f7f8fa; --row: #ffffff; --ink: #142033; --mut: #5d6878; --line: #d9dee5; --soft: #eef1f5;
+  --act: #1f4fb8; --amber: #9a5a00; --amber-s: #e8a33a; --red: #b42a24; --red-s: #e0524a; --green: #17784a; --spark: #1f4fb8;
+  --shadow: 0 20px 48px rgb(16 28 48 / 22%), 0 1px 3px rgb(16 28 48 / 14%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --fig: "Bahnschrift", "Barlow Semi Condensed", "Segoe UI", sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #0b0e12; --win: #12161c; --row: #181d24; --ink: #e4e9f0; --mut: #8d97a6; --line: #252c36; --soft: #1d232b;
+  --act: #8db0ff; --amber: #f0b552; --amber-s: #f0b552; --red: #ff7a70; --red-s: #ff7a70; --green: #5ccb8f; --spark: #8db0ff;
+  --shadow: 0 20px 48px rgb(0 0 0 / 60%), 0 1px 3px rgb(0 0 0 / 50%); color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --page: #0b0e12; --win: #12161c; --row: #181d24; --ink: #e4e9f0; --mut: #8d97a6; --line: #252c36; --soft: #1d232b;
+  --act: #8db0ff; --amber: #f0b552; --amber-s: #f0b552; --red: #ff7a70; --red-s: #ff7a70; --green: #5ccb8f; --spark: #8db0ff;
+  --shadow: 0 20px 48px rgb(0 0 0 / 60%), 0 1px 3px rgb(0 0 0 / 50%); color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 28px 16px 48px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 28px; }
+header h1 { font: 600 30px/1.1 var(--fig); margin: 0 0 6px; letter-spacing: .01em; text-wrap: balance; }
+header p { margin: 0; color: var(--mut); max-width: 62ch; }
+.eyebrow { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--act); }
+.grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 36px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.views { display: flex; gap: 0; margin-bottom: 14px; border: 1px solid var(--line); width: max-content; max-width: 100%; flex-wrap: wrap; background: var(--win); }
+.views button { font: 600 13px var(--fig); letter-spacing: .03em; color: var(--mut); background: transparent; border: 0; padding: 5px 14px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--win); background: var(--ink); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--act); outline-offset: 1px; }
+.cap { font-size: 12px; color: var(--mut); max-width: 400px; margin: 12px 0 0; }
+
+/* window */
+.win { width: min(400px, 100%); height: 640px; background: var(--win); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.f { font-family: var(--fig); font-variant-numeric: tabular-nums; }
+.tbar { height: 34px; display: flex; align-items: center; padding-left: 12px; gap: 10px; background: var(--ink); color: var(--win); user-select: none; }
+.tbar .brand { font: 600 14px var(--fig); letter-spacing: .12em; }
+.tbar .live { font: 11px var(--mono); opacity: .7; display: flex; align-items: center; gap: 5px; }
+.tbar .live::before { content: ""; width: 6px; height: 6px; border-radius: 3px; background: var(--green); }
+.tbar .sp { flex: 1; align-self: stretch; cursor: grab; }
+.tb { width: 34px; height: 34px; border: 0; background: transparent; color: inherit; opacity: .75; cursor: pointer; font: 13px var(--ui); }
+.tb:hover { opacity: 1; background: rgb(255 255 255 / 12%); }
+.tb.x:hover { background: #c42b1c; color: #fff; }
+.chips { display: flex; gap: 6px; padding: 7px 10px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.chips button { font: 500 12px var(--ui); white-space: nowrap; color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 1px 9px; cursor: pointer; }
+.chips button.on { color: var(--ink); border-color: var(--ink); }
+.chips button b { font: 600 12px var(--fig); color: var(--amber); margin-left: 3px; }
+.body { flex: 1; overflow-y: auto; }
+
+.band { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 5px; }
+.band h4 { margin: 0; font: 600 13px var(--fig); letter-spacing: .1em; text-transform: uppercase; }
+.band .n { font: 600 13px var(--fig); color: var(--mut); }
+.band .r { margin-left: auto; color: var(--mut); }
+.band.need h4, .band.need .n { color: var(--amber); }
+
+.item { background: var(--row); border-top: 1px solid var(--line); padding: 8px 12px 9px 12px; display: grid; gap: 4px; position: relative; }
+.item:last-of-type { border-bottom: 1px solid var(--line); }
+.item.need { box-shadow: inset 3px 0 var(--amber-s); padding-left: 14px; }
+.item.block { box-shadow: inset 3px 0 var(--red-s); padding-left: 14px; }
+.item.click { cursor: pointer; }
+.item.click:hover { background: var(--soft); }
+.item.dim { opacity: .55; }
+.top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.st { font: 600 12px var(--fig); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.st.amber { color: var(--amber); } .st.red { color: var(--red); } .st.blue { color: var(--act); } .st.green { color: var(--green); } .st.grey { color: var(--mut); }
+.ttl { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cost { font: 600 15px var(--fig); white-space: nowrap; }
+.cost.est::before { content: "~"; color: var(--mut); font-weight: 500; }
+.sub { display: flex; gap: 10px; align-items: center; color: var(--mut); min-width: 0; }
+.sub .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q { font-size: 13px; background: var(--soft); border-radius: 4px; padding: 6px 8px; }
+.line { display: flex; gap: 6px; }
+.line input { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--win); border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; }
+.btn { font: 600 13px var(--fig); letter-spacing: .03em; color: var(--ink); background: var(--win); border: 1px solid var(--line); border-radius: 4px; padding: 4px 12px; cursor: pointer; white-space: nowrap; min-height: 30px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--act); border-color: var(--act); color: #fff; }
+:root[data-theme="dark"] .btn.go { color: #0b0e12; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.go { color: #0b0e12; } }
+.btn.stop { color: var(--red); }
+.ctxt { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ctxt.y { color: var(--amber); } .ctxt.r { color: var(--red); }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--act); }
+.dots i.d { background: var(--green); border-color: var(--green); }
+.dots i.a { background: var(--act); }
+svg.spark { width: 112px; height: 20px; flex: none; }
+.collapsed { display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--line); color: var(--mut); cursor: pointer; background: var(--row); }
+.collapsed:hover { color: var(--ink); }
+
+/* opened row */
+.open { background: var(--row); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: inset 3px 0 var(--act); padding: 9px 12px 10px 14px; display: grid; gap: 8px; }
+.path { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+.path span { font: 600 11px var(--fig); letter-spacing: .06em; text-transform: uppercase; color: var(--mut); border-top: 3px solid var(--line); padding-top: 3px; }
+.path .ok { color: var(--green); border-color: var(--green); }
+.path .now { color: var(--act); border-color: var(--act); }
+.kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.kv div { display: grid; }
+.kv small { font-size: 11px; color: var(--mut); }
+.kv b { font: 600 16px var(--fig); font-variant-numeric: tabular-nums; }
+.log { display: grid; gap: 1px; color: var(--mut); }
+.log div { display: grid; grid-template-columns: 44px 70px minmax(0, 1fr); gap: 8px; }
+.log div span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.more { color: var(--act); font-size: 12px; cursor: pointer; }
+.wrapbtn { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* footer */
+.budget { border-top: 1px solid var(--line); padding: 7px 12px 8px; display: grid; gap: 4px; background: var(--win); }
+.budget .lbl { display: flex; justify-content: space-between; gap: 8px; color: var(--mut); }
+.budget .lbl b { font: 600 15px var(--fig); color: var(--ink); }
+.track { position: relative; height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; display: flex; }
+.track .x { background: var(--act); } .track .e { background: color-mix(in srgb, var(--act) 45%, var(--soft)); }
+.track::after { content: ""; position: absolute; left: 80%; top: -2px; bottom: -2px; width: 2px; background: var(--amber-s); }
+.compose { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 5px; background: var(--row); }
+.compose textarea { width: 100%; font: 13px var(--ui); color: var(--ink); background: var(--win); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; resize: none; }
+.compose .hint { display: flex; justify-content: space-between; color: var(--mut); gap: 8px; }
+
+/* prep sheet */
+.sheet { position: absolute; inset: 34px 0 0 0; background: rgb(10 16 26 / 38%); display: flex; align-items: flex-end; }
+.sheet .panel { background: var(--win); width: 100%; max-height: 92%; overflow-y: auto; border-top: 1px solid var(--line); border-radius: 10px 10px 0 0; padding: 10px 12px 12px; display: grid; gap: 8px; }
+.panel h5 { margin: 0; font: 600 13px var(--fig); letter-spacing: .1em; text-transform: uppercase; color: var(--mut); display: flex; justify-content: space-between; }
+.fld { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 2px 10px; font-size: 13px; }
+.fld dt { color: var(--mut); font-size: 12px; padding-top: 1px; } .fld dd { margin: 0; }
+.route { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.route select { font: 12px var(--mono); color: var(--ink); background: var(--row); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }
+.why { font-size: 12px; color: var(--mut); }
+
+/* notes */
+.notes { display: grid; gap: 22px; }
+.notes section { display: grid; gap: 6px; }
+.notes h3 { font: 600 15px var(--fig); letter-spacing: .1em; text-transform: uppercase; margin: 0; color: var(--mut); }
+.notes p, .notes li { margin: 0; max-width: 64ch; }
+.notes ul, .notes ol { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+.spec dt { color: var(--mut); } .spec dd { margin: 0; }
+code { font: 12px var(--mono); background: var(--soft); border-radius: 3px; padding: 1px 4px; }
+.flag { color: var(--amber); font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Direction B of 3 &middot; act first</div>
+    <h1>Triage Board</h1>
+    <p>One always-open column sorted by what you must do. Questions, denials and failures sit on top with their fix built into the row; running work shows live activity and spend; a session opens in place as an accordion, so you never lose the board.</p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="views" role="group" aria-label="Mock view">
+        <button data-v="board" aria-pressed="true">Board</button>
+        <button data-v="open" aria-pressed="false">Row opened</button>
+        <button data-v="prep" aria-pressed="false">Prep sheet</button>
+      </div>
+
+      <div class="win">
+        <div class="tbar">
+          <span class="brand">CONSOLE</span><span class="live">service ok</span>
+          <span class="sp" title="Drag to move"></span>
+          <button class="tb" title="Always on top (on)" aria-label="Always on top">⊤</button>
+          <button class="tb" title="Minimize" aria-label="Minimize">–</button>
+          <button class="tb x" title="Close window (runs keep going)" aria-label="Close">✕</button>
+        </div>
+        <div class="chips" role="group" aria-label="Project filter">
+          <button class="on">All</button><button>CONTENT MANAGER<b>1</b></button><button>BRAINAMP<b>1</b></button><button>CLAUDE CONSOLE</button><button>fashion_packshots_ai</button>
+        </div>
+
+        <div class="body">
+          <div class="band need"><h4>Needs you</h4><span class="n">2</span><span class="r m">oldest first</span></div>
+          <div class="item need" data-dim>
+            <div class="top"><span class="st amber">? Asks you</span><span class="ttl">Fix updater retry on 429</span><span class="cost est">0.84</span></div>
+            <div class="sub m"><span class="grow">CONTENT MANAGER · vscode · sonnet/med · 14m</span><span class="ctxt y">182K ▲</span></div>
+            <div class="q">Keep the old cache key, or migrate entries to the v2 key?</div>
+            <div class="line"><input id="b1" aria-label="Answer" placeholder="Answer (runs in a window copy)"><button class="btn go">Answer</button></div>
+          </div>
+          <div class="item block" data-dim>
+            <div class="top"><span class="st red">■ Blocked</span><span class="ttl">Add transcript search endpoint</span><span class="cost">0.41</span></div>
+            <div class="sub m"><span class="grow">BRAINAMP · window · sonnet/med · 3m</span><span class="ctxt">54K</span></div>
+            <div class="sub m"><span class="grow" style="color:var(--ink)">Denied: Bash git push origin main</span></div>
+            <div class="wrapbtn"><button class="btn go">Open in terminal</button><button class="btn">Dismiss</button></div>
+          </div>
+
+          <div class="band"><h4>Running</h4><span class="n">2</span><span class="r m">last 30 min of activity</span></div>
+          <div id="rowA" class="item click">
+            <div class="top"><span class="st blue">▶ Running</span><span class="ttl">Redesign proposal for the window</span><span class="cost est">1.92</span></div>
+            <div class="sub m"><svg class="spark" data-s="0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,5,7,4,8,9,6" aria-hidden="true"></svg><span class="grow">41 steps · 6m</span><span class="dots" title="Agents: 1 done, 1 running"><i class="d"></i><i class="a"></i></span><span class="ctxt">96K</span></div>
+          </div>
+          <div id="openA" class="open" hidden>
+            <div class="top"><span class="st blue">▶ Running</span><span class="ttl">Redesign proposal for the window</span><span class="cost est">1.92</span></div>
+            <div class="sub m"><span class="grow">CLAUDE CONSOLE · vscode · opus/high · started 18:58</span></div>
+            <div class="path" aria-label="Task progress"><span class="ok">Prep</span><span class="now">Run</span><span>Verify</span><span>Hand off</span></div>
+            <div class="kv"><div><small>Spent</small><b>~$1.92</b></div><div><small>Context</small><b>96K</b></div><div><small>Time</small><b>6m 40s</b></div><div><small>Agents</small><b>1 / 2</b></div></div>
+            <div class="log m">
+              <div><span>19:04</span><span>gen-purp</span><span>Read web/app.js</span></div>
+              <div><span>19:04</span><span>gen-purp</span><span>Read web/style.css</span></div>
+              <div><span>19:03</span><span>Explore</span><span>✓ done, 12 steps, 38K</span></div>
+              <div><span>19:03</span><span>main</span><span>Read PLAN.md</span></div>
+            </div>
+            <span class="more">All steps, Timeline, Chat ›</span>
+            <div class="line"><input id="b2" aria-label="Follow-up" placeholder="Follow-up"><button class="btn go">Continue</button></div>
+            <div class="wrapbtn"><button class="btn">Verify</button><button class="btn">Hand off</button><button class="btn">Terminal</button><button class="btn stop" id="stopbtn">Stop</button></div>
+          </div>
+          <div class="item click" data-dim>
+            <div class="top"><span class="st red">◔ Hand off</span><span class="ttl">Batch prepare launch split</span><span class="cost est">3.10</span></div>
+            <div class="sub m"><svg class="spark" data-s="3,4,6,5,7,6,4,5,6,8,7,5,6,4,3,5,6,7,5,4,6,5,7,6,4,5,3,4,5,4" aria-hidden="true"></svg><span class="grow">188 steps · 42m</span><span class="dots"><i class="d"></i><i class="d"></i><i class="d"></i></span><span class="ctxt r">312K ▲</span></div>
+          </div>
+
+          <div class="band"><h4>Waiting</h4><span class="n">1</span></div>
+          <div class="item click" data-dim>
+            <div class="top"><span class="st grey">○ Idle</span><span class="ttl">Phase 3 levers live check</span><span class="cost">0.28</span></div>
+            <div class="sub m"><span class="grow">CLAUDE CONSOLE · window · 2 follow-ups · 21m ago</span><span class="ctxt">71K</span></div>
+          </div>
+          <div class="collapsed m" data-dim><span class="st green">✓ Done today</span><span style="flex:1">4 tasks · 1 PASS</span><span>$0.71 ›</span></div>
+        </div>
+
+        <div class="budget">
+          <div class="lbl m"><span>Today <b>$8.73</b> of $15 soft limit</span><span>week $41.20</span></div>
+          <div class="track" title="Exact (window runs) then estimated (chats); the amber mark is 80 % of the limit"><i class="x" style="flex:0 0 21%"></i><i class="e" style="flex:0 0 37%"></i></div>
+        </div>
+        <div class="compose">
+          <textarea id="b3" rows="2" aria-label="New task">Make the 2 writers warning name both chats</textarea>
+          <div class="hint m"><span>CLAUDE CONSOLE ▾</span><span>Enter Prep · Ctrl+Enter run raw</span></div>
+        </div>
+
+        <div class="sheet" id="sheet" hidden>
+          <div class="panel">
+            <h5><span>Prep · CLAUDE CONSOLE</span><span class="m" style="letter-spacing:0;text-transform:none">$0.03 · 4 turns</span></h5>
+            <dl class="fld">
+              <dt>Goal</dt><dd>The "2 writers" warning names both chats and links to each.</dd>
+              <dt>Where</dt><dd class="m">console/state.py writers(), web/app.js renderStrip()</dd>
+              <dt>Done when</dt><dd>Strip shows "2 writers: A and B"; a click opens that session; tests pass.</dd>
+              <dt>Keep</dt><dd>No new endpoint; snapshot shape stays compatible.</dd>
+            </dl>
+            <div class="route"><span class="m" style="color:var(--mut)">Route</span>
+              <select id="rm" aria-label="Model"><option>sonnet</option><option>opus</option><option>haiku</option></select>
+              <select id="re" aria-label="Effort"><option>medium</option><option>low</option><option>high</option></select>
+              <span class="m" style="color:var(--mut)">small UI change · ~$0.40 typical</span></div>
+            <div class="why">Two files, clear done-when, no design risk: one tier below top.</div>
+            <div class="wrapbtn"><button class="btn go">Run</button><button class="btn">Run raw</button><button class="btn">Edit prompt</button><button class="btn" id="cancel">Cancel</button></div>
+          </div>
+        </div>
+      </div>
+      <p class="cap" id="cap">Rows never reorder on a single event; they move between bands only when their state changes. Click a running row to open it in place.</p>
+    </div>
+
+    <div class="notes">
+      <section>
+        <h3>Why this shape</h3>
+        <p>The window exists to answer "what do I need to do now?" and "is the rest fine?". So the column is ordered by action: things that wait on you, things running, things waiting for a follow-up, then done. Every row in the top band carries its own fix, so the most common job (answer a question, unblock a denial) takes one click and no navigation.</p>
+      </section>
+      <section>
+        <h3>Window</h3>
+        <dl class="spec">
+          <dt>Frame</dt><dd>Borderless, dark title strip as drag region (high contrast, easy to grab), 8 px corners</dd>
+          <dt>Size</dt><dd>400 x 640 default, resizable 360 to 520 wide; height follows the screen</dd>
+          <dt>Filter</dt><dd>Project chips with an amber count where something needs you, replacing the select box</dd>
+          <dt>Prep</dt><dd>Bottom sheet over the board; the board stays visible behind it</dd>
+        </dl>
+      </section>
+      <section>
+        <h3>Following progress and cost</h3>
+        <ul>
+          <li>Sparkline = tool calls per minute over the last 30 min, from steps the service already keeps. Flat line plus "Running" is the Stall? signal you can see before the 10 min rule fires</li>
+          <li>Agent dots: green done, filled blue running, ring waiting. Count of what is real, no guessed percent</li>
+          <li>Opened row: playbook path, spent, context, time, agents, last four steps, levers</li>
+          <li>Budget bar: exact spend (solid) then estimated (light), with a soft daily limit and an amber mark at 80 %. <span class="flag">New config:</span> <code>daily_budget_usd</code>; <span class="flag">new data:</span> estimated cost for chats</li>
+          <li>Prep shows a typical cost for the chosen route, read from your past runs of that route</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Human-proof rules</h3>
+        <ul>
+          <li>Accordion, not pages: one row open at a time, others dim but stay readable, Esc closes</li>
+          <li>Bands named by action ("Needs you", "Waiting"), states as words in caps with the existing glyphs</li>
+          <li>Figures in Bahnschrift (built into Windows, narrow, very legible digits); IDs and paths in Cascadia Mono</li>
+          <li>Buttons at least 30 px high, verbs only ("Answer", "Open in terminal", "Hand off")</li>
+          <li>Stop confirms in place; nothing uses a dialog; closing the window says runs continue</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What it would touch</h3>
+        <p><code>__main__.py</code> (frameless + minimize and pin through js_api), <code>style.css</code>, <code>app.js</code> (bands, accordion, sparkline as inline SVG, chips, sheet), <code>state.py</code> (per-minute activity buckets, estimated cost, today and week totals). Still no build step, no library.</p>
+      </section>
+      <section>
+        <h3>Trade-offs</h3>
+        <ul>
+          <li>Uses the full 640 px all the time: the most informative of the three, and the most screen it takes</li>
+          <li>With 8 or more sessions the Running band scrolls; Done stays collapsed to protect space</li>
+          <li>Timeline and Chat still need a full view behind "All steps"</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll("svg.spark").forEach((svg) => {
+  const v = svg.dataset.s.split(",").map(Number), max = Math.max(...v, 1), w = 112, h = 20, step = w / (v.length - 1);
+  const pts = v.map((y, i) => `${(i * step).toFixed(1)},${(h - 2 - (y / max) * (h - 4)).toFixed(1)}`);
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = `<line x1="0" y1="${h - 1}" x2="${w}" y2="${h - 1}" stroke="var(--line)" stroke-width="1"/>
+    <polygon points="0,${h - 1} ${pts.join(" ")} ${w},${h - 1}" fill="var(--spark)" fill-opacity=".15"/>
+    <polyline points="${pts.join(" ")}" fill="none" stroke="var(--spark)" stroke-width="1.4" stroke-linejoin="round"/>
+    <circle cx="${w - 1.5}" cy="${pts.at(-1).split(",")[1]}" r="2" fill="var(--spark)"/>`;
+});
+const caps = {
+  board: "Rows never reorder on a single event; they move between bands only when their state changes. Click a running row to open it in place.",
+  open: "The opened row replaces itself in place; the rest of the board dims but stays readable. Esc or a click on the header closes it.",
+  prep: "Enter in the composer runs Prep on Haiku; the card slides up over the board and always waits for Run."
+};
+function show(v) {
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  const open = v === "open";
+  document.getElementById("rowA").hidden = open;
+  document.getElementById("openA").hidden = !open;
+  document.querySelectorAll("[data-dim]").forEach((el) => el.classList.toggle("dim", open));
+  document.getElementById("sheet").hidden = v !== "prep";
+  document.getElementById("cap").textContent = caps[v];
+}
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
+document.getElementById("rowA").addEventListener("click", () => show("open"));
+document.querySelector("#openA .top").addEventListener("click", () => show("board"));
+document.getElementById("cancel").addEventListener("click", () => show("board"));
+document.getElementById("b3").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); show("prep"); } });
+const stop = document.getElementById("stopbtn"); let t;
+stop.addEventListener("click", () => {
+  if (stop.dataset.armed) { stop.textContent = "Stopping…"; stop.disabled = true; return; }
+  stop.dataset.armed = "1"; stop.textContent = "Stop run? Click again"; clearTimeout(t);
+  t = setTimeout(() => { delete stop.dataset.armed; stop.textContent = "Stop"; stop.disabled = false; }, 3000);
+});
+</script>

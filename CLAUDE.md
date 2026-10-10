@@ -16,7 +16,8 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
 - Data lives in `~/.claude/console/` (or env `CC_CONSOLE_HOME`, which the tests use). Never write
   anywhere else, and never edit `~/.claude/settings.json` from code that Claude runs: Fred runs
   `install_hooks.py` himself.
-- All styling is in `web/style.css`, tokens first (a visual rework is planned).
+- All styling is in `web/style.css`, tokens first. The visual rework target is locked: BRAINSTORM 7.5,
+  `design/rework/locked/console-cells.html`; files in `design/rework/explored/` are not targets.
 - Window runs: commands come only from console/claude_cli.py; runs only in config.json "projects"; Stop is the stream-json interrupt, never a kill of a run this service owns.
 - Levers: server.Hub.levers alone decides when Continue / Verify / Handoff / Escalate may run; a VS Code or terminal chat is only ever forked, never resumed in place.
 - User-level skills and agents live in dotclaude/ (same layout as ~/.claude); Fred copies them to ~/.claude. Code and Claude write ~/.claude/console/ only.

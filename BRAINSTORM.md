@@ -45,6 +45,7 @@ No cloud, no network calls of its own.
 | D8 | Folder | `D:\MY DOCS\MY TOOLS\CLAUDE CONSOLE\`, own git repo |
 | D9 | square-orchestrator ideas | Take 1-8 of section 9; leave the rest (section 2) |
 | D10 | Visual style | Borrow the square-orchestrator UI (section 7.4) |
+| D11 | Visual rework (2026-10-10) | Locked: "Console Cells", `design/rework/locked/console-cells.html` (section 7.5) |
 
 ## 4. Architecture
 
@@ -188,7 +189,30 @@ Segoe UI for text, Cascadia Mono for IDs, routes, numbers and steps; borders ins
 pending until the service confirms; closing the window never stops a run. Fred, 2026-10-10: the
 look is very compact; accepted for now, a visual rework comes later (keep styling in one CSS file
 with tokens so it is cheap to redo). Mockup:
-`design/window-style-v2.html` (all brainstorm screens are in `design/`).
+`design/brainstorm/window-style-v2.html` (all brainstorm screens are in `design/brainstorm/`).
+Replaced by 7.5 once the rework sub-plan is done.
+
+### 7.5 Visual rework: Console Cells (locked by Fred, 2026-10-10)
+
+Locked mockup: `design/rework/locked/console-cells.html`. The explored directions and how they
+were chosen are in `design/rework/README.md`; the image references are in `design/references/`.
+
+- Borderless window with two forms. Folded: a 380 x 48 pill with one cell chip per live session
+  and today's spend; a new question, denial or failure opens one card under it (answer in place).
+  Open: 400 x 640, a 56 px rail of session chips plus a focus pane (one session) or the Overview.
+- Motif: every quantity is counted in cells. Context: 30 cells of 10K (two rows of 15; the second
+  row is the hand-off zone). Spend: cells of $0.50, solid = exact, hatched = estimated, orange
+  outline at 80 % of a soft daily limit. Activity: one cell per minute, four intensity steps.
+  Agents: one cell per 2 steps.
+- Colour: monochrome off-white on near-black (dark first, light theme kept working); orange only
+  for "needs you", red and green only for state. State is never colour alone (glyph + word).
+- Type: Segoe UI for titles and text, Cascadia Mono for figures, Doto (dot matrix, bundled as a
+  local woff2, OFL) for the one focal figure per screen.
+- Dials (anti-slop Design Read): ENERGY 2 / RHYTHM 2 / MOTION 1; the only motion is one blinking
+  cell on the working agent, off for reduced-motion.
+- Needs from the service: estimated cost per session and agent (transcript usage x a price table
+  in `config.json`), per-minute activity buckets, `daily_budget_usd`. Open check: resizing a
+  frameless pywebview window from code on Windows (pill to open window).
 
 ## 8. Error handling
 
@@ -263,3 +287,6 @@ with tokens so it is cheap to redo). Mockup:
 - 2026-10-10 - Brainstorm with Fred in the Content Manager session; D1-D10 decided; design
   sections 1-4 approved; visual companion mockups copied to `design/`.
 - 2026-10-10 - Fred reviewed the spec: accepted; visual density to be reworked later.
+- 2026-10-10 - Visual rework explored (A Pill and Drawer, B Triage Board, C Rail and Focus, C + A
+  Rings and Pill, then Console Cells from Fred's references, refined with the anti-slop filter).
+  Fred locked Console Cells (D11, section 7.5); brainstorm screens moved to `design/brainstorm/`.

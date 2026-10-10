@@ -16,6 +16,7 @@ ends with working, tested software.
 | 3 | [plans/03-levers.md](plans/03-levers.md) - Continue, Verify, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | done 2026-10-10 |
 | 4 | [plans/04-polish.md](plans/04-polish.md) - rules-size warning, should-delegate flag, model-mix strip, in-chat handoff Done, move skills to ~/.claude | done 2026-10-10 |
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
+| 6 | Visual rework - Console Cells (BRAINSTORM 7.5, `design/rework/locked/console-cells.html`): borderless pill + rail + focus pane, cell motif, estimated cost, activity buckets | design locked 2026-10-10; plan to write after phase 4 |
 
 ## Changes to the design made while planning phase 1
 

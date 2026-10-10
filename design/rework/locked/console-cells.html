@@ -1,0 +1,500 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; }</style>
+<title>Console Cells</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: proposal page = stage (window mock: cell pill, or cell rail + focus pane) + notes. Motif: every quantity is counted in cells. Dark first (sits next to a dark VS Code), light variant kept working. */
+:root {
+  --page: #0b0c0e; --win: #121315; --rail: #0e0f11; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --rail: #ebe9e4; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --rail: #ebe9e4; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 28px 16px 48px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 26px; }
+header h1 { font: 700 34px/1 var(--dot); margin: 0 0 8px; letter-spacing: .02em; }
+header p { margin: 0; color: var(--mut); max-width: 64ch; }
+.grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 36px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.views { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; min-height: 40px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--you); outline-offset: 1px; }
+.sample { font: 11px var(--mono); color: var(--mut); margin: 0 0 12px; }
+.stage { min-height: 660px; }
+.cap { font-size: 12px; color: var(--mut); max-width: 400px; margin: 12px 0 0; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+
+/* cells */
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); }
+.cells i.y { background: var(--you); }
+.cells i.r { background: var(--bad); }
+.cells i.g { background: var(--ok); }
+.cells i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+.cells i.mk { box-shadow: inset 0 0 0 1px var(--you); }
+.cells i.l1 { background: color-mix(in srgb, var(--ink) 22%, var(--off)); }
+.cells i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.cells i.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+.cells i.l4 { background: var(--ink); }
+@media (prefers-reduced-motion: no-preference) { .cells i.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+@keyframes blink { 50% { background: var(--off); } }
+
+/* folded: cell pill */
+.pill { width: min(380px, 100%); height: 48px; background: var(--win); border-radius: 24px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 6px; padding: 0 6px 0 14px; user-select: none; }
+.grip { color: var(--mut); letter-spacing: -2px; font-size: 12px; cursor: grab; margin-right: 2px; }
+.chipcell { position: relative; display: grid; justify-items: center; gap: 1px; border: 0; background: transparent; padding: 3px 4px; border-radius: 6px; cursor: pointer; color: var(--ink); }
+.chipcell:hover { background: var(--raise); }
+.chipcell .cells { grid-template-columns: repeat(5, 3px); }
+.chipcell .gl { font: 600 9px/1 var(--mono); color: var(--mut); }
+.chipcell .gl.y { color: var(--you); } .chipcell .gl.r { color: var(--bad); }
+.chipcell .dot { position: absolute; top: 1px; right: 0; width: 6px; height: 6px; background: var(--you); border-radius: 1px; }
+.chipcell .dot.r { background: var(--bad); }
+.pill .sp { flex: 1; align-self: stretch; cursor: grab; }
+.pill .big { font: 700 20px/1 var(--dot); letter-spacing: .02em; padding: 0 4px; }
+.tb { width: 34px; height: 34px; border: 0; border-radius: 17px; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); display: grid; place-items: center; }
+.tb:hover { background: var(--raise); color: var(--ink); }
+.peek { width: min(380px, 100%); background: var(--win); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.peek .pill { box-shadow: none; border-bottom: 1px solid var(--line); border-radius: 0; width: 100%; }
+.askbox { margin: 8px; padding: 10px; border-radius: 8px; background: color-mix(in srgb, var(--you) 9%, var(--win)); border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); display: grid; gap: 6px; }
+.l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.t { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.age { color: var(--mut); white-space: nowrap; }
+.st { font: 600 11px var(--mono); white-space: nowrap; letter-spacing: .02em; }
+.st.y { color: var(--you); } .st.r { color: var(--bad); } .st.g { color: var(--ok); } .st.n { color: var(--ink); } .st.q { color: var(--mut); }
+.lr { display: flex; gap: 6px; flex-wrap: wrap; }
+.lr input, textarea.in { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+textarea.in { width: 100%; resize: none; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.you { background: var(--you); border-color: var(--you); color: #1a0d00; }
+.btn.stop { color: var(--bad); }
+
+/* full window */
+.win { width: min(400px, 100%); height: 640px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: grid; grid-template-columns: 56px minmax(0, 1fr); overflow: hidden; }
+.rail { background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 4px; user-select: none; }
+.rail .drag { color: var(--mut); font-size: 12px; letter-spacing: -1px; cursor: grab; height: 14px; line-height: 10px; }
+.rail .sep { width: 26px; height: 1px; background: var(--line); margin: 3px 0; }
+.rail .grow { flex: 1; width: 100%; cursor: grab; }
+.rail .chipcell { width: 46px; padding: 5px 0 3px; gap: 3px; }
+.rail .chipcell .cells { grid-template-columns: repeat(5, 4px); }
+.rail .chipcell.sel { background: var(--raise); box-shadow: inset 0 0 0 1px var(--line); }
+.rail .chipcell .lab { font: 500 9px var(--mono); color: var(--mut); max-width: 46px; overflow: hidden; white-space: nowrap; }
+.rail .chipcell .gl { font-size: 10px; }
+.rail .chipcell .dot { top: 3px; right: 6px; }
+.rb { width: 34px; height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); }
+.rb:hover { background: var(--raise); color: var(--ink); }
+.rb.on { color: var(--ink); }
+.rb.x:hover { background: #c42b1c; color: #fff; }
+.total { font: 700 15px/1 var(--dot); text-align: center; }
+.total small { display: block; font: 9px var(--mono); color: var(--mut); margin-top: 2px; }
+
+.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ptop { height: 36px; flex: none; display: flex; align-items: center; gap: 6px; padding-left: 12px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; }
+.ptop .crumb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mut); }
+.ptop .rb { width: 34px; height: 36px; border-radius: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; cursor: default; }
+.seg button { font: 500 11px var(--mono); border: 0; background: transparent; color: var(--mut); padding: 3px 8px; cursor: pointer; }
+.seg button.on { background: var(--raise); color: var(--ink); }
+.scroll { flex: 1; overflow-y: auto; padding: 12px; display: grid; gap: 14px; align-content: start; }
+h2 { font: 600 16px/1.3 var(--ui); margin: 3px 0 0; text-wrap: balance; }
+.hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; align-items: end; }
+.hero .big { font: 700 40px/.9 var(--dot); letter-spacing: .02em; }
+.hero .side { display: grid; gap: 1px; justify-items: end; text-align: right; }
+.hero .side b { font: 500 13px var(--mono); }
+.blk { display: grid; gap: 5px; }
+.blk .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.blk .hd .m { color: var(--mut); }
+.blk .hd a { font: 11px var(--mono); color: var(--ink); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ctx15 { grid-template-columns: repeat(15, minmax(0, 1fr)); gap: 2px; }
+.ctx15 i { aspect-ratio: 1.2; }
+.scale { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--mut); }
+.path { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.path span { display: grid; gap: 4px; font: 500 11px var(--mono); color: var(--mut); }
+.path .cells { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.path .cells i { aspect-ratio: 1.6; }
+.path .cur { color: var(--ink); }
+.path .ok { color: var(--ok); }
+.agents { display: grid; gap: 6px; }
+.agent { display: grid; grid-template-columns: 74px minmax(0, 1fr) 40px 40px; gap: 8px; align-items: center; }
+.agent .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent .cells { grid-template-columns: repeat(24, minmax(0, 1fr)); }
+.agent span:nth-child(n+3) { text-align: right; color: var(--mut); }
+.agent span.c { color: var(--ink); }
+.act30 { grid-template-columns: repeat(30, minmax(0, 1fr)); }
+.feed { display: grid; gap: 2px; color: var(--mut); }
+.feed div { display: grid; grid-template-columns: 40px 64px minmax(0, 1fr); gap: 8px; }
+.feed div span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.levers { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+
+.spend { grid-template-columns: repeat(30, minmax(0, 1fr)); grid-template-rows: repeat(5, auto); grid-auto-flow: column; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font: 10.5px var(--mono); color: var(--mut); }
+.legend span { display: inline-flex; gap: 5px; align-items: center; }
+.legend i { width: 8px; height: 8px; display: inline-block; border-radius: 1px; background: var(--off); }
+.legend i.f { background: var(--ink); }
+.legend i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+.legend i.mk { box-shadow: inset 0 0 0 1px var(--you); }
+.heat { display: grid; gap: 4px; }
+.hrow { background: transparent; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; width: 100%; display: grid; grid-template-columns: 84px minmax(0, 1fr) 40px; gap: 8px; align-items: center; cursor: pointer; border-radius: 4px; }
+.hrow:hover .nm { color: var(--ink); }
+.hrow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mut); }
+.hrow .nm.y { color: var(--you); } .hrow .nm.r { color: var(--bad); }
+.hrow .c { text-align: right; }
+.haxis { display: grid; grid-template-columns: 84px minmax(0, 1fr) 40px; gap: 8px; font: 10px var(--mono); color: var(--mut); }
+.haxis span:nth-child(2) { display: flex; justify-content: space-between; }
+.card { display: grid; gap: 3px; padding: 8px 10px; border-radius: 8px; background: var(--raise); border: 1px solid transparent; text-align: left; color: var(--ink); font: inherit; cursor: pointer; width: 100%; }
+.card:hover { border-color: var(--line); }
+.card.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); }
+.card.r { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.card .sub { color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compose { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: flex; gap: 6px; align-items: center; }
+.compose input { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid transparent; border-radius: 6px; padding: 7px 9px; }
+.kbd { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.banner { flex: none; display: flex; gap: 8px; align-items: center; padding: 6px 12px; background: color-mix(in srgb, var(--bad) 12%, var(--win)); color: var(--ink); font: 12px var(--ui); border-bottom: 1px solid var(--line); }
+.banner b { color: var(--bad); font: 600 11px var(--mono); }
+.empty { display: grid; gap: 8px; justify-items: start; padding: 8px 0; }
+.empty p { margin: 0; color: var(--mut); font-size: 13px; max-width: 34ch; }
+.loading { display: flex; gap: 8px; align-items: center; color: var(--mut); font-size: 13px; }
+.loading .cells { grid-template-columns: repeat(6, 6px); }
+
+/* notes */
+.notes { display: grid; gap: 22px; }
+.notes section { display: grid; gap: 6px; }
+.notes h3 { font: 600 15px var(--ui); margin: 0; }
+.notes p, .notes li { margin: 0; max-width: 64ch; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.read { font: 13px/1.5 var(--mono); background: var(--raise); border-radius: 8px; padding: 10px 12px; }
+.tbl { overflow-x: auto; }
+.tbl table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.tbl th, .tbl td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl th { font: 500 11px var(--mono); color: var(--mut); }
+code { font: 12px var(--mono); background: var(--raise); border-radius: 4px; padding: 1px 4px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Console Cells</h1>
+    <p>An alternate of Rings and Pill built from your five references. Same structure (folded pill, cell rail, focus pane, overview), but every quantity is counted in cells: context in 10K cells, spend in 50-cent cells, activity in one-minute cells. Monochrome by default; orange appears only when a session needs you.</p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="views" role="group" aria-label="Mock view">
+        <button data-v="pill" aria-pressed="false">Pill</button>
+        <button data-v="peek" aria-pressed="false">Peek</button>
+        <button data-v="focus" aria-pressed="true">Focus</button>
+        <button data-v="ask" aria-pressed="false">Asks you</button>
+        <button data-v="all" aria-pressed="false">Overview</button>
+        <button data-v="states" aria-pressed="false">Empty / offline</button>
+      </div>
+      <p class="sample">Every session, figure and cost in this mock is sample data.</p>
+
+      <div class="stage">
+        <div data-view="pill" hidden>
+          <div class="pill" data-strip="sm"></div>
+          <p class="cap">380 x 48. Each chip is one live session: 30 cells, one per 10K tokens of context, filled from the bottom. The top half turns orange past 150K, all red at 300K. The glyph under it is the state; a small square flags "needs you".</p>
+        </div>
+
+        <div data-view="peek" hidden>
+          <div class="peek">
+            <div class="pill" data-strip="sm"></div>
+            <div class="askbox">
+              <div class="l1"><span class="st y">? ASKS YOU</span><span class="t">Fix updater retry on 429</span><span class="age m">14m</span></div>
+              <div style="font-size:13px">Keep the old cache key, or migrate entries to the v2 key?</div>
+              <div class="lr"><input id="pk" aria-label="Answer" placeholder="Type your answer"><button class="btn you">Send answer</button></div>
+            </div>
+          </div>
+          <p class="cap">A new question opens one card under the pill, oldest first. Send or Esc folds it back.</p>
+        </div>
+
+        <div data-view="win" class="win">
+          <nav class="rail" aria-label="Sessions" data-strip="lg"></nav>
+
+          <section class="pane" data-pane="focus">
+            <div class="ptop"><span class="crumb m">CLAUDE CONSOLE / vscode / opus high</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close" title="Close window (runs keep going)">✕</button></div>
+            <div class="scroll">
+              <div><span class="st n">▶ RUNNING · 6m 40s</span><h2>Redesign proposal for the window</h2></div>
+              <div class="hero">
+                <span class="big">~1.92</span>
+                <span class="side"><span class="lbl">Spent, USD</span><b>$0.29 / min</b><span class="m" style="color:var(--mut)">doing: Read web/app.js</span></span>
+              </div>
+              <div class="blk">
+                <div class="hd"><span class="lbl">Context · 96K</span><span class="m">1 cell = 10K</span></div>
+                <div class="cells ctx15" data-ctx="96"></div>
+                <div class="scale"><span>0</span><span>150K hand off soon</span><span>300K hand off</span></div>
+              </div>
+              <div class="path" aria-label="Task progress" data-path="1"></div>
+              <div class="blk">
+                <div class="hd"><span class="lbl">Agents · 1 cell = 2 steps</span><span class="m">steps / cost</span></div>
+                <div class="agents">
+                  <div class="agent"><span class="nm m">main</span><span class="cells" data-n="9"></span><span class="m">18</span><span class="m c">1.10</span></div>
+                  <div class="agent"><span class="nm m">Explore ✓</span><span class="cells" data-n="6" data-done></span><span class="m">12</span><span class="m c">0.31</span></div>
+                  <div class="agent"><span class="nm m">gen-purpose</span><span class="cells" data-n="6" data-live></span><span class="m">11</span><span class="m c">0.51</span></div>
+                </div>
+              </div>
+              <div class="blk">
+                <div class="hd"><span class="lbl">Activity · last 30 min</span><a>Timeline</a></div>
+                <div class="cells act30" data-act="0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,2,3,4,3"></div>
+              </div>
+              <div class="feed m">
+                <div><span>19:04</span><span>gen-purp</span><span>Read web/app.js</span></div>
+                <div><span>19:04</span><span>gen-purp</span><span>Read web/style.css</span></div>
+                <div><span>19:03</span><span>Explore</span><span>done · 12 steps · 38K</span></div>
+              </div>
+            </div>
+            <div class="levers">
+              <div class="lr"><input id="fu" aria-label="Follow-up" placeholder="Follow-up (runs in a window copy)"><button class="btn go">Continue</button></div>
+              <div class="lr"><button class="btn">Verify</button><button class="btn">Hand off</button><button class="btn">Terminal</button><button class="btn stop" id="stopbtn">Stop</button></div>
+            </div>
+          </section>
+
+          <section class="pane" data-pane="ask" hidden>
+            <div class="ptop"><span class="crumb m">CONTENT MANAGER / vscode / sonnet medium</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button></div>
+            <div class="scroll">
+              <div><span class="st y">? ASKS YOU · waiting 14m</span><h2>Fix updater retry on 429</h2></div>
+              <div class="askbox" style="margin:0">
+                <div style="font:600 15px/1.4 var(--ui)">Keep the old cache key, or migrate entries to the v2 key?</div>
+                <textarea class="in" id="an" rows="3" aria-label="Answer" placeholder="Your answer runs in a window copy of this chat. The VS Code chat stays as it is."></textarea>
+                <div class="lr"><button class="btn you">Send answer</button><button class="btn">Open in terminal</button></div>
+              </div>
+              <div class="blk">
+                <div class="hd"><span class="lbl" style="color:var(--you)">Context · 182K · hand off soon</span><span class="m">1 cell = 10K</span></div>
+                <div class="cells ctx15" data-ctx="182"></div>
+                <div class="scale"><span>0</span><span>150K</span><span>300K</span></div>
+              </div>
+              <div class="path" data-path="1"></div>
+              <div class="feed m">
+                <div><span>18:49</span><span>main</span><span>Edit updater.py</span></div>
+                <div><span>18:48</span><span>main</span><span>Grep "cache_key" src/</span></div>
+                <div><span>18:47</span><span>main</span><span>Read src/cache.py</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="pane" data-pane="all" hidden>
+            <div class="ptop"><span class="crumb m">All projects · today</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button></div>
+            <div class="scroll">
+              <div class="hero">
+                <span class="big">8.73</span>
+                <span class="side"><span class="lbl">Today, USD</span><b>$0.61 / min now</b><span class="m" style="color:var(--mut)">soft limit $15</span></span>
+              </div>
+              <div class="blk">
+                <div class="cells spend" data-spend="6.4,17.5,24,30"></div>
+                <div class="legend"><span><i class="f"></i>exact $3.20</span><span><i class="h"></i>estimated $5.53</span><span><i class="mk"></i>80 % of limit</span><span>1 cell = $0.50</span></div>
+              </div>
+              <div class="blk">
+                <div class="hd"><span class="lbl">Activity · last 30 min</span><span class="m">cost</span></div>
+                <div class="heat" data-heat></div>
+                <div class="haxis"><span></span><span><span>18:35</span><span>19:05</span></span><span></span></div>
+              </div>
+              <div class="blk">
+                <div class="hd"><span class="lbl">Needs you · 2</span></div>
+                <button class="card y" data-to="ask"><span class="l1"><span class="st y">? ASKS YOU</span><span class="t">Fix updater retry on 429</span><span class="age m">14m</span></span><span class="sub m">CONTENT MANAGER · Keep the old cache key, or migrate?</span></button>
+                <button class="card r" data-to="focus"><span class="l1"><span class="st r">■ BLOCKED</span><span class="t">Add transcript search endpoint</span><span class="age m">3m</span></span><span class="sub m">BRAINAMP · denied: Bash git push origin main</span></button>
+              </div>
+              <div class="legend"><span>opus 38 %</span><span>sonnet 55 %</span><span>haiku 7 %</span><span>done today 4 · 1 PASS</span></div>
+            </div>
+            <div class="compose"><input id="nt" aria-label="New task" placeholder="New task in CLAUDE CONSOLE"><span class="kbd">Enter</span></div>
+          </section>
+
+          <section class="pane" data-pane="states" hidden>
+            <div class="banner"><b>OFFLINE</b> The service stopped answering. Runs keep going; the window reconnects by itself.</div>
+            <div class="ptop"><span class="crumb m">All projects · today</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button></div>
+            <div class="scroll">
+              <div class="empty">
+                <span class="lbl">Empty</span>
+                <div class="cells" style="grid-template-columns:repeat(15,10px)" data-blank="30"></div>
+                <p>No Claude Code session in the last 24 hours. Start one in VS Code or a terminal, or type a task below.</p>
+              </div>
+              <div class="blk">
+                <span class="lbl">Loading (Prep)</span>
+                <div class="loading"><span class="cells" data-load></span>Haiku is reading CLAUDE CONSOLE, 10 to 30 s</div>
+              </div>
+              <div class="blk">
+                <span class="lbl">Error</span>
+                <div class="card r" style="cursor:default"><span class="l1"><span class="st r">× FAILED</span><span class="t">Prep failed</span></span><span class="sub m" style="white-space:normal">claude.exe not found. Set "claude_exe" in config.json, then try again.</span></div>
+              </div>
+            </div>
+            <div class="compose"><input id="nt2" aria-label="New task" placeholder="New task in CLAUDE CONSOLE"><span class="kbd">Enter</span></div>
+          </section>
+        </div>
+        <p class="cap" id="cap"></p>
+      </div>
+    </div>
+
+    <div class="notes">
+      <section>
+        <h3>Design read</h3>
+        <p class="read">Reading this as: an always-on-top companion for one developer running several Claude Code sessions, in a monochrome cell-grid instrument language, dial ENERGY 2 / RHYTHM 2 / MOTION 1.</p>
+        <ul>
+          <li>ENERGY 2: one large dot-matrix figure per screen, everything else quiet</li>
+          <li>RHYTHM 2: blocks share one grammar (label, cells, scale), with the spend block and the question box as deliberate breaks</li>
+          <li>MOTION 1: hover states only, plus one blinking cell on the agent that is working right now. It stops for reduced-motion</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What each reference gave</h3>
+        <div class="tbl"><table>
+          <thead><tr><th>Reference</th><th>Taken</th><th>Left out</th></tr></thead>
+          <tbody>
+            <tr><td>Bio log phones</td><td>Dot-matrix voice for the one focal figure; off-white cells on near-black</td><td>Decorative code walls and invented readouts</td></tr>
+            <tr><td>Crypto dashboard</td><td>Square-cell composition bar (spend); hatched fill for a second kind of value (estimates)</td><td>Candlesticks, avatars, a chat-style assistant</td></tr>
+            <tr><td>Task board</td><td>Calm dark cards with one state word, readable sans titles</td><td>Columns of kanban (one person, few tasks)</td></tr>
+            <tr><td>Chip comparison</td><td>Rows of cells as counts you can compare across rows (agents, steps)</td><td>One colour per category: here colour means only "you" or "too much"</td></tr>
+            <tr><td>Energy heatmap</td><td>Session x minute heatmap with four steps of intensity</td><td>Big rounded tiles, illustrations, icon boxes</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+      <section>
+        <h3>One-line reasons</h3>
+        <ul>
+          <li>Cells: counting beats reading a bar. "10 of 30 cells" is the same at a glance from across the desk</li>
+          <li>Context grid in two rows of 15: the second row is the hand-off zone, so filling it is the warning</li>
+          <li>Hatched cells for estimated cost: exact and estimated dollars stay visibly different, never summed silently</li>
+          <li>Orange as the only accent: it means "you", so it can never be ignored as decoration</li>
+          <li>Dark first: it sits beside a dark VS Code all day. The light theme is kept and works</li>
+          <li>Doto for one figure per screen: it is the identity motif from the bio log reference. Cascadia Mono for all other figures, because it is already the app's data face and tabular. Segoe UI for titles because it reads as part of Windows</li>
+          <li>Uppercase labels at 0.04em, not wide tracking: they separate labels from values without shouting</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Anti-slop pass on the earlier drafts</h3>
+        <ul>
+          <li>Sample numbers are now labelled as sample data (R-17, R-38)</li>
+          <li>Empty, loading, error and offline states added (R-27)</li>
+          <li>No eyebrow pill above the heading, no coloured left stripes, no blue accent (Direction B had stripes)</li>
+          <li>State never by colour alone: glyph, word and the "needs you" square</li>
+          <li>Palette: off-white ink plus orange, with red and green kept for state only (R-29)</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Before building</h3>
+        <ul>
+          <li>Doto would ship as a local woff2 in <code>web/</code> (OFL licence); the app makes no network calls</li>
+          <li>Same open checks as Rings and Pill: frameless resize on Windows, estimated cost from transcript usage, per-minute activity buckets</li>
+          <li>The cells are plain CSS grid; no library, no build step</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+const S = [
+  { to: "ask", lab: "CM", gl: "?", tone: "y", ctx: 182, flag: "y", title: "Asks you: Fix updater retry on 429", nm: "? updater", cost: "~0.84",
+    act: "2,3,2,1,2,3,3,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0" },
+  { to: "focus", lab: "BRAIN", gl: "■", tone: "r", ctx: 54, flag: "r", title: "Blocked: Add transcript search endpoint", nm: "■ search", cost: "0.41",
+    act: "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,2,1,0" },
+  { to: "focus", lab: "CC", gl: "▶", tone: "", ctx: 96, sel: true, title: "Running: Redesign proposal for the window", nm: "▶ redesign", cost: "~1.92",
+    act: "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,2,3,4,3" },
+  { to: "focus", lab: "FPA", gl: "▶", tone: "", ctx: 312, title: "Running, hand off: Batch prepare launch split", nm: "▶ batch split", cost: "~3.10",
+    act: "2,3,2,3,3,2,3,4,3,2,3,2,2,3,3,2,3,3,2,3,4,3,2,3,2,2,3,2,3,2" },
+  { to: "focus", lab: "CC", gl: "○", tone: "", ctx: 71, title: "Idle: Phase 3 levers live check", nm: "○ levers", cost: "0.28",
+    act: "0,0,0,0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0" },
+];
+const cellsHtml = (classes) => classes.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("");
+function ctxClasses(ctx, total, half) {
+  const n = Math.min(total, Math.round(ctx / 10)), over = ctx >= 300;
+  return Array.from({ length: total }, (_, k) => k < n ? (over ? "r" : k >= half ? "y" : "f") : "");
+}
+function chipGrid(ctx) {  // 5 x 6, filled from the bottom row up
+  const order = ctxClasses(ctx, 30, 15), rows = [];
+  for (let r = 0; r < 6; r++) rows.unshift(order.slice(r * 5, r * 5 + 5));
+  return cellsHtml(rows.flat());
+}
+function strip(el, size) {
+  const chips = S.map((s) => `<button class="chipcell${size === "lg" && s.sel ? " sel" : ""}" data-to="${s.to}" title="${s.title}">
+      <span class="cells">${chipGrid(s.ctx)}</span><span class="gl ${s.tone}">${s.gl}</span>
+      ${size === "lg" ? `<span class="lab">${s.lab}</span>` : ""}${s.flag ? `<span class="dot ${s.flag === "r" ? "r" : ""}"></span>` : ""}</button>`).join("");
+  el.innerHTML = size === "sm"
+    ? `<span class="grip" title="Drag to move">⋮⋮</span>${chips}<span class="sp"></span><span class="big">8.73</span><button class="tb" data-to="all" aria-label="Open" title="Open (double-click the pill)">⌄</button>`
+    : `<div class="drag" title="Drag to move">⋯</div><button class="rb" data-to="all" title="Overview" aria-label="Overview">▦</button><div class="sep"></div>${chips}
+       <div class="sep"></div><button class="rb" data-to="all" title="New task (Ctrl+N)" aria-label="New task">＋</button><div class="grow" title="Drag to move"></div>
+       <div class="total">8.73<small>today</small></div><button class="rb on" title="Always on top (on)" aria-label="Always on top">⊤</button>
+       <button class="rb" data-to="pill" title="Fold to pill" aria-label="Fold to pill">⌃</button>`;
+}
+document.querySelectorAll("[data-strip]").forEach((el) => strip(el, el.dataset.strip));
+document.querySelectorAll("[data-ctx]").forEach((el) => { el.innerHTML = cellsHtml(ctxClasses(Number(el.dataset.ctx), 30, 15)); });
+document.querySelectorAll("[data-path]").forEach((el) => {
+  const steps = [["Prep", "ok"], ["Run", "cur"], ["Verify", ""], ["Hand off", ""]];
+  el.innerHTML = steps.map(([n, s]) => `<span class="${s}"><span class="cells">${cellsHtml(Array(6).fill(s === "ok" ? "g" : s === "cur" ? "f" : ""))}</span>${n}</span>`).join("");
+});
+document.querySelectorAll(".agent .cells").forEach((el) => {
+  const n = Number(el.dataset.n), live = el.hasAttribute("data-live");
+  el.innerHTML = cellsHtml(Array.from({ length: 24 }, (_, k) => k < n ? (live && k === n - 1 ? "f live" : "f") : ""));
+});
+const lv = (v) => ["", "l1", "l2", "l3", "l4"][Number(v)];
+document.querySelectorAll("[data-act]").forEach((el) => { el.innerHTML = cellsHtml(el.dataset.act.split(",").map(lv)); });
+document.querySelectorAll("[data-heat]").forEach((el) => {
+  el.innerHTML = S.map((s) => `<button class="hrow" data-to="${s.to}" title="${s.title}"><span class="nm m ${s.tone}">${s.nm}</span>
+    <span class="cells act30">${cellsHtml(s.act.split(",").map(lv))}</span><span class="c m">${s.cost}</span></button>`).join("");
+});
+document.querySelectorAll("[data-spend]").forEach((el) => {  // exact, exact+estimate, limit mark, total (in cells of $0.50)
+  const [ex, all, mk, tot] = el.dataset.spend.split(",").map(Number), cls = [];
+  for (let k = 0; k < tot * 5; k++) {
+    const col = Math.floor(k / 5);
+    let c = col < Math.floor(ex) ? "f" : col < Math.floor(all) ? "h" : "";
+    if (col === mk) c += " mk";
+    cls.push(c.trim());
+  }
+  el.innerHTML = cellsHtml(cls);
+});
+document.querySelectorAll("[data-blank]").forEach((el) => { el.innerHTML = cellsHtml(Array(Number(el.dataset.blank)).fill("")); });
+document.querySelectorAll("[data-load]").forEach((el) => {
+  el.innerHTML = cellsHtml(Array(6).fill(""));
+  const cells = el.querySelectorAll("i"); let k = 0;
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) setInterval(() => { cells.forEach((c, j) => c.className = j === k % 6 ? "f" : ""); k++; }, 300);
+  else cells[0].className = "f";
+});
+
+const caps = {
+  pill: "", peek: "",
+  focus: "One focal figure (spent), then context in cells, the playbook path, agents as rows of steps, and the last 30 minutes of activity.",
+  ask: "The question comes first, then where the answer runs. Orange is reserved for this state.",
+  all: "Overview: today's spend as cells (solid exact, hatched estimated, orange outline at 80 % of the soft limit), then a session by minute heatmap, then what needs you.",
+  states: "Offline banner, empty view, Prep loading and an error, all in the same cell language."
+};
+function show(v) {
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  const inWin = ["focus", "ask", "all", "states"].includes(v);
+  document.querySelector('[data-view="pill"]').hidden = v !== "pill";
+  document.querySelector('[data-view="peek"]').hidden = v !== "peek";
+  document.querySelector('[data-view="win"]').hidden = !inWin;
+  document.querySelectorAll("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== v; });
+  const cap = document.getElementById("cap"); cap.textContent = caps[v]; cap.hidden = !caps[v];
+}
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-to]");
+  if (!b) return;
+  if (b.classList.contains("chipcell") && b.closest(".rail")) document.querySelectorAll(".rail .chipcell").forEach((c) => c.classList.toggle("sel", c === b));
+  show(b.dataset.to);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") show("all"); });
+const stop = document.getElementById("stopbtn"); let t;
+stop.addEventListener("click", () => {
+  if (stop.dataset.armed) { stop.textContent = "Stopping…"; stop.disabled = true; return; }
+  stop.dataset.armed = "1"; stop.textContent = "Stop run? Click again"; clearTimeout(t);
+  t = setTimeout(() => { delete stop.dataset.armed; stop.textContent = "Stop"; stop.disabled = false; }, 3000);
+});
+show("focus");
+</script>

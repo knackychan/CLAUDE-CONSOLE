@@ -1,0 +1,463 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; }</style>
+<title>Console CA: Rings and Pill</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: proposal page = stage (window mock: folded ring pill, or rail + focus pane) + notes; follows system theme; stacks on phones. */
+:root {
+  --page: #e8eaed; --win: #fbfbfa; --rail: #f2f3f4; --raise: #eceef0; --ink: #1b1e22; --mut: #69707a; --line: rgb(27 30 34 / 11%);
+  --blue: #2864cf; --amber: #a85f00; --amber-bg: #fff3df; --red: #bd2f28; --red-bg: #fde9e7; --green: #1b7f45; --track: rgb(27 30 34 / 10%);
+  --shadow: 0 18px 50px rgb(20 24 30 / 22%), 0 2px 6px rgb(20 24 30 / 12%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --disp: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #0f1113; --win: #1a1c1f; --rail: #151719; --raise: #24272b; --ink: #e8eaed; --mut: #8f96a0; --line: rgb(255 255 255 / 9%);
+  --blue: #84b1ff; --amber: #f3b54c; --amber-bg: rgb(243 181 76 / 12%); --red: #ff6f62; --red-bg: rgb(255 111 98 / 11%); --green: #52c985; --track: rgb(255 255 255 / 10%);
+  --shadow: 0 18px 50px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 40%); color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --page: #0f1113; --win: #1a1c1f; --rail: #151719; --raise: #24272b; --ink: #e8eaed; --mut: #8f96a0; --line: rgb(255 255 255 / 9%);
+  --blue: #84b1ff; --amber: #f3b54c; --amber-bg: rgb(243 181 76 / 12%); --red: #ff6f62; --red-bg: rgb(255 111 98 / 11%); --green: #52c985; --track: rgb(255 255 255 / 10%);
+  --shadow: 0 18px 50px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 40%); color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 28px 16px 48px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 28px; }
+header h1 { font: 600 28px/1.15 var(--disp); margin: 0 0 6px; letter-spacing: -.015em; text-wrap: balance; }
+header p { margin: 0; color: var(--mut); max-width: 64ch; }
+.eyebrow { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--amber); }
+.grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 36px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.views { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; }
+.views button { font: 500 12px var(--ui); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); background: var(--win); border-color: var(--ink); }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.stage { min-height: 660px; }
+.cap { font-size: 12px; color: var(--mut); max-width: 400px; margin: 12px 0 0; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* rings, shared by pill and rail */
+.ring { position: relative; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink); cursor: pointer; padding: 0; font: inherit; }
+.ring svg { display: block; }
+.ring .g { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 600; }
+.ring .bd { position: absolute; min-width: 14px; height: 14px; border-radius: 7px; background: var(--amber); color: #1b1300; font: 700 9px/14px var(--ui); text-align: center; padding: 0 3px; }
+.ring .bd.r { background: var(--red); color: #fff; }
+
+/* folded: ring pill */
+.pill { width: min(380px, 100%); height: 46px; background: var(--win); border: 1px solid var(--line); border-radius: 23px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 4px; padding: 0 6px 0 12px; user-select: none; }
+.pill .grip { color: var(--mut); letter-spacing: -2px; font-size: 12px; cursor: grab; margin-right: 4px; }
+.pill .ring { width: 34px; height: 34px; border-radius: 17px; }
+.pill .ring:hover { background: var(--raise); }
+.pill .ring .g { font-size: 11px; }
+.pill .ring .bd { top: -2px; right: -2px; box-shadow: 0 0 0 2px var(--win); }
+.pill .sp { flex: 1; align-self: stretch; cursor: grab; }
+.pill .spend { white-space: nowrap; color: var(--mut); padding: 0 4px; }
+.pill .spend b { color: var(--ink); font-weight: 500; }
+.tb { width: 32px; height: 32px; border: 0; border-radius: 16px; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); display: grid; place-items: center; }
+.tb:hover { background: var(--raise); color: var(--ink); }
+.peek { width: min(380px, 100%); background: var(--win); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.peek .pill { box-shadow: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; width: 100%; }
+.askcard { margin: 8px; padding: 9px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); background: var(--amber-bg); display: grid; gap: 5px; }
+.l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.t { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.age { color: var(--mut); white-space: nowrap; }
+.chip { font: 600 11px var(--ui); white-space: nowrap; border-radius: 4px; padding: 0 6px; line-height: 18px; }
+.chip.amber { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.chip.red { color: var(--red); background: color-mix(in srgb, var(--red) 13%, transparent); }
+.chip.blue { color: var(--blue); background: color-mix(in srgb, var(--blue) 12%, transparent); }
+.chip.green { color: var(--green); background: color-mix(in srgb, var(--green) 13%, transparent); }
+.chip.grey { color: var(--mut); background: var(--raise); }
+.lr { display: flex; gap: 6px; flex-wrap: wrap; }
+.lr input, textarea.in { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--win); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; }
+textarea.in { width: 100%; resize: none; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: var(--win); border: 1px solid var(--line); border-radius: 7px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 30px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.stop { color: var(--red); }
+
+/* full: rail + pane */
+.win { width: min(400px, 100%); height: 640px; background: var(--win); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; grid-template-columns: 56px minmax(0, 1fr); overflow: hidden; }
+.rail { background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 4px; user-select: none; }
+.rail .drag { color: var(--mut); font-size: 12px; letter-spacing: -1px; cursor: grab; height: 14px; line-height: 10px; }
+.rail .sep { width: 26px; height: 1px; background: var(--line); margin: 3px 0; }
+.rail .grow { flex: 1; width: 100%; cursor: grab; }
+.rail .ses { width: 46px; display: grid; justify-items: center; gap: 0; padding: 3px 0 2px; border-radius: 8px; border: 0; background: transparent; cursor: pointer; color: var(--ink); font: inherit; position: relative; }
+.rail .ses:hover { background: var(--raise); }
+.rail .ses.sel { background: var(--win); box-shadow: inset 0 0 0 1px var(--line); }
+.rail .ses .ring { width: 36px; height: 36px; pointer-events: none; }
+.rail .ses .ring .g { font-size: 13px; }
+.rail .ses .ring .bd { top: -3px; right: -5px; box-shadow: 0 0 0 2px var(--rail); }
+.rail .lab { font: 500 9px var(--mono); color: var(--mut); max-width: 46px; overflow: hidden; white-space: nowrap; }
+.rb { width: 34px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); }
+.rb:hover { background: var(--raise); color: var(--ink); }
+.rb.on { color: var(--blue); }
+.rb.x:hover { background: #c42b1c; color: #fff; }
+.total { font: 500 11px var(--mono); text-align: center; line-height: 1.2; }
+.total small { display: block; color: var(--mut); font-size: 9px; }
+
+.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ptop { height: 36px; flex: none; display: flex; align-items: center; gap: 6px; padding-left: 12px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; }
+.ptop .crumb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mut); }
+.ptop .rb { width: 34px; height: 36px; border-radius: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; cursor: default; }
+.seg button { font: 500 11px var(--ui); border: 0; background: transparent; color: var(--mut); padding: 2px 8px; cursor: pointer; }
+.seg button.on { background: var(--raise); color: var(--ink); }
+.scroll { flex: 1; overflow-y: auto; padding: 12px; display: grid; gap: 12px; align-content: start; }
+h2 { font: 600 16px/1.3 var(--disp); margin: 4px 0 0; text-wrap: balance; }
+.now { background: var(--raise); border-radius: 8px; padding: 7px 10px; display: grid; }
+.now small { font-size: 11px; color: var(--mut); text-transform: uppercase; letter-spacing: .07em; }
+.now b { font: 500 13px var(--mono); overflow-wrap: anywhere; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 8px; }
+.stats div { padding: 6px 8px; display: grid; min-width: 0; }
+.stats div + div { border-left: 1px solid var(--line); }
+.stats small { font-size: 11px; color: var(--mut); }
+.stats b { font: 500 14px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stats i { font: 10px var(--mono); color: var(--mut); font-style: normal; white-space: nowrap; }
+.ctxbar { display: grid; gap: 3px; }
+.ctxbar .lbl { display: flex; justify-content: space-between; color: var(--mut); }
+.ctxbar .tr { position: relative; height: 6px; border-radius: 3px; background: var(--track); }
+.ctxbar .tr i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--green); }
+.ctxbar .tr i.y { background: var(--amber); }
+.ctxbar .tr b { position: absolute; top: -3px; bottom: -3px; width: 2px; left: 50%; background: var(--mut); }
+.path { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+.path span { display: grid; gap: 3px; font: 500 11px var(--ui); color: var(--mut); }
+.path span::before { content: ""; height: 4px; border-radius: 2px; background: var(--track); }
+.path .ok { color: var(--green); } .path .ok::before { background: var(--green); }
+.path .cur { color: var(--ink); font-weight: 600; } .path .cur::before { background: var(--blue); }
+.sh { font-size: 11px; color: var(--mut); text-transform: uppercase; letter-spacing: .07em; display: flex; justify-content: space-between; gap: 8px; }
+.sh a { color: var(--blue); text-transform: none; letter-spacing: 0; cursor: pointer; }
+.lanes { display: grid; gap: 5px; }
+.lane { display: grid; grid-template-columns: 76px minmax(0, 1fr) 44px; gap: 8px; align-items: center; }
+.lane .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mut); }
+.lane .tk { position: relative; height: 9px; border-radius: 2px; background: var(--track); }
+.lane .tk i { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--blue); }
+.lane .tk i.g { background: var(--green); } .lane .tk i.a { background: var(--amber); opacity: .45; } .lane .tk i.r { background: var(--red); opacity: .45; }
+.lane .c { text-align: right; }
+.lane.hi .nm { color: var(--amber); }
+.axis { display: grid; grid-template-columns: 76px minmax(0, 1fr) 44px; gap: 8px; color: var(--mut); font: 10px var(--mono); }
+.axis span:nth-child(2) { display: flex; justify-content: space-between; }
+.feed { display: grid; gap: 2px; color: var(--mut); }
+.feed > div:not(.sh) { display: grid; grid-template-columns: 40px 64px minmax(0, 1fr); gap: 8px; }
+.feed > div:not(.sh) span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.levers { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+.levers input { background: var(--raise); border-color: transparent; }
+
+/* overview cards (from A) */
+.card { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; display: grid; gap: 2px; background: transparent; text-align: left; color: var(--ink); font: inherit; width: 100%; }
+.card:hover { background: var(--raise); }
+.card.ask { border-color: color-mix(in srgb, var(--amber) 45%, transparent); background: var(--amber-bg); }
+.card.bad { border-color: color-mix(in srgb, var(--red) 45%, transparent); background: var(--red-bg); }
+.card.quiet { border-color: transparent; padding-block: 4px; }
+.l2 { display: grid; grid-template-columns: minmax(0, 1fr) 50px 44px; gap: 8px; color: var(--mut); }
+.l2 .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.l2 span:nth-child(n+2) { text-align: right; } .l2 .cost { color: var(--ink); }
+.l2 .y { color: var(--amber); } .l2 .r { color: var(--red); }
+.list { display: grid; gap: 5px; }
+.foot { flex: none; border-top: 1px solid var(--line); padding: 6px 12px 7px; display: grid; gap: 4px; }
+.foot .row { display: flex; justify-content: space-between; gap: 8px; color: var(--mut); }
+.foot b { color: var(--ink); font-weight: 500; }
+.mix { display: flex; height: 4px; border-radius: 2px; overflow: hidden; gap: 2px; }
+.mix i:nth-child(1) { background: var(--blue); } .mix i:nth-child(2) { background: color-mix(in srgb, var(--blue) 50%, var(--win)); } .mix i:nth-child(3) { background: var(--track); }
+.compose { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: flex; gap: 6px; align-items: center; }
+.compose input { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid transparent; border-radius: 7px; padding: 6px 9px; }
+.kbd { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+
+/* notes */
+.notes { display: grid; gap: 22px; }
+.notes section { display: grid; gap: 6px; }
+.notes h3 { font-size: 12px; margin: 0; letter-spacing: .08em; text-transform: uppercase; color: var(--mut); }
+.notes p, .notes li { margin: 0; max-width: 64ch; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+.spec dt { color: var(--mut); } .spec dd { margin: 0; }
+.tbl { overflow-x: auto; }
+.tbl table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.tbl th, .tbl td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl th { font-size: 11px; color: var(--mut); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+code { font: 12px var(--mono); background: var(--raise); border-radius: 4px; padding: 1px 4px; }
+.flag { color: var(--amber); font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">C + A &middot; merged direction</div>
+    <h1>Rings and Pill</h1>
+    <p>Folded, the console is A's pill, now made of C's session rings: one ring per live task, a badge when it needs you, today's spend. When a task asks, the pill opens one answer card. Unfolded, it is C's rail and focus pane, with A's quiet palette and card list as the overview.</p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="views" role="group" aria-label="Mock view">
+        <button data-v="pill" aria-pressed="false">Pill</button>
+        <button data-v="peek" aria-pressed="false">Pill + peek</button>
+        <button data-v="focus" aria-pressed="true">Focus</button>
+        <button data-v="ask" aria-pressed="false">Asks you</button>
+        <button data-v="all" aria-pressed="false">Overview</button>
+      </div>
+
+      <div class="stage">
+        <!-- PILL -->
+        <div data-view="pill" hidden>
+          <div class="pill">
+            <span class="grip" title="Drag to move">⋮⋮</span>
+            <button class="ring" data-ring="0.61,y,28" data-to="ask" title="Asks you: Fix updater retry on 429 (CONTENT MANAGER)"><svg></svg><span class="g" style="color:var(--amber)">?</span><span class="bd">1</span></button>
+            <button class="ring" data-ring="0.18,g,28" data-to="focus" title="Blocked: Add transcript search endpoint (BRAINAMP)"><svg></svg><span class="g" style="color:var(--red)">■</span><span class="bd r">!</span></button>
+            <button class="ring" data-ring="0.32,g,28" data-to="focus" title="Running: Redesign proposal for the window (CLAUDE CONSOLE)"><svg></svg><span class="g" style="color:var(--blue)">▶</span></button>
+            <button class="ring" data-ring="1,r,28" data-to="focus" title="Running, hand off: Batch prepare launch split"><svg></svg><span class="g" style="color:var(--blue)">▶</span></button>
+            <button class="ring" data-ring="0.24,g,28" data-to="focus" title="Idle: Phase 3 levers live check"><svg></svg><span class="g" style="color:var(--mut)">○</span></button>
+            <span class="sp"></span>
+            <span class="spend m"><b>$8.73</b></span>
+            <button class="tb" data-to="all" title="Open (double-click the pill)" aria-label="Open">⌄</button>
+          </div>
+          <p class="cap">380 x 46, always on top. One ring per live task: ring fills with context, glyph is the state, badge means it needs you. Click a ring to open the window on that task.</p>
+        </div>
+
+        <!-- PEEK -->
+        <div data-view="peek" hidden>
+          <div class="peek">
+            <div class="pill">
+              <span class="grip">⋮⋮</span>
+              <button class="ring" data-ring="0.61,y,28" title="Asks you"><svg></svg><span class="g" style="color:var(--amber)">?</span><span class="bd">1</span></button>
+              <button class="ring" data-ring="0.18,g,28" title="Blocked"><svg></svg><span class="g" style="color:var(--red)">■</span><span class="bd r">!</span></button>
+              <button class="ring" data-ring="0.32,g,28" title="Running"><svg></svg><span class="g" style="color:var(--blue)">▶</span></button>
+              <button class="ring" data-ring="1,r,28" title="Running"><svg></svg><span class="g" style="color:var(--blue)">▶</span></button>
+              <button class="ring" data-ring="0.24,g,28" title="Idle"><svg></svg><span class="g" style="color:var(--mut)">○</span></button>
+              <span class="sp"></span><span class="spend m"><b>$8.73</b></span>
+              <button class="tb" data-to="ask" aria-label="Open">⌄</button>
+            </div>
+            <div class="askcard">
+              <div class="l1"><span class="chip amber">? Asks you</span><span class="t">Fix updater retry on 429</span><span class="age m">14m</span></div>
+              <div style="font-size:13px">Keep the old cache key, or migrate entries to the v2 key?</div>
+              <div class="lr"><input id="pk" aria-label="Answer" placeholder="Type your answer"><button class="btn go">Send</button></div>
+            </div>
+          </div>
+          <p class="cap">A new question opens one card under the pill (oldest first). Send or Esc folds it back. Blocked and Failed show the same way, with Open in terminal instead of an answer box.</p>
+        </div>
+
+        <!-- FULL WINDOW -->
+        <div data-view="win" class="win">
+          <nav class="rail" aria-label="Sessions">
+            <div class="drag" title="Drag to move">⋯</div>
+            <button class="rb" data-to="all" title="Overview" aria-label="Overview">▦</button>
+            <div class="sep"></div>
+            <button class="ses" data-to="ask" title="Asks you: Fix updater retry on 429"><span class="ring" data-ring="0.61,y,36"><svg></svg><span class="g" style="color:var(--amber)">?</span><span class="bd">1</span></span><span class="lab">CM</span></button>
+            <button class="ses" data-to="focus" title="Blocked: Add transcript search endpoint"><span class="ring" data-ring="0.18,g,36"><svg></svg><span class="g" style="color:var(--red)">■</span><span class="bd r">!</span></span><span class="lab">BRAIN</span></button>
+            <button class="ses sel" data-to="focus" title="Running: Redesign proposal for the window"><span class="ring" data-ring="0.32,g,36"><svg></svg><span class="g" style="color:var(--blue)">▶</span></span><span class="lab">CC</span></button>
+            <button class="ses" data-to="focus" title="Running, hand off: Batch prepare launch split"><span class="ring" data-ring="1,r,36"><svg></svg><span class="g" style="color:var(--blue)">▶</span></span><span class="lab">FPA</span></button>
+            <button class="ses" data-to="focus" title="Idle: Phase 3 levers live check"><span class="ring" data-ring="0.24,g,36"><svg></svg><span class="g" style="color:var(--mut)">○</span></span><span class="lab">CC</span></button>
+            <div class="sep"></div>
+            <button class="rb" data-to="all" title="New task (Ctrl+N)" aria-label="New task">＋</button>
+            <div class="grow" title="Drag to move"></div>
+            <div class="total">$8.73<small>today</small></div>
+            <button class="rb on" title="Always on top (on)" aria-label="Always on top">⊤</button>
+            <button class="rb" data-to="pill" title="Fold to pill (double-click a top bar)" aria-label="Fold to pill">⌃</button>
+          </nav>
+
+          <!-- focus -->
+          <section class="pane" data-pane="focus">
+            <div class="ptop"><span class="crumb m">CLAUDE CONSOLE · vscode · opus/high</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close" title="Close window (runs keep going)">✕</button></div>
+            <div class="scroll">
+              <div><span class="chip blue">▶ Running · 6m 40s</span><h2>Redesign proposal for the window</h2></div>
+              <div class="now"><small>Doing now · general-purpose</small><b>Read web/app.js</b></div>
+              <div class="stats">
+                <div><small>Spent</small><b>~$1.92</b><i>$0.29/min</i></div>
+                <div><small>Context</small><b>96K</b><i>of 300K</i></div>
+                <div><small>Steps</small><b>41</b><i>8/min</i></div>
+                <div><small>Agents</small><b>1/2</b><i>done</i></div>
+              </div>
+              <div class="ctxbar"><div class="tr"><i style="width:32%"></i><b title="150K: hand off soon"></b></div><div class="lbl m"><span>0</span><span>150K soon</span><span>300K hand off</span></div></div>
+              <div class="path" aria-label="Task progress"><span class="ok">Prep</span><span class="cur">Run</span><span>Verify</span><span>Hand off</span></div>
+              <div class="lanes m">
+                <div class="sh"><span>Last 10 min</span><a>Timeline ›</a></div>
+                <div class="lane"><span class="nm">main</span><span class="tk"><i style="left:4%;width:22%"></i><i style="left:30%;width:6%"></i><i style="left:88%;width:12%"></i></span><span class="c">$1.10</span></div>
+                <div class="lane"><span class="nm">Explore ✓</span><span class="tk"><i class="g" style="left:34%;width:28%"></i></span><span class="c">$0.31</span></div>
+                <div class="lane"><span class="nm">gen-purpose</span><span class="tk"><i style="left:60%;width:40%"></i></span><span class="c">$0.51</span></div>
+                <div class="axis"><span></span><span><span>18:58</span><span>19:04</span></span><span></span></div>
+              </div>
+              <div class="feed m">
+                <div class="sh"><span>Steps</span><a>All 41 ›</a></div>
+                <div><span>19:04</span><span>gen-purp</span><span>Read web/app.js</span></div>
+                <div><span>19:04</span><span>gen-purp</span><span>Read web/style.css</span></div>
+                <div><span>19:03</span><span>Explore</span><span>✓ done · 12 steps · 38K</span></div>
+              </div>
+            </div>
+            <div class="levers">
+              <div class="lr"><input id="fu" aria-label="Follow-up" placeholder="Follow-up (runs in a window copy)"><button class="btn go">Continue</button></div>
+              <div class="lr"><button class="btn">Verify</button><button class="btn">Hand off</button><button class="btn">Terminal</button><button class="btn stop" id="stopbtn">Stop</button></div>
+            </div>
+          </section>
+
+          <!-- ask -->
+          <section class="pane" data-pane="ask" hidden>
+            <div class="ptop"><span class="crumb m">CONTENT MANAGER · vscode · sonnet/med</span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button></div>
+            <div class="scroll">
+              <div><span class="chip amber">? Asks you · waiting 14m</span><h2>Fix updater retry on 429</h2></div>
+              <div class="askcard" style="margin:0">
+                <div style="font:500 14px/1.4 var(--disp)">Keep the old cache key, or migrate entries to the v2 key?</div>
+                <textarea class="in" id="an" rows="3" aria-label="Answer" placeholder="Your answer. It runs in a window copy of this chat; the VS Code chat stays as it is."></textarea>
+                <div class="lr"><button class="btn go">Send answer</button><button class="btn">Open in terminal</button></div>
+              </div>
+              <div class="stats">
+                <div><small>Spent</small><b>~$0.84</b><i>idle</i></div>
+                <div><small>Context</small><b style="color:var(--amber)">182K</b><i>soon</i></div>
+                <div><small>Steps</small><b>63</b><i>total</i></div>
+                <div><small>Follow-ups</small><b>1</b><i>of 2</i></div>
+              </div>
+              <div class="ctxbar"><div class="tr"><i class="y" style="width:61%"></i><b></b></div><div class="lbl m"><span>0</span><span>150K soon</span><span>300K hand off</span></div></div>
+              <div class="feed m">
+                <div class="sh"><span>Last steps before the question</span><a>All ›</a></div>
+                <div><span>18:49</span><span>main</span><span>Edit updater.py</span></div>
+                <div><span>18:48</span><span>main</span><span>Grep "cache_key" src/</span></div>
+                <div><span>18:47</span><span>main</span><span>Read src/cache.py</span></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- overview -->
+          <section class="pane" data-pane="all" hidden>
+            <div class="ptop"><span class="crumb m">All projects</span><span class="seg" role="group" aria-label="Overview mode"><button class="on" data-mode="list">List</button><button data-mode="lanes">Lanes</button></span><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button></div>
+            <div class="scroll" id="ov-list">
+              <div class="sh"><span>Needs you</span><span>2</span></div>
+              <div class="list">
+                <button class="card ask" data-to="ask"><span class="l1"><span class="chip amber">? Asks you</span><span class="t">Fix updater retry on 429</span><span class="age m">14m</span></span><span class="l2 m"><span class="who">CONTENT MANAGER · sonnet/med</span><span class="cost">~0.84</span><span class="y">182K</span></span></button>
+                <button class="card bad" data-to="focus"><span class="l1"><span class="chip red">■ Blocked</span><span class="t">Add transcript search endpoint</span><span class="age m">3m</span></span><span class="l2 m"><span class="who">Denied: Bash git push</span><span class="cost">0.41</span><span>54K</span></span></button>
+              </div>
+              <div class="sh"><span>Working</span><span>3 · ~$5.30</span></div>
+              <div class="list">
+                <button class="card" data-to="focus"><span class="l1"><span class="chip blue">▶ Running</span><span class="t">Redesign proposal for the window</span><span class="age m">6m</span></span><span class="l2 m"><span class="who">CLAUDE CONSOLE · opus/high</span><span class="cost">~1.92</span><span>96K</span></span></button>
+                <button class="card" data-to="focus"><span class="l1"><span class="chip red">◔ Hand off</span><span class="t">Batch prepare launch split</span><span class="age m">42m</span></span><span class="l2 m"><span class="who">fashion_packshots_ai · sonnet/high</span><span class="cost">~3.10</span><span class="r">312K</span></span></button>
+                <button class="card" data-to="focus"><span class="l1"><span class="chip grey">○ Idle</span><span class="t">Phase 3 levers live check</span><span class="age m">21m</span></span><span class="l2 m"><span class="who">CLAUDE CONSOLE · 2 follow-ups</span><span class="cost">0.28</span><span>71K</span></span></button>
+              </div>
+              <div class="sh"><span>Done today</span><span>4 · $0.71 ›</span></div>
+              <div class="list">
+                <button class="card quiet"><span class="l1"><span class="chip green">✓ PASS</span><span class="t" style="font-weight:400">Verify routing table</span><span class="age m">$0.06</span></span></button>
+              </div>
+            </div>
+            <div class="scroll" id="ov-lanes" hidden>
+              <div class="lanes m">
+                <div class="sh"><span>Last 60 min</span><span>cost</span></div>
+                <div class="lane hi"><span class="nm">? updater</span><span class="tk"><i style="left:8%;width:40%"></i><i class="a" style="left:48%;width:52%"></i></span><span class="c">~0.84</span></div>
+                <div class="lane"><span class="nm" style="color:var(--red)">■ search</span><span class="tk"><i style="left:84%;width:11%"></i><i class="r" style="left:95%;width:5%"></i></span><span class="c">0.41</span></div>
+                <div class="lane"><span class="nm">▶ redesign</span><span class="tk"><i style="left:89%;width:11%"></i></span><span class="c">~1.92</span></div>
+                <div class="lane"><span class="nm">▶ batch split</span><span class="tk"><i style="left:30%;width:70%"></i></span><span class="c">~3.10</span></div>
+                <div class="lane"><span class="nm">○ levers</span><span class="tk"><i style="left:52%;width:13%"></i></span><span class="c">0.28</span></div>
+                <div class="lane"><span class="nm">✓ routing</span><span class="tk"><i class="g" style="left:2%;width:6%"></i></span><span class="c">0.06</span></div>
+                <div class="axis"><span></span><span><span>18:05</span><span>18:35</span><span>19:05</span></span><span></span></div>
+              </div>
+            </div>
+            <div class="compose"><input id="nt" aria-label="New task" placeholder="New task in CLAUDE CONSOLE…"><span class="kbd">Enter</span></div>
+            <div class="foot m">
+              <div class="row"><span>Today <b>$8.73</b> (~$5.53 est.) · now $0.61/min</span><span>opus 38 · sonnet 55 · haiku 7 %</span></div>
+              <div class="mix"><i style="flex:38"></i><i style="flex:55"></i><i style="flex:7"></i></div>
+            </div>
+          </section>
+        </div>
+        <p class="cap" id="cap"></p>
+      </div>
+    </div>
+
+    <div class="notes">
+      <section>
+        <h3>The merge</h3>
+        <div class="tbl"><table>
+          <thead><tr><th>Piece</th><th>From</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Folded pill, peek card with inline answer</td><td>A</td><td>Smallest footprint; one click to answer</td></tr>
+            <tr><td>Session rings (context fill, state glyph, badge)</td><td>C</td><td>Now the pill's content too: names-free but distinct per task</td></tr>
+            <tr><td>Rail + focus pane as the open window</td><td>C</td><td>One task big, the rest at a glance</td></tr>
+            <tr><td>Overview as 2-line cards, Lanes as a toggle</td><td>A + C</td><td>Cards to triage, lanes to see time and cost</td></tr>
+            <tr><td>Palette: quiet graphite, amber = you</td><td>A</td><td>Follows the system theme; only attention is loud</td></tr>
+            <tr><td>4-cell stats strip, doing-now line, burn rate</td><td>A + C</td><td>Cost and progress readable at a distance</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+      <section>
+        <h3>Dropped</h3>
+        <ul>
+          <li>C's 64 px rail-only strip: one folded form (the pill) is enough, and it is one less window size to test</li>
+          <li>A's separate Session page: the focus pane replaces it</li>
+          <li>C's dark-only look: the window follows the system theme</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Window states</h3>
+        <dl class="spec">
+          <dt>Pill</dt><dd>380 x 46, rounded, docked to an edge; double-click opens</dd>
+          <dt>Peek</dt><dd>Pill + one card, opens by itself on a new question, blocked or failed task</dd>
+          <dt>Open</dt><dd>400 x 640 (min 360 x 420); rail 56 px + pane; double-click a top bar folds</dd>
+          <dt>Frame</dt><dd>Borderless; drag from the pill grip, the rail's empty area or the pane's top bar</dd>
+          <dt>Memory</dt><dd>Position, open/folded and selected task kept in <code>config.json</code></dd>
+        </dl>
+      </section>
+      <section>
+        <h3>Human-proof rules</h3>
+        <ul>
+          <li>A ring is never alone: glyph inside, badge outside, tooltip with state and title, and the state in words once opened</li>
+          <li>The pane follows a task that just started asking, unless you picked one in the last 2 minutes</li>
+          <li>Past 6 rings the pill shows "+3"; Done tasks leave the pill and rail and live in Overview</li>
+          <li>Stop confirms in place; close says runs continue; Up / Down walks the rail, Enter opens, Esc goes to Overview, then folds</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Before building</h3>
+        <ul>
+          <li><span class="flag">Check:</span> pywebview frameless window resized from code between 380 x 46 and 400 x 640 on Windows, and edge-resize while frameless</li>
+          <li><span class="flag">New data:</span> estimated cost per session and per agent (transcript usage x price table in <code>config.json</code>), per-minute buckets for $/min and steps/min</li>
+          <li>Touches <code>__main__.py</code>, <code>style.css</code>, <code>app.js</code>, <code>state.py</code>; no new dependency, no build step</li>
+          <li>Next: a zero-decision sub-plan for this rework, written the same way as plans 01 to 03</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+function drawRings() {
+  document.querySelectorAll("[data-ring]").forEach((el) => {
+    const [f, tone, px] = el.dataset.ring.split(","), s = Number(px), r = s / 2 - 2.5, c = 2 * Math.PI * r;
+    const col = { g: "var(--green)", y: "var(--amber)", r: "var(--red)" }[tone];
+    const svg = el.querySelector("svg");
+    svg.setAttribute("width", s); svg.setAttribute("height", s); svg.setAttribute("viewBox", `0 0 ${s} ${s}`);
+    svg.innerHTML = `<circle cx="${s / 2}" cy="${s / 2}" r="${r}" fill="none" stroke="var(--track)" stroke-width="3"/>
+      <circle cx="${s / 2}" cy="${s / 2}" r="${r}" fill="none" stroke="${col}" stroke-width="3" stroke-linecap="round"
+        stroke-dasharray="${(c * Math.max(0.04, Number(f))).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 ${s / 2} ${s / 2})"/>`;
+  });
+}
+drawRings();
+const caps = {
+  pill: "", peek: "",
+  focus: "Open window: rail of rings on the left, the selected task on the right. Context bar marks 150K (hand off soon) and 300K (hand off).",
+  ask: "A task that asks opens on its question, with where the answer runs. The badge stays on its ring until you send.",
+  all: "Overview: A's cards to triage, a Lanes toggle to see when each task ran and what it cost. New task box and today's spend at the bottom."
+};
+function show(v) {
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  const inWin = ["focus", "ask", "all"].includes(v);
+  document.querySelector('[data-view="pill"]').hidden = v !== "pill";
+  document.querySelector('[data-view="peek"]').hidden = v !== "peek";
+  document.querySelector('[data-view="win"]').hidden = !inWin;
+  document.querySelectorAll("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== v; });
+  const cap = document.getElementById("cap"); cap.textContent = caps[v]; cap.hidden = !caps[v];
+}
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
+document.querySelectorAll("[data-to]").forEach((b) => b.addEventListener("click", () => {
+  if (b.classList.contains("ses")) document.querySelectorAll(".ses").forEach((s) => s.classList.toggle("sel", s === b));
+  show(b.dataset.to);
+}));
+document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".seg button").forEach((x) => x.classList.toggle("on", x === b));
+  document.getElementById("ov-list").hidden = b.dataset.mode !== "list";
+  document.getElementById("ov-lanes").hidden = b.dataset.mode !== "lanes";
+}));
+const stop = document.getElementById("stopbtn"); let t;
+stop.addEventListener("click", () => {
+  if (stop.dataset.armed) { stop.textContent = "Stopping…"; stop.disabled = true; return; }
+  stop.dataset.armed = "1"; stop.textContent = "Stop run? Click again"; clearTimeout(t);
+  t = setTimeout(() => { delete stop.dataset.armed; stop.textContent = "Stop"; stop.disabled = false; }, 3000);
+});
+show("focus");
+</script>
