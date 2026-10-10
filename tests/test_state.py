@@ -1,10 +1,21 @@
 import copy
+import json
+import tempfile
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
 
-from console import paths
+from console import paths, usage
 from console.state import State
 
 T0 = 1_000_000.0
+
+
+def line(mid, ts, model, **use):
+    """One transcript line with a usage block, `ts` seconds since the epoch."""
+    stamp = datetime.fromtimestamp(ts, timezone.utc).isoformat()
+    return json.dumps({"type": "assistant", "timestamp": stamp,
+                       "message": {"id": mid, "model": model, "usage": use}}) + "\n"
 
 
 def ev(event, ts, sid="s1", **extra):
@@ -250,19 +261,46 @@ class StateTest(unittest.TestCase):
         self.feed(ev("UserPromptSubmit", T0 + 7, sid="typed", prompt="one more thing"), ev("Stop", T0 + 8, sid="typed"))
         self.assertEqual(self.row(T0 + 9, "typed")["state"], "idle")  # a new prompt reopens it
 
-    def test_model_mix(self):
-        self.feed(ev("Stop", T0, sid="a", model="claude-opus-5-5"),
-                  ev("SubagentStop", T0 + 1, sid="a", agent_id="x1", model="claude-haiku-5-5"),
-                  ev("SubagentStop", T0 + 2, sid="a", agent_id="x2", model="claude-haiku-5-5"),
-                  ev("SubagentStart", T0 + 3, sid="a", agent_id="x3"),
-                  ev("run_started", T0 + 4, sid="b", model="sonnet"),
-                  ev("run_ended", T0 + 5, sid="b", cost=0.25, subtype="success"),
-                  ev("run_started", T0 + 6, sid="b"),
-                  ev("run_ended", T0 + 7, sid="b", cost=0.5, subtype="success"),
-                  ev("Stop", T0 + 8, sid="c", model="gpt-5"),
-                  ev("Stop", T0 - 90000, sid="old", model="claude-fable-5-1"))
-        self.assertEqual(self.state.snapshot(T0 + 9)["mix"],
-                         {"models": [["opus", 1], ["sonnet", 1], ["haiku", 2], ["gpt-5", 1]], "runs": 2, "cost": 0.75})
+    def test_spent_exact_or_estimated_and_today(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        chat, run = str(Path(tmp.name) / "a.jsonl"), str(Path(tmp.name) / "b.jsonl")
+        Path(chat).write_text(line("m1", T0 - 60, "claude-opus-5-5", input_tokens=1_000_000), encoding="utf-8")
+        agent = Path(usage.agent_path(chat, "x1"))
+        agent.parent.mkdir(parents=True)
+        agent.write_text(line("m2", T0 - 30, "claude-haiku-5-5", output_tokens=2_000_000), encoding="utf-8")
+        Path(run).write_text(line("m3", T0 - 20, "claude-sonnet-5-5", input_tokens=500_000), encoding="utf-8")
+        self.feed(ev("UserPromptSubmit", T0 - 100, sid="a", transcript_path=chat),
+                  ev("SubagentStart", T0 - 40, sid="a", agent_id="x1", agent_type="Explore"),
+                  ev("run_started", T0 - 50, sid="b", model="sonnet"),
+                  ev("UserPromptSubmit", T0 - 49, sid="b", transcript_path=run),
+                  ev("run_ended", T0 - 10, sid="b", cost=1.25, subtype="success"),
+                  ev("run_started", T0 - 5, sid="c", model="sonnet"),
+                  ev("UserPromptSubmit", T0 - 4, sid="d"))
+        reader = usage.Usage(paths.DEFAULTS["prices"])
+        for f in self.state.transcripts(T0):
+            reader.poll(f)
+        snap = self.state.snapshot(T0, reader)
+        rows = {r["id"]: r for r in snap["sessions"]}
+        self.assertEqual((rows["a"]["spent"], rows["a"]["spent_exact"], rows["a"]["burn"]), (5.0, False, 1.0))
+        self.assertEqual(rows["a"]["agents"][0]["cost"], 1.0)
+        self.assertEqual((rows["b"]["spent"], rows["b"]["spent_exact"]), (1.25, True))
+        self.assertEqual((rows["c"]["spent"], rows["c"]["spent_exact"]), (None, False))  # live, no transcript yet
+        self.assertIsNone(rows["d"]["spent"])
+        self.assertEqual(snap["spend"], {"today": 6.25, "exact": 1.25, "estimated": 5.0, "burn": 1.2, "budget": 15,
+                                         "runs": 1, "models": [["opus", 0.667], ["sonnet", 0.167], ["haiku", 0.167]]})
+        self.assertEqual(self.state.snapshot(T0)["spend"]["today"], 1.25)  # no reader: exact only
+
+    def test_activity_cells_per_minute(self):
+        now = 1_000_020.0  # a minute boundary
+        recs = [ev("UserPromptSubmit", now - 1900)]
+        for back, n, agents in ((-10, 12, 2), (5 * 60 - 1, 1, 0), (600, 4, 0), (29 * 60, 7, 0), (31 * 60, 1, 0)):
+            recs += [ev("PreToolUse", now - back, tool="Read", what="a.py",
+                        **({"agent_id": "x1"} if k < agents else {})) for k in range(n)]
+        self.feed(*sorted(recs, key=lambda r: r["ts"]))
+        row = self.row(now + 30)
+        self.assertEqual(row["activity"], [3] + [0] * 18 + [2] + [0] * 4 + [1] + [0] * 4 + [4])
+        self.assertEqual((row["main_steps"], row["turn_ts"]), (23, now - 1900))
 
 
 if __name__ == "__main__":

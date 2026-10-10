@@ -1,8 +1,9 @@
 """Sessions -> agents -> steps, built from event records; states computed at snapshot time."""
 import re
+import time
 from dataclasses import dataclass, field
 
-from . import claude_cli, redact
+from . import claude_cli, redact, usage as usage_mod
 
 # state -> (symbol, text, tone). Colour never carries a state alone.
 STATES = {
@@ -26,6 +27,9 @@ SOURCES = {"claude-vscode": "vscode", "cli": "terminal", "claude-desktop": "desk
 MAX_STEPS = 500
 MAX_TURNS = 200
 SHOW_FOR_S = 86400
+ACTIVITY_MIN = 30               # activity cells: one per minute, the last 30 minutes
+ACTIVITY_STEPS = (1, 3, 6, 10)  # steps in a minute for levels 1-4 (Fred: 1-2, 3-5, 6-9, 10+)
+BURN_S = 300                    # "$ / min now" is the estimated cost of the last 5 minutes / 5
 _PASTED = re.compile(r"</?pasted_content[^>]*>")
 _TAGGED = re.compile(r"<[A-Za-z]")  # an injected block the hook clipped before it closed: not a title
 
@@ -99,12 +103,14 @@ class Session:
     rules: dict = field(default_factory=dict)  # file -> {scope, lines, bytes}: CLAUDE.md / rules loaded
     reads: int = 0             # main-chat Read / Grep / Glob / WebFetch / WebSearch steps this turn
     chat_handoff: bool = False  # this turn ran /session-handoff inside the chat: its Stop makes it Done
-    runs: int = 0              # window runs (run_started lines), for the model-mix strip
+    run_costs: list = field(default_factory=list)  # [ts, cost] per finished window run: exact spend
+    transcript_path: str = ""  # read by usage.Usage for the estimated cost
 
 
-def family(model: str) -> str:
-    """claude-sonnet-5-5 -> sonnet; another model keeps its own name."""
-    return claude_cli.model_alias(model) or str(model or "")
+def midnight(now: float) -> float:
+    """Local midnight before `now`: "today" for the spend figures."""
+    t = time.localtime(now)
+    return time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
 
 
 class State:
@@ -126,6 +132,8 @@ class State:
                 setattr(s, key, norm_dir(rec[key]) if key == "project_dir" else rec[key])
         if rec.get("cwd") and not s.first_cwd:
             s.first_cwd = rec["cwd"]
+        if rec.get("transcript_path"):
+            s.transcript_path = rec["transcript_path"]
         agent = None
         aid = rec.get("agent_id")
         if aid:
@@ -220,7 +228,6 @@ class State:
         elif event == "run_started":
             s.window, s.run_live, s.source = True, True, "window"
             s.in_turn, s.ended = True, False
-            s.runs += 1
             self._turn_open(s, ts)
             s.interrupted = s.stopped = s.handed_off = False
             s.denied = s.failed = None
@@ -256,6 +263,7 @@ class State:
             s.doing = ""
             self._turn_close(s, ts)
             s.cost += float(rec.get("cost") or 0)
+            s.run_costs.append([ts, float(rec.get("cost") or 0)])
             s.stopped = bool(rec.get("stopped"))
             s.interrupted = bool(rec.get("interrupted"))
             if s.handoff and rec.get("subtype") == "success":
@@ -336,7 +344,30 @@ class State:
                 by_project.setdefault(s.project_dir, []).append(s.id)
         return {p: ids for p, ids in by_project.items() if len(ids) >= 2}
 
-    def snapshot(self, now: float) -> dict:
+    def files(self, s: Session) -> list:
+        """The session's transcript and its agents' transcripts ([] until a hook line names it)."""
+        if not s.transcript_path:
+            return []
+        return [s.transcript_path] + [usage_mod.agent_path(s.transcript_path, a) for a in s.agents]
+
+    def transcripts(self, now: float) -> list:
+        """Every transcript of the shown sessions: the hub reads them for the estimated cost."""
+        return [f for s in self.sessions.values() if now - s.last_ts <= SHOW_FOR_S for f in self.files(s)]
+
+    def activity(self, s: Session, now: float) -> list:
+        """Tool steps (main + agents) per minute over the last ACTIVITY_MIN minutes, oldest first,
+        as levels 0-4."""
+        counts = [0] * ACTIVITY_MIN
+        end = int(now // 60)
+        for step in s.steps:
+            back = end - int(step["ts"] // 60)
+            if 0 <= back < ACTIVITY_MIN:
+                counts[ACTIVITY_MIN - 1 - back] += 1
+        return [sum(c >= t for t in ACTIVITY_STEPS) for c in counts]
+
+    def snapshot(self, now: float, usage=None) -> dict:
+        """`usage` (a usage.Usage) adds the estimated cost; without it every estimate is 0."""
+        cost = usage.cost if usage else (lambda files, since=0.0: 0.0)
         writers = self.writers(now)
         writer_ids = {sid for ids in writers.values() for sid in ids}
         rows = []
@@ -353,6 +384,8 @@ class State:
                 group = "working"
             symbol, text, state_tone = STATES[state]
             follow_ups = max(0, s.prompts - 1)
+            files = self.files(s)
+            exact = s.window and not s.run_live  # a live window run has no result line yet: estimate
             rows.append({
                 "id": s.id, "project": s.project, "project_dir": s.project_dir,
                 "title": s.title or f"(prompt not seen) {s.id[:8]}", "source": s.source or "?",
@@ -368,6 +401,7 @@ class State:
                 "cost": round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,
                 "start_commit": s.start_commit, "cwd": s.cwd,
                 "started_ts": s.started_ts, "last_ts": s.last_ts,
+                "turn_ts": s.turns[-1][0] if s.turns else s.started_ts,
                 "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
                 "kind": s.kind, "handoff": s.handoff, "forked_from": s.forked_from, "forks": list(s.forks),
                 "follow_ups": follow_ups,
@@ -378,7 +412,12 @@ class State:
                 "rules_warn": self.rules_warn(s.rules),
                 "reads": s.reads,
                 "delegate_hint": state not in DONE and s.reads >= self.cfg["delegate_after_reads"],
-                "agents": [self._agent_row(a, s) for a in
+                "spent": round(s.cost if exact else cost(files), 4) if exact or files else None,
+                "spent_exact": exact,
+                "burn": round(cost(files, now - BURN_S) / (BURN_S / 60), 4),
+                "activity": self.activity(s, now),
+                "main_steps": sum(1 for st in s.steps if not st["agent"]),
+                "agents": [self._agent_row(a, s, cost) for a in
                            sorted(s.agents.values(), key=lambda a: a.started_ts)],
             })
         return {
@@ -386,7 +425,7 @@ class State:
             "sessions": rows,
             "writers": [{"project_dir": p, "sessions": ids} for p, ids in sorted(writers.items())],
             "counts": {g: sum(1 for r in rows if r["group"] == g) for g in ("needs", "working", "done")},
-            "mix": self.mix([self.sessions[r["id"]] for r in rows]),
+            "spend": self.spend([self.sessions[r["id"]] for r in rows], now, usage),
         }
 
     def rules_warn(self, rules: dict) -> str:
@@ -400,19 +439,28 @@ class State:
             out.append(f"{total:.1f} KB in all (over {max_kb} KB)")
         return "; ".join(out)
 
-    def mix(self, sessions: list) -> dict:
-        """The model-mix strip: shown sessions and agent runs per model family, window runs, cost."""
-        counts = {}
-        for s in sessions:
-            for model in [s.model] + [a.model for a in s.agents.values()]:
-                if model:
-                    counts[family(model)] = counts.get(family(model), 0) + 1
-        rank = {m: i for i, m in enumerate(claude_cli.MODELS[::-1])}  # biggest first, then others by name
-        models = sorted(counts.items(), key=lambda kv: (rank.get(kv[0], len(rank)), kv[0]))
-        return {"models": [list(kv) for kv in models], "runs": sum(s.runs for s in sessions),
-                "cost": round(sum(s.cost for s in sessions), 4)}
+    def spend(self, sessions: list, now: float, usage=None) -> dict:
+        """Today since local midnight: exact = finished window runs (their result line), estimated =
+        the other sessions' transcripts; the model shares and the burn rate come from all transcripts."""
+        start = midnight(now)
+        exact = sum(c for s in sessions for ts, c in s.run_costs if ts >= start)
+        runs = sum(1 for s in sessions for ts, _ in s.run_costs if ts >= start)
+        every = [f for s in sessions for f in self.files(s)]
+        estimated = burn = 0.0
+        families = {}
+        if usage:
+            estimated = usage.cost([f for s in sessions if not s.window for f in self.files(s)], start)
+            burn = usage.cost(every, now - BURN_S) / (BURN_S / 60)
+            families = usage.families(every, start)
+        total = sum(families.values())
+        rank = {m: i for i, m in enumerate(claude_cli.MODELS[::-1])}  # biggest first
+        models = [[m, round(c / total, 3)] for m, c in
+                  sorted(families.items(), key=lambda kv: (rank.get(kv[0], len(rank)), kv[0]))]
+        return {"today": round(exact + estimated, 4), "exact": round(exact, 4),
+                "estimated": round(estimated, 4), "burn": round(burn, 4),
+                "budget": self.cfg["daily_budget_usd"], "runs": runs, "models": models}
 
-    def _agent_row(self, a: Agent, s: Session) -> dict:
+    def _agent_row(self, a: Agent, s: Session, cost=None) -> dict:
         if a.done:
             symbol, text, tone = STATES["done"]
         elif s.in_turn:
@@ -420,8 +468,10 @@ class State:
         else:
             symbol, text, tone = "…", "No stop seen", "info"
         fill, ctx_tone = self.gauge(a.tokens or None)
+        spent = cost([usage_mod.agent_path(s.transcript_path, a.id)]) if cost and s.transcript_path else 0.0
         return {"id": a.id, "type": a.type or "agent", "model": a.model, "effort": a.effort,
                 "tokens": a.tokens, "steps": a.steps, "doing": a.doing, "verdict": a.verdict,
+                "cost": round(spent, 4),
                 "symbol": symbol, "text": text, "tone": tone,
                 "ctx_fill": None if fill is None else round(fill, 3), "ctx_tone": ctx_tone}
 
