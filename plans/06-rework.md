@@ -74,8 +74,8 @@ Dependencies point one way: `state -> claude_cli, redact, usage`; `usage -> clau
 - [x] Task 4: service (reads transcripts, serves Doto, keeps the compose project)
 - [x] Task 5: borderless window
 - [x] Task 6: Console Cells window
-- [ ] Task 7: Fred: live check in the real window
-- [ ] Task 8: close the phase
+- [ ] Task 7: Fred: live check in the real window (superseded: done as plan 07 Task 5, after the Cells Drawer window replaces the rail)
+- [ ] Task 8: close the phase (done as plan 07 Task 6)
 
 ---
 
