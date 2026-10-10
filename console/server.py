@@ -8,13 +8,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import claude_cli, events, guard, levers, paths, prep, runs
+from . import claude_cli, events, guard, levers, paths, prep, runs, usage
 from .state import State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-          "/style.css": ("style.css", "text/css; charset=utf-8")}
+          "/style.css": ("style.css", "text/css; charset=utf-8"),
+          "/doto.woff2": ("doto.woff2", "font/woff2")}
 POLL_S = 1.0
 TICK_S = 15.0
 APP_ID = "claude-console"
@@ -32,6 +33,7 @@ class Hub:
         self.state = State(cfg)
         self.reader = events.LogReader(folder)
         self.runs = runs.RunManager(cfg, folder, exe)
+        self.usage = usage.Usage(cfg["prices"])
         self.user_home = Path.home()  # where ~/.claude/skills is looked up (tests point it elsewhere)
         self.lock = threading.Lock()
         self.changed = threading.Condition(self.lock)
@@ -48,6 +50,18 @@ class Hub:
                 self.changed.notify_all()
         return len(new)
 
+    def read_costs(self) -> int:
+        """Read what the shown sessions' transcripts added (estimated cost); new messages push a snapshot."""
+        with self.lock:
+            files = self.state.transcripts(time.time())
+        self.usage.keep(files)
+        new = sum(self.usage.poll(f) for f in files)  # file reads outside the lock: Usage has its own
+        if new:
+            with self.lock:
+                self.version += 1
+                self.changed.notify_all()
+        return new
+
     def tick(self) -> None:
         """Time-based states (Quiet, Stall?, Stale?) change without new events."""
         with self.lock:
@@ -59,6 +73,7 @@ class Hub:
         last_tick = time.monotonic()
         while not self._stop.is_set():
             self.poll_once()
+            self.read_costs()
             if time.monotonic() - last_tick >= TICK_S:
                 self.runs.reconcile()
                 self.tick()
@@ -73,7 +88,7 @@ class Hub:
 
     def snapshot(self) -> dict:
         with self.lock:
-            return self.state.snapshot(time.time())
+            return self.state.snapshot(time.time(), self.usage)
 
     def steps(self, session_id: str) -> list:
         with self.lock:
@@ -217,7 +232,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"projects": project_list(cfg), "models": claude_cli.MODELS,
                                "efforts": claude_cli.EFFORTS, "default_model": cfg["default_model"],
                                "default_effort": cfg["default_effort"], "claude": bool(self.hub.runs.exe),
-                               "config_path": str(self.hub.folder / "config.json")})
+                               "config_path": str(self.hub.folder / "config.json"),
+                               "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
+                               "project": paths.load_window(self.hub.folder).get("project", "")})
         if url.path == "/api/chat":
             return self._chat(query.get("session", [""])[0])
         if url.path in ("/api/levers", "/api/timeline"):
@@ -374,11 +391,16 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"projects": project_list(self.hub.cfg)})
 
     def _draft(self, body):
-        text = body.get("text")
+        """The unsent prompt (draft.txt) and, when given, the compose project (window.json)."""
+        text, project = body.get("text"), body.get("project")
         if not isinstance(text, str) or len(text) > MAX_PROMPT:
             return self._error(400, "bad draft")
+        if project is not None and (not isinstance(project, str) or len(project) > 1000):
+            return self._error(400, "bad project")
         self.hub.folder.mkdir(parents=True, exist_ok=True)
         (self.hub.folder / "draft.txt").write_text(text, encoding="utf-8")
+        if project is not None:
+            paths.save_window(self.hub.folder, project=project)
         return self._json({"ok": True})
 
     # -- GET helpers -----------------------------------------------------------------

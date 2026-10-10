@@ -67,6 +67,23 @@ class ServerTest(unittest.TestCase):
     def test_static_and_ping(self):
         self.assertEqual(self.get("/")[0], 200)
         self.assertEqual(json.loads(self.get("/api/ping")[1]), {"app": "claude-console"})
+        status, font = self.get("/doto.woff2")
+        self.assertEqual((status, font[:4]), (200, b"wOF2"))
+        for page in ("/", "/style.css", "/app.js"):  # the window makes no network calls
+            self.assertNotIn(b"https://", self.get(page)[1], page)
+
+    def test_hub_reads_transcripts_for_the_estimate(self):
+        transcript = Path(self.tmp.name) / "s2.jsonl"
+        transcript.write_text(json.dumps({"type": "assistant", "timestamp": "2026-10-10T10:00:00Z", "message": {
+            "id": "m1", "model": "claude-sonnet-5-5", "usage": {"input_tokens": 1_000_000}}}) + "\n", encoding="utf-8")
+        with open(Path(self.tmp.name) / "events-2026-10-10.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": 9e12, "event": "UserPromptSubmit", "session_id": "s2", "prompt": "hi",
+                                 "transcript_path": str(transcript)}) + "\n")
+        self.hub.poll_once()
+        self.assertEqual(self.hub.read_costs(), 1)
+        self.assertEqual(self.hub.read_costs(), 0)
+        row = next(s for s in self.hub.snapshot()["sessions"] if s["id"] == "s2")
+        self.assertEqual((row["spent"], row["spent_exact"]), (2.0, False))
 
 
 class RunServerTest(unittest.TestCase):
@@ -244,7 +261,12 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.call("/api/draft", {"text": "half a prompt"}), (200, {"ok": True}))
         self.assertEqual(self.call("/api/draft")[1], {"text": "half a prompt"})
         cfg = self.call("/api/config")[1]
-        self.assertEqual((cfg["projects"], cfg["claude"], cfg["default_model"]), ([str(self.project)], True, "sonnet"))
+        self.assertEqual((cfg["projects"], cfg["claude"], cfg["default_model"], cfg["project"]),
+                         ([str(self.project)], True, "sonnet", ""))
+        self.assertEqual(self.call("/api/draft", {"text": "", "project": str(self.project)})[0], 200)
+        self.assertEqual(self.call("/api/config")[1]["project"], str(self.project))
+        self.assertEqual(cfg["gauge"], [150000, 300000])
+        self.assertEqual(self.call("/api/draft", {"text": "", "project": 3})[0], 400)
 
 
 if __name__ == "__main__":

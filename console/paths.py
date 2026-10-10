@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import threading
 from pathlib import Path
 
 DEFAULTS = {
@@ -80,6 +81,30 @@ def add_project(folder: Path, project: str) -> None:
     tmp = path.with_name("config.json.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+_WINDOW_LOCK = threading.Lock()  # the page (project) and the window (form, place) both save
+
+
+def load_window(folder: Path) -> dict:
+    """window.json: the window's last form, place, always-on-top, and the compose project."""
+    try:
+        data = json.loads((Path(folder) / "window.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_window(folder: Path, **fields) -> dict:
+    """Merge `fields` into window.json (written whole, through a temp file)."""
+    with _WINDOW_LOCK:
+        data = dict(load_window(folder), **fields)
+        path = Path(folder) / "window.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name("window.json.tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+        return data
 
 
 def ensure_config() -> dict:
