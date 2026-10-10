@@ -1,0 +1,56 @@
+<h2>How should "who is doing what" look?</h2>
+<p class="subtitle">Same data in all three: one session (one task) with its route, context gauge, and the agents it spawned. Pick the layout for the main area of the mini window (about 420 px wide).</p>
+
+<div class="cards">
+  <div class="card" data-choice="tree" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Tree (compact, live)</div>
+        <div class="mockup-body" style="font-family:monospace;font-size:11px;line-height:1.6">
+          <div><b>updater retry</b> &middot; CONTENT MANAGER</div>
+          <div>risky &middot; opus/high &nbsp; ctx <span style="letter-spacing:-1px">&#9608;&#9608;&#9608;&#9608;&#9617;&#9617;&#9617;&#9617;</span> 47% <span style="color:#c90">handoff soon</span></div>
+          <div>&#9679; main &middot; editing updater.py &middot; 38k tok</div>
+          <div>&#9500; &#10003; investigator haiku &middot; 6 files &middot; 9k</div>
+          <div>&#9500; &#9679; verifier sonnet/low &middot; unittest 41/145</div>
+          <div>&#9492; <span style="color:#d33">&#9632; blocked: git push</span> [Open in terminal]</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A. Tree</h3><p>Session on top, agents nested under it, one line each with live status. Fits small widths; several sessions stack as collapsible blocks.</p></div>
+  </div>
+
+  <div class="card" data-choice="lanes" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Lanes (columns per agent)</div>
+        <div class="mockup-body" style="font-size:11px">
+          <div><b>updater retry</b> &middot; opus/high &middot; ctx 47%</div>
+          <div style="display:flex;gap:4px;margin-top:6px">
+            <div class="mock-sidebar" style="width:34%"><div class="label">main</div>read updater.py<br>edit retry loop<br>&#9679; edit test</div>
+            <div class="mock-sidebar" style="width:33%"><div class="label">investigator</div>grep download<br>read 6 files<br>&#10003; done</div>
+            <div class="mock-sidebar" style="width:33%"><div class="label">verifier</div>&#9679; unittest<br>41/145</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B. Lanes</h3><p>One column per agent with its recent steps. Most detail per agent, but gets cramped past 3 agents at mini-window width.</p></div>
+  </div>
+
+  <div class="card" data-choice="timeline" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. Timeline (bars over time)</div>
+        <div class="mockup-body" style="font-size:11px;font-family:monospace;line-height:1.7">
+          <div><b>updater retry</b> &middot; opus/high &middot; ctx 47%</div>
+          <div>prep &nbsp;&nbsp;&nbsp;&nbsp;&#9608;&#9608;</div>
+          <div>main &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9617;</div>
+          <div>investig. &nbsp;&nbsp;&#9608;&#9608;&#9608;</div>
+          <div>verifier &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#9608;&#9608;&#9617;</div>
+          <div style="opacity:.6">0s &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;30s &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;60s &nbsp;&nbsp;&nbsp;90s</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C. Timeline</h3><p>Gantt bars: when each agent ran, overlaps, how long. Best for seeing how a task was handled afterwards; weaker for "what is it doing right now".</p></div>
+  </div>
+</div>
+<p class="subtitle" style="margin-top:10px">Clicking any line (any layout) opens its detail: the enhanced prompt, the agent's steps, tokens, and the verifier output.</p>

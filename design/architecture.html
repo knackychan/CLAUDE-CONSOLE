@@ -1,0 +1,50 @@
+<h2>Design 1/4: architecture</h2>
+<p class="subtitle">Three small pieces. One event log is the single source the view reads, whether a task started in VS Code, a terminal, or the mini window.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Data flow</div>
+  <div class="mockup-body" style="font-family:monospace;font-size:12px;line-height:1.6;white-space:pre">
+ VS Code session      terminal session      run started by the window
+        \                    |                    /
+         \                   |                   /
+     global hooks (~/.claude/settings.json, async, never block)
+     SessionStart  UserPromptSubmit  PreToolUse  SubagentStart/Stop
+     PermissionDenied  Stop  PreCompact/PostCompact  SessionEnd
+                             |
+                             v
+        <b>1. cc-events</b>  tiny script, appends one JSON line per event
+                             |
+                 ~/.claude/console/events.jsonl   (+ transcript tail on Stop
+                             |                     = context tokens)
+                             v
+        <b>2. console service</b>  Python, 127.0.0.1 only, tails the log,
+           builds sessions -> agents -> steps, pushes SSE
+           also runs:  Prep   claude -p (haiku, low, Read/Grep/Glob, JSON out)
+                       Run    claude -p (route model + effort, auto mode,
+                                         --permission-prompts none, stream-json)
+                       Handoff  claude -p "/session-handoff" --resume id
+                       Open in terminal   claude --resume id  (new terminal)
+                             |
+                             v
+        <b>3. mini window</b>  pywebview, always on top, ~420 x 640
+           Prep card (review, Run / Run raw / Edit)
+           Tree view (sessions, agents, gauge, red blocked events)
+           Session detail: prompt, steps, tokens, verifier, Timeline tab
+  </div>
+</div>
+
+<div class="pros-cons" style="margin-top:12px">
+  <div class="pros"><h4>Checked against docs / this machine</h4><ul>
+    <li>Hook events incl. SubagentStart/Stop, PermissionDenied (auto mode); hooks can be async</li>
+    <li>Every hook gets session_id, cwd, transcript_path, permission_mode, effort, agent_type</li>
+    <li>-p: --model, --effort, --permission-mode auto, --permission-prompts none, --resume</li>
+    <li>-p expands /skill-name, so Handoff works headless</li>
+    <li>stream-json marks subagent messages with parent_tool_use_id (nesting tree)</li>
+    <li>Transcript lines carry usage: input + cache_read + cache_creation = context tokens</li>
+  </ul></div>
+  <div class="cons"><h4>Still to verify in the plan</h4><ul>
+    <li>Exact input schema of SubagentStart/Stop and PermissionDenied</li>
+    <li>--json-schema combined with tool use for the Prep output</li>
+    <li>Context window size per model (transcript has no size field; status line does)</li>
+  </ul></div>
+</div>

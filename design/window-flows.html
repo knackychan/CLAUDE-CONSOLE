@@ -1,0 +1,75 @@
+<h2>Design 3/4: the mini window, three states</h2>
+<p class="subtitle">Left: home (tree of sessions + prompt box). Middle: Prep card after Enter. Right: one session's detail. About 420 px wide each.</p>
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px">
+
+  <div class="mockup" style="flex:1;min-width:260px">
+    <div class="mockup-header">1. Home</div>
+    <div class="mockup-body" style="font-family:monospace;line-height:1.6">
+      <div>Project: [CONTENT MANAGER v] &nbsp; &#9679; 2 working</div>
+      <hr>
+      <div><b>&#9660; updater retry</b> &middot; window &middot; risky opus/high</div>
+      <div>&nbsp; ctx &#9608;&#9608;&#9608;&#9608;&#9617;&#9617;&#9617;&#9617; 47% <span style="color:#c90">soon</span></div>
+      <div>&nbsp; &#9679; main &middot; editing updater.py</div>
+      <div>&nbsp; &#9500; &#10003; investigator haiku &middot; 6 files</div>
+      <div>&nbsp; &#9492; &#9679; verifier sonnet/low &middot; unittest</div>
+      <div style="margin-top:4px"><b>&#9654; route-model skill</b> &middot; vscode &middot; unrouted</div>
+      <div>&nbsp; ctx &#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9617; <span style="color:#d33">82% handoff</span></div>
+      <div style="margin-top:4px;opacity:.6"><b>&#9654; skills pass</b> &middot; ended &middot; PASS</div>
+      <hr>
+      <div class="mock-input">Prompt: what to do...</div>
+      <div style="opacity:.7">Enter = Prep &nbsp;&middot;&nbsp; Ctrl+Enter = Run raw</div>
+    </div>
+  </div>
+
+  <div class="mockup" style="flex:1;min-width:260px">
+    <div class="mockup-header">2. Prep card (waits for Run)</div>
+    <div class="mockup-body" style="line-height:1.5">
+      <div class="label">Scouting... (haiku, 4 reads)</div>
+      <div style="opacity:.75">you: the updater sometimes fails, make it retry</div>
+      <div style="border:1px solid currentColor;padding:6px;border-radius:4px;margin-top:6px">
+        <b>Goal</b> retry failed downloads<br>
+        <b>Where</b> updater.py download_release()<br>
+        <b>Keep</b> SHA-256 check each attempt<br>
+        <b>Done when</b> new test passes; unittest green<br>
+        <b>Last decisions</b> (PLAN.md History) 2 lines<br>
+        <b>Question</b> how many retries? [3]
+      </div>
+      <div style="margin-top:6px">Route [risky &middot; opus &middot; high v]</div>
+      <div style="margin-top:6px"><button class="mock-button">Run</button> <button class="mock-button">Run raw</button> <button class="mock-button">Cancel</button></div>
+    </div>
+  </div>
+
+  <div class="mockup" style="flex:1;min-width:260px">
+    <div class="mockup-header">3. Session detail</div>
+    <div class="mockup-body" style="line-height:1.5">
+      <div><b>updater retry</b> &middot; opus/high &middot; 47% &middot; 2 follow-ups</div>
+      <div style="margin:4px 0">[Steps] [Timeline] [Prep] [Chat]</div>
+      <div style="font-family:monospace">
+        12:01 main Read updater.py<br>
+        12:01 &#8627; investigator Grep "download"<br>
+        12:02 main Edit updater.py<br>
+        12:03 &#8627; verifier Bash unittest<br>
+        12:04 <span style="color:#d33">blocked: git push (auto mode)</span><br>
+        12:04 verdict FAIL test_retry_backoff
+      </div>
+      <div style="margin-top:6px">
+        <button class="mock-button">Continue</button>
+        <button class="mock-button">Escalate (effort up)</button>
+        <button class="mock-button">Handoff</button>
+        <button class="mock-button">Open in terminal</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:12px;font-size:13px">
+  <h3>Rules behind the buttons</h3>
+  <ul>
+    <li><b>Run</b> always starts a new session (one task = one chat). <b>Continue</b> resumes it with your follow-up.</li>
+    <li><b>Escalate</b> appears after a FAIL verdict: one step up (effort first, then model), once per task; it writes the routing-misses line.</li>
+    <li><b>Handoff</b> runs /session-handoff in that session, then marks it ended. Gauge red (60%+) or 2 follow-ups makes it the highlighted button.</li>
+    <li><b>Open in terminal</b> opens a new terminal in the project folder with claude --resume &lt;id&gt; (for blocked actions, or to take over).</li>
+    <li><b>Chat</b> tab shows the streamed text for window-started runs; VS Code / terminal sessions show steps only (you already see their chat there).</li>
+  </ul>
+</div>

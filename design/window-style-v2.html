@@ -1,0 +1,54 @@
+<h2>Mini window, square-orchestrator style</h2>
+<p class="subtitle">Borrowed: Segoe UI + Cascadia Mono, borders instead of cards, 28 px rows, state = symbol + text + tone (never colour alone), "Needs you" on top, inspector-style detail, event rows, bottom status strip.</p>
+
+<style>
+  .cc { --bg: light-dark(#fff, #181818); --fg: light-dark(#1a1c1f, #fff); --mut: light-dark(rgb(26 28 31/50%), rgb(255 255 255/50%));
+        --bd: light-dark(rgb(26 28 31/10%), rgb(255 255 255/10%)); --info: light-dark(#339cff,#83c3ff); --ok: light-dark(#00a240,#40c977);
+        --warn: light-dark(#c77800,#f5b74a); --bad: light-dark(#ba2623,#fa423e);
+        color-scheme: light dark; background: var(--bg); color: var(--fg); width: 420px; max-width: 100%; margin: 0 auto;
+        border: 1px solid var(--bd); font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
+  .cc .m { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+  .cc .row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border-bottom: 1px solid var(--bd); }
+  .cc .hd { justify-content: space-between; font-weight: 500; }
+  .cc .sec { padding: 6px 10px 2px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); }
+  .cc .mut { color: var(--mut); }
+  .cc .info { color: var(--info); } .cc .ok { color: var(--ok); } .cc .warn { color: var(--warn); } .cc .bad { color: var(--bad); }
+  .cc .ind { padding-left: 26px; }
+  .cc .bar { display: inline-block; width: 64px; height: 6px; border: 1px solid var(--bd); vertical-align: middle; position: relative; }
+  .cc .bar i { position: absolute; inset: 0 auto 0 0; background: currentColor; }
+  .cc .act { margin-left: auto; display: flex; gap: 6px; }
+  .cc button { font: inherit; font-size: 12px; background: transparent; color: var(--fg); border: 1px solid var(--bd); padding: 2px 8px; border-radius: 4px; }
+  .cc button.pri { border-color: var(--info); color: var(--info); }
+  .cc .ask { padding: 8px 10px; border-bottom: 1px solid var(--bd); border-left: 3px solid var(--warn); }
+  .cc input { width: 100%; font: inherit; background: transparent; color: var(--fg); border: 1px solid var(--bd); padding: 4px 6px; margin-top: 4px; }
+  .cc .strip { display: flex; gap: 12px; padding: 4px 10px; font-size: 11px; color: var(--mut); border-top: 1px solid var(--bd); flex-wrap: wrap; }
+</style>
+
+<div class="cc">
+  <div class="row hd"><span>Claude Console</span><span class="m mut">CONTENT MANAGER &#9662;</span><span class="m"><span class="info">&#9654; 2</span> &nbsp;<span class="warn">! 2</span></span></div>
+
+  <div class="sec">Needs you</div>
+  <div class="ask">
+    <div class="m"><span class="warn">? STOP</span> &middot; updater retry &middot; claude &middot; opus/high</div>
+    <div>How many retries before giving up? Default 3 with 2 s backoff.</div>
+    <input placeholder="Answer (sent as Continue)">
+  </div>
+  <div class="row m"><span class="bad">&#9632; Blocked</span><span>route-model test &middot; git push</span><span class="act"><button>Open in terminal</button></span></div>
+  <div class="row m"><span class="warn">&#9719; Stall?</span><span>skills pass &middot; 11 min quiet</span><span class="act"><button>Open</button><button>Stop</button></span></div>
+
+  <div class="sec">Working</div>
+  <div class="row m"><span class="info">&#9654; Running</span><span>library perf &middot; vscode &middot; sonnet/med</span>
+    <span class="act warn">ctx <span class="bar"><i style="width:47%"></i></span> 47%</span></div>
+  <div class="row m ind"><span class="info">&#9654;</span>main &middot; Edit web/src/lib/grid.ts</div>
+  <div class="row m ind"><span class="ok">&#10003;</span>investigator &middot; haiku &middot; 6 files &middot; 9.1K</div>
+  <div class="row m ind"><span class="info">&#9654;</span>verifier &middot; sonnet/low &middot; npm run check</div>
+  <div class="row m"><span class="warn">&#8230; Quiet</span><span>docs pass &middot; terminal &middot; unrouted</span><span class="act bad">ctx <span class="bar"><i style="width:82%"></i></span> 82% <button class="pri">Handoff</button></span></div>
+
+  <div class="sec">Done today</div>
+  <div class="row m mut"><span class="ok">&#10003; PASS</span><span>installer fix &middot; sonnet/med &middot; 14 min</span></div>
+
+  <div style="padding:8px 10px;border-top:1px solid var(--bd)">
+    <input class="m" placeholder="Prompt: what to do...  (Enter = Prep, Ctrl+Enter = Run raw)">
+  </div>
+  <div class="strip m"><span>service &#9679; ok</span><span>today 9 runs &middot; $3.10 eq.</span><span>opus 22% &middot; sonnet 61% &middot; haiku 17%</span><span class="warn">2 writers: CONTENT MANAGER</span></div>
+</div>

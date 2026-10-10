@@ -1,0 +1,39 @@
+<h2>Your prompter becomes the "Prep" step</h2>
+<p class="subtitle">Enter sends your raw prompt to Haiku (low effort, read-only tools: Read / Grep / Glob, a few turns) in the project folder. It scouts, rewrites the prompt and picks the route in one pass. Question: when do you want to review the card before it runs?</p>
+
+<div class="mockup">
+  <div class="mockup-header">Mini window: Prep card (CONTENT MANAGER)</div>
+  <div class="mockup-body" style="font-size:12px">
+    <div class="label">You typed</div>
+    <div style="opacity:.75">the updater sometimes fails, make it retry</div>
+    <div class="label" style="margin-top:8px">Scouted (haiku, 4 reads)</div>
+    <div>updater.py: download_release(), verify_sha256() &middot; tests/test_updater.py &middot; CLAUDE.md: updater = risky row</div>
+    <div class="label" style="margin-top:8px">Enhanced prompt (editable)</div>
+    <div style="border:1px solid currentColor;padding:6px;border-radius:4px">
+      <b>Goal:</b> retry failed release downloads in updater.py.<br>
+      <b>Where:</b> download_release() (updater.py), tests in tests/test_updater.py.<br>
+      <b>Keep:</b> SHA-256 check after every attempt; background download with progress.<br>
+      <b>Done when:</b> new test for 2 failures then success passes; py -m unittest discover -s tests green.<br>
+      <b>Open question:</b> how many retries? (default 3, backoff 2 s)
+    </div>
+    <div style="margin-top:8px">
+      Route: <span style="border:1px solid currentColor;padding:2px 6px;border-radius:10px">risky &middot; opus &middot; high</span>
+      &nbsp; <button class="mock-button">Run</button> <button class="mock-button">Run raw</button> <button class="mock-button">Edit</button>
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top:14px">
+  <div class="option" data-choice="always" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content"><h3>Always review</h3><p>Card waits for Run every time. Safest, one extra click per task.</p></div>
+  </div>
+  <div class="option" data-choice="smart" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content"><h3>Review only when it matters</h3><p>Waits when the route is risky or Prep has an open question; otherwise runs after a 3 s countdown you can stop.</p></div>
+  </div>
+  <div class="option" data-choice="auto" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content"><h3>Never wait</h3><p>Runs straight away; the card stays visible in the timeline so you can see what was sent.</p></div>
+  </div>
+</div>

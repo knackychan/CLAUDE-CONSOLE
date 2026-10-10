@@ -1,0 +1,88 @@
+<h2>Where should the Claude Code console live?</h2>
+<p class="subtitle">Same pieces in all three: prompt box (route picked automatically), chat stream, and an "agents" panel showing who is doing what. The difference is where it sits and how much room it gets.</p>
+
+<div class="cards">
+  <div class="card" data-choice="workspace" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Brainamp: new "Agents" workspace (rail tab)</div>
+        <div class="mockup-body" style="font-size:11px">
+          <div class="mock-nav">Library | Knowledge | Canvas | Notes | <b>Agents</b></div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <div class="mock-sidebar" style="width:28%">
+              <div class="label">Sessions</div>
+              <div>&#9679; installer fix</div>
+              <div>&#9675; route-model test</div>
+              <div>&#9675; skills pass</div>
+            </div>
+            <div class="mock-content" style="width:44%">
+              <div class="label">Chat</div>
+              <div>you: fix the updater retry</div>
+              <div>claude: reading updater.py...</div>
+              <div style="margin-top:8px" class="mock-input">prompt...</div>
+              <div style="font-size:10px;opacity:.7">Route: normal &middot; sonnet &middot; medium</div>
+            </div>
+            <div class="mock-sidebar" style="width:28%">
+              <div class="label">Agents</div>
+              <div>main &middot; sonnet/med<br><i>editing updater.py</i></div>
+              <div>investigator &middot; haiku<br><i>done, 6 files</i></div>
+              <div>verifier &middot; sonnet/low<br><i>running tests</i></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Full workspace in Brainamp</h3>
+      <p>Most room: session list, chat, agent lanes side by side. Lives next to Library/Knowledge. Heaviest build.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="desk" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Brainamp: inside the Jarvis desk (dock)</div>
+        <div class="mockup-body" style="font-size:11px">
+          <div style="display:flex;gap:6px">
+            <div class="mock-content" style="width:62%">
+              <div class="placeholder">current workspace (Library grid...)</div>
+            </div>
+            <div class="mock-sidebar" style="width:38%">
+              <div class="label">Jarvis &middot; Ask | <b>Code</b></div>
+              <div>main &#9679; sonnet/med</div>
+              <div>&nbsp;&#8627; verifier &#9679; tests</div>
+              <div style="margin-top:6px">claude: patched retry, testing</div>
+              <div class="mock-input" style="margin-top:6px">prompt...</div>
+              <div style="font-size:10px;opacity:.7">Route: normal &middot; sonnet</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. A "Code" tab in the Jarvis desk</h3>
+      <p>Small embedded chat beside whatever you are doing. Agents shown as a compact tree above the chat. Reuses the existing desk.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="mini" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Standalone mini window (always on top)</div>
+        <div class="mockup-body" style="font-size:11px">
+          <div style="width:70%;margin:auto;border:1px solid currentColor;padding:6px;border-radius:6px">
+            <div class="label">Claude &middot; CONTENT MANAGER</div>
+            <div>&#9679; main sonnet/med &middot; editing</div>
+            <div>&#9679; verifier &middot; tests 41/145</div>
+            <div style="margin-top:6px">claude: patched retry</div>
+            <div class="mock-input" style="margin-top:6px">prompt...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Separate mini window</h3>
+      <p>Floats over VS Code or any app, works for any repo, not tied to Brainamp being open. Could later be what the Jarvis widget opens.</p>
+    </div>
+  </div>
+</div>
