@@ -77,6 +77,18 @@ class RunsTest(unittest.TestCase):
         texts = [i["text"] for i in runs.chat(self.mgr.stream_path(sid)) if i["role"] == "you"]
         self.assertEqual(texts, ["first", "second"])
 
+    def test_fork_starts_a_window_copy(self):
+        sid = self.mgr.start(str(self.project), "/session-handoff", "sonnet", "low", fork="vscode-1",
+                             title="↳ fix", kind="handoff", extra={"escalated": "x"})
+        self.assertNotEqual(sid, "vscode-1")
+        self.assertTrue(wait_for(lambda: self.ended(sid)))
+        started = [r for r in self.log() if r["event"] == "run_started"][0]
+        self.assertEqual((started["kind"], started["forked_from"], started["escalated"]),
+                         ("handoff", "vscode-1", "x"))
+        claude = [i["text"] for i in runs.chat(self.mgr.stream_path(sid)) if i["role"] == "claude"]
+        self.assertEqual(claude, ["echo: /session-handoff"])  # no STOP footer after a /skill
+        self.assertEqual(self.mgr.meta(sid)["model"], "sonnet")
+
     def test_reconcile_marks_a_cut_run_interrupted(self):
         self.mgr.runs.mkdir(parents=True)
         self.mgr.stream_path("dead").write_text('{"type":"cc_prompt","text":"x"}\n', encoding="utf-8")

@@ -132,7 +132,10 @@ class RunManager:
 
     # -- start ----------------------------------------------------------------------
     def start(self, cwd: str, prompt: str, model: str, effort: str, resume: str = None,
-              title: str = "", route: str = "", reason: str = "", prep: str = "") -> str:
+              title: str = "", route: str = "", reason: str = "", prep: str = "",
+              fork: str = "", kind: str = "run", extra: dict = None) -> str:
+        """A new run, a new turn of a window run (`resume`), or a window copy of another chat (`fork`).
+        `kind` (run, continue, verify, handoff, escalate) and `extra` go into the run_started line."""
         if not self.exe:
             raise RunError("claude.exe not found; set \"claude_exe\" in config.json")
         sid = resume or str(uuid.uuid4())
@@ -144,9 +147,10 @@ class RunManager:
             fh.write(json.dumps({"type": "cc_prompt", "ts": time.time(), "text": prompt}, ensure_ascii=False) + "\n")
         offset = path.stat().st_size
         cmd = claude_cli.run_command(self.exe, model, effort, sid, resume=bool(resume),
-                                     name=redact.clip(title, 60))
+                                     name=redact.clip(title, 60), fork=fork)
         proc = self._spawn(cmd, cwd, path)
-        proc.stdin.write(claude_cli.user_message(prompt + claude_cli.STOP_FOOTER))
+        footer = "" if prompt.startswith("/") else claude_cli.STOP_FOOTER  # a /skill takes no footer
+        proc.stdin.write(claude_cli.user_message(prompt + footer))
         proc.stdin.flush()
         with self.lock:
             self.live[sid] = proc
@@ -157,10 +161,13 @@ class RunManager:
                          "start_commit": (self.meta(sid) or {}).get("start_commit") or start_commit})
         rec = {"event": "run_started", "session_id": sid, "cwd": cwd, "project": Path(cwd).name,
                "project_dir": cwd, "pid": proc.pid,
-               "model": model, "effort": effort, "resume": bool(resume), "start_commit": start_commit}
-        for key, value in (("title", title), ("route", route), ("reason", reason), ("prep", prep)):
+               "model": model, "effort": effort, "resume": bool(resume), "start_commit": start_commit,
+               "kind": kind}
+        for key, value in (("title", title), ("route", route), ("reason", reason), ("prep", prep),
+                           ("forked_from", fork)):
             if value:
                 rec[key] = value
+        rec.update(extra or {})
         self.emit(rec)
         threading.Thread(target=self._watch, args=(sid, proc, path, offset), name=f"run-{sid[:8]}",
                          daemon=True).start()
