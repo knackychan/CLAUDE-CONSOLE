@@ -12,7 +12,7 @@ ends with working, tested software.
 | # | Sub-plan | State |
 |---|---|---|
 | 1 | [plans/01-watch.md](plans/01-watch.md) - hooks, service, tree, gauge, Steps, Needs you, Quiet / Stall?, 2 writers | done 2026-10-10 |
-| 2 | Run - prompt box, Prep card, Run / Run raw, Chat, Stop, Open in terminal, crash recovery, STOP answers | to write after phase 1 |
+| 2 | [plans/02-run.md](plans/02-run.md) - prompt box, Prep card, Run / Run raw, Chat, Stop, Open in terminal, crash recovery, STOP answers | written 2026-10-10, not started |
 | 3 | Levers - Continue, Handoff, Escalate + verdict + routing-misses, follow-up hint, Timeline | to write |
 | 4 | Polish - rules-size warning, should-delegate flag, model-mix strip, move skills to ~/.claude | to write |
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
@@ -31,6 +31,22 @@ ends with working, tested software.
 - Phase 1 sessions are only those Claude Code reports through hooks; "Interrupted" needs the
   window's own runs and comes in phase 2.
 
+## Changes to the design made while planning phase 2
+
+- **Stop is an interrupt over stdin, not a signal.** Ctrl+C to a hidden console did nothing; the
+  stream-json `control_request` `interrupt` stops the turn cleanly. Runs therefore use
+  `--input-format stream-json` and the service keeps their stdin; a run left over from an earlier
+  service can only be killed (`taskkill /T`). Closing the window gives stdin EOF: the turn finishes.
+- **Prep runs without hooks, skills or MCP** (`--settings {"disableAllHooks": true}`,
+  `--disable-slash-commands`, `--strict-mcp-config`, `--tools Read,Grep,Glob`): $0.03 instead of $0.11,
+  and Prep never shows as a session.
+- **The service picks the session id** (`--session-id`), so the window knows the session before the
+  first hook line; source `window` comes from `run_started`, never from the inherited
+  `CLAUDE_CODE_ENTRYPOINT` (removed from the child environment with the other session variables).
+- **STOP footer added by the service** to every window-run prompt; the global CLAUDE.md line for VS
+  Code sessions is an optional Fred step (Claude does not edit it).
+- **Answer / Resume only for window runs** in phase 2; Continue for any session stays in phase 3.
+
 ## History
 
 - 2026-10-10 - Master plan and sub-plan 01 written. All phase 1 code was run once in a scratch folder
@@ -39,3 +55,4 @@ ends with working, tested software.
 - 2026-10-10 - Phase 1 code placed (tasks 0-7, 37 tests OK); Fred ran `install_hooks.py --write`; live: sessions, Steps and the red gauge (this chat at 337.5K) show; hooks also apply to already-open chats. Open: agent-row live check, then Task 8.
 - 2026-10-10 - Fred asked for prompting from the window: that is phase 2 (Run); write plans/02-run.md after phase 1 closes.
 - 2026-10-10 - Phase 1 done: 37 tests OK; live check passed (an Explore agent row appeared under its session while running, then `✓ Done` with model, steps and tokens; no hook-errors.log). Differed from 01: Fred asked for agent rows to show their state text and a green context bar (`State.gauge(tokens)` now serves sessions and agents; one assertion added, still 37 tests).
+- 2026-10-10 - Sub-plan 02 written (zero-decision, final code): verified in a scratch clone (60 tests OK, real Prep through the service, window flows in a browser with a fake claude); the plan re-applied to a fresh clone reproduces that code. Claude could not start a live auto-mode run (its classifier refuses): Task 7 live check is Fred's.
