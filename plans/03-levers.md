@@ -59,14 +59,14 @@ Dependencies point one way: `levers -> claude_cli, redact`; `prep -> claude_cli,
 
 ## TODO
 
-- [ ] Task 1: hook verdicts
-- [ ] Task 2: state (verdict, levers, forks, follow-ups, Timeline)
-- [ ] Task 3: claude_cli fork + levers + Prep misses
-- [ ] Task 4: runs (fork, kind)
-- [ ] Task 5: service routes
-- [ ] Task 6: window
-- [ ] Task 7: Fred: live check
-- [ ] Task 8: close the phase
+- [x] Task 1: hook verdicts
+- [x] Task 2: state (verdict, levers, forks, follow-ups, Timeline)
+- [x] Task 3: claude_cli fork + levers + Prep misses
+- [x] Task 4: runs (fork, kind)
+- [x] Task 5: service routes
+- [x] Task 6: window
+- [x] Task 7: Fred: live check
+- [x] Task 8: close the phase
 
 ---
 
@@ -3508,16 +3508,17 @@ Add `"D:\\MY DOCS\\MY TOOLS\\cc-levers"` to `"projects"` in `%USERPROFILE%\.clau
 
 ## DONE WHEN (whole plan)
 
-- [ ] `py -m unittest discover -s tests` -> 78 tests OK.
-- [ ] Any session can be continued from the window; a VS Code / terminal chat continues as a window copy and stays untouched.
-- [ ] Verify gives a PASS / FAIL badge; Escalate runs once, one step up, and writes a routing-misses line that the next Prep reads.
-- [ ] Handoff runs `/session-handoff` and makes the session Done; the follow-up hint says when.
-- [ ] The Timeline tab shows turns and agent runs over time.
-- [ ] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code.
+- [x] `py -m unittest discover -s tests` -> 79 tests OK (78 planned + the `STOP: none` test).
+- [x] Any session can be continued from the window; a VS Code / terminal chat continues as a window copy and stays untouched.
+- [x] Verify gives a PASS / FAIL badge; Escalate runs once, one step up, and writes a routing-misses line that the next Prep reads.
+- [x] Handoff runs `/session-handoff` and makes the session Done (fake claude only; live check 5 not tried); the follow-up hint says when.
+- [x] The Timeline tab shows turns and agent runs over time.
+- [x] Nothing outside `~/.claude/console/`, this repo and the run's own project folder was written by the code.
 
 ## History
 
 - 2026-10-10 - Plan written. Fred decided: fork VS Code / terminal chats, Handoff only where the skill is installed, a Verify button, escalation ladder "effort to high, then model", keep the `haiku` alias (verified Haiku 5.5 on CLI 2.1.296). All code was run in a scratch clone first: 78 tests OK; the plan's tasks were replayed in a fresh clone (each task's tests fail as written, then pass: 64, 69, 74, 75, 78); the window flows were checked in a browser with the fake claude (Escalate fork, routing-misses line, Stop, Handoff Done, follow-up hint, Timeline; no console errors). CLI facts from real `claude -p` calls on 2.1.296 (alias resolution, `--fork-session --session-id`, a `/skill` over stream-json, the full fork command with `--name` and auto mode; about $0.003 in all).
+- 2026-10-10 - Tasks 1-6 placed exactly as written (64, 69, 74, 75, 78 tests; the 6 browser checks passed with the fake claude). Task 7 live check by Fred: checks 1-4, 6, 7 passed (Escalate was run in CLAUDE CONSOLE instead of cc-levers: the escalated run edited nothing); check 5 not tried. Differed: `STOP: none` became a STOP question, fixed in `cc_events.py` (79 tests); check 2 shows no Handoff button when the skill is missing, only `Handoff off: ...`; a VS Code chat that ran `/session-handoff` itself keeps the hint (see Troubleshooting).
 
 ## Troubleshooting
 
