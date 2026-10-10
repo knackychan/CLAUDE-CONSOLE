@@ -17,6 +17,20 @@ from console import paths, redact  # noqa: E402
 TAIL_BYTES = 512 * 1024
 _ROUTE = re.compile(r"^[\s`*>\-]*Route:\s*(.+?)[\s`*]*$", re.M)
 _STOP = re.compile(r"^[\s`*>\-]*STOP:\s*(.+?)[\s`*]*$", re.M)
+# A block Claude Code or an extension puts before (or instead of) Fred's text, e.g.
+# <browser_instruction>, <task-notification>. Fred's own pastes (<pasted_content>) stay.
+_INJECTED = re.compile(r"\s*<(?!pasted_content\b)([A-Za-z][\w-]*)[^>]*>.*?</\1>\s*", re.S)
+
+
+def strip_injected(text: str) -> str:
+    """The prompt without the injected blocks at its start."""
+    text = str(text or "")
+    for _ in range(10):
+        m = _INJECTED.match(text)
+        if not m:
+            break
+        text = text[m.end():]
+    return text
 
 
 def project_root(cwd: str):
@@ -92,7 +106,7 @@ def build_record(data: dict, now: float = None) -> dict:
     }
     tool = data.get("tool_name")
     if event == "UserPromptSubmit":
-        rec["prompt"] = redact.clip(redact.mask(data.get("prompt", "")), 120)
+        rec["prompt"] = redact.clip(redact.mask(strip_injected(data.get("prompt", ""))), 120)
     elif event in ("PreToolUse", "PermissionDenied"):
         rec["tool"] = tool
         rec["what"] = redact.summarize(tool, data.get("tool_input"), cwd)

@@ -74,6 +74,15 @@ class BuildRecordTest(unittest.TestCase):
         self.assertTrue(rec["prompt"].startswith("token=***"))
         self.assertEqual(len(rec["prompt"]), 120)
 
+    def test_injected_blocks_are_not_the_prompt(self):
+        prompt = ('<browser_instruction># Claude in Chrome\n' + "x" * 500 + '</browser_instruction>\n'
+                  '<pasted_content id="1">Project: D:/x</pasted_content>')
+        rec = cc_events.build_record(self.base("UserPromptSubmit", prompt=prompt))
+        self.assertEqual(rec["prompt"], '<pasted_content id="1">Project: D:/x</pasted_content>')
+        rec = cc_events.build_record(self.base("UserPromptSubmit",
+                                               prompt="<task-notification><task-id>b1</task-id></task-notification>"))
+        self.assertEqual(rec.get("prompt", ""), "")  # empty fields are left out of the line
+
     def test_pre_tool_use_has_summary_not_input(self):
         rec = cc_events.build_record(self.base("PreToolUse", tool_name="Read", tool_use_id="t1",
                                                tool_input={"file_path": str(self.repo / "src" / "a.py")},

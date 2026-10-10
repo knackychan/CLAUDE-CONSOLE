@@ -136,6 +136,9 @@ class StateTest(unittest.TestCase):
                   ev("Stop", T0 + 1, sid="s2", project_dir="D:/repo"))
         self.assertEqual(self.row(T0 + 2)["title"], "Project: D:/x")
         self.assertEqual({r["project_dir"] for r in self.state.snapshot(T0 + 2)["sessions"]}, {"D:/repo"})
+        self.feed(ev("UserPromptSubmit", T0 + 3, sid="s3", prompt="<browser_instruction># Claude in Chrome…"),
+                  ev("UserPromptSubmit", T0 + 4, sid="s3", prompt="fix the title"))
+        self.assertEqual(self.row(T0 + 5, "s3")["title"], "fix the title")
 
 
 if __name__ == "__main__":

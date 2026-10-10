@@ -64,8 +64,14 @@ def run_command(exe: list, model: str, effort: str, session_id: str, resume: boo
     return cmd
 
 
-def terminal_command(exe: list, session_id: str) -> list:
-    return exe + ["--resume", session_id]
+def terminal_command(exe: list, session_id: str, model: str = "", effort: str = "") -> list:
+    """Interactive resume on the run's own model and effort (not Fred's default)."""
+    cmd = exe + ["--resume", session_id]
+    if model:
+        cmd += ["--model", model]
+    if effort:
+        cmd += ["--effort", effort]
+    return cmd
 
 
 def user_message(text: str) -> bytes:

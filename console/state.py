@@ -24,6 +24,7 @@ SOURCES = {"claude-vscode": "vscode", "cli": "terminal", "claude-desktop": "desk
 MAX_STEPS = 500
 SHOW_FOR_S = 86400
 _PASTED = re.compile(r"</?pasted_content[^>]*>")
+_TAGGED = re.compile(r"<[A-Za-z]")  # an injected block the hook clipped before it closed: not a title
 
 
 def norm_dir(path: str) -> str:
@@ -122,8 +123,9 @@ class State:
         elif event == "UserPromptSubmit":
             s.in_turn, s.ended = True, False
             s.prompts += 1
-            if not s.title:
-                s.title = redact.clip(_PASTED.sub(" ", rec.get("prompt", "")), 60)
+            text = redact.clip(_PASTED.sub(" ", rec.get("prompt", "")), 60)
+            if not s.title and not _TAGGED.match(text):
+                s.title = text
             s.denied = s.failed = None
             s.stop_question = ""
             s.interrupted = s.stopped = False

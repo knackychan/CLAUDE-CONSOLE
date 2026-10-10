@@ -262,7 +262,8 @@ class RunManager:
             raise RunError("not a window run")
         if self.is_live(sid):
             raise RunError("stop the run first: two writers on one session")
-        subprocess.Popen(claude_cli.terminal_command(self.exe, sid), cwd=meta["cwd"],
+        subprocess.Popen(claude_cli.terminal_command(self.exe, sid, meta.get("model", ""), meta.get("effort", "")),
+                         cwd=meta["cwd"],
                          env=claude_cli.child_env(), creationflags=claude_cli.NEW_CONSOLE)
 
 

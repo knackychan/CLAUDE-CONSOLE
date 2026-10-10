@@ -40,6 +40,11 @@ class CommandTest(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(claude_cli.child_env(), {"PATH": "x", "CLAUDE_CONFIG_DIR": "keep"})
 
+    def test_terminal_keeps_the_run_model(self):
+        self.assertEqual(claude_cli.terminal_command(["claude.exe"], "abc", "sonnet", "low"),
+                         ["claude.exe", "--resume", "abc", "--model", "sonnet", "--effort", "low"])
+        self.assertEqual(claude_cli.terminal_command(["claude.exe"], "abc"), ["claude.exe", "--resume", "abc"])
+
     def test_find_exe_prefers_config(self):
         self.assertEqual(claude_cli.find_exe({"claude_exe": r"C:\x\claude.exe"}), r"C:\x\claude.exe")
 
