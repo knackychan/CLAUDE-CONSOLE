@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 
-from console import events, guard, paths, server
+from console import events, guard, levers, paths, server
 
 
 class GuardTest(unittest.TestCase):
@@ -70,7 +70,7 @@ class ServerTest(unittest.TestCase):
 
 
 class RunServerTest(unittest.TestCase):
-    """POST routes with the fake claude: prep, run, chat, stop, answer, draft."""
+    """POST routes with the fake claude: prep, run, chat, stop, levers, draft."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -80,6 +80,7 @@ class RunServerTest(unittest.TestCase):
         cfg = dict(paths.load_config(), projects=[str(self.project)])
         fake = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
         self.httpd, self.hub = server.make_server(cfg, port=0, folder=self.folder, exe=fake)
+        self.hub.user_home = Path(self.tmp.name)  # no ~/.claude/skills here unless a test adds one
         self.port = self.httpd.server_address[1]
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
@@ -136,9 +137,14 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual([i["role"] for i in chat["items"]], ["you", "claude", "tool", "result"])
         self.assertFalse(chat["live"])
 
-    def test_answer_resumes_and_stop_interrupts(self):
+    def wait_idle(self, sid):
+        end = time.time() + 15
+        while time.time() < end and (self.session(sid) is None or self.session(sid)["run_live"]):
+            time.sleep(0.1)
+
+    def test_continue_resumes_and_stop_interrupts(self):
         sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "SLOW one"})[1]["session"]
-        self.assertEqual(self.call("/api/answer", {"session": sid, "text": "go"})[0], 409)  # still running
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "go"})[0], 409)  # still running
         end = time.time() + 15
         while time.time() < end and "echo" not in self.hub.runs.stream_path(sid).read_text(encoding="utf-8"):
             time.sleep(0.1)
@@ -146,7 +152,70 @@ class RunServerTest(unittest.TestCase):
         while time.time() < end and self.session(sid)["run_live"]:
             time.sleep(0.1)
         self.assertEqual(self.session(sid)["stopped"], True)
-        self.assertEqual(self.call("/api/answer", {"session": sid, "text": "go on"}), (200, {"session": sid}))
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "go on"}), (200, {"session": sid}))
+
+    def test_levers_fork_a_vscode_session(self):
+        for event, extra in (("UserPromptSubmit", {"prompt": "fix add"}),
+                             ("Stop", {"model": "claude-sonnet-5-5", "effort": "medium"})):
+            events.append(self.folder, dict({"event": event, "ts": time.time(), "session_id": "v1",
+                                             "project": "proj", "project_dir": str(self.project),
+                                             "cwd": str(self.project)}, **extra))
+        self.hub.poll_once()
+        lv = self.call("/api/levers?session=v1")[1]
+        self.assertEqual((lv["continue"], lv["fork"], lv["route"]), ("", True, "sonnet/medium"))
+        self.assertEqual(lv["escalate"], "only after a FAIL verdict")
+        self.assertIn("session-handoff skill", lv["handoff"])
+        self.assertEqual(self.call("/api/handoff", {"session": "v1"})[0], 409)
+        self.assertEqual(self.call("/api/levers?session=nope")[0], 404)
+        self.assertEqual(self.call("/api/continue", {"session": "v1", "text": " "})[0], 400)
+        status, data = self.call("/api/continue", {"session": "v1", "text": "and the tests"})
+        self.assertEqual(status, 200)
+        fork = data["session"]
+        self.assertNotEqual(fork, "v1")
+        row = self.session(fork)
+        self.assertEqual((row["forked_from"], row["title"], row["kind"], row["source"]),
+                         ("v1", "↳ fix add", "continue", "window"))
+        self.assertEqual(self.session("v1")["forks"], [fork])
+        self.assertEqual((self.hub.runs.meta(fork)["model"], self.hub.runs.meta(fork)["effort"]), ("sonnet", "medium"))
+        self.wait_idle(fork)
+        timeline = self.call(f"/api/timeline?session={fork}")[1]
+        self.assertEqual([lane["label"] for lane in timeline["lanes"]], ["main"])
+        self.assertEqual(len(timeline["lanes"][0]["spans"]), 1)
+
+    def test_verify_then_escalate_once(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
+                                     "model": "sonnet", "effort": "high"})[1]["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.call("/api/escalate", {"session": sid}), (409, {"error": "only after a FAIL verdict"}))
+        self.assertEqual(self.call("/api/verify", {"session": sid}), (200, {"session": sid}))
+        self.wait_idle(sid)
+        events.append(self.folder, {"event": "Stop", "ts": time.time(), "session_id": sid,  # what the hook logs
+                                    "verdict": "FAIL", "verdict_detail": "test_add - 3 != 4"})
+        self.hub.poll_once()
+        self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["escalate_to"], "opus/high")
+        self.assertEqual(self.call("/api/escalate", {"session": sid}), (200, {"session": sid}))
+        self.assertEqual(self.hub.runs.meta(sid)["model"], "opus")
+        self.wait_idle(sid)
+        self.assertEqual(self.session(sid)["escalated"], "sonnet/high -> opus/high")
+        self.assertTrue(self.call(f"/api/levers?session={sid}")[1]["escalate"].startswith("escalated once already"))
+        misses = levers.read_misses(self.folder, "proj")
+        self.assertEqual(len(misses), 1)
+        self.assertTrue(misses[0].endswith(" - proj - raw: sonnet/high failed (test_add - 3 != 4); "
+                                           "next time start at opus/high."))
+        you = [i["text"] for i in self.call(f"/api/chat?session={sid}")[1]["items"] if i["role"] == "you"]
+        self.assertTrue(you[1].startswith("Check the work of this session."))
+        self.assertTrue(you[2].startswith("The checks failed: test_add - 3 != 4. You now run on opus/high"))
+
+    def test_handoff_marks_the_session_done(self):
+        skill = self.project / ".claude" / "skills" / "session-handoff"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add"})[1]["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.call("/api/handoff", {"session": sid}), (200, {"session": sid}))
+        self.wait_idle(sid)
+        row = self.session(sid)
+        self.assertEqual((row["state"], row["group"], row["kind"]), ("done", "done", "handoff"))
 
     def test_allow_adds_a_folder_claude_code_ran_in(self):
         other = Path(self.tmp.name) / "other"

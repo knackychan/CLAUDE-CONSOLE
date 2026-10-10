@@ -1,5 +1,5 @@
 """The console service: reads the event log, keeps the state, serves the window over HTTP + SSE,
-and (phase 2) starts, stops and resumes window runs."""
+starts, stops and resumes window runs (phase 2), and pulls the levers (phase 3)."""
 import json
 import os
 import threading
@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import claude_cli, events, guard, paths, prep, runs
+from . import claude_cli, events, guard, levers, paths, prep, runs
 from .state import State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -20,6 +20,7 @@ TICK_S = 15.0
 APP_ID = "claude-console"
 MAX_BODY = 256 * 1024
 MAX_PROMPT = 20000
+BUSY = {"running", "quiet", "stall"}
 
 
 class Hub:
@@ -31,6 +32,7 @@ class Hub:
         self.state = State(cfg)
         self.reader = events.LogReader(folder)
         self.runs = runs.RunManager(cfg, folder, exe)
+        self.user_home = Path.home()  # where ~/.claude/skills is looked up (tests point it elsewhere)
         self.lock = threading.Lock()
         self.changed = threading.Condition(self.lock)
         self.version = 0
@@ -77,12 +79,65 @@ class Hub:
         with self.lock:
             return self.state.steps(session_id)
 
+    def timeline(self, session_id: str):
+        with self.lock:
+            return self.state.timeline(session_id, time.time())
+
     def session(self, session_id: str):
         with self.lock:
             s = self.state.sessions.get(session_id)
-            return None if s is None else {"cwd": s.cwd, "window": s.window, "title": s.title,
-                                           "model": s.model, "effort": s.effort, "prep": s.prep,
-                                           "start_commit": s.start_commit}
+            if s is None:
+                return None
+            return {"cwd": s.cwd, "first_cwd": s.first_cwd or s.cwd, "window": s.window, "title": s.title,
+                    "model": s.model, "effort": s.effort, "prep": s.prep, "start_commit": s.start_commit,
+                    "project": s.project, "project_dir": s.project_dir, "route": s.route,
+                    "run_live": s.run_live, "state": self.state.state_of(s, time.time()),
+                    "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated}
+
+    def route_of(self, session_id: str, s: dict) -> tuple:
+        """(model, effort) the session runs on: a window run's own route, else the model last seen."""
+        meta = self.runs.meta(session_id) or {}
+        model = meta.get("model") or claude_cli.model_alias(s["model"]) or self.cfg["default_model"]
+        effort = meta.get("effort") or (s["effort"] if s["effort"] in claude_cli.EFFORTS
+                                        else self.cfg["default_effort"])
+        return model, effort
+
+    def levers(self, session_id):
+        """What each lever would do for this session and why one is off ("" = allowed). The one
+        place that decides; the POST handlers call it again before they start anything."""
+        s = self.session(session_id) if isinstance(session_id, str) else None
+        if s is None:
+            return None
+        meta = self.runs.meta(session_id)
+        window = bool(s["window"] and meta)
+        cwd = meta.get("cwd") if window else s["first_cwd"]  # Claude Code files a chat under its start folder
+        if not self.allowed(s["project_dir"]):
+            base = "runs are off in this project: pick it on the home view and allow runs"
+        elif not self.runs.exe:
+            base = "claude.exe not found; set \"claude_exe\" in config.json"
+        elif s["run_live"] or s["state"] in BUSY or self.runs.is_live(session_id):
+            base = "still working: wait until it stops"
+        elif not cwd or not os.path.isdir(cwd):
+            base = "the session's folder is gone"
+        else:
+            base = ""
+        model, effort = self.route_of(session_id, s)
+        step = levers.escalate_step(model, effort)
+        if base:
+            escalate = base
+        elif s["verdict"] != "FAIL":
+            escalate = "only after a FAIL verdict"
+        elif s["escalated"]:
+            escalate = f"escalated once already ({s['escalated']})"
+        elif not step:
+            escalate = "already on the top route"
+        else:
+            escalate = ""
+        handoff = base or ("" if levers.handoff_ready(s["project_dir"], self.user_home) else
+                           "the session-handoff skill is not installed here (phase 4 moves it to ~/.claude)")
+        return {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate,
+                "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
+                "fork": not window, "cwd": cwd or ""}
 
     def allowed(self, project_dir) -> str:
         """The configured folder matching `project_dir`, or "" (runs only in listed folders)."""
@@ -164,6 +219,10 @@ class Handler(BaseHTTPRequestHandler):
                                "config_path": str(self.hub.folder / "config.json")})
         if url.path == "/api/chat":
             return self._chat(query.get("session", [""])[0])
+        if url.path in ("/api/levers", "/api/timeline"):
+            sid = query.get("session", [""])[0]
+            data = self.hub.levers(sid) if url.path == "/api/levers" else self.hub.timeline(sid)
+            return self._json(data) if data else self._error(404, "unknown session")
         if url.path == "/api/draft":
             try:
                 text = (self.hub.folder / "draft.txt").read_text(encoding="utf-8")
@@ -178,8 +237,9 @@ class Handler(BaseHTTPRequestHandler):
         if not guard.host_ok(self.headers.get("Host"), self._port()) or not guard.post_ok(self.headers):
             return self._send(403, b"forbidden", "text/plain")
         routes = {"/api/prep": self._prep, "/api/run": self._run, "/api/stop": self._stop,
-                  "/api/answer": self._answer, "/api/terminal": self._terminal, "/api/draft": self._draft,
-                  "/api/allow": self._allow}
+                  "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow}
+        for lever in ("continue", "verify", "handoff", "escalate"):
+            routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
         handler = routes.get(urlparse(self.path).path)
         if handler is None:
             return self._send(404, b"not found", "text/plain")
@@ -256,20 +316,41 @@ class Handler(BaseHTTPRequestHandler):
         result = self.hub.runs.stop(sid)
         return self._json({"stop": result})
 
-    def _answer(self, body):
-        """STOP answers and Interrupted resumes: the same session, a new turn."""
-        sid, s = self._window_session(body)
-        text = self._text(body, "text")
-        if not sid:
-            return self._error(404, "not a window run")
-        if not text:
-            return self._error(400, "empty answer")
-        meta = self.hub.runs.meta(sid)
-        if not self.hub.allowed(meta.get("cwd")):
-            return self._error(403, "not a project listed in config.json")
-        self.hub.runs.start(meta["cwd"], text, meta["model"], meta["effort"], resume=sid)
+    def _lever(self, body, lever):
+        """Continue (also STOP answers and Resume), Verify, Handoff, Escalate: a new turn of a window
+        run, or a window copy (fork) of a VS Code / terminal chat, which stays as it is."""
+        sid = body.get("session")
+        info = self.hub.levers(sid)
+        if info is None:
+            return self._error(404, "unknown session")
+        if info[lever]:
+            return self._error(409, info[lever])
+        s = self.hub.session(sid)
+        model, effort = self.hub.route_of(sid, s)
+        extra, miss = {}, ""
+        if lever == "continue":
+            text = self._text(body, "text")
+            if not text:
+                return self._error(400, "empty prompt")
+        elif lever == "verify":
+            text = levers.VERIFY_TEXT
+        elif lever == "handoff":
+            text = levers.HANDOFF_TEXT
+        else:  # escalate: one step up, once, and the miss is logged for Prep
+            new_model, new_effort = levers.escalate_step(model, effort)
+            route_from, route_to = f"{model}/{effort}", f"{new_model}/{new_effort}"
+            miss = levers.miss_line(s["project"], s["route"], route_from, route_to, s["verdict_detail"])
+            text = levers.escalate_text(s["verdict_detail"], new_model, new_effort)
+            model, effort = new_model, new_effort
+            extra = {"escalated": f"{route_from} -> {route_to}"}
+        fork = sid if info["fork"] else ""
+        new = self.hub.runs.start(info["cwd"], text, model, effort, resume=None if fork else sid, fork=fork,
+                                  title="↳ " + (s["title"] or sid[:8]) if fork else "",
+                                  route=s["route"] if fork else "", kind=lever, extra=extra)
+        if miss:
+            levers.add_miss(self.hub.folder, miss)
         self.hub.poll_once()
-        return self._json({"session": sid})
+        return self._json({"session": new})
 
     def _terminal(self, body):
         sid, s = self._window_session(body)
