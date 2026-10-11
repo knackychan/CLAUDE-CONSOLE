@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from console import paths, usage
@@ -70,6 +71,100 @@ class UsageTest(unittest.TestCase):
         self.assertEqual(self.usage.poll(fork), 0)  # still read up to its end
         self.assertEqual(Path(usage.agent_path(self.path, "a1")).as_posix(),
                          Path(self.tmp.name, "s1", "subagents", "agent-a1.jsonl").as_posix())
+
+
+def local(day, hour=12):
+    """An ISO timestamp at `hour` local time on `day`, with the local offset (the day must not depend on the zone)."""
+    return datetime.fromisoformat(f"{day}T{hour:02d}:00:00").astimezone().isoformat()
+
+
+def cwd_line(mid, day, cwd, model="claude-opus-5-5", **use):
+    return json.dumps({"type": "assistant", "cwd": cwd, "timestamp": local(day),
+                       "message": {"id": mid, "model": model, "usage": use}}) + "\n"
+
+
+class HistoryTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "projects"
+        (self.root / "d--A" / "s1" / "subagents").mkdir(parents=True)
+        (self.root / "d--B").mkdir()
+        self.hist = usage.History(PRICES)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_sums_each_local_day_once_per_message(self):
+        a = self.root / "d--A" / "s1.jsonl"
+        a.write_text(cwd_line("m1", "2026-10-09", "D:/work/A", input_tokens=1_000_000, output_tokens=100)
+                     + cwd_line("m1", "2026-10-09", "D:/work/A", input_tokens=1_000_000, output_tokens=100)
+                     + cwd_line("m2", "2026-10-10", "D:/work/A", model="<synthetic>", input_tokens=9),
+                     encoding="utf-8")
+        (self.root / "d--A" / "s1" / "subagents" / "agent-x.jsonl").write_text(
+            cwd_line("m3", "2026-10-10", "D:/work/A", model="claude-haiku-5-5", output_tokens=1_000_000,
+                     cache_read_input_tokens=7, cache_creation_input_tokens=5), encoding="utf-8")
+        fork = self.root / "d--B" / "s2.jsonl"
+        fork.write_text(cwd_line("m1", "2026-10-09", "D:/work/B", input_tokens=1_000_000, output_tokens=100)
+                        + cwd_line("m4", "2026-10-10", "D:/work/B", model="claude-sonnet-5-5",
+                                   input_tokens=1_000_000), encoding="utf-8")
+        self.assertEqual(self.hist.scan(self.root), 3)
+        days = self.hist.days()
+        self.assertEqual(sorted(days), ["2026-10-09", "2026-10-10"])
+        d9, d10 = days["2026-10-09"], days["2026-10-10"]
+        self.assertAlmostEqual(d9["cost"], 4.002)
+        self.assertEqual(d9["tokens"], [1_000_000, 100, 0, 0])
+        self.assertEqual(set(d9["projects"]), {"A"})  # the copy in the fork counts once, in the file seen first
+        self.assertAlmostEqual(d10["cost"], 0.5 + 2.0)
+        self.assertEqual(d10["tokens"], [1_000_000, 1_000_000, 5, 7])
+        self.assertAlmostEqual(d10["projects"]["B"], 2.0)
+        self.assertEqual(sorted(d10["models"]), ["haiku", "sonnet"])
+        self.assertEqual(self.hist.scan(self.root), 0)
+        with open(fork, "a", encoding="utf-8") as fh:
+            fh.write(cwd_line("m5", "2026-10-10", "D:/work/B", model="claude-sonnet-5-5", output_tokens=100_000))
+        self.assertEqual(self.hist.scan(self.root), 1)
+        self.assertAlmostEqual(self.hist.days()["2026-10-10"]["cost"], 3.5)
+        self.assertEqual(self.hist.scan(Path(self.tmp.name) / "missing"), 0)
+
+
+class AggregateTest(unittest.TestCase):
+    DAYS = {"2026-10-05": {"cost": 1.0, "tokens": [1, 2, 3, 4]},     # Monday
+            "2026-10-11": {"cost": 2.0, "tokens": [0, 0, 0, 10]},    # Sunday, same week
+            "2026-10-12": {"cost": 4.0, "tokens": [0, 0, 0, 100]},   # Monday, next week
+            "2025-12-31": {"cost": 8.0, "tokens": [1000, 0, 0, 0]}}
+
+    def test_weeks_start_on_monday(self):
+        weeks = usage.weeks(self.DAYS, "2026-10-14", n=3)
+        self.assertEqual([w["start"] for w in weeks], ["2026-09-28", "2026-10-05", "2026-10-12"])
+        self.assertEqual([w["cost"] for w in weeks], [0.0, 3.0, 4.0])
+        self.assertEqual([w["tokens"] for w in weeks], [0, 20, 100])
+
+    def test_months_cross_the_year(self):
+        months = usage.months(self.DAYS, "2026-10-14", n=11)
+        self.assertEqual(months[0]["month"], "2025-12")
+        self.assertEqual(months[-1]["month"], "2026-10")
+        self.assertEqual(len(months), 11)
+        self.assertEqual(months[0]["cost"], 8.0)
+        self.assertEqual(months[0]["tokens"], 1000)
+        self.assertEqual(months[-1]["cost"], 7.0)
+        self.assertEqual(months[-1]["tokens"], 120)
+        self.assertEqual(months[5]["cost"], 0.0)
+
+
+class DaysFileTest(unittest.TestCase):
+    def test_closed_days_are_kept_and_the_larger_cost_wins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            self.assertEqual(usage.load_days(folder), {})
+            scanned = {"2026-10-09": {"cost": 5.0}, "2026-10-10": {"cost": 1.0}, "2026-10-11": {"cost": 9.0}}
+            self.assertTrue(usage.save_days(folder, scanned, "2026-10-11"))
+            self.assertEqual(sorted(usage.load_days(folder)), ["2026-10-09", "2026-10-10"])  # not today
+            self.assertFalse(usage.save_days(folder, scanned, "2026-10-11"))  # nothing new: no write
+            later = {"2026-10-10": {"cost": 3.0}, "2026-10-11": {"cost": 9.5}}  # 10-09's transcript is gone
+            merged = usage.merge_days(usage.load_days(folder), later)
+            self.assertEqual({d: v["cost"] for d, v in merged.items()},
+                             {"2026-10-09": 5.0, "2026-10-10": 3.0, "2026-10-11": 9.5})
+            (folder / "usage-days.json").write_text("not json", encoding="utf-8")
+            self.assertEqual(usage.load_days(folder), {})
 
 
 if __name__ == "__main__":
