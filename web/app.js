@@ -97,6 +97,13 @@ function routeText(s) {
   if (s.route === "unrouted") return run ? "unrouted · " + run : "unrouted";
   return run ? s.route + " · " + run : s.route;
 }
+function modelText(model, effort) { return [alias(model), effort].filter(Boolean).join(" "); }
+function routeRows(s, rows) {  // the Route block: the Prep that wrote the prompt, then main and the agents
+  const prep = s.prep
+    ? { nm: "Prep", word: "done", model: s.prep_model, steps: s.prep_turns, unit: "t", cost: s.prep_cost }
+    : { nm: "Prep", word: "none", model: "", steps: 0, unit: "", cost: null, off: true };
+  return [prep].concat(rows);
+}
 function tlBase() { return Math.floor(snap.now / 60) - 29; }  // the minute of the Timeline's first cell
 function projectName(dir) {
   const p = snap && snap.projects.find((x) => x.dir === dir);
@@ -639,8 +646,9 @@ function agentRows(s, steps) {  // main first, then the agents; `steps` (oldest 
   const agentCost = s.agents.reduce((t, a) => t + a.cost, 0);
   const last = (id) => { for (let k = steps.length - 1; k >= 0; k--) if (steps[k].agent === id) return steps[k]; return null; };
   return [{ nm: "main", id: "", steps: s.main_steps, cost: s.spent == null ? null : Math.max(0, s.spent - agentCost),
-            word: working ? (running ? "waiting" : "working") : label(s).toLowerCase() }]
+            model: s.model, effort: s.effort, word: working ? (running ? "waiting" : "working") : label(s).toLowerCase() }]
     .concat(s.agents.map((a) => ({ nm: a.type, id: a.id, steps: a.steps, cost: a.cost, verdict: a.verdict,
+      model: a.model, effort: a.effort,
       word: a.text === "Running" ? "working" : a.text === "Done" ? "done" : a.text.toLowerCase() })))
     .map((r) => Object.assign(r, { last: last(r.id) }));
 }
@@ -669,10 +677,13 @@ function renderBrief(s) {
         <span class="m">1 cell = ${kTokens(red / 30)}</span></div>
         <div class="cells act30">${cellsHtml(ctxClasses(s.ctx_tokens))}</div>
         <div class="scale"><span>0</span><span>${kTokens(yellow)} hand off soon</span><span>${kTokens(red)} hand off</span></div></div>
-      <div class="blk"><div class="hd"><span class="lbl">Agents · 1 cell = 2 steps</span><span class="m">steps / cost</span></div><div class="agents">
-        ${rows.map((r) => `<div class="agent"><span class="nm m" title="${esc(r.nm)}">${r.word === "done" ? "✓ " : r.word === "working" ? "▶ " : ""}${esc(r.nm)}${r.verdict ? " " + esc(r.verdict) : ""}</span>
+      <div class="blk"><div class="hd"><span class="lbl">Route · 1 cell = 2 steps</span><span class="m">model · steps / cost</span></div><div class="agents">
+        ${routeRows(s, rows).map((r) => `<div class="agent${r.off ? " off" : ""}"><span class="nm m" title="${esc(r.nm)}">${r.word === "done" ? "✓ " : r.word === "working" ? "▶ " : ""}${esc(r.nm)}${r.verdict ? " " + esc(r.verdict) : ""}</span>
           <span class="cells">${cellsHtml(Array.from({ length: 24 }, (_, k) => k < Math.ceil(r.steps / 2) ? "f" : ""))}</span>
-          <span class="m">${r.steps}</span><span class="m c">${r.cost == null ? "&ndash;" : money(r.cost)}</span></div>`).join("")}</div></div>
+          <span class="m" title="${esc(r.model || "")}">${r.off ? "none" : esc(modelText(r.model, r.effort)) || "&ndash;"}</span>
+          <span class="m"${r.unit ? ' title="turns"' : ""}>${r.off ? "" : r.steps + (r.unit || "")}</span><span class="m c">${r.cost == null ? "&ndash;" : money(r.cost)}</span></div>`).join("")}
+        ${s.escalated ? `<div class="esc m">↑ escalated ${esc(s.escalated)}${s.escalated_ts ? " · " + hhmm(s.escalated_ts) : ""}</div>` : ""}</div>
+        ${s.models.length ? `<div class="legend"><span>model mix</span>${s.models.map(([m, f]) => `<span>${esc(m)} ${f < 0.01 ? "&lt;1" : Math.round(f * 100)} %</span>`).join("")}</div>` : ""}</div>
       <div class="blk"><div class="hd"><span class="lbl">Activity · last 30 min</span><span class="m">1 cell = 1 min</span></div>
         <div class="cells act30">${activityCells(s.activity)}</div></div>
     </div></div>`;
@@ -694,7 +705,8 @@ function renderSession() {
   const when = BUSY.has(s.state) ? ago(snap.now - s.turn_ts) : (s.state === "stop" ? "waiting " : "") + ago(snap.now - s.last_ts);
   const src = s.source === "?" ? "" : s.source + " / ";
   setHtml($("sbody"), `<div class="head"><span class="st ${t}">${s.symbol} ${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>
-    <div class="where"><span class="m" title="${esc(s.route_reason || "")}">${esc(s.project)} / ${esc(src)}${esc(routeText(s))}</span>
+    <div class="where"><span class="m" title="${esc(s.route_reason || "")}">${esc(s.project)} / ${esc(src)}${esc(s.route)}</span>
+    ${s.model ? `<span class="mdl" title="${esc(s.model)}">${esc(modelText(s.model, s.effort))}</span>` : ""}
     ${s.project_dir ? `<button class="btn sm" data-here="${esc(s.project_dir)}">New task here</button>` : ""}</div></div>
     ${noteLine(s)}${askBlock(s)}${renderBrief(s)}`);
   renderProc(s).catch(() => {});
@@ -702,8 +714,13 @@ function renderSession() {
 }
 
 const LIVE = '<span class="cells"><i class="f live"></i></span>';
-function logRow(x, mark = "") {
-  return `<div${x.denied ? ' class="r"' : ""}><span>${mark}</span><span>${hms(x.ts)}</span><span>${esc(x.agent_type)}</span><span>${esc(x.tool)} ${esc(x.what)}</span></div>`;
+function logRow(x, mark = "", tag = "") {  // `tag`: the step's model when it is not main's
+  return `<div${x.denied ? ' class="r"' : ""}><span>${mark}</span><span>${hms(x.ts)}</span><span>${esc(x.agent_type)}</span><span>${tag ? `<span class="tag">${esc(tag)}</span>` : ""}${esc(x.tool)} ${esc(x.what)}</span></div>`;
+}
+function stepTag(s) {  // agent id -> its model family, only where it differs from main's
+  const main = alias(s.model), by = {};
+  for (const a of s.agents) if (alias(a.model) && alias(a.model) !== main) by[a.id] = alias(a.model);
+  return (x) => by[x.agent] || "";
 }
 
 async function renderProc(s) {
@@ -717,12 +734,13 @@ async function renderProc(s) {
   let body = "";
   if (wanted === "steps") {
     const mark = s.state === "running" ? LIVE : s.state === "stop" ? '<span class="st y">?</span>' : s.state === "blocked" ? '<span class="st r">■</span>' : "";
-    body = newest.length ? `<div class="log">${newest.map((x, k) => logRow(x, k === 0 ? mark : "")).join("")}</div>` : '<p class="none">No step yet.</p>';
+    const tag = stepTag(s);
+    body = newest.length ? `<div class="log">${newest.map((x, k) => logRow(x, k === 0 ? mark : "", tag(x))).join("")}</div>` : '<p class="none">No step yet.</p>';
   } else if (wanted === "agents") {
     body = `<div class="alist">${rows.map((r) => {
       const m = r.word === "working" && s.state === "running" ? LIVE : r.word === "done" ? '<span class="st g">✓</span>'
         : `<span class="st ${r.word === "waiting" ? "q" : tone(s)}">${r.word === "waiting" ? "○" : s.symbol}</span>`;
-      return `<div class="arow">${m}<span class="nm">${esc(r.nm)}${r.verdict ? " " + esc(r.verdict) : ""}</span><span class="m">${esc(r.word)}</span>
+      return `<div class="arow">${m}<span class="nm">${esc(r.nm)}${r.verdict ? " " + esc(r.verdict) : ""}</span><span class="m">${esc(r.word)}${r.model ? " · " + esc(alias(r.model)) : ""}</span>
         <span class="m">${r.steps} steps</span><span class="m c">${r.cost == null ? "&ndash;" : money(r.cost)}</span>
         <span class="last m">${r.last ? `${hms(r.last.ts)} <span>${esc(r.last.tool)} ${esc(r.last.what)}</span>` : "no step yet"}</span></div>`;
     }).join("")}</div>`;
@@ -737,7 +755,7 @@ async function renderProc(s) {
       }).join("")}</div>
       <div class="scale"><span>${hhmm(at(0))}</span><span>${hhmm(at(15))}</span><span>${hhmm(at(29))}</span></div>
       <div class="hd at"><span class="lbl">${hhmm(at(sel))} · ${inMin.length} step${inMin.length === 1 ? "" : "s"}</span><span class="m">← → other minutes</span></div>
-      ${inMin.length ? `<div class="log">${inMin.map((x) => logRow(x)).join("")}</div>` : '<p class="none">No step in this minute.</p>'}</div>`;
+      ${inMin.length ? `<div class="log">${inMin.map((x) => logRow(x, "", stepTag(s)(x))).join("")}</div>` : '<p class="none">No step in this minute.</p>'}</div>`;
   } else {
     const turns = chat.items.filter((i) => i.role !== "tool");
     const foot = chat.source === "window"
