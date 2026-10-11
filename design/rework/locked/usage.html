@@ -1,0 +1,504 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; }</style>
+<title>Usage page</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Usage page of the Cells Drawer window (locked 2026-10-11). Tokens, type and cells copied unchanged from locked/cells-drawer.html. */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 28px 16px 48px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 26px; }
+header h1 { font: 700 34px/1 var(--dot); margin: 0 0 8px; letter-spacing: .02em; }
+header p { margin: 0; color: var(--mut); max-width: 64ch; }
+.grid { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 36px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.views { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; min-height: 40px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.sample { font: 11px var(--mono); color: var(--mut); margin: 0 0 12px; }
+.cap { font-size: 12px; color: var(--mut); max-width: 400px; margin: 12px 0 0; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mut { color: var(--mut); }
+.lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+
+/* cells, as locked */
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); }
+.cells i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+.cells i.mk { box-shadow: inset 0 0 0 1px var(--you); }
+.cells i.l1, .day.l1, .col i.l1 { background: color-mix(in srgb, var(--ink) 22%, var(--off)); }
+.cells i.l2, .day.l2, .col i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.cells i.l3, .day.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+.cells i.l4, .day.l4 { background: var(--ink); }
+
+/* window chrome, as locked */
+.win { position: relative; width: min(400px, 100%); height: 640px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
+.top { height: 36px; flex: none; display: flex; align-items: center; gap: 4px; padding-left: 10px; border-bottom: 1px solid var(--line); user-select: none; }
+.top .sp { flex: 1; align-self: stretch; cursor: grab; min-width: 8px; }
+.top .crumb { font: 600 13px var(--ui); margin-left: 2px; }
+.grip { color: var(--mut); letter-spacing: -2px; font-size: 12px; cursor: grab; margin-right: 2px; }
+.rb { width: 34px; height: 36px; border: 0; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); display: grid; place-items: center; flex: none; }
+.rb:hover { background: var(--raise); color: var(--ink); }
+.rb.on { color: var(--ink); }
+.rb.x:hover { background: #c42b1c; color: #fff; }
+.rb:disabled { opacity: .35; cursor: default; background: transparent; }
+.scope { display: flex; align-items: center; gap: 6px; max-width: 170px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 600 12px var(--mono); }
+.scope .car { color: var(--mut); font-size: 10px; }
+.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.btn:hover { border-color: var(--ink); }
+.btn.sm { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+@container (max-width: 372px) { .top .grip { display: none; } .top .rb { width: 26px; } .today .usd { display: none; } }
+
+/* list: today strip and its breakdown, as locked; the breakdown gains one line, the way into the Usage page */
+.today { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: center; width: 100%; padding: 10px 12px; background: transparent; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.today:hover { background: color-mix(in srgb, var(--raise) 60%, transparent); }
+.today .big { font: 700 30px/.9 var(--dot); letter-spacing: .02em; grid-row: span 2; }
+.today .row30 { grid-template-columns: repeat(30, minmax(0, 1fr)); }
+.today .sub { display: flex; justify-content: space-between; gap: 8px; color: var(--mut); }
+.todaymore { padding: 2px 12px 10px; display: grid; gap: 6px; border-bottom: 1px solid var(--line); }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font: 10.5px var(--mono); color: var(--mut); }
+.legend span { display: inline-flex; gap: 5px; align-items: center; }
+.legend i { width: 8px; height: 8px; display: inline-block; border-radius: 1px; background: var(--off); }
+.legend i.f { background: var(--ink); }
+.legend i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+.legend i.mk { box-shadow: inset 0 0 0 1px var(--you); }
+.legend i.l1 { background: color-mix(in srgb, var(--ink) 22%, var(--off)); }
+.legend i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.legend i.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+.legend i.l4 { background: var(--ink); }
+.go-usage { justify-self: start; }
+.sec { display: flex; justify-content: space-between; align-items: baseline; padding: 20px 12px 6px; }
+.card { margin: 0 8px 6px; padding: 3px 10px; border-radius: 8px; display: flex; gap: 8px; }
+.card .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st { font: 600 11px var(--mono); white-space: nowrap; color: var(--mut); }
+
+/* usage page. Rhythm as the session page: 12 px between blocks, 4 px inside one. One Doto figure: the month total */
+.uhead { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.uhead .big { font: 700 30px/.9 var(--dot); letter-spacing: .02em; grid-row: span 2; }
+.uhead .big .est { font: 500 15px var(--mono); color: var(--mut); margin-right: 2px; }
+.uhead .mon { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+.uhead .mon b { font: 600 13px var(--ui); white-space: nowrap; }
+.uhead .mon .rb { width: 28px; height: 26px; border-radius: 6px; }
+.uhead .sub { color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* four figures in fixed columns, like the brief */
+.ustats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.ustats > span { display: grid; gap: 4px; min-width: 0; }
+.ustats small { font: 10.5px/1 var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ustats b { font: 500 12px/16px var(--mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ustats i { font: 11px/1 var(--mono); font-style: normal; color: var(--mut); }
+.ublk { padding: 12px 12px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.ublk .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.ublk .hd .m { color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* calendar: one cell per day, Monday first, tone in four steps of the daily limit */
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.cal .wd { font: 10px var(--mono); color: var(--mut); text-align: center; padding-bottom: 2px; }
+.day { position: relative; height: 34px; border: 0; border-radius: 2px; background: var(--off); color: var(--ink); padding: 3px 4px; cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; font: 10px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: left; }
+.day .dc { align-self: flex-end; }
+.day.l2, .day.l3, .day.l4 { color: var(--win); }
+.day.na, .day.fut { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--mut); cursor: default; }
+.day.now { box-shadow: inset 0 0 0 1px var(--you); }
+.day[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 1; }
+.day:not(:disabled):hover { outline: 1px solid var(--ink); outline-offset: 1px; }
+/* the picked day */
+.dayd { margin: 0 12px; padding: 8px 10px 10px; border-radius: 8px; background: var(--raise); display: grid; gap: 8px; }
+.dayd .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.dayd .hd b { font: 600 13px var(--ui); }
+.dayd .hd .m { color: var(--ink); font-weight: 500; }
+.tok { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 8px; }
+.tok span { display: grid; gap: 3px; min-width: 0; }
+.tok small { font: 10.5px/1 var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tok b { font: 500 12px/1 var(--mono); }
+.prj { display: grid; gap: 4px; }
+.prow { display: grid; grid-template-columns: minmax(0, 118px) minmax(0, 1fr) 50px; gap: 8px; align-items: center; font-size: 12px; }
+.prow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prow .cells { grid-template-columns: repeat(30, minmax(0, 1fr)); }
+.prow .c { text-align: right; }
+.dayd .none { margin: 0; color: var(--mut); font-size: 13px; }
+/* over time: tabs as the session page, the metric as a two-button seg on the right */
+.tabs { display: flex; gap: 16px; align-items: center; border-bottom: 1px solid var(--line); }
+.tabs button { font: 12px var(--ui); color: var(--mut); background: transparent; border: 0; padding: 0; min-height: 32px; cursor: pointer; white-space: nowrap; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px var(--ink); }
+.tabs .seg { margin-left: auto; display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.tabs .seg button { font: 11px var(--mono); min-height: 22px; padding: 0 8px; box-shadow: none; }
+.tabs .seg button[aria-pressed="true"] { background: var(--raise); color: var(--ink); font-weight: 400; }
+/* columns of cells: each column is one day, week or month, each cell a fixed amount; a part-filled top cell is half tone */
+.plot { position: relative; display: grid; gap: 2px; align-items: end; height: 132px; padding-top: 12px; border-bottom: 1px solid var(--line); }
+.col { height: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; display: flex; flex-direction: column-reverse; gap: 1px; border-radius: 1px; }
+.col i { display: block; height: 5px; flex: none; background: var(--ink); border-radius: 1px; }
+.col.na { cursor: default; background: repeating-linear-gradient(0deg, transparent 0 5px, color-mix(in srgb, var(--off) 55%, transparent) 5px 6px); }
+.col:not(.na):hover i { background: var(--mut); }
+.col:not(.na):hover i.l2 { background: color-mix(in srgb, var(--mut) 50%, var(--off)); }
+.col[aria-pressed="true"] { outline: 1px solid var(--ink); outline-offset: 1px; }
+.lim { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--you); pointer-events: none; }
+.lim span { position: absolute; left: 0; bottom: 2px; font: 10px var(--mono); color: var(--mut); background: var(--win); padding-right: 4px; }
+.scale { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--mut); }
+.foot { padding: 14px 12px 16px; font-size: 12px; color: var(--mut); margin: 0; text-wrap: pretty; }
+.tip { position: absolute; z-index: 9; pointer-events: none; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: 11px/1.4 var(--mono); color: var(--ink); white-space: nowrap; box-shadow: var(--shadow); }
+.tip small { display: block; color: var(--mut); font-size: 10.5px; }
+@container (max-width: 372px) {
+  .ustats { gap: 0 6px; }
+  .prow { grid-template-columns: minmax(0, 90px) minmax(0, 1fr) 46px; }
+  .tabs { gap: 12px; }
+  .tabs .seg button { padding: 0 6px; }
+}
+
+/* notes */
+.notes { display: grid; gap: 22px; }
+.notes section { display: grid; gap: 6px; }
+.notes h3 { font: 600 15px var(--ui); margin: 0; }
+.notes p, .notes li { margin: 0; max-width: 64ch; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.read { font: 13px/1.5 var(--mono); background: var(--raise); border-radius: 8px; padding: 10px 12px; }
+code { font: 12px var(--mono); background: var(--raise); border-radius: 4px; padding: 1px 4px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Usage</h1>
+    <p>Locked by Fred on 11 Oct 2026 (BRAINSTORM D13, plan 09). A Usage page for the Cells Drawer window: estimated cost and tokens per day, week and month, a calendar of days and a chart of how they move over time. Same tokens, type and cell motif as the locked Cells Drawer; it opens from today's spend breakdown and goes back to the list like the Prep page.</p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="views" role="group" aria-label="Mock view">
+        <button data-v="list" aria-pressed="false">List (way in)</button>
+        <button data-v="usage" aria-pressed="true">Usage</button>
+      </div>
+      <p class="sample">Figures are this machine's transcripts as read on 11 Oct 2026 (16,054 messages since 11 Sep), at the list prices in config.json. Project names shortened.</p>
+
+      <div class="win" id="win">
+        <!-- LIST: only the part that changes -->
+        <section data-pane="list" style="display:contents" hidden>
+          <div class="top">
+            <span class="grip">⋮⋮</span>
+            <span class="scope">All projects<span class="car">▾</span></span>
+            <span class="sp"></span>
+            <button class="rb on" aria-label="Always on top">⊤</button><button class="rb" aria-label="Fold to pill">⌃</button><button class="rb" aria-label="Minimize">–</button><button class="rb x" aria-label="Close">✕</button>
+          </div>
+          <div class="scroll">
+            <button class="today" aria-expanded="true" title="Hide today's breakdown">
+              <span class="big">6.66</span>
+              <span class="cells row30" id="spend"></span>
+              <span class="sub m"><span>today<span class="usd">, USD</span> · $0.21 / min</span><span>limit $15</span></span>
+            </button>
+            <div class="todaymore">
+              <div class="legend"><span><i class="f"></i>exact $0.00</span><span><i class="h"></i>estimated $6.66</span><span><i class="mk"></i>80 % of limit</span></div>
+              <div class="legend"><span>1 cell = $0.50</span><span>sonnet 68 %</span><span>opus 32 %</span><span>window runs 0</span></div>
+              <button class="btn sm go-usage" data-go="usage">Usage by day, week, month ›</button>
+            </div>
+            <div class="sec"><span class="lbl">Working · 2</span></div>
+            <div class="card"><span class="st">▶ RUNNING</span><span class="t">Usage page mockup</span><span class="m mut">4.51</span></div>
+            <div class="card"><span class="st">· IDLE</span><span class="t">Content Manager reels import</span><span class="m mut">2.15</span></div>
+          </div>
+        </section>
+
+        <!-- USAGE -->
+        <section data-pane="usage" style="display:contents">
+          <div class="top">
+            <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">←</button>
+            <span class="crumb">Usage</span>
+            <span class="sp"></span>
+            <button class="rb on" aria-label="Always on top">⊤</button><button class="rb" aria-label="Fold to pill">⌃</button><button class="rb x" aria-label="Close">✕</button>
+          </div>
+          <div class="scroll" id="uscroll">
+            <div class="uhead">
+              <span class="big" id="mtotal"></span>
+              <span class="mon"><button class="rb" id="mprev" aria-label="Previous month">‹</button><b id="mname"></b><button class="rb" id="mnext" aria-label="Next month">›</button></span>
+              <span class="sub m" id="msub"></span>
+            </div>
+            <div class="ustats" id="ustats"></div>
+            <div class="ublk">
+              <div class="hd"><span class="lbl">Days</span><span class="legend"><span><i class="l1"></i>&lt; $15</span><span><i class="l2"></i>&lt; 45</span><span><i class="l3"></i>&lt; 90</span><span><i class="l4"></i>90+</span></span></div>
+              <div class="cal" id="cal"></div>
+            </div>
+            <div class="ublk"><div class="dayd" id="dayd"></div></div>
+            <div class="ublk">
+              <div class="tabs" role="tablist">
+                <button role="tab" data-range="days" aria-selected="true">Days</button>
+                <button role="tab" data-range="weeks" aria-selected="false">Weeks</button>
+                <button role="tab" data-range="months" aria-selected="false">Months</button>
+                <span class="seg"><button data-metric="cost" aria-pressed="true">$</button><button data-metric="tok" aria-pressed="false">tokens</button></span>
+              </div>
+              <div class="plot" id="plot"></div>
+              <div class="scale" id="scale"></div>
+              <div class="hd"><span class="m mut" id="unit"></span><span class="m mut" id="peak"></span></div>
+            </div>
+            <p class="foot">Estimated from the transcripts at list prices, fast mode 2x; window runs are exact. Transcripts reach back to 11 Sep: Claude Code deletes them after 30 days, so the service keeps each closed day in usage-days.json.</p>
+          </div>
+        </section>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+      <p class="cap" id="cap"></p>
+    </div>
+
+    <div class="notes">
+      <section>
+        <h3>Design read</h3>
+        <p class="read">Reading this as: a look back, opened a few times a day from the spend strip, read as one month figure, then the calendar, then one day; dial ENERGY 2 / RHYTHM 2 / MOTION 0.</p>
+        <ul>
+          <li>Same tokens, type and cells as the locked Cells Drawer. No new colour: tone steps of ink, orange only for today and the limit, as on the spend strip</li>
+          <li>One Doto figure: the month total. Every other figure is Cascadia Mono in fixed columns</li>
+          <li>No motion: nothing here is live enough to blink</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Reading order</h3>
+        <ul>
+          <li>Head: the month's estimated total, the month with ‹ ›, then tokens, days used and the share of cache reads</li>
+          <li>Four figures in fixed columns: today, this week (Monday first), the average per day used, days over the $15 limit</li>
+          <li>Calendar: one cell per day, Monday first, the cost in whole dollars in the corner. Tone in four steps of the daily limit (under $15, under 3x, under 6x, 6x and more), today ringed in orange like the 80 % mark of the spend strip. Days before the first transcript are outlined, not filled</li>
+          <li>The picked day (today by default; click a day or a Days column): cost, tokens in four columns, each project as 30 cells against that day's top project, the model shares in words as in the spend breakdown</li>
+          <li>Over time: Days (last 30), Weeks (last 12), Months (last 12) as tabs; $ or tokens as a two-button seg. One series, one axis</li>
+        </ul>
+      </section>
+      <section>
+        <h3>The chart in cells</h3>
+        <ul>
+          <li>Each column is one day, week or month, stacked from cells of a fixed amount, like every other quantity in the window. The amount is the smallest of 1, 2, 5, 10, 20, 25, 50 ... that keeps the tallest column within 20 cells, and is named under the chart ("1 cell = $20")</li>
+          <li>The top cell of a column is half tone when it is only part full, so a $3 day still shows one cell</li>
+          <li>Days in $: the $15 limit is a dashed orange line, named at the left end, where the oldest days sit low. Weeks and months have no limit line</li>
+          <li>Hover or focus a column for its date, cost and tokens; a Days column also picks that day; a Months column moves the calendar to that month</li>
+          <li>Columns before the first transcript are faint ruled stripes, not empty: "no data" never reads as "$0"</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What the real data says</h3>
+        <ul>
+          <li>Spend runs well over the $15 soft limit: 9 of the 11 October days, $78 a day on average, $248 on 10 Oct. That is why the calendar tones step in multiples of the limit and not up to it</li>
+          <li>Cache reads are about 97 % of all tokens (566M of 581M on 10 Oct). Token figures count all four kinds; the picked day splits them</li>
+          <li>Reading every transcript (308 files, 1.42 GB) took 2.2 s on this machine, warm. The service can read them all once at start, in its own thread, then keep following only what grows</li>
+        </ul>
+      </section>
+      <section>
+        <h3>What it would touch</h3>
+        <p><code>console/usage.py</code> (per-message tokens and project next to the cost; daily totals; week and month sums), <code>console/server.py</code> (one scan at start in a thread; <code>/api/usage</code> through <code>guard.py</code>; closed days written to <code>~/.claude/console/usage-days.json</code>), <code>web/app.js</code> and <code>web/style.css</code> (the page and one button in the spend breakdown). <code>cc_events.py</code>, the hooks and the other pages stay as they are.</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+// date: [cost, input, output, cache write, cache read, {project: cost}, {model: cost}], local days
+const DAYS = {
+  "2026-09-11": [0.53, 30, 5913, 57722, 1178476, { "sticker-generator": 0.53 }, { sonnet: 0.53 }],
+  "2026-09-19": [16.6, 478, 161839, 623630, 62419828, { fashion_packshots_ai: 16.39, home: 0.2 }, { sonnet: 16.6 }],
+  "2026-09-22": [56.65, 1904, 309038, 3812594, 179554124, { "sticker-generator": 56.65 }, { opus: 37.82, sonnet: 18.83 }],
+  "2026-09-23": [21.59, 854, 163724, 1082276, 56170531, { "sticker-generator": 21.59 }, { opus: 21.59 }],
+  "2026-09-24": [36.92, 1166, 252903, 2219263, 109372001, { "sticker-generator": 36.92 }, { sonnet: 19.53, opus: 17.39 }],
+  "2026-09-25": [37.6, 1730, 152266, 2753121, 142486163, { "sticker-generator": 37.6 }, { sonnet: 37.6 }],
+  "2026-09-26": [80.22, 2762, 353759, 5023814, 289253739, { "sticker-generator": 80.22 }, { sonnet: 67.53, opus: 12.69 }],
+  "2026-09-27": [37.52, 1698, 96864, 3159150, 113325675, { "sticker-generator": 37.52 }, { opus: 19.45, sonnet: 18.07 }],
+  "2026-09-29": [76.53, 1544, 495447, 2189129, 245507778, { "sticker-generator": 76.53 }, { opus: 76.53 }],
+  "2026-10-01": [28.27, 566, 247277, 538703, 95041809, { "sticker-generator": 28.27 }, { opus: 28.27 }],
+  "2026-10-02": [17.62, 520, 226743, 995686, 36212687, { "summer-quest": 17.62 }, { opus: 16.92, sonnet: 0.7 }],
+  "2026-10-03": [89.89, 2434, 1067221, 3213895, 229340977, { "summer-quest": 89.89 }, { opus: 82.88, sonnet: 7.01 }],
+  "2026-10-04": [88.93, 2732, 1234695, 4271923, 208875169, { "summer-quest": 88.93 }, { opus: 80.26, sonnet: 8.42, haiku: 0.25 }],
+  "2026-10-05": [88.43, 2179, 959942, 2581985, 260125235, { "summer-quest": 88.43 }, { opus: 88.34, haiku: 0.1 }],
+  "2026-10-06": [94.98, 1990, 1227028, 2964533, 250379876, { "summer-quest": 73.37, "CONTENT MANAGER": 21.62 }, { opus: 92.59, sonnet: 2.33, haiku: 0.06 }],
+  "2026-10-07": [12.22, 338, 131769, 543652, 32337207, { "summer-quest": 12.22 }, { opus: 12.19, haiku: 0.03 }],
+  "2026-10-08": [45.49, 1114, 447886, 1332987, 151920601, { "summer-quest": 35.2, "CONTENT MANAGER": 10.3 }, { opus: 35.17, sonnet: 10.28, haiku: 0.04 }],
+  "2026-10-09": [140.7, 2476, 1282556, 4706529, 400968091, { "CONTENT MANAGER": 116.81, "summer-quest": 23.9 }, { opus: 139.63, sonnet: 1.03, haiku: 0.04 }],
+  "2026-10-10": [247.96, 7268, 2915724, 11785649, 566161688, { "CONTENT MANAGER": 151.81, "CLAUDE CONSOLE": 96.08, other: 0.07 }, { opus: 205.35, sonnet: 31.66, fable: 10.71, haiku: 0.24 }],
+  "2026-10-11": [6.66, 262, 94475, 607891, 12009186, { "CLAUDE CONSOLE": 4.51, "CONTENT MANAGER": 2.15 }, { sonnet: 4.51, opus: 2.15 }],
+};
+const TODAY = "2026-10-11", FIRST = "2026-09-11", LIMIT = 15;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const cellsHtml = (classes) => classes.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("");
+const pad = (n) => String(n).padStart(2, "0");
+const key = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const date = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const addDays = (k, n) => { const d = date(k); d.setDate(d.getDate() + n); return key(d); };
+const monday = (k) => addDays(k, -((date(k).getDay() + 6) % 7));
+const nice = (d) => `${WD[date(d).getDay()]} ${date(d).getDate()} ${MONTHS[date(d).getMonth()]}`;
+const usd = (v) => v >= 1000 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + v.toFixed(2);
+function tok(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e8 ? 0 : 1) + "M";
+  if (n >= 1e3) return Math.round(n / 1e3) + "K";
+  return String(n);
+}
+const dayCost = (k) => (DAYS[k] || [0])[0];
+const dayTok = (k) => { const r = DAYS[k]; return r ? r[1] + r[2] + r[3] + r[4] : 0; };
+function sum(from, to) {  // inclusive keys
+  let cost = 0, t = 0, cr = 0, used = 0;
+  for (let k = from; k <= to; k = addDays(k, 1)) {
+    const r = DAYS[k]; if (!r) continue;
+    cost += r[0]; t += r[1] + r[2] + r[3] + r[4]; cr += r[4]; used++;
+  }
+  return { cost, t, cr, used };
+}
+const tone = (c) => !c ? "" : c < LIMIT ? "l1" : c < 3 * LIMIT ? "l2" : c < 6 * LIMIT ? "l3" : "l4";
+
+let month = TODAY.slice(0, 7), picked = TODAY, range = "days", metric = "cost";
+
+function renderHead() {
+  const first = month + "-01", d = date(first);
+  const last = key(new Date(d.getFullYear(), d.getMonth() + 1, 0)), to = last < TODAY ? last : TODAY;
+  const s = sum(first, to);
+  document.getElementById("mtotal").innerHTML = `<span class="est">~</span>${s.cost >= 1000 ? Math.round(s.cost) : s.cost.toFixed(2)}`;
+  document.getElementById("mname").textContent = `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+  document.getElementById("msub").textContent = `est. USD · ${tok(s.t)} tokens · ${s.used} days used`;
+  document.getElementById("mprev").disabled = first <= FIRST.slice(0, 7) + "-01";
+  document.getElementById("mnext").disabled = month >= TODAY.slice(0, 7);
+  const wk = sum(monday(TODAY), TODAY), over = [];
+  for (let k = first; k <= to; k = addDays(k, 1)) if (dayCost(k) >= LIMIT) over.push(k);
+  const fig = (label, value, under) => `<span><small>${label}</small><b>${value}</b><i>${under}</i></span>`;
+  document.getElementById("ustats").innerHTML =
+    fig("today", usd(dayCost(TODAY)), tok(dayTok(TODAY)) + " tok")
+    + fig("this week", usd(wk.cost), tok(wk.t) + " tok")
+    + fig("avg / day", usd(s.used ? s.cost / s.used : 0), "days used")
+    + fig(`over $${LIMIT}`, `${over.length} of ${s.used}`, "days used");
+}
+
+function renderCal() {
+  const d = date(month + "-01"), lead = (d.getDay() + 6) % 7, n = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  let html = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((w) => `<span class="wd">${w}</span>`).join("") + "<span></span>".repeat(lead);
+  for (let i = 1; i <= n; i++) {
+    const k = `${month}-${pad(i)}`, c = dayCost(k);
+    if (k > TODAY || k < FIRST) {
+      html += `<button class="day ${k > TODAY ? "fut" : "na"}" disabled title="${k > TODAY ? "" : "No transcript left for this day"}"><span>${i}</span></button>`;
+      continue;
+    }
+    const tip = `${nice(k)}|${c ? `${usd(c)} · ${tok(dayTok(k))} tokens` : "no use"}`;
+    html += `<button class="day ${tone(c)}${k === TODAY ? " now" : ""}" data-day="${k}" data-tip="${esc(tip)}" aria-pressed="${k === picked}" aria-label="${esc(tip.replace("|", ": "))}">
+      <span>${i}</span>${c ? `<span class="dc">$${Math.round(c)}</span>` : ""}</button>`;
+  }
+  document.getElementById("cal").innerHTML = html;
+}
+
+function renderDay() {
+  const r = DAYS[picked], el = document.getElementById("dayd");
+  if (!r) { el.innerHTML = `<div class="hd"><b>${nice(picked)}</b><span class="m">$0.00</span></div><p class="none">No Claude Code use this day.</p>`; return; }
+  const projects = Object.entries(r[5]).sort((a, b) => b[1] - a[1]), top = projects[0][1];
+  const fams = Object.entries(r[6]).sort((a, b) => b[1] - a[1]).map(([f, c]) => `<span>${f} ${Math.round(100 * c / r[0])} %</span>`).join("");
+  el.innerHTML = `<div class="hd"><b>${nice(picked)}${picked === TODAY ? " · today" : ""}</b><span class="m">~${usd(r[0])}</span></div>
+    <div class="tok"><span><small>input</small><b>${tok(r[1])}</b></span><span><small>output</small><b>${tok(r[2])}</b></span>
+      <span><small>cache write</small><b>${tok(r[3])}</b></span><span><small>cache read</small><b>${tok(r[4])}</b></span></div>
+    <div class="prj">${projects.map(([p, c]) => {
+      const n = Math.max(1, Math.round(30 * c / top));
+      return `<div class="prow"><span class="nm">${esc(p)}</span><span class="cells">${cellsHtml(Array.from({ length: 30 }, (_, k) => k < n ? "f" : ""))}</span><span class="c m">${usd(c)}</span></div>`;
+    }).join("")}</div>
+    <div class="legend">${fams}</div>`;
+}
+
+function buckets() {
+  const out = [];
+  if (range === "days") {
+    for (let i = 29; i >= 0; i--) {
+      const k = addDays(TODAY, -i);
+      out.push({ k, na: k < FIRST, v: metric === "cost" ? dayCost(k) : dayTok(k), t: dayTok(k), c: dayCost(k), label: nice(k), short: `${date(k).getDate()} ${MONTHS[date(k).getMonth()]}` });
+    }
+  } else if (range === "weeks") {
+    for (let i = 11; i >= 0; i--) {
+      const from = addDays(monday(TODAY), -7 * i), to = addDays(from, 6), s = sum(from, to);
+      out.push({ k: from, na: to < FIRST, v: metric === "cost" ? s.cost : s.t, t: s.t, c: s.cost, label: `week of ${date(from).getDate()} ${MONTHS[date(from).getMonth()]}`, short: `${date(from).getDate()} ${MONTHS[date(from).getMonth()]}` });
+    }
+  } else {
+    const now = date(TODAY);
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1), from = key(d), to = key(new Date(d.getFullYear(), d.getMonth() + 1, 0)), s = sum(from, to);
+      out.push({ k: from.slice(0, 7), na: to < FIRST, v: metric === "cost" ? s.cost : s.t, t: s.t, c: s.cost, label: `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`, short: MONTHS[d.getMonth()] });
+    }
+  }
+  return out;
+}
+
+function renderChart() {
+  const b = buckets(), max = Math.max(...b.map((x) => x.v));
+  const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000].map((s) => s * (metric === "cost" ? 1 : 1e6)).find((s) => max / s <= 20);
+  const plot = document.getElementById("plot");
+  plot.style.gridTemplateColumns = `repeat(${b.length}, minmax(0, 1fr))`;
+  plot.innerHTML = b.map((x) => {
+    const tip = `${x.label}|${x.na ? "before the first transcript" : `${usd(x.c)} · ${tok(x.t)} tokens`}`;
+    if (x.na) return `<button class="col na" disabled data-tip="${esc(tip)}" aria-label="${esc(tip.replace("|", ": "))}"></button>`;
+    const full = Math.floor(x.v / step), part = x.v - full * step > 0 ? 1 : 0;
+    const on = range === "days" ? x.k === picked : range === "months" ? x.k === month : false;
+    return `<button class="col" data-col="${x.k}" data-tip="${esc(tip)}" aria-pressed="${on}" aria-label="${esc(tip.replace("|", ": "))}">${"<i></i>".repeat(full)}${part ? '<i class="l2"></i>' : ""}</button>`;
+  }).join("") + (range === "days" && metric === "cost" ? `<div class="lim" style="bottom:${(LIMIT / step) * 6 - 1}px"><span>limit $${LIMIT}</span></div>` : "");
+  const mid = b[Math.floor(b.length / 2)];
+  document.getElementById("scale").innerHTML = `<span>${b[0].short}</span><span>${mid.short}</span><span>${range === "days" ? "today" : b[b.length - 1].short}</span>`;
+  document.getElementById("unit").textContent = `1 cell = ${metric === "cost" ? "$" + step : tok(step) + " tokens"}`;
+  const top = b.reduce((a, x) => x.v > a.v ? x : a, b[0]);
+  document.getElementById("peak").textContent = `top ${metric === "cost" ? usd(top.v) : tok(top.v)}, ${range === "days" ? top.label : top.short}`;
+  document.querySelectorAll("[data-range]").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.range === range)));
+  document.querySelectorAll("[data-metric]").forEach((t) => t.setAttribute("aria-pressed", String(t.dataset.metric === metric)));
+}
+
+function renderUsage() { renderHead(); renderCal(); renderDay(); renderChart(); }
+
+// list strip: 13 estimated cells for $6.66, the 80 % mark at cell 24
+document.getElementById("spend").innerHTML = cellsHtml(Array.from({ length: 30 }, (_, k) => [k < 13 ? "h" : "", k === 23 ? "mk" : ""].filter(Boolean).join(" ")));
+
+// tooltip: one for the window, above the hovered or focused cell
+const tip = document.getElementById("tip"), win = document.getElementById("win");
+function showTip(el) {
+  const [a, b] = el.dataset.tip.split("|");
+  tip.innerHTML = `${esc(a)}<small>${esc(b)}</small>`; tip.hidden = false;
+  const w = win.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const left = Math.min(Math.max(4, r.left - w.left + r.width / 2 - tip.offsetWidth / 2), w.width - tip.offsetWidth - 4);
+  tip.style.left = left + "px"; tip.style.top = Math.max(40, r.top - w.top - tip.offsetHeight - 6) + "px";
+}
+win.addEventListener("pointerover", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); else tip.hidden = true; });
+win.addEventListener("pointerleave", () => { tip.hidden = true; });
+win.addEventListener("focusin", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); else tip.hidden = true; });
+document.getElementById("uscroll").addEventListener("scroll", () => { tip.hidden = true; });
+
+const caps = {
+  list: "The way in: the spend strip's breakdown (one click on the strip) gains one button, Usage by day, week, month. The list is otherwise as locked.",
+  usage: "Click a day in the calendar or a Days column to pick it; ‹ › changes the month; a Months column moves the calendar there. Hover or focus any cell for its figures. Esc goes back to the list.",
+};
+function show(v) {
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  document.querySelectorAll("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== v; });
+  tip.hidden = true;
+  document.getElementById("cap").textContent = caps[v];
+}
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
+document.addEventListener("click", (e) => {
+  const g = e.target.closest("[data-go]");
+  if (g) { show(g.dataset.go); return; }
+  const day = e.target.closest("[data-day]");
+  if (day) { picked = day.dataset.day; renderCal(); renderDay(); renderChart(); return; }
+  const col = e.target.closest("[data-col]");
+  if (col && range === "days") { picked = col.dataset.col; month = picked.slice(0, 7); renderUsage(); return; }
+  if (col && range === "months") { month = col.dataset.col; renderUsage(); return; }
+  const r = e.target.closest("[data-range]");
+  if (r) { range = r.dataset.range; renderChart(); return; }
+  const m = e.target.closest("[data-metric]");
+  if (m) { metric = m.dataset.metric; renderChart(); return; }
+});
+const moveMonth = (n) => { const d = date(month + "-01"); d.setMonth(d.getMonth() + n); month = key(d).slice(0, 7); renderHead(); renderCal(); renderChart(); };
+document.getElementById("mprev").addEventListener("click", () => moveMonth(-1));
+document.getElementById("mnext").addEventListener("click", () => moveMonth(1));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !document.querySelector('[data-pane="usage"]').hidden) show("list"); });
+
+renderUsage();
+show("usage");
+</script>

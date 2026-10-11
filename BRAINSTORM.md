@@ -47,6 +47,7 @@ No cloud, no network calls of its own.
 | D10 | Visual style | Borrow the square-orchestrator UI (section 7.4) |
 | D11 | Visual rework (2026-10-10) | Locked: "Console Cells", `design/rework/locked/console-cells.html` (section 7.5) |
 | D12 | Open window layout (2026-10-10) | Locked: "Cells Drawer", `design/rework/locked/cells-drawer.html` (section 7.5): a list instead of the rail, a full-width session page, a searchable project picker. Console Cells stays the reference for tokens and the cell motif |
+| D13 | Usage page (2026-10-11) | Locked: `design/rework/locked/usage.html` (section 7.5): estimated cost and tokens per day, week and month from every transcript, a calendar of days and columns of cells over time; history kept in `~/.claude/console/usage-days.json` |
 
 ## 4. Architecture
 
@@ -214,6 +215,11 @@ in `design/references/`.
     click a minute for its steps) / Chat (the last turns in words, also for VS Code and terminal
     chats), and the levers bar.
   - The Prep page, with Back to the list.
+  - The Usage page (D13, `design/rework/locked/usage.html`), from a button in the spend breakdown, with Back
+    to the list: the month's estimated total, today / this week / average / days over the limit, a calendar
+    (one cell per day, four tones in multiples of `daily_budget_usd`, today ringed in orange), the picked day
+    (tokens in, out, cache write, cache read; projects; model shares), Days / Weeks / Months as columns of cells
+    in $ or tokens (tokens count cache reads), the limit line on Days in $.
   The window is a CSS container: no horizontal scroll at 400 or 340 px.
 - Motif: every quantity is counted in cells. Context: 30 cells of 10K (two rows of 15; the second
   row is the hand-off zone). Spend: cells of $0.50, solid = exact, hatched = estimated, orange

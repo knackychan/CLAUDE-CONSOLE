@@ -10,6 +10,7 @@ through its views; each page has the window mock on the left and its reasoning o
 |---|---|---|
 | [locked/cells-drawer.html](locked/cells-drawer.html) | https://claude.ai/artifact/SqX2KpJqpnV6Q7FA7zhVzn | **The target** (locked 2026-10-10, plan 07). Cells Drawer: Console Cells without the rail. The open window is one list (needs you / working / done today) with answer and unblock in place, a searchable project picker in the header, and a full-width session page (head, brief, Steps / Agents / Timeline / Chat). Views: pill, peek, list, session, asks you, empty / offline |
 | [locked/console-cells.html](locked/console-cells.html) | https://claude.ai/artifact/9s2oCibRMRPYqdRC8ZAt5d | Console Cells: the tokens, type and cell motif that Cells Drawer keeps (plan 06 built its pill, peek and cells). Its rail, focus pane and Overview are replaced by Cells Drawer. Views: pill, peek, focus, asks you, overview, empty / offline / loading / error |
+| [locked/usage.html](locked/usage.html) | - | The Usage page of Cells Drawer (locked 2026-10-11, plan 09): the month total, a calendar of daily cost (tones in multiples of the daily limit), the picked day by project and model, Days / Weeks / Months as columns of cells in $ or tokens (tokens count cache reads). Opened from the spend breakdown. Figures are this machine's transcripts as read on 2026-10-11 |
 
 ## Explored (not targets)
 

@@ -18,6 +18,7 @@ ends with working, tested software.
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
 | 6 | [plans/06-rework.md](plans/06-rework.md) - Visual rework, Console Cells (BRAINSTORM 7.5, `design/rework/locked/console-cells.html`): borderless pill + rail + focus pane, cell motif, estimated cost, activity buckets | written 2026-10-10 |
 | 7 | [plans/07-cells-drawer.md](plans/07-cells-drawer.md) - Cells Drawer window (BRAINSTORM 7.5, D12, `design/rework/locked/cells-drawer.html`): list, session page and searchable project picker replace the rail, focus pane and Overview; Chat from transcripts, per-minute Timeline; its live check also closes plan 06 Tasks 7-8 | written 2026-10-10 |
+| 9 | [plans/09-usage.md](plans/09-usage.md) - Usage page (BRAINSTORM D13, `design/rework/locked/usage.html`): cost and tokens per day, week and month from every transcript, calendar and columns of cells, history in usage-days.json | written 2026-10-11 |
 
 ## Changes to the design made while planning phase 1
 
@@ -112,6 +113,19 @@ ends with working, tested software.
 - **Notes** (Fred): one muted line under the session head, only when there is a note.
 - **Brief open or folded** (Fred): remembered for the window in `~/.claude/console/window.json` (`brief`),
   next to the form, through `/api/draft`.
+
+## Changes to the design made while planning phase 9
+
+- **Usage page** (Fred, 2026-10-11): its own page from a button in the spend breakdown, drawn first as a
+  mockup and locked as `design/rework/locked/usage.html` (BRAINSTORM D13). Estimated cost and tokens only;
+  projects show for the picked day.
+- **Every transcript, not only the shown sessions**: the service reads all of `~/.claude/projects` once at
+  start in its own thread (308 files, 1.42 GB, 2.2 s warm on this machine), then each minute only what grew.
+- **History outlives the transcripts** (Fred): Claude Code deletes them after 30 days, so the service keeps
+  each closed day in `~/.claude/console/usage-days.json`; for a day in both, the larger cost wins.
+- **Calendar tones in multiples of the limit** (Fred): under $15, under 3x, under 6x, 6x and more. Real spend
+  is $78 a day on average in October, so tones up to the limit would all be the same.
+- **Tokens count all four kinds** (Fred), cache reads included (about 97 %); the picked day splits them.
 
 ## History
 
