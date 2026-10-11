@@ -728,6 +728,33 @@ async function renderProc(s) {
   let steps = [], chat = null;
   if (wanted === "chat") chat = await api("/api/chat?session=" + encodeURIComponent(s.id));
   else steps = await api("/api/steps?session=" + encodeURIComponent(s.id));
+// A chat reply as HTML: Markdown pipe tables become <table>s, everything else stays escaped text.
+const TBL_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+function tblCells(line) { return line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|")); }
+function tblHtml(head, sep, rows) {
+  const al = tblCells(sep).map((c) => (c.startsWith(":") ? (c.endsWith(":") ? "center" : "left") : c.endsWith(":") ? "right" : ""));
+  const row = (tag) => (line) => { const c = tblCells(line);
+    return `<tr>${al.map((a, k) => `<${tag}${a ? ` class="${a}"` : ""}>${esc(c[k] ?? "")}</${tag}>`).join("")}</tr>`; };
+  return `<div class="tbl"><table><thead>${row("th")(head)}</thead><tbody>${rows.map(row("td")).join("")}</tbody></table></div>`;
+}
+function chatHtml(text) {
+  const lines = String(text ?? "").split("\n"), out = [];
+  let para = [];
+  const flush = () => { const t = para.join("\n").replace(/^\n+|\n+$/g, ""); if (t) out.push(`<p>${esc(t)}</p>`); para = []; };
+  for (let k = 0; k < lines.length; k++) {
+    if (lines[k].includes("|") && k + 1 < lines.length && lines[k + 1].includes("-") && TBL_SEP.test(lines[k + 1])
+        && tblCells(lines[k]).length === tblCells(lines[k + 1]).length) {
+      let end = k + 2;
+      while (end < lines.length && lines[end].trim() && lines[end].includes("|")) end++;
+      flush();
+      out.push(tblHtml(lines[k], lines[k + 1], lines.slice(k + 2, end)));
+      k = end - 1;
+    } else para.push(lines[k]);
+  }
+  flush();
+  return out.join("");
+}
+
   if (seq !== procSeq || openId !== s.id || tab !== wanted) return;
   const rows = agentRows(s, steps);
   const newest = steps.slice().reverse();
@@ -762,7 +789,7 @@ async function renderProc(s) {
       ? "Streamed from this window run." + (chat.start_commit ? ` start ${esc(chat.start_commit.slice(0, 7))} · ${chat.changed == null ? "?" : chat.changed} file(s) changed since.` : "")
       : `Read from the ${esc(s.source === "?" ? "chat" : s.source)} transcript, in words; tool output stays in Steps.`;
     body = `<div class="chat">${turns.map((i) => `<div class="turn ${i.role}"><span class="lbl">${i.role === "you" ? "You" : i.role === "claude" ? "Claude" : esc(i.role)}${i.ts ? " · " + hhmm(i.ts) : ""}</span>
-      <p>${esc(i.text)}</p></div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
+      ${i.role === "claude" ? chatHtml(i.text) : `<p>${esc(i.text)}</p>`}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
       <p class="src">${foot}</p></div>`;
   }
   const html = `<div class="tabs" role="tablist" aria-label="Process">${TABS.map(([id, nm]) =>
