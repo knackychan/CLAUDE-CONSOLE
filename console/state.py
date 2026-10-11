@@ -89,11 +89,15 @@ class Session:
     cost: float = 0.0
     route_reason: str = ""
     prep: str = ""
+    prep_model: str = ""       # the Prep that wrote the prompt: its model, cost and turns (Route block)
+    prep_cost: float = None
+    prep_turns: int = 0
     start_commit: str = ""
     denials: list = field(default_factory=list)  # a run that still succeeded: shown as a note
     verdict: str = ""          # PASS / FAIL from the last VERDICT: line (verifier or main)
     verdict_detail: str = ""
     escalated: str = ""        # "sonnet/medium -> sonnet/high" once Escalate ran (once per task)
+    escalated_ts: float = 0.0
     kind: str = ""             # the last window run: run, continue, verify, handoff, escalate
     handoff: bool = False      # a Handoff run is going
     handed_off: bool = False   # a Handoff run succeeded: Done
@@ -105,6 +109,16 @@ class Session:
     chat_handoff: bool = False  # this turn ran /session-handoff inside the chat: its Stop makes it Done
     run_costs: list = field(default_factory=list)  # [ts, cost] per finished window run: exact spend
     transcript_path: str = ""  # read by usage.Usage for the estimated cost
+
+
+def shares(families: dict) -> list:
+    """[[family, share of the cost]], biggest model first: the spend line and a session's Route block."""
+    total = sum(families.values())
+    if not total:
+        return []
+    rank = {m: i for i, m in enumerate(claude_cli.MODELS[::-1])}
+    return [[m, round(c / total, 3)] for m, c in
+            sorted(families.items(), key=lambda kv: (rank.get(kv[0], len(rank)), kv[0]))]
 
 
 def midnight(now: float) -> float:
@@ -236,7 +250,7 @@ class State:
             s.kind = rec.get("kind") or "run"
             s.handoff = s.kind == "handoff"
             if rec.get("escalated"):
-                s.escalated = rec["escalated"]
+                s.escalated, s.escalated_ts = rec["escalated"], ts
             parent = self.sessions.get(rec.get("forked_from") or "")
             if parent and parent is not s:
                 s.forked_from = parent.id
@@ -244,16 +258,19 @@ class State:
                     parent.forks.append(s.id)
                 if not s.prompts:  # the copy carries the parent's context: same follow-up count
                     s.prompts, s.ctx_tokens = parent.prompts, parent.ctx_tokens
-                if s.escalated:
-                    parent.escalated = s.escalated  # once per task, whichever copy escalated
+                if s.escalated:  # once per task, whichever copy escalated
+                    parent.escalated, parent.escalated_ts = s.escalated, s.escalated_ts
                 elif parent.escalated:
-                    s.escalated = parent.escalated
+                    s.escalated, s.escalated_ts = parent.escalated, parent.escalated_ts
             if rec.get("title") and not s.title:
                 s.title = redact.clip(rec["title"], 60)
             if rec.get("route"):
                 s.route, s.route_reason = rec["route"], rec.get("reason", "")
             if rec.get("prep"):
                 s.prep = rec["prep"]
+                s.prep_model = rec.get("prep_model") or ""
+                s.prep_cost = rec.get("prep_cost")
+                s.prep_turns = int(rec.get("prep_turns") or 0)
             if rec.get("start_commit") and not s.start_commit:
                 s.start_commit = rec["start_commit"]
             if rec.get("model") and not s.model:
@@ -368,6 +385,7 @@ class State:
     def snapshot(self, now: float, usage=None) -> dict:
         """`usage` (a usage.Usage) adds the estimated cost; without it every estimate is 0."""
         cost = usage.cost if usage else (lambda files, since=0.0: 0.0)
+        fams = usage.families if usage else (lambda files, since=0.0: {})
         writers = self.writers(now)
         writer_ids = {sid for ids in writers.values() for sid in ids}
         rows = []
@@ -403,6 +421,9 @@ class State:
                 "started_ts": s.started_ts, "last_ts": s.last_ts,
                 "turn_ts": s.turns[-1][0] if s.turns else s.started_ts,
                 "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
+                "escalated_ts": s.escalated_ts,
+                "prep_model": s.prep_model, "prep_cost": s.prep_cost, "prep_turns": s.prep_turns,
+                "models": shares(fams(files)),
                 "kind": s.kind, "handoff": s.handoff, "forked_from": s.forked_from, "forks": list(s.forks),
                 "follow_ups": follow_ups,
                 "handoff_hint": state not in DONE and (
@@ -417,7 +438,7 @@ class State:
                 "burn": round(cost(files, now - BURN_S) / (BURN_S / 60), 4),
                 "activity": self.activity(s, now),
                 "main_steps": sum(1 for st in s.steps if not st["agent"]),
-                "agents": [self._agent_row(a, s, cost) for a in
+                "agents": [self._agent_row(a, s, cost, fams) for a in
                            sorted(s.agents.values(), key=lambda a: a.started_ts)],
             })
         shown = [self.sessions[r["id"]] for r in rows]
@@ -454,10 +475,7 @@ class State:
             estimated = sum(self.day_cost(s, start, usage) for s in sessions if not s.window)
             burn = usage.cost(every, now - BURN_S) / (BURN_S / 60)
             families = usage.families(every, start)
-        total = sum(families.values())
-        rank = {m: i for i, m in enumerate(claude_cli.MODELS[::-1])}  # biggest first
-        models = [[m, round(c / total, 3)] for m, c in
-                  sorted(families.items(), key=lambda kv: (rank.get(kv[0], len(rank)), kv[0]))]
+        models = shares(families)
         return {"today": round(exact + estimated, 4), "exact": round(exact, 4),
                 "estimated": round(estimated, 4), "burn": round(burn, 4),
                 "budget": self.cfg["daily_budget_usd"], "runs": runs, "models": models}
@@ -483,7 +501,7 @@ class State:
                 p["name"] = s.project or p["name"]
         return [dict(p, today=round(today.get(d, 0.0), 4)) for d, p in sorted(found.items())]
 
-    def _agent_row(self, a: Agent, s: Session, cost=None) -> dict:
+    def _agent_row(self, a: Agent, s: Session, cost=None, fams=None) -> dict:
         if a.done:
             symbol, text, tone = STATES["done"]
         elif s.in_turn:
@@ -491,8 +509,11 @@ class State:
         else:
             symbol, text, tone = "…", "No stop seen", "info"
         fill, ctx_tone = self.gauge(a.tokens or None)
-        spent = cost([usage_mod.agent_path(s.transcript_path, a.id)]) if cost and s.transcript_path else 0.0
-        return {"id": a.id, "type": a.type or "agent", "model": a.model, "effort": a.effort,
+        files = [usage_mod.agent_path(s.transcript_path, a.id)] if s.transcript_path else []
+        spent = cost(files) if cost and files else 0.0
+        seen = fams(files) if fams and files else {}  # a running agent: the model its transcript names
+        model = a.model or (max(seen, key=seen.get) if seen else "")
+        return {"id": a.id, "type": a.type or "agent", "model": model, "effort": a.effort,
                 "tokens": a.tokens, "steps": a.steps, "doing": a.doing, "verdict": a.verdict,
                 "cost": round(spent, 4),
                 "symbol": symbol, "text": text, "tone": tone,

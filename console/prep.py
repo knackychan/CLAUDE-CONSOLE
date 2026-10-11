@@ -90,6 +90,7 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list) -> 
         "id": new_id(), "ts": time.time(), "project_dir": project_dir, "raw": raw,
         "fields": fields, "prompt": format_prompt(fields), "route": fields["route"],
         "reason": fields.get("reason", ""), "cost": result["cost"], "turns": result["turns"],
+        "model": cfg["prep_model"],
     }
     preps = Path(folder) / "preps"
     preps.mkdir(parents=True, exist_ok=True)

@@ -354,10 +354,12 @@ class Handler(BaseHTTPRequestHandler):
             title = card["fields"].get("goal") or card["raw"]
             route = card["route"].get("type") or "routed"
             reason, prep_id = card.get("reason", ""), card["id"]
+            extra = {"prep_model": card.get("model") or cfg["prep_model"], "prep_cost": card.get("cost"),
+                     "prep_turns": card.get("turns")}  # the Route block's first row
         else:
-            title, route, reason, prep_id = text, "raw", "", ""
+            title, route, reason, prep_id, extra = text, "raw", "", "", None
         sid = self.hub.runs.start(folder, text, model, effort, title=title, route=route,
-                                  reason=reason, prep=prep_id)
+                                  reason=reason, prep=prep_id, extra=extra)
         self.hub.poll_once()
         return self._json({"session": sid})
 

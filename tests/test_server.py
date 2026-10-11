@@ -172,6 +172,7 @@ class RunServerTest(unittest.TestCase):
         row = self.session(sid)
         self.assertEqual((row["source"], row["title"], row["route"]),
                          ("window", "Fix add() in calc.py", "mechanical"))
+        self.assertEqual((row["prep_model"], row["prep_cost"], row["prep_turns"]), ("haiku", 0.03, 5))
         end = time.time() + 15
         while time.time() < end and self.session(sid)["run_live"]:
             time.sleep(0.1)

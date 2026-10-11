@@ -36,6 +36,7 @@ class PrepTest(unittest.TestCase):
             cfg = copy.deepcopy(paths.DEFAULTS)
             card = prep.run_prep(cfg, Path(tmp), tmp, "fix the add function", FAKE)
             self.assertEqual(card["route"], {"type": "mechanical", "model": "sonnet", "effort": "low"})
+            self.assertEqual((card["model"], card["cost"], card["turns"]), ("haiku", 0.03, 5))
             self.assertTrue(card["prompt"].startswith("Goal: Fix add() in calc.py\nWhere: calc.py:2"))
             self.assertEqual(prep.load(Path(tmp), card["id"])["raw"], "fix the add function")
             self.assertIsNone(prep.load(Path(tmp), "../x"))

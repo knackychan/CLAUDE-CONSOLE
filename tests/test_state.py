@@ -276,6 +276,29 @@ class StateTest(unittest.TestCase):
                                          "runs": 1, "models": [["opus", 0.667], ["sonnet", 0.167], ["haiku", 0.167]]})
         self.assertEqual(self.state.snapshot(T0)["spend"]["today"], 1.25)  # no reader: exact only
 
+    def test_route_prep_agent_models_and_escalation(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        chat = str(Path(tmp.name) / "r.jsonl")
+        Path(chat).write_text(line("m1", T0 - 60, "claude-opus-5-5", output_tokens=300_000), encoding="utf-8")
+        agent = Path(usage.agent_path(chat, "x1"))
+        agent.parent.mkdir(parents=True)
+        agent.write_text(line("m2", T0 - 30, "claude-haiku-5-5", output_tokens=4_000_000), encoding="utf-8")
+        self.feed(ev("run_started", T0 - 100, sid="r", model="opus", prep="p1", prep_model="haiku",
+                     prep_cost=0.02, prep_turns=3),
+                  ev("UserPromptSubmit", T0 - 99, sid="r", transcript_path=chat),
+                  ev("SubagentStart", T0 - 40, sid="r", agent_id="x1", agent_type="Explore"),
+                  ev("run_started", T0 - 20, sid="r", kind="escalate", escalated="sonnet/high -> opus/high"))
+        reader = usage.Usage(paths.DEFAULTS["prices"])
+        for f in self.state.transcripts(T0):
+            reader.poll(f)
+        row = self.state.snapshot(T0, reader)["sessions"][0]
+        self.assertEqual((row["prep_model"], row["prep_cost"], row["prep_turns"]), ("haiku", 0.02, 3))
+        self.assertEqual((row["escalated"], row["escalated_ts"]), ("sonnet/high -> opus/high", T0 - 20))
+        self.assertEqual(row["agents"][0]["model"], "haiku")  # still running: named by its transcript
+        self.assertEqual(row["models"], [["opus", 0.75], ["haiku", 0.25]])  # opus $6, haiku $2
+        self.assertEqual(self.state.snapshot(T0)["sessions"][0]["models"], [])  # no reader, no shares
+
     def test_projects_for_the_picker(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
