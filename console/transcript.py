@@ -8,6 +8,7 @@ from datetime import datetime
 from . import redact
 
 TAIL_BYTES = 1024 * 1024  # read from the end: enough for the last few turns of a long chat
+HEAD_BYTES = 256 * 1024  # the first prompt is near the start of the file
 TURNS = 6
 TEXT_MAX = 1500
 # A block Claude Code or an extension puts into a user line (<system-reminder>, <command-name>, ...).
@@ -69,3 +70,27 @@ def turns(path, limit: int = TURNS) -> list:
             out.append({"role": "you" if kind == "user" else "claude", "text": redact.mask(text[:TEXT_MAX]),
                         "ts": _when(rec.get("timestamp"))})
     return out[-limit:]
+
+
+def first_prompt(path) -> str:
+    """The first thing typed in the chat, in words and masked ("" when none is in the first 256 KB)."""
+    path = str(path or "")
+    if not path.endswith(".jsonl"):
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(HEAD_BYTES)
+    except OSError:
+        return ""
+    for raw in data.split(b"\n"):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue  # also the line cut at the end of the 256 KB
+        if not isinstance(rec, dict) or rec.get("type") != "user" or rec.get("isMeta") or rec.get("isSidechain"):
+            continue
+        msg = rec.get("message")
+        text = _words(msg.get("content") if isinstance(msg, dict) else None)
+        if text and not text.startswith("[Request interrupted"):
+            return redact.mask(text[:TEXT_MAX])
+    return ""

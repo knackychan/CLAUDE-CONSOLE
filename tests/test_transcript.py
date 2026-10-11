@@ -62,6 +62,27 @@ class TranscriptTest(unittest.TestCase):
         self.assertEqual(transcript.turns(Path(self.tmp.name) / "notes.txt"), [])
         self.assertEqual(transcript.turns(None), [])
 
+    def test_first_prompt(self):
+        self.write(
+            user("<system-reminder>rules</system-reminder>") | {"isMeta": True},
+            user([{"type": "tool_result", "tool_use_id": "t0", "content": "x"}]),
+            user([{"type": "text", "text": "[Request interrupted by user]"}]),
+            user("start the cells drawer, key sk-abcdefghijkl1234"),
+            user("second prompt"),
+        )
+        self.assertEqual(transcript.first_prompt(self.path), "start the cells drawer, key ***")
+        self.write(claude([{"type": "text", "text": "hi"}]))
+        self.assertEqual(transcript.first_prompt(self.path), "")
+        self.assertEqual(transcript.first_prompt(Path(self.tmp.name) / "none.jsonl"), "")
+        self.assertEqual(transcript.first_prompt(None), "")
+
+    def test_first_prompt_reads_only_the_head(self):
+        self.write(user("x" * 3000), user("later"), raw='{"type": "user", "mess')
+        old = transcript.HEAD_BYTES
+        transcript.HEAD_BYTES = 1000  # the first line is cut: it is skipped, the next ones are not read
+        self.addCleanup(setattr, transcript, "HEAD_BYTES", old)
+        self.assertEqual(transcript.first_prompt(self.path), "")
+
 
 if __name__ == "__main__":
     unittest.main()
