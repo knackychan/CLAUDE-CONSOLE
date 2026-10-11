@@ -59,6 +59,32 @@ class ServerTest(unittest.TestCase):
 
     def test_foreign_host_is_refused(self):
         self.assertEqual(self.get("/api/state", host="evil.example")[0], 403)
+        self.assertEqual(self.get("/api/usage", host="evil.example")[0], 403)
+
+    def test_usage_endpoint_sums_every_transcript(self):
+        now = time.time()
+        today, yesterday = time.strftime("%Y-%m-%d"), time.strftime("%Y-%m-%d", time.localtime(now - 86400))
+        root = Path(self.tmp.name) / "home" / ".claude" / "projects" / "d--work-X"
+        root.mkdir(parents=True)
+        stamp = lambda ts: time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ts)) + "Z"
+        line = lambda mid, ts: json.dumps({"type": "assistant", "cwd": "D:/work/X", "timestamp": stamp(ts),
+                                           "message": {"id": mid, "model": "claude-opus-5-5",
+                                                       "usage": {"input_tokens": 1_000_000}}}) + "\n"
+        (root / "s9.jsonl").write_text(line("m1", now - 86400) + line("m2", now), encoding="utf-8")
+        self.hub.user_home = Path(self.tmp.name) / "home"
+        status, body = self.get("/api/usage")
+        self.assertEqual((status, json.loads(body)["ready"]), (200, False))
+        self.hub.read_history()
+        data = json.loads(self.get("/api/usage")[1])
+        self.assertTrue(data["ready"])
+        self.assertEqual((data["today"], data["first"], data["limit"]), (today, yesterday, 15))
+        self.assertEqual(data["days"][today]["projects"], {"X": 4.0})
+        self.assertEqual(data["days"][yesterday]["tokens"], [1_000_000, 0, 0, 0])
+        self.assertEqual((len(data["weeks"]), len(data["months"])), (12, 12))
+        self.assertEqual(data["months"][-1]["month"], today[:7])
+        self.assertAlmostEqual(sum(w["cost"] for w in data["weeks"]), 8.0)
+        kept = json.loads((Path(self.tmp.name) / "usage-days.json").read_text(encoding="utf-8"))["days"]
+        self.assertEqual(sorted(kept), [yesterday])  # closed days only
 
     def test_post_needs_header(self):
         self.assertEqual(self.get("/api/state", method="POST")[0], 403)

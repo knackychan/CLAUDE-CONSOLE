@@ -18,6 +18,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/doto.woff2": ("doto.woff2", "font/woff2")}
 POLL_S = 1.0
 TICK_S = 15.0
+HISTORY_S = 60.0  # the Usage page's scan of every transcript
 APP_ID = "claude-console"
 MAX_BODY = 256 * 1024
 MAX_PROMPT = 20000
@@ -34,6 +35,9 @@ class Hub:
         self.reader = events.LogReader(folder)
         self.runs = runs.RunManager(cfg, folder, exe)
         self.usage = usage.Usage(cfg["prices"])
+        self.history = usage.History(cfg["prices"])
+        self.usage_days = {}  # day -> totals: every transcript merged with usage-days.json
+        self.usage_ready = False
         self.user_home = Path.home()  # where ~/.claude/skills is looked up (tests point it elsewhere)
         self.lock = threading.Lock()
         self.changed = threading.Condition(self.lock)
@@ -62,6 +66,32 @@ class Hub:
                 self.changed.notify_all()
         return new
 
+    def read_history(self) -> None:
+        """The Usage page: what every transcript under ~/.claude/projects added, per day, merged with the
+        closed days kept in usage-days.json (Claude Code deletes transcripts after 30 days)."""
+        self.history.scan(self.user_home / ".claude" / "projects")
+        scanned, today = self.history.days(), usage.day_of(time.time())
+        usage.save_days(self.folder, scanned, today)
+        days = usage.merge_days(usage.load_days(self.folder), scanned)
+        with self.lock:
+            self.usage_days, self.usage_ready = days, True
+
+    def usage_report(self) -> dict:
+        with self.lock:
+            days, ready = self.usage_days, self.usage_ready
+        today = usage.day_of(time.time())
+        return {"ready": ready, "today": today, "first": min(days) if days else "",
+                "limit": self.cfg["daily_budget_usd"], "days": days,
+                "weeks": usage.weeks(days, today), "months": usage.months(days, today)}
+
+    def history_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.read_history()
+            except OSError:
+                pass
+            self._stop.wait(HISTORY_S)
+
     def tick(self) -> None:
         """Time-based states (Quiet, Stall?, Stale?) change without new events."""
         with self.lock:
@@ -82,6 +112,7 @@ class Hub:
 
     def start(self) -> None:
         threading.Thread(target=self.run, name="cc-hub", daemon=True).start()
+        threading.Thread(target=self.history_loop, name="cc-usage", daemon=True).start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -232,6 +263,8 @@ class Handler(BaseHTTPRequestHandler):
                                "config_path": str(self.hub.folder / "config.json"),
                                "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
                                "project": window.get("project", ""), "brief": window.get("brief") is True})
+        if url.path == "/api/usage":
+            return self._json(self.hub.usage_report())
         if url.path == "/api/chat":
             return self._chat(query.get("session", [""])[0])
         if url.path == "/api/levers":
