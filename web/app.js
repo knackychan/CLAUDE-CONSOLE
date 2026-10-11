@@ -7,6 +7,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const GUARDED = ["continue", "answer", "resume", "verify", "handoff", "escalate"];  // levers that re-read the context
 const RESUME_TEXT = "You were interrupted. Check `git diff` first, then finish the task.";
 const BUSY = new Set(["running", "quiet", "stall"]);
 const PEEK = new Set(["stop", "blocked", "failed", "interrupted"]);  // a new one opens the peek card
@@ -39,6 +40,8 @@ let firstSnap = true;
 let procSeq = 0;         // the newest process render; older ones are dropped
 let procShown = "";      // session|tab the process pane shows now
 let leversSig = "";
+let cold = null;        // {idle_s, tokens, cost} when a lever would re-read the open session at full price
+let coldTimer = null;
 const seen = new Set();  // peek events already shown, answered or dismissed
 const sent = {};         // "session|question" -> the session that runs the answer ("" = same one)
 const cardMsg = {};      // session -> the last error of a list card
@@ -754,11 +757,13 @@ async function renderProc(s) {
 
 async function renderLevers(s) {
   const sig = [s.id, s.window, s.run_live, s.stop_question, s.state, s.verdict, s.escalated,
-               s.handoff_hint, s.forks.length].join("|");
+               s.handoff_hint, s.forks.length, Math.floor((snap.now - s.last_ts) / 600)].join("|");  // the last one: idle turns cold
   if (sig === leversSig) return;
   leversSig = sig;
+  cold = null;
   const lv = s.run_live ? null : await api("/api/levers?session=" + encodeURIComponent(s.id)).catch(() => null);
   if (openId !== s.id || leversSig !== sig) return;
+  cold = lv && !lv.continue ? lv.cold : null;
   let html = "";
   if (lv && !lv.continue && !s.stop_question) {
     html += `<div class="lr"><input id="fu" aria-label="Follow-up" placeholder="${lv.fork ? "Follow-up (runs in a window copy)" : "Follow-up"}">
@@ -771,7 +776,12 @@ async function renderLevers(s) {
   if (lv && !lv.escalate) buttons += `<button class="btn go" data-act="escalate">Escalate to ${esc(lv.escalate_to)}</button>`;
   if (lv && !lv.continue && s.window && s.state === "interrupted") buttons += '<button class="btn go" data-act="resume">Resume</button>';
   if (s.window && !s.run_live) buttons += '<button class="btn" data-act="terminal" title="Open in terminal">Terminal</button>';
+  if (lv && s.project_dir) {  // a new task that takes over: built here from the transcript, no model call
+    buttons += `<button class="btn${cold ? " go" : ""}" data-act="brief" title="A new task with the goal, the last message, the edited files and the git status of this one">Brief a new task</button>`;
+    if (cold) buttons += '<button class="btn" data-act="vbrief" title="The Verify text plus the same facts, in a new task">Verify in a new task</button>';
+  }
   if (buttons) html += `<div class="lr">${buttons}</div>`;
+  if (cold) html += `<div class="say">Cold cache: ${kTokens(cold.tokens)} tokens, idle ${Math.round(cold.idle_s / 3600)} h. Continue, Verify, Hand off and Escalate re-read them at full price, about $${money(cold.cost)} (a second click confirms). A new task with a brief costs almost nothing.</div>`;
   let off = "";
   if (lv && lv.continue) off = "Levers off: " + lv.continue;
   else if (lv && lv.handoff) off = "Hand off is off: " + lv.handoff;
@@ -791,19 +801,42 @@ async function act(name, button) {
     stopTimer = setTimeout(() => { delete button.dataset.armed; button.textContent = "Stop"; }, 3000);
     return;
   }
+  const typed = name === "answer" ? $("answer") : name === "continue" ? $("fu") : null;
+  if (typed && !typed.value.trim()) return;  // nothing to send: no cost to confirm
+  if (cold && GUARDED.includes(name) && !button.dataset.armed) {  // two clicks: a cold cache re-reads the context at full price
+    button.dataset.armed = "1";
+    button.dataset.label = button.textContent;
+    button.textContent = `Re-read ~$${money(cold.cost)}? Click again`;
+    clearTimeout(coldTimer);
+    coldTimer = setTimeout(() => { delete button.dataset.armed; button.textContent = button.dataset.label; }, 4000);
+    return;
+  }
+  const confirm = Boolean(button.dataset.armed);
   const msg = name === "answer" || (name === "terminal" && $("a-msg")) ? $("a-msg") : $("f-msg");
   button.disabled = true;
   try {
     let r = null;
+    if (name === "brief" || name === "vbrief") {  // pre-fill the new-task box; Fred edits it and runs it
+      const b = await api("/api/brief?session=" + encodeURIComponent(s.id) + (name === "vbrief" ? "&kind=verify" : ""));
+      pick(b.project_dir);
+      showPage("list");
+      draft = b.text;
+      $("c-prompt").value = draft;
+      saveDraft();
+      renderCompose();
+      $("c-prompt").focus();
+      button.disabled = false;
+      return;
+    }
     if (name === "stop") { button.textContent = "Stopping ..."; await api("/api/stop", { session: s.id }); }
     if (name === "terminal") await api("/api/terminal", { session: s.id });
-    if (name === "resume") r = await api("/api/continue", { session: s.id, text: RESUME_TEXT });
+    if (name === "resume") r = await api("/api/continue", { session: s.id, text: RESUME_TEXT, confirm });
     if (name === "continue" || name === "answer") {
       const text = $(name === "answer" ? "answer" : "fu").value.trim();
       if (!text) { button.disabled = false; return; }
-      r = await api("/api/continue", { session: s.id, text });
+      r = await api("/api/continue", { session: s.id, text, confirm });
     }
-    if (["verify", "handoff", "escalate"].includes(name)) r = await api("/api/" + name, { session: s.id });
+    if (["verify", "handoff", "escalate"].includes(name)) r = await api("/api/" + name, { session: s.id, confirm });
     if (r && r.session !== s.id) { openSession(r.session, "chat"); return; }  // a window copy (fork)
     if (r) tab = "chat";
     leversSig = "";  // redraw from the next snapshot
