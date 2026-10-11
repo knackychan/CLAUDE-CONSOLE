@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 
-from console import events, guard, levers, paths, server
+from console import brief, events, guard, levers, paths, server
 
 
 class GuardTest(unittest.TestCase):
@@ -198,6 +198,14 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.session(sid)["stopped"], True)
         self.assertEqual(self.call("/api/continue", {"session": sid, "text": "go on"}), (200, {"session": sid}))
 
+    def test_mark_done_a_chat_that_never_stopped(self):
+        events.append(self.folder, {"event": "UserPromptSubmit", "ts": time.time(), "session_id": "v2",
+                                    "project": "proj", "project_dir": str(self.project), "prompt": "x"})
+        self.hub.poll_once()
+        self.assertEqual(self.call("/api/done", {"session": "nope"})[0], 404)
+        self.assertEqual(self.call("/api/done", {"session": "v2"}), (200, {"session": "v2"}))
+        self.assertEqual(self.session("v2")["state"], "done")
+
     def test_levers_fork_a_vscode_session(self):
         for event, extra in (("UserPromptSubmit", {"prompt": "fix add"}),
                              ("Stop", {"model": "claude-sonnet-5-5", "effort": "medium"})):
@@ -345,6 +353,39 @@ class RunServerTest(unittest.TestCase):
         self.wait_idle(sid)
         row = self.session(sid)
         self.assertEqual((row["state"], row["group"], row["kind"]), ("done", "done", "handoff"))
+
+    def test_handoff_starts_a_new_session_with_the_note(self):
+        skill = self.project / ".claude" / "skills" / "session-handoff"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add"})[1]["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["next"], "only after a Hand off")
+        self.assertEqual(self.call(f"/api/brief?session={sid}&kind=next"), (409, {"error": "only after a Hand off"}))
+        self.call("/api/handoff", {"session": sid})
+        self.wait_idle(sid)
+        self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["next"], "")
+        status, data = self.call(f"/api/brief?session={sid}&kind=next")
+        self.assertEqual((status, data["project_dir"]), (200, self.hub.session(sid)["project_dir"]))
+        self.assertTrue(data["text"].startswith(brief.NEXT_INTRO))
+        self.assertIn("Handoff note:\necho: /session-handoff", data["text"])  # the skill's last message
+        new = self.call("/api/run", {"project_dir": str(self.project), "prompt": data["text"]})[1]["session"]
+        self.assertNotEqual(new, sid)
+        self.wait_idle(new)
+        you = [i["text"] for i in self.call(f"/api/chat?session={new}")[1]["items"] if i["role"] == "you"]
+        self.assertEqual(you, [data["text"]])
+        self.assertEqual(self.session(sid)["state"], "done")  # the source stays Done
+        self.assertNotEqual(self.session(new)["state"], "done")
+
+    def test_lever_order_after_verify(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add"})[1]["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["after_verify"], ["handoff", "escalate", "done"])
+        for verdict, order in (("PASS", ["handoff", "done"]), ("FAIL", ["escalate", "handoff", "done"])):
+            events.append(self.folder, {"event": "Stop", "ts": time.time(), "session_id": sid,
+                                        "verdict": verdict, "verdict_detail": ""})
+            self.hub.poll_once()
+            self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["after_verify"], order, verdict)
 
     def test_allow_adds_a_folder_claude_code_ran_in(self):
         other = Path(self.tmp.name) / "other"

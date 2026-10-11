@@ -13,13 +13,18 @@ STATES = {
     "stop": ("?", "STOP", "warning"),
     "blocked": ("■", "Blocked", "danger"),
     "failed": ("×", "Failed", "danger"),
+    "replied": ("↩", "Replied", "info"),  # the turn ended with a plain reply: read it (replied_for_s, then Idle)
     "idle": ("○", "Idle", "info"),
     "stale": ("△", "Stale?", "warning"),
     "interrupted": ("‖", "Interrupted", "warning"),
     "done": ("✓", "Done", "success"),
+    "verified": ("✓", "Verified", "success"),  # the last turn ended with VERDICT: PASS
+    "verify_failed": ("×", "Verify failed", "danger"),
+    "empty": ("◌", "Empty", "info"),  # opened, nothing sent: rules loaded and no prompt or step ever
+    "lost": ("⊘", "Lost?", "info"),  # mid-turn, no event for stale_after_s: the chat was closed without a Stop
 }
-NEEDS_YOU = {"stop", "blocked", "stall", "failed", "interrupted"}
-DONE = {"done", "stale"}
+NEEDS_YOU = {"stop", "blocked", "stall", "failed", "interrupted", "verify_failed"}
+DONE = {"done", "stale", "lost", "verified"}
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 READ_TOOLS = {"Read", "Grep", "Glob", "WebFetch", "WebSearch"}  # main-chat reads: "should delegate"
 HANDOFF_SKILL = "session-handoff"
@@ -96,11 +101,15 @@ class Session:
     denials: list = field(default_factory=list)  # a run that still succeeded: shown as a note
     verdict: str = ""          # PASS / FAIL from the last VERDICT: line (verifier or main)
     verdict_detail: str = ""
+    verdict_ts: float = 0.0    # when it arrived: a verdict older than the last turn's start is not about this turn
+    reply: str = ""            # the start of the last reply (Stop hook), shown under Idle / Replied rows
+    replied_ts: float = 0.0    # the last turn ended with a reply at this time (0: a turn is going or none ended)
     escalated: str = ""        # "sonnet/medium -> sonnet/high" once Escalate ran (once per task)
     escalated_ts: float = 0.0
     kind: str = ""             # the last window run: run, continue, verify, handoff, escalate
     handoff: bool = False      # a Handoff run is going
     handed_off: bool = False   # a Handoff run succeeded: Done
+    handoff_by: str = ""       # the session whose last message is the handoff note (itself or its Handoff copy)
     forked_from: str = ""
     forks: list = field(default_factory=list)
     turns: list = field(default_factory=list)  # [start, end or None] per turn; the last start is turn_ts
@@ -109,6 +118,12 @@ class Session:
     chat_handoff: bool = False  # this turn ran /session-handoff inside the chat: its Stop makes it Done
     run_costs: list = field(default_factory=list)  # [ts, cost] per finished window run: exact spend
     transcript_path: str = ""  # read by usage.Usage for the estimated cost
+
+
+def is_empty(s: Session) -> bool:
+    """A chat that loaded its rules and never got a prompt, a step, an agent or a Stop."""
+    return not (s.turns or s.window or s.agents or s.failed or s.compactions or s.replied_ts
+                or s.ctx_tokens is not None)
 
 
 def shares(families: dict) -> list:
@@ -176,7 +191,9 @@ class State:
             s.denied = s.failed = None
             s.stop_question = ""
             s.interrupted = s.stopped = s.handed_off = False
+            s.handoff_by = ""
             s.reads = 0
+            s.reply, s.replied_ts = "", 0.0
             words = rec.get("prompt", "").split()
             s.chat_handoff = bool(words) and words[0] == "/" + HANDOFF_SKILL  # typed: no Skill step
             self._turn_open(s, ts)
@@ -203,7 +220,7 @@ class State:
             agent.tokens = rec.get("context_tokens") or agent.tokens
             if rec.get("verdict"):
                 agent.verdict = rec["verdict"]
-                self._verdict(s, rec)
+                self._verdict(s, rec, ts)
         elif event == "PermissionDenied":
             s.denied = {"tool": rec.get("tool", ""), "what": rec.get("what", ""),
                         "reason": rec.get("reason", ""), "ts": ts}
@@ -221,12 +238,14 @@ class State:
                 s.route = rec["route"]
             s.stop_question = rec.get("stop_question", "")
             if rec.get("verdict"):
-                self._verdict(s, rec)
+                self._verdict(s, rec, ts)
+            s.reply, s.replied_ts = rec.get("reply", ""), ts
             if s.chat_handoff:  # /session-handoff ran in this turn: Done, like a window Handoff
-                s.handed_off, s.chat_handoff = True, False
+                s.handed_off, s.chat_handoff, s.handoff_by = True, False, s.id
         elif event == "StopFailure":
             s.in_turn = False
             s.chat_handoff = False
+            s.replied_ts = 0.0
             self._turn_close(s, ts)
             s.failed = {"error": rec.get("error", "unknown"), "details": rec.get("error_details", "")}
         elif event == "InstructionsLoaded" and not agent and rec.get("file"):
@@ -235,6 +254,9 @@ class State:
         elif event == "PostCompact":
             s.ctx_tokens = None
             s.compactions += 1
+        elif event == "marked_done":  # Fred's Mark done; the chat's next prompt brings it back
+            s.in_turn, s.ended, s.doing = False, True, ""
+            self._turn_close(s, ts)
         elif event == "SessionEnd":
             s.in_turn = False
             self._turn_close(s, ts)
@@ -244,6 +266,8 @@ class State:
             s.in_turn, s.ended = True, False
             self._turn_open(s, ts)
             s.interrupted = s.stopped = s.handed_off = False
+            s.handoff_by = ""
+            s.reply, s.replied_ts = "", 0.0
             s.denied = s.failed = None
             s.denials = []
             s.stop_question = ""
@@ -283,11 +307,13 @@ class State:
             s.run_costs.append([ts, float(rec.get("cost") or 0)])
             s.stopped = bool(rec.get("stopped"))
             s.interrupted = bool(rec.get("interrupted"))
+            if rec.get("subtype") == "success" and not (s.stopped or s.interrupted):
+                s.replied_ts = ts
             if s.handoff and rec.get("subtype") == "success":
-                s.handed_off = True
+                s.handed_off, s.handoff_by = True, s.id
                 parent = self.sessions.get(s.forked_from)
                 if parent:
-                    parent.handed_off = True
+                    parent.handed_off, parent.handoff_by = True, s.id
             s.handoff = False
             if rec.get("denials") and rec.get("subtype") == "success":
                 s.denials = [{"tool": d.get("tool", ""), "what": d.get("what", "")} for d in rec["denials"]]
@@ -301,8 +327,11 @@ class State:
         if len(s.steps) > MAX_STEPS:
             del s.steps[: len(s.steps) - MAX_STEPS]
 
-    def _verdict(self, s, rec):
-        s.verdict, s.verdict_detail = rec["verdict"], rec.get("verdict_detail", "")
+    def _verdict(self, s, rec, ts):
+        s.verdict, s.verdict_detail, s.verdict_ts = rec["verdict"], rec.get("verdict_detail", ""), ts
+        parent = self.sessions.get(s.forked_from) if s.kind == "verify" else None
+        if parent:  # a Verify copy judged the original chat: the original carries the verdict too
+            parent.verdict, parent.verdict_detail, parent.verdict_ts = s.verdict, s.verdict_detail, ts
 
     def _turn_open(self, s, ts):
         if not s.turns or s.turns[-1][1] is not None:
@@ -316,6 +345,8 @@ class State:
 
     # -- snapshot -----------------------------------------------------------------
     def state_of(self, s: Session, now: float) -> str:
+        if is_empty(s):
+            return "empty"
         if s.ended or s.handed_off:
             return "done"
         if s.failed:
@@ -326,6 +357,8 @@ class State:
             return "interrupted"
         age = now - s.last_ts
         if s.in_turn:
+            if age >= self.cfg["stale_after_s"] and not s.run_live:  # a window run has its own process
+                return "lost"
             if age >= self.cfg["stall_after_s"]:
                 return "stall"
             if age >= self.cfg["quiet_after_s"]:
@@ -333,8 +366,15 @@ class State:
             return "running"
         if s.stop_question:
             return "stop"
+        verdict = s.verdict if s.verdict_ts >= (s.turns[-1][0] if s.turns else 0.0) else ""  # about the last turn
+        if verdict == "PASS":
+            return "verified"
         if age >= self.cfg["stale_after_s"]:
             return "stale"
+        if verdict == "FAIL":
+            return "verify_failed"
+        if s.replied_ts and now - s.replied_ts < self.cfg["replied_for_s"]:
+            return "replied"
         return "idle"
 
     def gauge(self, tokens):
@@ -382,8 +422,9 @@ class State:
                 counts[ACTIVITY_MIN - 1 - back] += 1
         return [sum(c >= t for t in ACTIVITY_STEPS) for c in counts]
 
-    def snapshot(self, now: float, usage=None) -> dict:
-        """`usage` (a usage.Usage) adds the estimated cost; without it every estimate is 0."""
+    def snapshot(self, now: float, usage=None, day=None) -> dict:
+        """`usage` (a usage.Usage) adds the estimated cost; without it every estimate is 0. `day` is today's
+        usage.History row ({cost, models}), the spend figure; without it the spend is 0."""
         cost = usage.cost if usage else (lambda files, since=0.0: 0.0)
         fams = usage.families if usage else (lambda files, since=0.0: {})
         writers = self.writers(now)
@@ -394,10 +435,14 @@ class State:
                 continue
             state = self.state_of(s, now)
             pct, tone = self.gauge(s.ctx_tokens)
-            if state in NEEDS_YOU or (tone == "red" and state not in DONE):
+            if state == "empty":
+                group = "empty"
+            elif state in NEEDS_YOU or (tone == "red" and state not in DONE):
                 group = "needs"
             elif state in DONE:
                 group = "done"
+            elif state == "replied":
+                group = "replied"
             else:
                 group = "working"
             symbol, text, state_tone = STATES[state]
@@ -406,7 +451,7 @@ class State:
             exact = s.window and not s.run_live  # a live window run has no result line yet: estimate
             rows.append({
                 "id": s.id, "project": s.project, "project_dir": s.project_dir,
-                "title": s.title or f"(prompt not seen) {s.id[:8]}", "source": s.source or "?",
+                "title": s.title or ("Empty chat, nothing sent" if state == "empty" else f"(prompt not seen) {s.id[:8]}"), "source": s.source or "?",
                 "model": s.model, "effort": s.effort, "route": s.route or "unrouted",
                 "state": state, "symbol": symbol, "text": text, "tone": state_tone,
                 "group": group, "doing": s.doing, "prompts": s.prompts,
@@ -420,11 +465,11 @@ class State:
                 "start_commit": s.start_commit, "cwd": s.cwd,
                 "started_ts": s.started_ts, "last_ts": s.last_ts,
                 "turn_ts": s.turns[-1][0] if s.turns else s.started_ts,
-                "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
+                "verdict": s.verdict, "verdict_detail": s.verdict_detail, "reply": s.reply, "escalated": s.escalated,
                 "escalated_ts": s.escalated_ts,
                 "prep_model": s.prep_model, "prep_cost": s.prep_cost, "prep_turns": s.prep_turns,
                 "models": shares(fams(files)),
-                "kind": s.kind, "handoff": s.handoff, "forked_from": s.forked_from, "forks": list(s.forks),
+                "kind": s.kind, "handoff": s.handoff, "handoff_by": s.handoff_by if s.handed_off else "", "forked_from": s.forked_from, "forks": list(s.forks),
                 "follow_ups": follow_ups,
                 "handoff_hint": state not in DONE and (
                     tone == "red" or follow_ups >= self.cfg["handoff_after_followups"]),
@@ -446,8 +491,8 @@ class State:
             "now": now,
             "sessions": rows,
             "writers": [{"project_dir": p, "sessions": ids} for p, ids in sorted(writers.items())],
-            "counts": {g: sum(1 for r in rows if r["group"] == g) for g in ("needs", "working", "done")},
-            "spend": self.spend(shown, now, usage),
+            "counts": {g: sum(1 for r in rows if r["group"] == g) for g in ("needs", "replied", "working", "done", "empty")},
+            "spend": self.spend(shown, now, usage, day),
             "projects": self.projects(shown, now, usage),
         }
 
@@ -462,23 +507,17 @@ class State:
             out.append(f"{total:.1f} KB in all (over {max_kb} KB)")
         return "; ".join(out)
 
-    def spend(self, sessions: list, now: float, usage=None) -> dict:
-        """Today since local midnight: exact = finished window runs (their result line), estimated =
-        the other sessions' transcripts; the model shares and the burn rate come from all transcripts."""
-        start = midnight(now)
-        exact = sum(c for s in sessions for ts, c in s.run_costs if ts >= start)
-        runs = sum(1 for s in sessions for ts, _ in s.run_costs if ts >= start)
-        every = [f for s in sessions for f in self.files(s)]
-        estimated = burn = 0.0
-        families = {}
+    def spend(self, sessions: list, now: float, usage=None, day=None) -> dict:
+        """Today since local midnight: the Usage calendar's figure for today (`day`, list prices from every
+        transcript, window runs included), so the main screen and the calendar always agree. The burn rate
+        comes from the shown sessions' transcripts."""
+        day = day or {}
+        runs = sum(1 for s in sessions for ts, _ in s.run_costs if ts >= midnight(now))
+        burn = 0.0
         if usage:
-            estimated = sum(self.day_cost(s, start, usage) for s in sessions if not s.window)
-            burn = usage.cost(every, now - BURN_S) / (BURN_S / 60)
-            families = usage.families(every, start)
-        models = shares(families)
-        return {"today": round(exact + estimated, 4), "exact": round(exact, 4),
-                "estimated": round(estimated, 4), "burn": round(burn, 4),
-                "budget": self.cfg["daily_budget_usd"], "runs": runs, "models": models}
+            burn = usage.cost([f for s in sessions for f in self.files(s)], now - BURN_S) / (BURN_S / 60)
+        return {"today": round(float(day.get("cost") or 0), 4), "burn": round(burn, 4),
+                "budget": self.cfg["daily_budget_usd"], "runs": runs, "models": shares(day.get("models") or {})}
 
     def day_cost(self, s: Session, start: float, usage=None) -> float:
         """What one session cost since `start`: a window session's finished runs (exact), else the

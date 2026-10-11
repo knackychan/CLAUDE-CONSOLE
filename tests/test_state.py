@@ -41,9 +41,11 @@ class StateTest(unittest.TestCase):
         self.assertEqual(self.row(T0 + 200)["state"], "quiet")
         self.assertEqual(self.row(T0 + 700)["state"], "stall")
         self.assertEqual(self.row(T0 + 700)["group"], "needs")
+        # a chat closed mid-turn sends no Stop: after stale_after_s it leaves Needs you as Lost?
+        self.assertEqual((self.row(T0 + 2000)["state"], self.row(T0 + 2000)["group"]), ("lost", "done"))
         self.feed(ev("Stop", T0 + 20))
-        self.assertEqual(self.row(T0 + 30)["state"], "idle")
-        self.assertEqual(self.row(T0 + 30)["group"], "working")
+        self.assertEqual((self.row(T0 + 30)["state"], self.row(T0 + 30)["group"]), ("replied", "replied"))
+        self.assertEqual((self.row(T0 + 700)["state"], self.row(T0 + 700)["group"]), ("idle", "working"))
         self.assertEqual(self.row(T0 + 2000)["state"], "stale")
         self.assertEqual(self.row(T0 + 2000)["group"], "done")
         self.assertEqual(self.row(T0 + 30)["title"], "fix the updater retry")
@@ -118,7 +120,7 @@ class StateTest(unittest.TestCase):
                   ev("run_ended", T0 + 6, cost=0.25, subtype="success"))
         row = self.row(T0 + 7)
         self.assertEqual((row["state"], row["source"], row["title"], row["route"]),
-                         ("idle", "window", "Fix add() in calc.py", "mechanical"))
+                         ("replied", "window", "Fix add() in calc.py", "mechanical"))
         self.assertEqual((row["window"], row["run_live"], row["cost"], row["prep"], row["start_commit"]),
                          (True, False, 0.25, "p1", "abc"))
         self.assertEqual(row["model"], "claude-sonnet-5-5")
@@ -137,7 +139,7 @@ class StateTest(unittest.TestCase):
                   ev("run_ended", T0 + 32, subtype="success",
                      denials=[{"tool": "Bash", "what": "find ."}, {"tool": "PowerShell", "what": "ls"}]))
         row = self.row(T0 + 33)
-        self.assertEqual((row["state"], row["group"], row["denied"]), ("idle", "working", None))
+        self.assertEqual((row["state"], row["group"], row["denied"]), ("replied", "replied", None))
         self.assertEqual([d["tool"] for d in row["denials"]], ["Bash", "PowerShell"])
         self.feed(ev("run_started", T0 + 40))
         self.assertEqual(self.row(T0 + 41)["denials"], [])
@@ -162,6 +164,54 @@ class StateTest(unittest.TestCase):
         self.feed(ev("UserPromptSubmit", T0 + 8), ev("Stop", T0 + 9, verdict="PASS"))
         self.assertEqual((self.row(T0 + 10)["verdict"], self.row(T0 + 10)["verdict_detail"]), ("PASS", ""))
 
+    def test_replied_shows_the_reply_then_falls_back_to_idle(self):
+        self.feed(ev("UserPromptSubmit", T0, prompt="why is it slow?"),
+                  ev("Stop", T0 + 5, reply="It re-reads the whole transcript on every poll."))
+        row = self.row(T0 + 6)
+        self.assertEqual((row["state"], row["group"], row["symbol"], row["reply"]),
+                         ("replied", "replied", "↩", "It re-reads the whole transcript on every poll."))
+        self.assertEqual(self.row(T0 + 5 + 600)["state"], "idle")
+        self.assertEqual(self.state.snapshot(T0 + 6)["counts"]["replied"], 1)
+        self.feed(ev("UserPromptSubmit", T0 + 20))
+        self.assertEqual((self.row(T0 + 21)["state"], self.row(T0 + 21)["reply"]), ("running", ""))
+        self.feed(ev("Stop", T0 + 25, stop_question="which file?"))  # a question outranks a reply
+        self.assertEqual(self.row(T0 + 26)["state"], "stop")
+
+    def test_verified_and_verify_failed_belong_to_the_last_turn(self):
+        self.feed(ev("UserPromptSubmit", T0), ev("Stop", T0 + 5, verdict="PASS"))
+        row = self.row(T0 + 6)
+        self.assertEqual((row["state"], row["group"], row["text"]), ("verified", "done", "Verified"))
+        self.assertEqual(self.row(T0 + 5000)["state"], "verified")  # it does not decay into Stale?
+        self.feed(ev("UserPromptSubmit", T0 + 10), ev("Stop", T0 + 15))  # the next turn has no verdict of its own
+        self.assertEqual(self.row(T0 + 16)["state"], "replied")
+        self.feed(ev("UserPromptSubmit", T0 + 20), ev("Stop", T0 + 25, verdict="FAIL", verdict_detail="a.py:3 - boom"))
+        row = self.row(T0 + 26)
+        self.assertEqual((row["state"], row["group"]), ("verify_failed", "needs"))
+        self.assertEqual(self.row(T0 + 25 + 1800)["state"], "stale")
+        self.feed(ev("UserPromptSubmit", T0 + 30, sid="v"), ev("SubagentStart", T0 + 31, sid="v", agent_id="a1"),
+                  ev("SubagentStop", T0 + 32, sid="v", agent_id="a1", verdict="PASS"))
+        self.assertEqual(self.row(T0 + 33, "v")["state"], "running")  # the turn is not over yet
+        self.feed(ev("Stop", T0 + 34, sid="v"))
+        self.assertEqual(self.row(T0 + 35, "v")["state"], "verified")
+
+    def test_a_verify_copy_hands_its_verdict_to_the_original(self):
+        self.feed(ev("UserPromptSubmit", T0, sid="orig"), ev("Stop", T0 + 5, sid="orig"),
+                  ev("run_started", T0 + 10, sid="copy", kind="verify", forked_from="orig"),
+                  ev("Stop", T0 + 14, sid="copy", verdict="PASS"), ev("run_ended", T0 + 15, sid="copy", subtype="success"))
+        self.assertEqual(self.row(T0 + 16, "copy")["state"], "verified")
+        self.assertEqual(self.row(T0 + 16, "orig")["state"], "verified")
+
+    def test_a_chat_with_no_prompt_and_no_step_is_empty(self):
+        self.feed(ev("SessionStart", T0, sid="e"), ev("InstructionsLoaded", T0 + 1, sid="e", file="CLAUDE.md"))
+        row = self.row(T0 + 2, "e")
+        self.assertEqual((row["state"], row["group"], row["title"]), ("empty", "empty", "Empty chat, nothing sent"))
+        self.feed(ev("SessionEnd", T0 + 3, sid="e"))
+        self.assertEqual(self.row(T0 + 4, "e")["state"], "empty")  # closed without a word: still nothing to show
+        self.assertEqual(self.state.snapshot(T0 + 4)["counts"]["empty"], 1)
+        self.feed(ev("InstructionsLoaded", T0 + 5, sid="p", file="CLAUDE.md"),
+                  ev("PreToolUse", T0 + 6, sid="p", tool="Read", what="a.py"))
+        self.assertEqual(self.row(T0 + 7, "p")["state"], "running")  # a chat that started before the hooks
+
     def test_escalate_and_handoff_runs(self):
         self.feed(ev("run_started", T0, kind="run", model="sonnet", effort="low"),
                   ev("run_ended", T0 + 5, subtype="success"),
@@ -175,8 +225,9 @@ class StateTest(unittest.TestCase):
         self.assertEqual(self.row(T0 + 14)["state"], "idle")  # a failed handoff is not Done
         self.feed(ev("run_started", T0 + 15, kind="handoff"), ev("run_ended", T0 + 16, subtype="success"))
         self.assertEqual((self.row(T0 + 17)["state"], self.row(T0 + 17)["group"]), ("done", "done"))
+        self.assertEqual(self.row(T0 + 17)["handoff_by"], "s1")  # the note is its own last message
         self.feed(ev("run_started", T0 + 18, kind="continue"))
-        self.assertEqual(self.row(T0 + 19)["state"], "running")
+        self.assertEqual((self.row(T0 + 19)["state"], self.row(T0 + 19)["handoff_by"]), ("running", ""))
 
     def test_fork_of_a_vscode_session(self):
         self.feed(ev("UserPromptSubmit", T0, sid="v", prompt="fix the updater"),
@@ -189,8 +240,9 @@ class StateTest(unittest.TestCase):
         self.assertEqual((parent["forks"], parent["state"], parent["source"]), (["f"], "done", "vscode"))
         self.assertEqual((fork["forked_from"], fork["title"], fork["follow_ups"], fork["source"]),
                          ("v", "↳ fix the updater", 2, "window"))
+        self.assertEqual((parent["handoff_by"], fork["handoff_by"]), ("f", "f"))  # the note is in the copy
         self.feed(ev("UserPromptSubmit", T0 + 8, sid="v"))  # Fred typed in VS Code again
-        self.assertEqual(self.row(T0 + 9, "v")["state"], "running")
+        self.assertEqual((self.row(T0 + 9, "v")["state"], self.row(T0 + 9, "v")["handoff_by"]), ("running", ""))
 
     def test_follow_up_hint(self):
         self.feed(ev("UserPromptSubmit", T0), ev("Stop", T0 + 1), ev("UserPromptSubmit", T0 + 2), ev("Stop", T0 + 3))
@@ -237,14 +289,14 @@ class StateTest(unittest.TestCase):
                   ev("UserPromptSubmit", T0, sid="agent", prompt="go"),
                   ev("PreToolUse", T0 + 1, sid="agent", agent_id="a1", tool="Skill", what="session-handoff"),
                   ev("Stop", T0 + 2, sid="agent"))
-        self.assertEqual(self.row(T0 + 6, "typed")["state"], "done")
+        self.assertEqual((self.row(T0 + 6, "typed")["state"], self.row(T0 + 6, "typed")["handoff_by"]), ("done", "typed"))
         self.assertEqual(self.row(T0 + 2, "called")["state"], "running")  # Done only once the turn ends
         self.feed(ev("Stop", T0 + 3, sid="called"))
         self.assertEqual((self.row(T0 + 4, "called")["state"], self.row(T0 + 4, "called")["group"]), ("done", "done"))
         self.assertEqual(self.row(T0 + 3, "failed")["state"], "failed")
-        self.assertEqual(self.row(T0 + 3, "agent")["state"], "idle")
+        self.assertEqual(self.row(T0 + 3, "agent")["state"], "replied")
         self.feed(ev("UserPromptSubmit", T0 + 7, sid="typed", prompt="one more thing"), ev("Stop", T0 + 8, sid="typed"))
-        self.assertEqual(self.row(T0 + 9, "typed")["state"], "idle")  # a new prompt reopens it
+        self.assertEqual(self.row(T0 + 9, "typed")["state"], "replied")  # a new prompt reopens it
 
     def test_spent_exact_or_estimated_and_today(self):
         tmp = tempfile.TemporaryDirectory()
@@ -265,16 +317,24 @@ class StateTest(unittest.TestCase):
         reader = usage.Usage(paths.DEFAULTS["prices"])
         for f in self.state.transcripts(T0):
             reader.poll(f)
-        snap = self.state.snapshot(T0, reader)
+        day = {"cost": 6.25, "models": {"opus": 5.0, "sonnet": 1.25}}  # today's usage.History row
+        snap = self.state.snapshot(T0, reader, day)
         rows = {r["id"]: r for r in snap["sessions"]}
         self.assertEqual((rows["a"]["spent"], rows["a"]["spent_exact"], rows["a"]["burn"]), (5.0, False, 1.0))
         self.assertEqual(rows["a"]["agents"][0]["cost"], 1.0)
         self.assertEqual((rows["b"]["spent"], rows["b"]["spent_exact"]), (1.25, True))
         self.assertEqual((rows["c"]["spent"], rows["c"]["spent_exact"]), (None, False))  # live, no transcript yet
         self.assertIsNone(rows["d"]["spent"])
-        self.assertEqual(snap["spend"], {"today": 6.25, "exact": 1.25, "estimated": 5.0, "burn": 1.2, "budget": 15,
-                                         "runs": 1, "models": [["opus", 0.667], ["sonnet", 0.167], ["haiku", 0.167]]})
-        self.assertEqual(self.state.snapshot(T0)["spend"]["today"], 1.25)  # no reader: exact only
+        self.assertEqual(snap["spend"], {"today": 6.25, "burn": 1.2, "budget": 15, "runs": 1,
+                                         "models": [["opus", 0.8], ["sonnet", 0.2]]})
+        self.assertEqual(self.state.snapshot(T0)["spend"]["today"], 0.0)  # no calendar row: nothing today
+
+    def test_mark_done_until_the_next_prompt(self):
+        self.feed(ev("UserPromptSubmit", T0, prompt="x"), ev("PreToolUse", T0 + 5, tool="Bash", what="ls"),
+                  ev("marked_done", T0 + 700))
+        self.assertEqual((self.row(T0 + 701)["state"], self.row(T0 + 701)["group"]), ("done", "done"))
+        self.feed(ev("UserPromptSubmit", T0 + 800, prompt="again"))
+        self.assertEqual(self.row(T0 + 801)["state"], "running")  # back to work
 
     def test_route_prep_agent_models_and_escalation(self):
         tmp = tempfile.TemporaryDirectory()

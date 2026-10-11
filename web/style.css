@@ -187,6 +187,12 @@ textarea.in.m { font: 12px/1.45 var(--mono); }
 .card.r { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .card.quiet { background: transparent; padding-block: 3px; gap: 0; }
 .card.quiet .t { font-weight: 400; }
+/* an idle chat waits for its next prompt: one dim line, so the running cards above stand out */
+.card.idle .t { color: var(--mut); }
+.card.idle:hover .t { color: var(--ink); }
+/* a replied chat waits to be read: the title stays at full ink, the reply's start sits under it */
+.card.replied .t { font-weight: 600; }
+.card .reply { padding-left: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 /* line 2 is the instrument line, one size down: cost and context sit in fixed columns and line up down the list */
 .l2 { display: grid; grid-template-columns: minmax(0, 1fr) 38px 98px; gap: 6px; align-items: center; color: var(--mut); font-size: 11px; }
 .l2 .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -346,9 +352,6 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .turn { display: grid; gap: 3px; }
 .turn p { margin: 0; font-size: 13px; line-height: 1.45; text-wrap: pretty; white-space: pre-wrap; overflow-wrap: anywhere; }
 .turn.you { padding-left: 9px; border-left: 2px solid var(--line); }
-.turn.note p, .turn.result p { color: var(--mut); font: 12px var(--mono); }
-.chat .src { font: 11px var(--mono); color: var(--mut); margin: 0; }
-.levers { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
 /* who spoke: an ink pill for You, a raised pill for Claude (orange stays "needs you") */
 .turn.you > .lbl, .turn.claude > .lbl { justify-self: start; padding: 1px 7px; border-radius: 4px; }
 .turn.you > .lbl { background: var(--ink); color: var(--win); }
@@ -359,6 +362,9 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .turn th { background: var(--raise); font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); border-top: 0; }
 .turn th.center, .turn td.center { text-align: center; }
 .turn th.right, .turn td.right { text-align: right; font-variant-numeric: tabular-nums; }
+.turn.note p, .turn.result p { color: var(--mut); font: 12px var(--mono); }
+.chat .src { font: 11px var(--mono); color: var(--mut); margin: 0; }
+.levers { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
 .levers:empty { display: none; }
 
 /* Prep page */

@@ -19,7 +19,12 @@ ends with working, tested software.
 | 6 | [plans/06-rework.md](plans/06-rework.md) - Visual rework, Console Cells (BRAINSTORM 7.5, `design/rework/locked/console-cells.html`): borderless pill + rail + focus pane, cell motif, estimated cost, activity buckets | written 2026-10-10 |
 | 7 | [plans/07-cells-drawer.md](plans/07-cells-drawer.md) - Cells Drawer window (BRAINSTORM 7.5, D12, `design/rework/locked/cells-drawer.html`): list, session page and searchable project picker replace the rail, focus pane and Overview; Chat from transcripts, per-minute Timeline; its live check also closes plan 06 Tasks 7-8 | written 2026-10-10 |
 | 8 | [plans/08-cold-handoff.md](plans/08-cold-handoff.md) - cold-cache guard on the levers (second click with the estimated re-read cost) and seeded briefs: Brief a new task / Verify in a new task, built locally with no model call | Tasks 1-4 done 2026-10-11, Task 5 (live check) open |
+| 9 | [plans/09-route-trace.md](plans/09-route-trace.md) - Route block on the session page: Prep row (model, turns, cost, or a dim "none"), model and effort per main and agent, escalation time, session model mix, header model chip, step tags where the model differs from main's | written 2026-10-11 |
 | 10 | [plans/10-usage.md](plans/10-usage.md) - Usage page (BRAINSTORM D13, `design/rework/locked/usage.html`): cost and tokens per day, week and month from every transcript, calendar and columns of cells, history in usage-days.json | written 2026-10-11 |
+| 11 | [plans/11-states.md](plans/11-states.md) - Attention states: `Replied` (own section, 10 min), `Verified` / `Verify failed` from the last turn's verdict, `Empty` chats folded, a reply line under Idle and Replied rows | Tasks 1-2 done 2026-10-11, Task 3 (live check) open |
+| 12 | [plans/12-tray.md](plans/12-tray.md) - Tray icon (BRAINSTORM D14): the service in a tray process, the pywebview window as a child process only while open (about 39 MB hidden instead of about 329); icon colour and tooltip from the needs / working counts | Tasks 1-2 done 2026-10-11, Task 3 (Fred's restart and look) open |
+| 13 | [plans/13-handoff-next.md](plans/13-handoff-next.md) - Hand off then Start next chat (the new-task box seeded with the skill's note), lever order after Verify from `levers.after_verify` | Task 1 done 2026-10-11, Task 2 (live check) open |
+| 14 | [plans/14-logo.md](plans/14-logo.md) - Logo and app icon: a 3 x 3 board of cells with a lit route and an orange signal cell, drawn by `console/icon.py` for the tray states, `assets/app.ico` on the window with its own AppUserModelID; shown name ContextCompanion (temporary, Fred) | Tasks 1-3 done 2026-10-11, Task 4 (Fred's look at the tray) open |
 
 ## Changes to the design made while planning phase 1
 
@@ -91,7 +96,9 @@ ends with working, tested software.
 
 - **Estimated cost from the transcripts, read by the service** (Fred): the hook logs `transcript_path`
   on turn lines; `console/usage.py` prices each message once (API list prices in `config.json`
-  `"prices"`, fast mode 2x). Window runs stay exact (their result line).
+  `"prices"`, fast mode 2x). Window runs stay exact on their session card (their result line). Today's
+  spend on the main screen is the Usage calendar's figure for today (list prices, every transcript), so the
+  two always agree (Fred, 2026-10-11); the exact / estimated split of the spend row is gone.
 - **Spend** (Fred): `daily_budget_usd` 15, $0.50 cells in a growing 30 x 5 grid; the model mix becomes
   each model's share of today's spend (the phase 4 counts and the bottom strip go).
 - **Window** (Fred): rail = Needs you + Working (Done in the Overview), the Prep card takes the pane,
@@ -128,6 +135,21 @@ ends with working, tested software.
   is $78 a day on average in October, so tones up to the limit would all be the same.
 - **Tokens count all four kinds** (Fred), cache reads included (about 97 %); the picked day splits them.
 
+## Changes to the design made while planning phase 12
+
+- **Tray icon, window on demand** (Fred, 2026-10-11, D14): idle RAM is WebView2's, so hiding the window saves
+  nothing (208 MB hidden); the window becomes its own process that the tray starts and ends. The tray is Win32
+  through ctypes, so the stack stays standard library + pywebview. The page's close button ends the window only;
+  Quit is in the tray menu.
+
+## Changes to the design made while planning phase 13
+
+- **Hand off, then Start next chat** (Fred, 2026-10-11): the skill still runs and its end makes the chat
+  Done; the session page then offers a new task pre-filled with the skill's last message. Fred runs it;
+  nothing starts by itself.
+- **After Verify** (Fred, 2026-10-11): PASS gives Hand off then Mark done (the Accept step); FAIL gives
+  Escalate then Hand off. `Hub.levers` returns the order (`after_verify`).
+
 ## History
 
 - 2026-10-10 - Master plan and sub-plan 01 written. All phase 1 code was run once in a scratch folder
@@ -146,3 +168,6 @@ ends with working, tested software.
 - 2026-10-10 - Phase 6 tasks 1-6 placed (95 tests OK); Task 7 (live check) not run yet: it moves to plan 07 Task 5, after the Cells Drawer window replaces the rail.
 - 2026-10-10 - Fred locked Cells Drawer (D12) and decided the Chat tab from transcripts, the per-minute Timeline, the Prep page, one muted note line and the brief state in window.json. Sub-plan 07 written (zero-decision, final code): verified in a scratch clone (99 tests OK; each task's new tests fail as written, then pass), the window checked in a browser at 400 and 340 px with the fake claude (every view of the mock, dark, light by hand-set tokens, pill and peek, picker, answer in place, Prep, Run, Stop, empty and offline states, no console errors); tasks replayed in a fresh clone (98, 99, 99, 99, files equal to the scratch code). Tasks 5-6 (the real window, closing plans 06 and 07) are Fred's.
 - 2026-10-11 - Fred approved the Usage mockup (D13, `design/rework/locked/usage.html`). Plan 10 placed: `usage.History` reads every transcript per local day, `/api/usage` with 12 weeks and 12 months, history in `usage-days.json`, the Usage page from the spend breakdown; 104 tests OK; checked in headless Edge against the real transcripts at 400 and 340 px. Open: Fred's look in the native window.
+- 2026-10-11 - Chat tab (commit ebc9873): turn labels are pills (ink for You, raised for Claude; orange stays "needs you") and Claude replies render Markdown pipe tables as `<table>` through the escape-first `chatHtml` in `web/app.js`; 119 tests OK, checked in headless Edge at 700 and 340 px, not yet in the live window.
+- 2026-10-11 - Tray (plan 12, D14): Fred chose A2 of a measured comparison (pywebview hidden, Edge `--app`, Tk). `console/tray.py` and `py -m console --window` placed; 130 tests OK; live on a scratch home: tray process 39 MB private and 0.14 s CPU per minute with the window closed, close from the icon saves the place and frees the 6 WebView2 processes, Quit ends everything. Not committed: `Tray.close` uses the uncommitted pid filter in `window._hwnd`.
+- 2026-10-11 - Plan 13 placed: Hand off then Start next chat (`/api/brief?kind=next`, gated by `Hub.levers`), `levers.after_verify` order on the session page; 134 tests OK. Not checked in the live window yet.

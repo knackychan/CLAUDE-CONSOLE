@@ -21,6 +21,12 @@ class BriefTest(unittest.TestCase):
         text = brief.build("task")
         self.assertEqual(text, brief.TASK_INTRO)
 
+    def test_next_brief_keeps_the_note_lines(self):
+        text = brief.build("next", goal="g", last="Read PLAN.md.\nNext: step 4.", files=["a.py"], plan=True)
+        self.assertEqual(text, brief.NEXT_INTRO + "\n\nHandoff note:\nRead PLAN.md.\nNext: step 4.")
+        self.assertEqual(brief.build("next"), brief.NEXT_INTRO)
+        self.assertTrue(brief.build("next", last="x" * 5000).endswith("x…"))
+
     def test_verify_brief_starts_with_the_verify_text(self):
         text = brief.build("verify", goal="g", files=["a.py"], plan=True)
         self.assertTrue(text.startswith(levers.VERIFY_TEXT))

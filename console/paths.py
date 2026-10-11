@@ -11,6 +11,7 @@ DEFAULTS = {
     "quiet_after_s": 180,
     "stall_after_s": 600,
     "stale_after_s": 1800,
+    "replied_for_s": 600,  # a plain reply shows as Replied this long after the turn ended, then as Idle
     "writers_window_s": 600,
     "gauge_yellow_tokens": 150000,
     "gauge_red_tokens": 300000,

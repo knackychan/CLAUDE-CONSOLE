@@ -32,6 +32,11 @@ class LeversTest(unittest.TestCase):
             self.assertIn(line, prep.build_prompt("x", [line]))
             self.assertIn("\n(none)\n", prep.build_prompt("x"))
 
+    def test_after_verify(self):
+        self.assertEqual(levers.after_verify("PASS"), ("handoff", "done"))
+        self.assertEqual(levers.after_verify("FAIL"), ("escalate", "handoff", "done"))
+        self.assertEqual(levers.after_verify(""), ("handoff", "escalate", "done"))
+
     def test_handoff_ready(self):
         with tempfile.TemporaryDirectory() as tmp:
             proj, home = Path(tmp) / "proj", Path(tmp) / "home"

@@ -172,6 +172,7 @@ def build_record(data: dict, now: float = None) -> dict:
         if question.rstrip(".").lower() not in _NO_QUESTION:
             rec["stop_question"] = redact.clip(redact.mask(question), 200)
         rec.update(verdict(message))
+        rec["reply"] = redact.clip(redact.mask(message.lstrip("#*>`- \t\r\n")), 120)  # the list shows where the chat stands
     elif event == "StopFailure":
         rec["error"] = data.get("error") or "unknown"
         rec["error_details"] = redact.clip(redact.mask(data.get("error_details", "")), 120)

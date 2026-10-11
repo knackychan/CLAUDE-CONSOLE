@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Logo and name: preview</title>
+<style>
+/* Preview sheet only (not the app): the mark at 256, 32 and 16 px, the name lockups, the tray states. */
+@font-face { font-family: "Doto"; src: url("../../web/doto.woff2") format("woff2"); font-weight: 700; }
+:root { --page: #0b0c0e; --win: #121315; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; --mono: "Cascadia Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace; }
+body { margin: 0; padding: 32px; background: var(--page); color: var(--ink); font: 13px/1.45 var(--ui); }
+h2 { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); margin: 0 0 12px; }
+section { margin-bottom: 32px; }
+.row { display: flex; align-items: end; gap: 28px; flex-wrap: wrap; }
+.row figure { margin: 0; display: grid; justify-items: center; gap: 8px; }
+figcaption { font: 11px var(--mono); color: var(--mut); }
+.px { image-rendering: pixelated; }
+.bar { display: flex; gap: 18px; align-items: center; padding: 10px 16px; border-radius: 8px; }
+.bar.dark { background: #1f1f1f; } .bar.light { background: #eeeeee; color: #17181b; }
+.bar span { font: 11px var(--mono); }
+.lock { display: flex; align-items: center; gap: 14px; }
+.lock b { font: 700 34px/1 var(--dot); letter-spacing: .02em; }
+.lock.alt b { font-size: 22px; color: var(--mut); }
+.lock.alt img { opacity: .5; }
+</style>
+<section>
+  <h2>Mark at 256, 32, 16 px (and 32, 16 enlarged 6x)</h2>
+  <div class="row">
+    <figure><img src="../../assets/logo-256.png" width="256" height="256" alt="Mark, 256 px"><figcaption>256</figcaption></figure>
+    <figure><img src="../../assets/logo-32.png" width="32" height="32" alt="Mark, 32 px"><figcaption>32</figcaption></figure>
+    <figure><img src="../../assets/logo-16.png" width="16" height="16" alt="Mark, 16 px"><figcaption>16</figcaption></figure>
+    <figure><img class="px" src="../../assets/logo-32.png" width="192" height="192" alt=""><figcaption>32 x6</figcaption></figure>
+    <figure><img class="px" src="../../assets/logo-16.png" width="96" height="96" alt=""><figcaption>16 x6</figcaption></figure>
+  </div>
+</section>
+<section>
+  <h2>Tray: needs you, working, quiet (16 and 24 px, dark and light taskbar)</h2>
+  <div class="row">
+    <div class="bar dark">
+      <img src="tray-needs-16.png" alt="needs"><img src="tray-working-16.png" alt="working"><img src="tray-idle-16.png" alt="quiet">
+      <img src="tray-needs-24.png" alt=""><img src="tray-working-24.png" alt=""><img src="tray-idle-24.png" alt="">
+      <span>dark</span>
+    </div>
+    <div class="bar light">
+      <img src="tray-needs-16.png" alt=""><img src="tray-working-16.png" alt=""><img src="tray-idle-16.png" alt="">
+      <img src="tray-needs-24.png" alt=""><img src="tray-working-24.png" alt=""><img src="tray-idle-24.png" alt="">
+      <span>light</span>
+    </div>
+  </div>
+</section>
+<section>
+  <h2>Name (temporary)</h2>
+  <div class="lock"><img src="../../assets/logo-32.png" width="32" height="32" alt=""><b>ContextCompanion</b></div>
+</section>

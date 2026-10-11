@@ -10,7 +10,8 @@ from . import redact
 TAIL_BYTES = 1024 * 1024  # read from the end: enough for the last few turns of a long chat
 HEAD_BYTES = 256 * 1024  # the first prompt is near the start of the file
 TURNS = 6
-TEXT_MAX = 1500
+TEXT_MAX = 1500   # the first prompt (a title, a brief goal)
+TURN_MAX = 20000  # one chat turn: a long reply must not end mid-word
 # A block Claude Code or an extension puts into a user line (<system-reminder>, <command-name>, ...).
 # Fred's own pastes stay, as in cc_events.py.
 _INJECTED = re.compile(r"\s*<(?!pasted_content\b)([A-Za-z][\w-]*)[^>]*>.*?</\1>\s*", re.S)
@@ -67,8 +68,10 @@ def turns(path, limit: int = TURNS) -> list:
         if text.startswith("[Request interrupted"):
             out.append({"role": "note", "text": "stopped", "ts": _when(rec.get("timestamp"))})
         else:
-            out.append({"role": "you" if kind == "user" else "claude", "text": redact.mask(text[:TEXT_MAX]),
-                        "ts": _when(rec.get("timestamp"))})
+            text = redact.mask(text)
+            if len(text) > TURN_MAX:
+                text = text[:TURN_MAX].rstrip() + "\n[cut here, the full text is in the transcript]"
+            out.append({"role": "you" if kind == "user" else "claude", "text": text, "ts": _when(rec.get("timestamp"))})
     return out[-limit:]
 
 

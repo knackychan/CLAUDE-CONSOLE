@@ -24,6 +24,14 @@ class TranscriptTest(unittest.TestCase):
     def write(self, *recs, raw=""):
         self.path.write_text("".join(json.dumps(r) + "\n" for r in recs) + raw, encoding="utf-8")
 
+    def test_a_long_reply_is_whole_up_to_the_limit_then_marked_cut(self):
+        self.write(claude([{"type": "text", "text": "a" * 5000}]),
+                   claude([{"type": "text", "text": "b" * (transcript.TURN_MAX + 10)}]))
+        first, second = transcript.turns(self.path)
+        self.assertEqual(len(first["text"]), 5000)
+        self.assertTrue(second["text"].endswith("[cut here, the full text is in the transcript]"))
+        self.assertEqual(second["text"].count("b"), transcript.TURN_MAX)
+
     def test_words_only(self):
         self.write(
             user("fix the retry"),

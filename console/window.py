@@ -2,6 +2,7 @@
 peek card; open, 400 x 640. The page calls this as window.pywebview.api.<method>(...); the form,
 the place on screen and always-on-top are kept in window.json for the next start."""
 import ctypes
+import os
 from ctypes import wintypes
 from pathlib import Path
 
@@ -10,20 +11,47 @@ from . import paths
 PILL_W, PILL_H = 380, 48
 OPEN_W, OPEN_H = 400, 640
 PEEK_MAX_H = 360  # the pill plus one card, never taller
-TITLE = "Claude Console"
+TITLE = "ContextCompanion"  # the product name (temporary, Fred 2026-10-11): window title, tray tooltip and menu
 BACKGROUND = "#121315"  # --win in style.css: what the window shows outside the page's own corners
 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
+APP_ID = "ClaudeConsole.Window"  # AppUserModelID: the taskbar groups and pins the window apart from python
 
 
 HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
 SWP_KEEP = 0x0001 | 0x0002 | 0x0010 | 0x4000  # NOSIZE | NOMOVE | NOACTIVATE | ASYNCWINDOWPOS
 
 
-def _hwnd(title: str = TITLE) -> int:
+def _hwnd(title: str = TITLE, pid: int = None) -> int:
+    """This process's top-level window called `title`. FindWindowW alone can return another process's
+    window of the same name (Explorer's Windows.Internal.Shell.TabProxyWindow did), and then always-on-top
+    and the rounded corners went to that window."""
+    pid = os.getpid() if pid is None else pid
+    found = []
     try:
-        return ctypes.windll.user32.FindWindowW(None, title) or 0
+        user32 = ctypes.windll.user32
+        buf, owner = ctypes.create_unicode_buffer(256), wintypes.DWORD()
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def each(hwnd, _):
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value == pid and user32.GetWindowTextW(hwnd, buf, 256) and buf.value == title:
+                found.append(hwnd)
+                return False
+            return True
+
+        user32.EnumWindows(each, 0)
     except (AttributeError, OSError):
         return 0
+    return found[0] if found else 0
+
+
+def set_app_id(app_id: str = APP_ID) -> bool:
+    """Own taskbar button with the window's icon (assets/app.ico): without an AppUserModelID Windows groups the
+    window under pythonw.exe and shows Python's icon. Called before the window exists."""
+    try:
+        return ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(app_id)) == 0
+    except (AttributeError, OSError):
+        return False
 
 
 def set_topmost(on: bool, title: str = TITLE) -> bool:
@@ -109,5 +137,5 @@ class WindowApi:
         self._window.minimize()
 
     def close(self) -> None:
-        """Closes the window and the service inside it; window runs keep going (they are detached)."""
+        """Closes the window and ends its process; the service in the tray and window runs keep going."""
         self._window.destroy()

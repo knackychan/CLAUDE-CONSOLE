@@ -10,11 +10,11 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
 const GUARDED = ["continue", "answer", "resume", "verify", "handoff", "escalate"];  // levers that re-read the context
 const RESUME_TEXT = "You were interrupted. Check `git diff` first, then finish the task.";
 const BUSY = new Set(["running", "quiet", "stall"]);
-const PEEK = new Set(["stop", "blocked", "failed", "interrupted"]);  // a new one opens the peek card
+const PEEK = new Set(["stop", "blocked", "failed", "interrupted", "verify_failed"]);  // a new one opens the peek card
 const SPEND_CELL = 0.5;   // 1 spend cell = $0.50
 const PILL_CHIPS = 9;
 const DONE_SHOWN = 2;     // done sessions listed before "Show N more"
-const TABS = [["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"], ["chat", "Chat"]];
+const TABS = [["chat", "Chat"], ["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"]];
 
 let snap = null;
 let cfg = null;          // /api/config
@@ -22,7 +22,7 @@ let live = false;
 let form = "open";       // open | pill
 let page = "list";       // list | session | prep | usage
 let openId = null;
-let tab = "steps";       // steps | agents | timeline | chat
+let tab = "chat";        // chat | steps | agents | timeline
 let tlMin = -1;          // the Timeline's selected minute (minutes since 1970; -1: the last busy one)
 let scope = "";          // the project folder the list shows ("" = all projects)
 let project = "";        // where a new task runs (window.json, through /api/draft)
@@ -32,6 +32,7 @@ let fail = null;         // {title, msg, retry} shown above the compose box
 let draft = "";
 let briefOpen = false;   // the session page's brief, open for the window (window.json)
 let doneOpen = false;
+let emptyOpen = false;
 let hi = 0;              // the picker's highlighted row
 let draftTimer = null;
 let onTop = true;
@@ -78,18 +79,18 @@ function baseName(p) { return String(p || "").split(/[\\/]/).filter(Boolean).pop
 function alias(model) { return (String(model || "").match(/fable|opus|sonnet|haiku/) || [model || ""])[0]; }
 function label(s) { return s.state === "stop" ? "Asks you" : s.text; }
 function tone(s) {  // orange only for "needs you", red and green only for state
-  if (s.state === "blocked" || s.state === "failed") return "r";
+  if (s.state === "blocked" || s.state === "failed" || s.state === "verify_failed") return "r";
   if (s.group === "needs") return "y";
-  if (s.state === "done") return "g";
-  return s.state === "running" ? "n" : "q";
+  if (s.state === "done" || s.state === "verified") return "g";
+  return s.state === "running" || s.state === "replied" ? "n" : "q";
 }
 function stateWord(s) {  // [glyph, word, tone]; a finished session says its verdict
-  if (s.group === "done" && s.verdict === "PASS") return ["✓", "PASS", "g"];
+  if (s.group === "done" && s.state !== "verified" && s.verdict === "PASS") return ["✓", "PASS", "g"];
   if (s.group === "done" && s.verdict === "FAIL") return ["×", "FAIL", "r"];
   return [s.symbol, label(s), tone(s)];
 }
 function cellsHtml(classes) { return classes.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join(""); }
-function liveSessions() { return snap ? snap.sessions.filter((s) => s.group !== "done")
+function liveSessions() { return snap ? snap.sessions.filter((s) => s.group !== "done" && s.group !== "empty")
   .sort((a, b) => (a.group === "needs" ? 0 : 1) - (b.group === "needs" ? 0 : 1)) : []; }
 function current() { return snap && snap.sessions.find((s) => s.id === openId); }
 function routeText(s) {
@@ -210,7 +211,8 @@ function needText(s) {
   if (s.state === "blocked" && s.denied) return `denied: ${s.denied.tool} ${s.denied.what}`;
   if (s.state === "failed" && s.failed) return `${s.failed.error} ${s.failed.details || ""}`.trim();
   if (s.state === "interrupted") return "The run stopped before it finished.";
-  if (s.state === "stall") return "no events for 10 min, still running";
+  if (s.state === "verify_failed") return ("Verify FAIL " + s.verdict_detail).trim();
+  if (s.state === "stall") return `no event for ${ago(snap.now - s.last_ts)}: the chat may be closed`;
   if (s.ctx_tone === "red") return `context ${kTokens(s.ctx_tokens)}: hand off`;
   return "";
 }
@@ -219,6 +221,7 @@ function needButtons(s, where, withOpen) {
   let out = "";
   if (s.state === "blocked" && s.window && !s.run_live) out += b("terminal", "", "Open in terminal");
   if (s.state === "interrupted" && s.window) out += b("resume", " you", "Resume");
+  if (s.state === "stall" && !s.run_live) out += b("done", "", "Mark done");
   return out + (withOpen ? b("open", "", "Open") : "");
 }
 
@@ -255,6 +258,7 @@ async function unblock(button) {
     if (name === "send") r = await api("/api/continue", { session: s.id, text });
     if (name === "resume") await api("/api/continue", { session: s.id, text: RESUME_TEXT });
     if (name === "terminal") await api("/api/terminal", { session: s.id });
+    if (name === "done") await api("/api/done", { session: s.id });
     if (peek) return dismissPeek();
     delete cardMsg[s.id];
     if (r) { sent[s.id + "|" + s.stop_question] = r.session === s.id ? "" : r.session; field.value = ""; }
@@ -287,7 +291,7 @@ function showPage(name) {
   render();
 }
 
-async function openSession(id, list = "steps") {
+async function openSession(id, list = "chat") {
   if (form === "pill") await setForm("open");
   openId = id;
   tab = list;
@@ -300,11 +304,14 @@ async function openSession(id, list = "steps") {
 function inScope(s) { return !scope || s.project_dir === scope; }
 function groups() {
   const mine = snap.sessions.filter(inScope);
-  return { needs: mine.filter((s) => s.group === "needs"), work: mine.filter((s) => s.group === "working"),
-    done: mine.filter((s) => s.group === "done").sort((a, b) => b.last_ts - a.last_ts) };
+  const work = mine.filter((s) => s.group === "working");
+  const byAge = (g) => mine.filter((s) => s.group === g).sort((a, b) => b.last_ts - a.last_ts);
+  return { needs: mine.filter((s) => s.group === "needs"), replied: byAge("replied"), empty: byAge("empty"),
+    work: work.filter((s) => BUSY.has(s.state)),
+    idle: work.filter((s) => !BUSY.has(s.state)).sort((a, b) => b.last_ts - a.last_ts), done: mine.filter((s) => s.group === "done").sort((a, b) => b.last_ts - a.last_ts) };
 }
 function navList() {  // the sessions ‹ › step through: the list in its order, or all when the open one is out of scope
-  const g = groups(), all = [...g.needs, ...g.work, ...g.done];
+  const g = groups(), all = [...g.needs, ...g.replied, ...g.work, ...g.idle, ...g.done];
   if (all.some((s) => s.id === openId)) return all;
   return [...snap.sessions].sort((a, b) => (a.group === "needs" ? 0 : 1) - (b.group === "needs" ? 0 : 1));
 }
@@ -323,12 +330,12 @@ function render() {
 }
 
 // -- list page ---------------------------------------------------------------------------
-function spendRow(sp) {  // one row: solid = exact, hatched = estimated, orange outline at 80 % of the limit
-  const solid = Math.round(sp.exact / SPEND_CELL), all = Math.round(sp.today / SPEND_CELL);
+function spendRow(sp) {  // one row: hatched = estimated (list prices), orange outline at 80 % of the limit
+  const all = Math.round(sp.today / SPEND_CELL);
   const mark = sp.budget > 0 ? Math.ceil(sp.budget * 0.8 / SPEND_CELL) - 1 : -1;
   const cols = Math.max(30, all, mark + 1);
   const cls = Array.from({ length: cols }, (_, k) =>
-    [k < solid ? "f" : k < all ? "h" : "", k === mark ? "mk" : ""].filter(Boolean).join(" "));
+    [k < all ? "h" : "", k === mark ? "mk" : ""].filter(Boolean).join(" "));
   return { cols, html: cellsHtml(cls) };
 }
 
@@ -341,8 +348,8 @@ function renderTop() {
   setHtml($("today"), `<span class="big">${money(sp.today)}</span><span class="cells row30" style="--cols:${row.cols}">${row.html}</span>
     <span class="sub m"><span>today<span class="usd">, USD</span> · $${money(sp.burn)} / min</span>
     <span>${sp.budget > 0 ? "limit $" + sp.budget : "no limit"}</span></span>`);
-  setHtml($("todaymore"), `<div class="legend"><span><i class="f"></i>exact $${money(sp.exact)}</span>
-    <span><i class="h"></i>estimated $${money(sp.estimated)}</span>${sp.budget > 0 ? '<span><i class="mk"></i>80 % of limit</span>' : ""}</div>
+  setHtml($("todaymore"), `<div class="legend"><span><i class="h"></i>estimated $${money(sp.today)} (list prices)</span>
+    ${sp.budget > 0 ? '<span><i class="mk"></i>80 % of limit</span>' : ""}</div>
     <div class="legend"><span>1 cell = $0.50</span>${sp.models.map(([m, f]) => `<span>${esc(m)} ${f < 0.01 ? "&lt;1" : Math.round(f * 100)} %</span>`).join("")}
     ${sp.runs ? `<span>window runs ${sp.runs}</span>` : ""}
     ${snap.writers.map((w) => `<span>2 writers: ${esc(baseName(w.project_dir))}</span>`).join("")}</div>
@@ -372,16 +379,18 @@ function cardHtml(s) {
   return `<div class="card${t === "y" || t === "r" ? " " + t : ""}" data-open="${esc(s.id)}" tabindex="0" role="button"
     aria-label="${esc(label(s) + ": " + s.title)}">
     <div class="l1"><span class="st ${t}">${s.symbol} ${esc(label(s))}${hand}</span><span class="t">${esc(s.title)}</span>
-    <span class="age m">${ago(snap.now - s.last_ts)}</span></div>
+    <span class="age m" title="since the last event">${ago(snap.now - s.last_ts)}</span></div>
     <div class="l2 m"><span class="who">${esc(s.project)}${s.two_writers ? " · 2 writers" : ""}<span class="route"> · ${esc(routeText(s))}</span></span>
     <span class="cost">${spentText(s)}</span>${ctxMini(s)}</div>${third}</div>`;
 }
 
 function quietHtml(s, showProject) {
   const [glyph, word, t] = stateWord(s);
-  return `<div class="card quiet" data-open="${esc(s.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + s.title)}">
-    <div class="l1"><span class="st ${t}">${glyph} ${esc(word)}</span><span class="t">${esc(s.title)}${showProject ? ` <span class="m mut">· ${esc(s.project)}</span>` : ""}</span>
-    <span class="age m">${spentText(s)}</span></div></div>`;
+  const hand = s.handoff_hint ? ' <span class="st q">· HAND OFF</span>' : "";
+  const reply = (s.state === "idle" || s.state === "replied") && s.reply ? `<div class="reply mut" title="${esc(s.reply)}">${esc(s.reply)}</div>` : "";
+  return `<div class="card quiet${s.state === "idle" || s.state === "replied" ? " " + s.state : ""}" data-open="${esc(s.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + s.title)}">
+    <div class="l1"><span class="st ${t}">${glyph} ${esc(word)}${hand}</span><span class="t">${esc(s.title)}${showProject ? ` <span class="m mut">· ${esc(s.project)}</span>` : ""}</span>
+    <span class="age m">${s.state === "replied" ? ago(snap.now - s.last_ts) : spentText(s)}</span></div>${reply}</div>`;
 }
 
 function renderListPage() {
@@ -389,10 +398,14 @@ function renderListPage() {
   const g = groups(), shown = doneOpen ? g.done : g.done.slice(0, DONE_SHOWN);
   const sec = (cls, text, list, id = "") => list.length ? `<div class="sec"${id ? ` id="${id}"` : ""}><span class="lbl ${cls}">${text} · ${list.length}</span></div>` : "";
   let html = sec("y", "Needs you", g.needs, "needsec") + g.needs.map(cardHtml).join("")
+    + sec("", "Replied", g.replied) + g.replied.map((s) => quietHtml(s, !scope)).join("")
     + sec("", "Working", g.work) + g.work.map(cardHtml).join("")
+    + sec("", "Idle", g.idle) + g.idle.map((s) => quietHtml(s, !scope)).join("")
     + sec("", "Done today", g.done) + shown.map((s) => quietHtml(s, !scope)).join("")
-    + (g.done.length > DONE_SHOWN && !doneOpen ? `<div class="more-done"><button class="btn sm" data-go="moredone">Show ${g.done.length - DONE_SHOWN} more</button></div>` : "");
-  if (!g.needs.length && !g.work.length && !g.done.length) {
+    + (g.done.length > DONE_SHOWN && !doneOpen ? `<div class="more-done"><button class="btn sm" data-go="moredone">Show ${g.done.length - DONE_SHOWN} more</button></div>` : "")
+    + (g.empty.length ? `<div class="more-done"><button class="btn sm" data-go="empties" title="Chats that loaded their rules and never got a prompt">${emptyOpen ? "Hide" : "Show"} ${g.empty.length} empty ${g.empty.length === 1 ? "chat" : "chats"}</button></div>`
+      + (emptyOpen ? g.empty.map((s) => quietHtml(s, !scope)).join("") : "") : "");
+  if (!g.needs.length && !g.replied.length && !g.work.length && !g.idle.length && !g.done.length && !g.empty.length) {
     html = scope
       ? `<div class="sec"><span class="lbl">${esc(projectName(scope))}</span></div><div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
          <p>No session in ${esc(projectName(scope))} today. Type a task below, or pick All projects.</p></div>`
@@ -499,7 +512,7 @@ function projectRows() {  // allowed folders and every folder a session ran in, 
   const row = (dir) => { if (!by.has(dir)) by.set(dir, { dir, name: baseName(dir), on: cfg.projects.includes(dir), last: 0, today: 0, live: 0, needs: 0 }); return by.get(dir); };
   cfg.projects.forEach(row);
   snap.projects.forEach((p) => Object.assign(row(p.dir), { name: p.name || baseName(p.dir), last: p.last_ts, today: p.today }));
-  snap.sessions.forEach((s) => { if (s.project_dir && s.group !== "done") { const r = row(s.project_dir); r.live++; r.needs += s.group === "needs"; } });
+  snap.sessions.forEach((s) => { if (s.project_dir && s.group !== "done" && s.group !== "empty") { const r = row(s.project_dir); r.live++; r.needs += s.group === "needs"; } });
   return [...by.values()];
 }
 
@@ -668,7 +681,7 @@ function renderBrief(s) {
         <span><small>$ / min</small><b>${money(s.burn)}</b></span>
         <span><small class="${t}">${word}</small><span class="cx"><span class="cells">${cellsHtml(ctxClasses(s.ctx_tokens))}</span>
           <b class="${t}">${s.ctx_tokens == null ? "?" : kTokens(s.ctx_tokens)}</b></span></span>
-        <span><small>time</small><b>${elapsed(end - s.started_ts)}</b></span>
+        <span><small title="since the chat started">session</small><b>${elapsed(end - s.started_ts)}</b></span>
         <span><small>steps</small><b>${steps}</b></span>
       </span>
     </button>
@@ -702,7 +715,7 @@ function renderSession() {
     return;
   }
   const t = tone(s);
-  const when = BUSY.has(s.state) ? ago(snap.now - s.turn_ts) : (s.state === "stop" ? "waiting " : "") + ago(snap.now - s.last_ts);
+  const when = BUSY.has(s.state) ? "turn " + ago(snap.now - s.turn_ts) : (s.state === "stop" ? "waiting " : "") + ago(snap.now - s.last_ts);
   const src = s.source === "?" ? "" : s.source + " / ";
   setHtml($("sbody"), `<div class="head"><span class="st ${t}">${s.symbol} ${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>
     <div class="where"><span class="m" title="${esc(s.route_reason || "")}">${esc(s.project)} / ${esc(src)}${esc(s.route)}</span>
@@ -723,11 +736,6 @@ function stepTag(s) {  // agent id -> its model family, only where it differs fr
   return (x) => by[x.agent] || "";
 }
 
-async function renderProc(s) {
-  const seq = ++procSeq, wanted = tab;
-  let steps = [], chat = null;
-  if (wanted === "chat") chat = await api("/api/chat?session=" + encodeURIComponent(s.id));
-  else steps = await api("/api/steps?session=" + encodeURIComponent(s.id));
 // A chat reply as HTML: Markdown pipe tables become <table>s, everything else stays escaped text.
 const TBL_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 function tblCells(line) { return line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|")); }
@@ -755,6 +763,11 @@ function chatHtml(text) {
   return out.join("");
 }
 
+async function renderProc(s) {
+  const seq = ++procSeq, wanted = tab;
+  let steps = [], chat = null;
+  if (wanted === "chat") chat = await api("/api/chat?session=" + encodeURIComponent(s.id));
+  else steps = await api("/api/steps?session=" + encodeURIComponent(s.id));
   if (seq !== procSeq || openId !== s.id || tab !== wanted) return;
   const rows = agentRows(s, steps);
   const newest = steps.slice().reverse();
@@ -802,7 +815,7 @@ function chatHtml(text) {
 
 async function renderLevers(s) {
   const sig = [s.id, s.window, s.run_live, s.stop_question, s.state, s.verdict, s.escalated,
-               s.handoff_hint, s.forks.length, Math.floor((snap.now - s.last_ts) / 600)].join("|");  // the last one: idle turns cold
+               s.handoff_hint, s.handoff_by, s.forks.length, Math.floor((snap.now - s.last_ts) / 600)].join("|");  // the last one: idle turns cold
   if (sig === leversSig) return;
   leversSig = sig;
   cold = null;
@@ -816,10 +829,15 @@ async function renderLevers(s) {
   }
   let buttons = "";
   if (s.run_live) buttons += '<button class="btn stop" data-act="stop">Stop</button>';
-  if (lv && !lv.verify) buttons += '<button class="btn" data-act="verify">Verify</button>';
-  if (lv && !lv.handoff) buttons += `<button class="btn${s.handoff_hint ? " go" : ""}" data-act="handoff">Hand off</button>`;
-  if (lv && !lv.escalate) buttons += `<button class="btn go" data-act="escalate">Escalate to ${esc(lv.escalate_to)}</button>`;
+  if (lv && !lv.next) buttons += '<button class="btn go" data-act="next" title="A new task seeded with the handoff note">Start next chat</button>';
   if (lv && !lv.continue && s.window && s.state === "interrupted") buttons += '<button class="btn go" data-act="resume">Resume</button>';
+  if (lv && !lv.verify) buttons += '<button class="btn" data-act="verify">Verify</button>';
+  const after = {  // what follows Verify, in the order the service gives (levers.after_verify)
+    handoff: lv && !lv.handoff ? `<button class="btn${s.handoff_hint || s.verdict === "PASS" ? " go" : ""}" data-act="handoff">Hand off</button>` : "",
+    escalate: lv && !lv.escalate ? `<button class="btn go" data-act="escalate">Escalate to ${esc(lv.escalate_to)}</button>` : "",
+    done: !s.run_live && s.group !== "done" ? '<button class="btn" data-act="done" title="Leave the list until the next prompt">Mark done</button>' : "",
+  };
+  for (const k of lv ? lv.after_verify : ["done"]) buttons += after[k] || "";
   if (s.window && !s.run_live) buttons += '<button class="btn" data-act="terminal" title="Open in terminal">Terminal</button>';
   if (lv && s.project_dir) {  // a new task that takes over: built here from the transcript, no model call
     buttons += `<button class="btn${cold ? " go" : ""}" data-act="brief" title="A new task with the goal, the last message, the edited files and the git status of this one">Brief a new task</button>`;
@@ -861,8 +879,9 @@ async function act(name, button) {
   button.disabled = true;
   try {
     let r = null;
-    if (name === "brief" || name === "vbrief") {  // pre-fill the new-task box; Fred edits it and runs it
-      const b = await api("/api/brief?session=" + encodeURIComponent(s.id) + (name === "vbrief" ? "&kind=verify" : ""));
+    if (name === "brief" || name === "vbrief" || name === "next") {  // pre-fill the new-task box; Fred edits it and runs it
+      const kind = { vbrief: "&kind=verify", next: "&kind=next" }[name] || "";
+      const b = await api("/api/brief?session=" + encodeURIComponent(s.id) + kind);
       pick(b.project_dir);
       showPage("list");
       draft = b.text;
@@ -875,6 +894,7 @@ async function act(name, button) {
     }
     if (name === "stop") { button.textContent = "Stopping ..."; await api("/api/stop", { session: s.id }); }
     if (name === "terminal") await api("/api/terminal", { session: s.id });
+    if (name === "done") await api("/api/done", { session: s.id });
     if (name === "resume") r = await api("/api/continue", { session: s.id, text: RESUME_TEXT, confirm });
     if (name === "continue" || name === "answer") {
       const text = $(name === "answer" ? "answer" : "fu").value.trim();
@@ -1086,6 +1106,7 @@ async function go(name, button) {
     if (n) n.scrollIntoView({ block: "start", behavior: "smooth" });
   }
   if (name === "moredone") { doneOpen = true; render(); }
+  if (name === "empties") { emptyOpen = !emptyOpen; render(); }
   if (name === "usage") showPage("usage");
   if (name === "fold") await setForm("pill");
   if (name === "unfold") await setForm("open");

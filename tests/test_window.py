@@ -58,6 +58,12 @@ class WindowApiTest(unittest.TestCase):
         self.api.close()
         self.assertEqual(self.win.calls[-2:], [("minimize",), ("destroy",)])
 
+    def test_hwnd_is_only_this_process_window(self):
+        # the test process has no window: an Explorer tab proxy or the real window of the same name
+        # (another process) must not be picked, so always-on-top never reaches them
+        self.assertEqual(window._hwnd(), 0)
+        self.assertEqual(window._hwnd("no such window title", pid=0), 0)
+
     def test_place_is_kept_only_while_on_a_screen(self):
         self.assertEqual(self.api._place(), (None, None))
         self.api._remember_place()

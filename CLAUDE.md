@@ -29,7 +29,8 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
 
 ```bat
 py -m unittest discover -s tests   :: all tests
-py -m console                      :: the window (service inside)
+py -m console                      :: tray icon (service inside); opens the window
+py -m console --window             :: the window only, for a running service
 py -m console --serve              :: service only: http://127.0.0.1:47770/
 run.bat                            :: the window without a console
 py install_hooks.py [--write|--remove]   :: Fred only: add/remove the hooks in ~/.claude/settings.json

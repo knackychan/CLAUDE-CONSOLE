@@ -118,8 +118,9 @@ class Hub:
         self._stop.set()
 
     def snapshot(self) -> dict:
+        now = time.time()
         with self.lock:
-            return self.state.snapshot(time.time(), self.usage)
+            return self.state.snapshot(now, self.usage, self.usage_days.get(usage.day_of(now)))
 
     def steps(self, session_id: str, limit: int = 200) -> list:
         with self.lock:
@@ -135,7 +136,8 @@ class Hub:
                     "project": s.project, "project_dir": s.project_dir, "route": s.route,
                     "run_live": s.run_live, "state": self.state.state_of(s, time.time()),
                     "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
-                    "transcript_path": s.transcript_path, "ctx_tokens": s.ctx_tokens, "last_ts": s.last_ts}
+                    "transcript_path": s.transcript_path, "ctx_tokens": s.ctx_tokens, "last_ts": s.last_ts,
+                    "handoff_by": s.handoff_by if s.handed_off else ""}
 
     def route_of(self, session_id: str, s: dict) -> tuple:
         """(model, effort) the session runs on: a window run's own route, else the model last seen."""
@@ -189,8 +191,9 @@ class Hub:
         handoff = base or ("" if levers.handoff_ready(s["project_dir"], self.user_home) else
                            "the session-handoff skill is not installed here: copy "
                            "dotclaude/skills/session-handoff to ~/.claude/skills")
-        return {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate,
-                "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
+        nxt = base or ("" if s["handoff_by"] else "only after a Hand off")  # a new task seeded with the note
+        return {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate, "next": nxt,
+                "after_verify": list(levers.after_verify(s["verdict"])), "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
                 "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model)}
 
     def allowed(self, project_dir) -> str:
@@ -296,7 +299,8 @@ class Handler(BaseHTTPRequestHandler):
         if not guard.host_ok(self.headers.get("Host"), self._port()) or not guard.post_ok(self.headers):
             return self._send(403, b"forbidden", "text/plain")
         routes = {"/api/prep": self._prep, "/api/run": self._run, "/api/stop": self._stop,
-                  "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow}
+                  "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
+                  "/api/done": self._done}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
         handler = routes.get(urlparse(self.path).path)
@@ -376,6 +380,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "not a window run")
         result = self.hub.runs.stop(sid)
         return self._json({"stop": result})
+
+    def _done(self, body):
+        """Mark done: a chat that never sent its Stop (closed mid-turn) leaves the list until its next prompt."""
+        sid = body.get("session")
+        s = self.hub.session(sid) if isinstance(sid, str) else None
+        if s is None:
+            return self._error(404, "unknown session")
+        if s["run_live"] or self.hub.runs.is_live(sid):
+            return self._error(409, "a window run is still going: Stop it first")
+        self.hub.runs.emit({"event": "marked_done", "session_id": sid})
+        self.hub.poll_once()
+        return self._json({"session": sid})
 
     def _lever(self, body, lever):
         """Continue (also STOP answers and Resume), Verify, Handoff, Escalate: a new turn of a window
@@ -472,8 +488,14 @@ class Handler(BaseHTTPRequestHandler):
         """The text of a new task that takes over a session, built from its transcript, its steps and the
         folder's git status: no model call, nothing written."""
         s = self.hub.session(sid)
-        if s is None or kind not in ("task", "verify"):
+        if s is None or kind not in ("task", "verify", "next"):
             return self._error(404, "unknown session")
+        if kind == "next":  # after a Hand off: the next task starts from the skill's note
+            off = self.hub.levers(sid)["next"]
+            if off:
+                return self._error(409, off)
+            return self._json({"text": brief.build("next", last=self._last_reply(s["handoff_by"])),
+                               "project_dir": s["project_dir"]})
         turns = transcript.turns(s["transcript_path"])
         files = []
         for step in self.hub.steps(sid, MAX_STEPS):
@@ -486,6 +508,15 @@ class Handler(BaseHTTPRequestHandler):
                            status=claude_cli.git_status(folder) if os.path.isdir(folder or "") else [],
                            plan=os.path.isfile(os.path.join(folder or "", "PLAN.md")))
         return self._json({"text": text, "project_dir": s["project_dir"]})
+
+    def _last_reply(self, sid: str) -> str:
+        """Claude's last message in a session: its window run's stream, or its transcript."""
+        if self.hub.runs.meta(sid):
+            items = runs.chat(self.hub.runs.stream_path(sid))
+        else:
+            s = self.hub.session(sid)
+            items = transcript.turns(s["transcript_path"]) if s else []
+        return next((i["text"] for i in reversed(items) if i["role"] == "claude"), "")
 
     def _stream(self):
         self.send_response(200)

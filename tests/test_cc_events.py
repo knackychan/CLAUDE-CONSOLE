@@ -96,6 +96,13 @@ class BuildRecordTest(unittest.TestCase):
         self.assertEqual(rec["route"], "mechanical, low effort, cavecrew-builder on sonnet")
         self.assertEqual(rec["stop_question"], "how many retries?")
 
+    def test_stop_keeps_the_start_of_the_reply_masked(self):
+        rec = cc_events.build_record(self.base("Stop", transcript_path="",
+                                               last_assistant_message="## Done\n\nThe retry is in token=abc123 now. " + "x" * 200))
+        self.assertTrue(rec["reply"].startswith("Done The retry is in token=*** now."))
+        self.assertEqual(len(rec["reply"]), 120)
+        self.assertNotIn("reply", cc_events.build_record(self.base("Stop", transcript_path="")))
+
     def test_stop_none_is_no_question(self):
         for answer in ("none", "None.", "n/a", "-"):
             rec = cc_events.build_record(self.base("Stop", last_assistant_message=f"Done.\nSTOP: {answer}"))

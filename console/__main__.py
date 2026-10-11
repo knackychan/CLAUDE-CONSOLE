@@ -1,4 +1,5 @@
-"""py -m console          open the window (service runs inside it)
+"""py -m console          the tray icon (service inside); it opens the window as its own process
+py -m console --window the window only, for a running service (what the tray starts)
 py -m console --serve  service only; open http://127.0.0.1:47770/ in a browser"""
 import argparse
 import json
@@ -21,16 +22,22 @@ def already_running(port: int) -> bool:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="console")
     parser.add_argument("--serve", action="store_true", help="service only, no window")
+    parser.add_argument("--window", action="store_true", help="the window only, for a running service")
     args = parser.parse_args(argv)
 
     if sys.stderr is None:  # started with pythonw (run.bat): keep errors readable
         paths.home().mkdir(parents=True, exist_ok=True)
         sys.stderr = open(paths.home() / "window-errors.log", "a", encoding="utf-8")
     cfg = paths.ensure_config()
-    events.prune(paths.home(), cfg["retention_days"])
-    runs.prune(paths.home(), cfg["retention_days"])
     port = cfg["port"]
     url = f"http://127.0.0.1:{port}/"
+    if args.window:
+        if not already_running(port):
+            print(f"no service on port {port}: start it with py -m console", file=sys.stderr)
+            return 1
+        return open_window(url)
+    events.prune(paths.home(), cfg["retention_days"])
+    runs.prune(paths.home(), cfg["retention_days"])
 
     httpd = None
     try:
@@ -54,8 +61,20 @@ def main(argv=None) -> int:
         except KeyboardInterrupt:
             return 0
 
-    import webview  # imported late: --serve works without pywebview
-    from . import window
+    if not httpd:  # a tray already runs: show a window for it
+        return open_window(url)
+    from . import tray
+    tray.Tray(hub).run()  # until Quit in the tray menu
+    hub.stop()
+    httpd.shutdown()
+    return 0
+
+
+def open_window(url: str) -> int:
+    """The pywebview window, a client of the service; closing it ends this process and frees WebView2."""
+    import webview  # imported late: --serve and the tray work without pywebview
+    from . import icon, window
+    window.set_app_id()
     api = window.WindowApi(paths.home())
     x, y = api._place()
     # Not transparent: a WinForms form cannot be, its corners showed grey. Windows 11 rounds it instead
@@ -65,7 +84,7 @@ def main(argv=None) -> int:
                                 easy_drag=False, background_color=window.BACKGROUND, on_top=api.state()["on_top"])
     api._attach(win)
     win.events.closing += api._remember_place
-    webview.start(api._restore)
+    webview.start(api._restore, icon=str(icon.ICO))  # pywebview's WinForms form loads it as its Icon
     return 0
 
 

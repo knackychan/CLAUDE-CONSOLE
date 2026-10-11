@@ -48,6 +48,8 @@ No cloud, no network calls of its own.
 | D11 | Visual rework (2026-10-10) | Locked: "Console Cells", `design/rework/locked/console-cells.html` (section 7.5) |
 | D12 | Open window layout (2026-10-10) | Locked: "Cells Drawer", `design/rework/locked/cells-drawer.html` (section 7.5): a list instead of the rail, a full-width session page, a searchable project picker. Console Cells stays the reference for tokens and the cell motif |
 | D13 | Usage page (2026-10-11) | Locked: `design/rework/locked/usage.html` (section 7.5): estimated cost and tokens per day, week and month from every transcript, a calendar of days and columns of cells over time; history kept in `~/.claude/console/usage-days.json` |
+| D14 | Tray (2026-10-11) | A2: the service lives in a tray icon process (ctypes, no new package); the pywebview window is a child process that exists only while open, so a hidden console costs about 39 MB instead of about 329 (`plans/12-tray.md`) |
+| D15 | Name and logo (2026-10-11) | Name: ContextCompanion, temporary (Fred), harness-neutral; only the shown name changes (`window.TITLE`, page title), ids and folders stay. Logo: a 3 x 3 board of cells, a lit route to an orange signal cell (`design/logo/`, `console/icon.py`, `plans/14-logo.md`) |
 
 ## 4. Architecture
 
@@ -65,6 +67,7 @@ No cloud, no network calls of its own.
            runs: Prep, Run, Continue, Handoff, Escalate, Stop, Open in terminal
                              |
         3. mini window   pywebview, always on top, about 420 x 640, plain HTML/JS
+           (D14: its own process, started and ended from the tray icon)
 ```
 
 - Stack: Python 3.14 standard library (`http.server`, threads, SSE) + pywebview (already installed

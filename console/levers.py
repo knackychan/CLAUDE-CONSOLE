@@ -1,5 +1,5 @@
-"""Phase 3 levers: the texts Verify, Handoff and Escalate send, the escalation step, and the
-routing-misses file. When a lever is allowed is decided in one place: server.Hub.levers."""
+"""Phase 3 levers: the texts Verify, Handoff and Escalate send, the escalation step, the order after
+Verify, and the routing-misses file. When a lever is allowed is decided in one place: server.Hub.levers."""
 import time
 from pathlib import Path
 
@@ -38,6 +38,16 @@ def escalate_text(detail: str, model: str, effort: str) -> str:
     return (f"The checks failed: {failed}. You now run on {model}/{effort} (escalated once). Find and fix "
             "the cause, run the checks again, then end your final message with one line: "
             "`VERDICT: PASS` or `VERDICT: FAIL <shortest failing line>`.")
+
+
+def after_verify(verdict: str) -> tuple:
+    """The levers that follow Verify, in button order: a PASS is handed off (the next task) or accepted
+    (Mark done); a FAIL is escalated first."""
+    if verdict == "PASS":
+        return ("handoff", "done")
+    if verdict == "FAIL":
+        return ("escalate", "handoff", "done")
+    return ("handoff", "escalate", "done")
 
 
 def handoff_ready(project_dir: str, home: Path = None) -> bool:
