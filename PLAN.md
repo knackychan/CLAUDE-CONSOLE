@@ -18,6 +18,7 @@ ends with working, tested software.
 | 5 | Other harnesses - Codex CLI, OpenCode, Command Code | to write |
 | 6 | [plans/06-rework.md](plans/06-rework.md) - Visual rework, Console Cells (BRAINSTORM 7.5, `design/rework/locked/console-cells.html`): borderless pill + rail + focus pane, cell motif, estimated cost, activity buckets | written 2026-10-10 |
 | 7 | [plans/07-cells-drawer.md](plans/07-cells-drawer.md) - Cells Drawer window (BRAINSTORM 7.5, D12, `design/rework/locked/cells-drawer.html`): list, session page and searchable project picker replace the rail, focus pane and Overview; Chat from transcripts, per-minute Timeline; its live check also closes plan 06 Tasks 7-8 | written 2026-10-10 |
+| 8 | [plans/08-cold-handoff.md](plans/08-cold-handoff.md) - cold-cache guard on the levers (second click with the estimated re-read cost) and seeded briefs: Brief a new task / Verify in a new task, built locally with no model call | Tasks 1-4 done 2026-10-11, Task 5 (live check) open |
 | 9 | [plans/09-usage.md](plans/09-usage.md) - Usage page (BRAINSTORM D13, `design/rework/locked/usage.html`): cost and tokens per day, week and month from every transcript, calendar and columns of cells, history in usage-days.json | written 2026-10-11 |
 
 ## Changes to the design made while planning phase 1
