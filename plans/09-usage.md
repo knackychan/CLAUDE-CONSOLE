@@ -54,9 +54,9 @@ tests/test_server.py  + UsageEndpointTest
 ## TODO
 
 - [x] Task 0: lock the mockup; D13, PLAN row 9, this plan
-- [ ] Task 1: `usage.py` history, weeks, months, days file (tests first)
-- [ ] Task 2: service: `cc-usage` thread, `/api/usage` (tests first)
-- [ ] Task 3: the Usage page in the window
+- [x] Task 1: `usage.py` history, weeks, months, days file (tests first)
+- [x] Task 2: service: `cc-usage` thread, `/api/usage` (tests first)
+- [x] Task 3: the Usage page in the window
 - [ ] Task 4: check in a browser against the real transcripts (Claude), then the native window (Fred)
 
 ### Task 1: history and aggregation in `usage.py`
@@ -77,3 +77,10 @@ tests/test_server.py  + UsageEndpointTest
 
 - [ ] Claude: the service on a spare port with `CC_CONSOLE_HOME` on a temp folder, the page in headless Edge at 400 and 340 px: calendar and columns filled from the real transcripts, Days / Weeks / Months, $ / tokens, month ‹ ›, a picked day, dark and light.
 - [ ] Fred: `py -m console`, open the spend breakdown, `Usage by day, week, month ›`.
+
+## Result (2026-10-11)
+
+- Tasks 1-3 placed and committed (`feat: usage history ...`, `feat: /api/usage ...`, `feat: Usage page in the window`); 104 tests OK (99 + 5).
+- Task 4, Claude's part: the service on port 47791 with `CC_CONSOLE_HOME` on a temp folder, driven in headless Edge over CDP at 400 and 340 px, dark and light. Real transcripts: 16,122 messages from 11 Sep, October about $870 so far, the calendar, the picked day (today: CLAUDE CONSOLE and CONTENT MANAGER), Days in $ with the limit line, Weeks in tokens, Months with September picked, a day's tooltip; no horizontal scroll, no page errors. `usage-days.json` was written to the temp folder only.
+- Task 4, Fred's part: open: `py -m console`, click the spend strip, `Usage by day, week, month ›`.
+- Differed from the plan: the code is in the commits, not pasted here.
