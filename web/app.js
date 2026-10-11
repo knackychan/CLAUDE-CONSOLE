@@ -19,7 +19,7 @@ let snap = null;
 let cfg = null;          // /api/config
 let live = false;
 let form = "open";       // open | pill
-let page = "list";       // list | session | prep
+let page = "list";       // list | session | prep | usage
 let openId = null;
 let tab = "steps";       // steps | agents | timeline | chat
 let tlMin = -1;          // the Timeline's selected minute (minutes since 1970; -1: the last busy one)
@@ -271,6 +271,9 @@ function showPage(name) {
   leversSig = "";
   procShown = "";
   if (name === "session") $("sscroll").scrollTop = 0;
+  clearInterval(usageTimer);
+  usageTimer = null;
+  if (name === "usage") { $("uscroll").scrollTop = 0; loadUsage(); usageTimer = setInterval(loadUsage, 60000); }
   render();
 }
 
@@ -332,7 +335,8 @@ function renderTop() {
     <span><i class="h"></i>estimated $${money(sp.estimated)}</span>${sp.budget > 0 ? '<span><i class="mk"></i>80 % of limit</span>' : ""}</div>
     <div class="legend"><span>1 cell = $0.50</span>${sp.models.map(([m, f]) => `<span>${esc(m)} ${f < 0.01 ? "&lt;1" : Math.round(f * 100)} %</span>`).join("")}
     ${sp.runs ? `<span>window runs ${sp.runs}</span>` : ""}
-    ${snap.writers.map((w) => `<span>2 writers: ${esc(baseName(w.project_dir))}</span>`).join("")}</div>`);
+    ${snap.writers.map((w) => `<span>2 writers: ${esc(baseName(w.project_dir))}</span>`).join("")}</div>
+    <button class="btn sm go-usage" data-go="usage">Usage by day, week, month &#8250;</button>`);
 }
 
 function cardHtml(s) {
@@ -814,6 +818,186 @@ function step(d) {  // ‹ › and Up / Down: the neighbouring session in the li
   if (k >= 0 && to) { openSession(to.id, tab); }
 }
 
+// -- usage page (BRAINSTORM D13): cost and tokens per day, week and month from every transcript ------------
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MON_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+  "November", "December"];
+const WDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000];  // one column cell: $ or M tokens
+let usage = null;        // /api/usage
+let uMonth = "";         // the calendar's month, YYYY-MM
+let uPicked = "";        // the picked day, YYYY-MM-DD
+let uRange = "days";     // days | weeks | months
+let uMetric = "cost";    // cost | tok
+let usageTimer = null;
+function dkey(d) { return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; }
+function ddate(k) { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d || 1); }
+function addDays(k, n) { const d = ddate(k); d.setDate(d.getDate() + n); return dkey(d); }
+function dayName(k) { const d = ddate(k); return `${WDAY[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`; }
+function usd(v) { return v >= 1000 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + money(v); }
+function tokText(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e8 ? 0 : 1) + "M";
+  return n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n || 0);
+}
+function uCost(k) { const d = usage.days[k]; return d ? d.cost : 0; }
+function uTok(k) { const d = usage.days[k]; return d ? d.tokens.reduce((a, b) => a + b, 0) : 0; }
+function uSum(from, to) {  // inclusive days
+  let cost = 0, tok = 0, used = 0;
+  for (let k = from; k <= to; k = addDays(k, 1)) {
+    if (!usage.days[k]) continue;
+    cost += uCost(k); tok += uTok(k); used++;
+  }
+  return { cost, tok, used };
+}
+function uLimit() { return usage.limit > 0 ? usage.limit : 15; }
+function uTone(c) { const L = uLimit(); return !c ? "" : c < L ? "l1" : c < 3 * L ? "l2" : c < 6 * L ? "l3" : "l4"; }
+function monthEnd(m) { const d = ddate(m + "-01"); return dkey(new Date(d.getFullYear(), d.getMonth() + 1, 0)); }
+
+async function loadUsage() {
+  try { usage = await api("/api/usage"); } catch (e) { usage = { error: e.message }; }
+  if (usage.today && !uMonth) { uMonth = usage.today.slice(0, 7); uPicked = usage.today; }
+  renderUsage();
+}
+
+function usageHead() {
+  const first = uMonth + "-01", end = monthEnd(uMonth), to = end < usage.today ? end : usage.today, s = uSum(first, to);
+  const wk = uSum(addDays(usage.today, -((ddate(usage.today).getDay() + 6) % 7)), usage.today);
+  let over = 0;
+  for (let k = first; k <= to; k = addDays(k, 1)) if (usage.limit > 0 && uCost(k) >= usage.limit) over++;
+  const fig = (label, value, under) => `<span><small>${label}</small><b>${value}</b><i>${under}</i></span>`;
+  const firstMonth = (usage.first || usage.today).slice(0, 7), d = ddate(first);
+  return `<div class="uhead"><span class="big"><span class="est">~</span>${s.cost >= 1000 ? Math.round(s.cost) : money(s.cost)}</span>
+      <span class="mon"><button class="rb" id="u-prev" data-umonth="-1" aria-label="Previous month"${uMonth <= firstMonth ? " disabled" : ""}>&#8249;</button>
+        <b>${MON_LONG[d.getMonth()]} ${d.getFullYear()}</b>
+        <button class="rb" id="u-next" data-umonth="1" aria-label="Next month"${uMonth >= usage.today.slice(0, 7) ? " disabled" : ""}>&#8250;</button></span>
+      <span class="sub m">est. USD · ${tokText(s.tok)} tokens · ${s.used} ${s.used === 1 ? "day" : "days"} used</span></div>
+    <div class="ustats">${fig("today", usd(uCost(usage.today)), tokText(uTok(usage.today)) + " tok")}
+      ${fig("this week", usd(wk.cost), tokText(wk.tok) + " tok")}
+      ${fig("avg / day", usd(s.used ? s.cost / s.used : 0), "days used")}
+      ${usage.limit > 0 ? fig(`over $${usage.limit}`, `${over} of ${s.used}`, "days used") : fig("days used", String(s.used), "no limit")}</div>`;
+}
+
+function usageCalendar() {
+  const d = ddate(uMonth + "-01"), lead = (d.getDay() + 6) % 7, n = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const L = uLimit();
+  let html = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((w) => `<span class="wd">${w}</span>`).join("") + "<span></span>".repeat(lead);
+  for (let i = 1; i <= n; i++) {
+    const k = `${uMonth}-${two(i)}`, c = uCost(k);
+    if (k > usage.today || !usage.first || k < usage.first) {
+      html += `<button class="day ${k > usage.today ? "fut" : "na"}" disabled${k > usage.today ? "" : ' title="No transcript left for this day"'}><span>${i}</span></button>`;
+      continue;
+    }
+    const tip = `${dayName(k)}|${c ? `${usd(c)} · ${tokText(uTok(k))} tokens` : "no use"}`;
+    html += `<button class="day ${uTone(c)}${k === usage.today ? " now" : ""}" id="ud-${k}" data-day="${k}" data-tip="${esc(tip)}"
+      aria-pressed="${k === uPicked}" aria-label="${esc(tip.replace("|", ": "))}"><span>${i}</span>${c ? `<span class="dc">$${Math.round(c)}</span>` : ""}</button>`;
+  }
+  return `<div class="ublk"><div class="hd"><span class="lbl">Days</span><span class="legend"><span><i class="l1"></i>&lt; $${L}</span>
+      <span><i class="l2"></i>&lt; ${3 * L}</span><span><i class="l3"></i>&lt; ${6 * L}</span><span><i class="l4"></i>${6 * L}+</span></span></div>
+    <div class="cal">${html}</div></div>`;
+}
+
+function usageDay() {
+  const r = usage.days[uPicked], head = `<div class="hd"><b>${dayName(uPicked)}${uPicked === usage.today ? " · today" : ""}</b>`;
+  if (!r) return `<div class="ublk"><div class="dayd">${head}<span class="m">$0.00</span></div><p class="none">No Claude Code use this day.</p></div></div>`;
+  const projects = Object.entries(r.projects).filter(([, c]) => c >= 0.005).sort((a, b) => b[1] - a[1]);
+  const top = projects.length ? projects[0][1] : 1;
+  const fams = Object.entries(r.models).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1])
+    .map(([f, c]) => `<span>${esc(f)} ${r.cost ? Math.round(100 * c / r.cost) : 0} %</span>`).join("");
+  const tk = (label, n) => `<span><small>${label}</small><b>${tokText(n)}</b></span>`;
+  return `<div class="ublk"><div class="dayd">${head}<span class="m">~${usd(r.cost)}</span></div>
+    <div class="tok">${tk("input", r.tokens[0])}${tk("output", r.tokens[1])}${tk("cache write", r.tokens[2])}${tk("cache read", r.tokens[3])}</div>
+    <div class="uprj">${projects.map(([p, c]) => {
+      const n = Math.max(1, Math.round(30 * c / top));
+      return `<div class="urow"><span class="nm" title="${esc(p)}">${esc(p)}</span><span class="cells">${cellsHtml(Array.from({ length: 30 }, (_, k) => k < n ? "f" : ""))}</span><span class="c m">${usd(c)}</span></div>`;
+    }).join("")}</div>
+    <div class="legend">${fams}</div></div></div>`;
+}
+
+function usageBuckets() {  // one column each, oldest first
+  const tok = uMetric === "tok", first = usage.first || usage.today;
+  if (uRange === "days") {
+    return Array.from({ length: 30 }, (_, j) => {
+      const k = addDays(usage.today, j - 29), d = ddate(k);
+      return { k, na: k < first, c: uCost(k), t: uTok(k), v: tok ? uTok(k) : uCost(k), label: dayName(k), short: `${d.getDate()} ${MON[d.getMonth()]}` };
+    });
+  }
+  if (uRange === "weeks") {
+    return usage.weeks.map((w) => {
+      const d = ddate(w.start), short = `${d.getDate()} ${MON[d.getMonth()]}`;
+      return { k: w.start, na: addDays(w.start, 6) < first, c: w.cost, t: w.tokens, v: tok ? w.tokens : w.cost, label: "week of " + short, short };
+    });
+  }
+  return usage.months.map((m) => {
+    const d = ddate(m.month + "-01");
+    return { k: m.month, na: m.month < first.slice(0, 7), c: m.cost, t: m.tokens, v: tok ? m.tokens : m.cost,
+      label: `${MON_LONG[d.getMonth()]} ${d.getFullYear()}`, short: MON[d.getMonth()] };
+  });
+}
+
+function usageChart() {
+  const b = usageBuckets(), tok = uMetric === "tok", unit = tok ? 1e6 : 1;
+  const max = Math.max(...b.map((x) => x.v)), step = STEPS.map((s) => s * unit).find((s) => max / s <= 20) || STEPS[STEPS.length - 1] * unit;
+  const cols = b.map((x) => {
+    const tip = `${x.label}|${x.na ? "before the first transcript" : `${usd(x.c)} · ${tokText(x.t)} tokens`}`;
+    if (x.na) return `<button class="col na" disabled data-tip="${esc(tip)}" aria-label="${esc(tip.replace("|", ": "))}"></button>`;
+    const full = Math.floor(x.v / step), part = x.v - full * step > 0 ? 1 : 0;
+    const on = uRange === "days" ? x.k === uPicked : uRange === "months" ? x.k === uMonth : false;
+    return `<button class="col" id="uc-${x.k}" data-col="${x.k}" data-tip="${esc(tip)}" aria-pressed="${on}" aria-label="${esc(tip.replace("|", ": "))}">${"<i></i>".repeat(full)}${part ? '<i class="l2"></i>' : ""}</button>`;
+  }).join("");
+  const lim = uRange === "days" && !tok && usage.limit > 0
+    ? `<div class="lim" style="bottom:${(usage.limit / step) * 6 - 1}px"><span>limit $${usage.limit}</span></div>` : "";
+  const top = b.reduce((a, x) => x.v > a.v ? x : a, b[0]), mid = b[Math.floor(b.length / 2)];
+  const tabs = [["days", "Days"], ["weeks", "Weeks"], ["months", "Months"]].map(([k, l]) =>
+    `<button role="tab" id="ur-${k}" data-range="${k}" aria-selected="${uRange === k}">${l}</button>`).join("");
+  return `<div class="ublk"><div class="tabs" role="tablist">${tabs}
+      <span class="seg"><button id="um-cost" data-metric="cost" aria-pressed="${!tok}">$</button><button id="um-tok" data-metric="tok" aria-pressed="${tok}">tokens</button></span></div>
+    <div class="plot" style="grid-template-columns:repeat(${b.length}, minmax(0, 1fr))">${cols}${lim}</div>
+    <div class="scale"><span>${b[0].short}</span><span>${mid.short}</span><span>${uRange === "days" ? "today" : b[b.length - 1].short}</span></div>
+    <div class="hd"><span class="m mut">1 cell = ${tok ? tokText(step) + " tokens" : "$" + step}</span>
+      <span class="m mut">${top.v ? `top ${tok ? tokText(top.v) : usd(top.v)}, ${uRange === "days" ? top.label : top.short}` : ""}</span></div></div>`;
+}
+
+function renderUsage() {
+  if (page !== "usage") return;
+  $("utip").hidden = true;
+  if (!usage || usage.error || !usage.ready) {
+    const text = usage && usage.error ? `The service did not answer: ${usage.error}` : "Reading every transcript, a few seconds the first time";
+    setHtml($("uscroll"), `<div class="empty"><span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>${esc(text)}</span></div>`);
+    if (usage && !usage.error && !usage.ready) setTimeout(() => { if (page === "usage") loadUsage(); }, 2000);
+    return;
+  }
+  const since = usage.first ? dayName(usage.first) : "today";
+  setHtml($("uscroll"), usageHead() + usageCalendar() + usageDay() + usageChart()
+    + `<p class="ufoot">Estimated from the transcripts at the list prices in config.json, fast mode 2x. Kept from ${esc(since)}:
+       Claude Code deletes transcripts after 30 days, so the service keeps each closed day in usage-days.json.</p>`);
+}
+
+function showTip(el) {
+  const tip = $("utip"), [a, b] = el.dataset.tip.split("|");
+  tip.innerHTML = `${esc(a)}<small>${esc(b)}</small>`;
+  tip.hidden = false;
+  const w = $("open").getBoundingClientRect(), r = el.getBoundingClientRect();
+  tip.style.left = Math.min(Math.max(4, r.left - w.left + r.width / 2 - tip.offsetWidth / 2), w.width - tip.offsetWidth - 4) + "px";
+  tip.style.top = Math.max(40, r.top - w.top - tip.offsetHeight - 6) + "px";
+}
+function moveMonth(n) { const d = ddate(uMonth + "-01"); d.setMonth(d.getMonth() + n); uMonth = dkey(d).slice(0, 7); renderUsage(); }
+$("uscroll").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-day],[data-col],[data-range],[data-metric],[data-umonth]");
+  if (!t || t.disabled) return;
+  if (t.dataset.day) uPicked = t.dataset.day;
+  else if (t.dataset.col && uRange === "days") { uPicked = t.dataset.col; uMonth = uPicked.slice(0, 7); }
+  else if (t.dataset.col && uRange === "months") uMonth = t.dataset.col;
+  else if (t.dataset.range) uRange = t.dataset.range;
+  else if (t.dataset.metric) uMetric = t.dataset.metric;
+  else if (t.dataset.umonth) return moveMonth(Number(t.dataset.umonth));
+  renderUsage();
+});
+$("uscroll").addEventListener("pointerover", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); else $("utip").hidden = true; });
+$("uscroll").addEventListener("pointerleave", () => { $("utip").hidden = true; });
+$("uscroll").addEventListener("focusin", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); else $("utip").hidden = true; });
+$("uscroll").addEventListener("scroll", () => { $("utip").hidden = true; });
+
 // -- events ------------------------------------------------------------------------------
 async function go(name, button) {
   if (name === "list") showPage("list");
@@ -824,6 +1008,7 @@ async function go(name, button) {
     if (n) n.scrollIntoView({ block: "start", behavior: "smooth" });
   }
   if (name === "moredone") { doneOpen = true; render(); }
+  if (name === "usage") showPage("usage");
   if (name === "fold") await setForm("pill");
   if (name === "unfold") await setForm("open");
   if (name === "allow") allowRuns(button);
@@ -912,7 +1097,7 @@ document.addEventListener("keydown", (e) => {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();
     else if (page === "prep") prepAct("cancel");
-    else if (page === "session") showPage("list");
+    else if (page === "session" || page === "usage") showPage("list");
     return;
   }
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
