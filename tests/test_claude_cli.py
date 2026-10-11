@@ -1,8 +1,11 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from console import claude_cli
@@ -57,6 +60,15 @@ class CommandTest(unittest.TestCase):
 
     def test_find_exe_prefers_config(self):
         self.assertEqual(claude_cli.find_exe({"claude_exe": r"C:\x\claude.exe"}), r"C:\x\claude.exe")
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_git_status_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(claude_cli.git_status(tmp), [])  # not a repo
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            Path(tmp, "a.txt").write_text("x", encoding="utf-8")
+            self.assertEqual(claude_cli.git_status(tmp), ["?? a.txt"])
+        self.assertEqual(claude_cli.git_status(os.path.join(tmp, "gone")), [])
 
     def test_pid_alive(self):
         self.assertTrue(claude_cli.pid_alive(os.getpid()))

@@ -145,3 +145,13 @@ def git_changed(cwd: str, commit: str):
             return None
         names.update(line for line in out.stdout.splitlines() if line.strip())
     return len(names)
+
+
+def git_status(cwd: str) -> list:
+    """`git status --short` lines of `cwd` ([] when it is not a repo or git is missing)."""
+    try:
+        out = subprocess.run(["git", "status", "--short"], cwd=cwd, capture_output=True, text=True,
+                             timeout=10, creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return out.stdout.splitlines() if out.returncode == 0 else []
