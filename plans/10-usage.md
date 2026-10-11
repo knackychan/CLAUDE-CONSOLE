@@ -1,4 +1,4 @@
-# Plan 09: Usage page Implementation Plan
+# Plan 10: Usage page Implementation Plan
 
 > Related plans: [../PLAN.md](../PLAN.md) (master), [06-rework.md](06-rework.md) (the estimate from transcripts this builds on), [07-cells-drawer.md](07-cells-drawer.md) (the window and the spend breakdown it opens from), [08-cold-handoff.md](08-cold-handoff.md) (written in parallel; also edits `server.py`, `app.js`, `style.css`)
 > Context: [../BRAINSTORM.md](../BRAINSTORM.md) D13 and 7.5; the locked mockup [../design/rework/locked/usage.html](../design/rework/locked/usage.html) (its notes column holds the reasoning); [../CLAUDE.md](../CLAUDE.md)

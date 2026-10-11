@@ -19,7 +19,7 @@ ends with working, tested software.
 | 6 | [plans/06-rework.md](plans/06-rework.md) - Visual rework, Console Cells (BRAINSTORM 7.5, `design/rework/locked/console-cells.html`): borderless pill + rail + focus pane, cell motif, estimated cost, activity buckets | written 2026-10-10 |
 | 7 | [plans/07-cells-drawer.md](plans/07-cells-drawer.md) - Cells Drawer window (BRAINSTORM 7.5, D12, `design/rework/locked/cells-drawer.html`): list, session page and searchable project picker replace the rail, focus pane and Overview; Chat from transcripts, per-minute Timeline; its live check also closes plan 06 Tasks 7-8 | written 2026-10-10 |
 | 8 | [plans/08-cold-handoff.md](plans/08-cold-handoff.md) - cold-cache guard on the levers (second click with the estimated re-read cost) and seeded briefs: Brief a new task / Verify in a new task, built locally with no model call | Tasks 1-4 done 2026-10-11, Task 5 (live check) open |
-| 9 | [plans/09-usage.md](plans/09-usage.md) - Usage page (BRAINSTORM D13, `design/rework/locked/usage.html`): cost and tokens per day, week and month from every transcript, calendar and columns of cells, history in usage-days.json | written 2026-10-11 |
+| 10 | [plans/10-usage.md](plans/10-usage.md) - Usage page (BRAINSTORM D13, `design/rework/locked/usage.html`): cost and tokens per day, week and month from every transcript, calendar and columns of cells, history in usage-days.json | written 2026-10-11 |
 
 ## Changes to the design made while planning phase 1
 
@@ -115,7 +115,7 @@ ends with working, tested software.
 - **Brief open or folded** (Fred): remembered for the window in `~/.claude/console/window.json` (`brief`),
   next to the form, through `/api/draft`.
 
-## Changes to the design made while planning phase 9
+## Changes to the design made while planning phase 10
 
 - **Usage page** (Fred, 2026-10-11): its own page from a button in the spend breakdown, drawn first as a
   mockup and locked as `design/rework/locked/usage.html` (BRAINSTORM D13). Estimated cost and tokens only;
@@ -145,4 +145,4 @@ ends with working, tested software.
 - 2026-10-10 - Sub-plan 06 written (zero-decision, final code): Fred decided the estimate from transcripts read by the service, list prices, a $15 soft limit with $0.50 cells, activity levels 1-2 / 3-5 / 6-9 / 10+ steps per minute, rail = needs + working, Prep in the pane, a seg control for Steps / Timeline / Chat, a project select in the compose row, one notes block, model shares of spend, a remembered form and place, a peek card for new events only. Verified in a scratch clone: 95 tests OK, the frameless resize and a second start as the pill checked on this machine, the estimate on this project's transcripts; tasks replayed in a fresh clone (88, 91, 92, 93, 95, 95, files equal to the scratch code), the fresh clone checked in a browser at 420 px with the fake claude. Task 7 (the real window on Fred's screen) is Fred's.
 - 2026-10-10 - Phase 6 tasks 1-6 placed (95 tests OK); Task 7 (live check) not run yet: it moves to plan 07 Task 5, after the Cells Drawer window replaces the rail.
 - 2026-10-10 - Fred locked Cells Drawer (D12) and decided the Chat tab from transcripts, the per-minute Timeline, the Prep page, one muted note line and the brief state in window.json. Sub-plan 07 written (zero-decision, final code): verified in a scratch clone (99 tests OK; each task's new tests fail as written, then pass), the window checked in a browser at 400 and 340 px with the fake claude (every view of the mock, dark, light by hand-set tokens, pill and peek, picker, answer in place, Prep, Run, Stop, empty and offline states, no console errors); tasks replayed in a fresh clone (98, 99, 99, 99, files equal to the scratch code). Tasks 5-6 (the real window, closing plans 06 and 07) are Fred's.
-- 2026-10-11 - Fred approved the Usage mockup (D13, `design/rework/locked/usage.html`). Plan 09 placed: `usage.History` reads every transcript per local day, `/api/usage` with 12 weeks and 12 months, history in `usage-days.json`, the Usage page from the spend breakdown; 104 tests OK; checked in headless Edge against the real transcripts at 400 and 340 px. Open: Fred's look in the native window.
+- 2026-10-11 - Fred approved the Usage mockup (D13, `design/rework/locked/usage.html`). Plan 10 placed: `usage.History` reads every transcript per local day, `/api/usage` with 12 weeks and 12 months, history in `usage-days.json`, the Usage page from the spend breakdown; 104 tests OK; checked in headless Edge against the real transcripts at 400 and 340 px. Open: Fred's look in the native window.
