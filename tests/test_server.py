@@ -238,6 +238,77 @@ class RunServerTest(unittest.TestCase):
                          ("transcript", [("you", "hello"), ("claude", "Hi.")]))
         self.assertEqual(self.call("/api/chat?session=nope")[1]["items"], [])
 
+    def idle_chat(self, sid, hours, tokens, transcript=None):
+        """A VS Code chat whose last event was `hours` ago, holding `tokens` of context."""
+        ts = time.time() - hours * 3600
+        base = {"session_id": sid, "project": "proj", "project_dir": str(self.project), "cwd": str(self.project)}
+        first = dict(base, event="UserPromptSubmit", ts=ts, prompt="fix add")
+        if transcript:
+            first["transcript_path"] = str(transcript)
+        events.append(self.folder, first)
+        events.append(self.folder, dict(base, event="PreToolUse", ts=ts + 1, tool="Edit", what="calc.py"))
+        events.append(self.folder, dict(base, event="PreToolUse", ts=ts + 2, tool="Edit", what="calc.py"))
+        events.append(self.folder, dict(base, event="PreToolUse", ts=ts + 3, tool="Read", what="notes.md"))
+        events.append(self.folder, dict(base, event="Stop", ts=ts + 4, model="claude-sonnet-5-5",
+                                        effort="medium", context_tokens=tokens))
+        self.hub.poll_once()
+
+    def test_a_cold_large_chat_needs_a_confirm_before_a_lever_re_reads_it(self):
+        self.idle_chat("c1", hours=9, tokens=444000)
+        lv = self.call("/api/levers?session=c1")[1]
+        self.assertEqual(lv["cold"], {"idle_s": lv["cold"]["idle_s"], "tokens": 444000, "cost": 1.11})  # sonnet 2.5 / M
+        self.assertTrue(9 * 3600 - 60 < lv["cold"]["idle_s"] < 9 * 3600 + 60)
+        for lever, body in (("continue", {"text": "go"}), ("verify", {})):
+            status, data = self.call(f"/api/{lever}", dict(body, session="c1"))
+            self.assertEqual(status, 409, lever)
+            self.assertTrue(data["error"].startswith("cold cache: 444K tokens, idle 9 h, would be re-read at full "
+                                                     "price (about $1.11)"), data)
+        self.assertEqual(self.call("/api/continue", {"session": "c1", "text": "go", "confirm": "yes"})[0], 409)
+        self.assertEqual([s["id"] for s in self.hub.snapshot()["sessions"]], ["c1"])  # nothing started
+        status, data = self.call("/api/continue", {"session": "c1", "text": "go", "confirm": True})
+        self.assertEqual(status, 200)
+        self.assertNotEqual(data["session"], "c1")
+        self.wait_idle(data["session"])
+
+    def test_no_cold_guard_for_a_recent_or_a_small_chat(self):
+        self.idle_chat("r1", hours=0.5, tokens=444000)  # the cache may still be warm
+        self.idle_chat("s1", hours=9, tokens=100000)  # cheap to re-read
+        self.assertIsNone(self.call("/api/levers?session=r1")[1]["cold"])
+        self.assertIsNone(self.call("/api/levers?session=s1")[1]["cold"])
+        status, data = self.call("/api/continue", {"session": "s1", "text": "go"})
+        self.assertEqual(status, 200)
+        self.wait_idle(data["session"])
+
+    def test_brief_of_a_session_from_its_transcript_and_steps(self):
+        transcript = Path(self.tmp.name) / "c2.jsonl"
+        transcript.write_text("".join(json.dumps(rec) + "\n" for rec in (
+            {"type": "user", "timestamp": "2026-10-10T10:00:00Z",
+             "message": {"role": "user", "content": "Implement the Cells Drawer window"}},
+            {"type": "assistant", "timestamp": "2026-10-10T10:00:05Z",
+             "message": {"role": "assistant", "content": [{"type": "text", "text": "Step 3 is placed."}]}},
+            {"type": "user", "timestamp": "2026-10-10T10:01:00Z",
+             "message": {"role": "user", "content": "continue"}})), encoding="utf-8")
+        (self.project / "PLAN.md").write_text("# plan", encoding="utf-8")
+        self.idle_chat("c2", hours=9, tokens=444000, transcript=transcript)
+        status, data = self.call("/api/brief?session=c2")
+        self.assertEqual((status, data["project_dir"]), (200, self.hub.session("c2")["project_dir"]))
+        for part in ("Goal (the first prompt of the earlier chat):\nImplement the Cells Drawer window",
+                     "Where it stopped (the last message of Claude):\nStep 3 is placed.",
+                     "Files the earlier chat edited:\n- calc.py\n\n", "Read PLAN.md first."):
+            self.assertIn(part, data["text"])
+        self.assertNotIn("notes.md", data["text"])  # a Read is not an edit
+        verify = self.call("/api/brief?session=c2&kind=verify")[1]["text"]
+        self.assertTrue(verify.startswith("Check the work of this session."))
+        self.assertNotIn("PLAN.md", verify)
+        self.assertEqual(self.call("/api/brief?session=nope")[0], 404)
+        self.assertEqual(self.call("/api/brief?session=c2&kind=other")[0], 404)
+
+    def test_brief_without_a_transcript_falls_back_to_the_title(self):
+        self.idle_chat("c3", hours=9, tokens=444000)
+        text = self.call("/api/brief?session=c3")[1]["text"]
+        self.assertIn("Goal (the first prompt of the earlier chat):\nfix add", text)
+        self.assertNotIn("Where it stopped", text)
+
     def test_verify_then_escalate_once(self):
         sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
                                      "model": "sonnet", "effort": "high"})[1]["session"]

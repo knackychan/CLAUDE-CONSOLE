@@ -25,6 +25,7 @@ DEFAULTS = {
     "rules_max_kb": 16,
     "delegate_after_reads": 10,
     "daily_budget_usd": 15,
+    "cold_after_s": 3600,  # idle this long: both prompt-cache lifetimes (5 min, 1 h) are gone
     # USD per million tokens, API list prices (claude-api skill, 2026-10-06); fast mode costs 2x.
     # Haiku's higher price for prompts over 100K tokens is left out.
     "prices": {

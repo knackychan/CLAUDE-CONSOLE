@@ -8,8 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import claude_cli, events, guard, levers, paths, prep, runs, transcript, usage
-from .state import State, norm_dir
+from . import brief, claude_cli, events, guard, levers, paths, prep, runs, transcript, usage
+from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
@@ -121,9 +121,9 @@ class Hub:
         with self.lock:
             return self.state.snapshot(time.time(), self.usage)
 
-    def steps(self, session_id: str) -> list:
+    def steps(self, session_id: str, limit: int = 200) -> list:
         with self.lock:
-            return self.state.steps(session_id)
+            return self.state.steps(session_id, limit)
 
     def session(self, session_id: str):
         with self.lock:
@@ -135,7 +135,7 @@ class Hub:
                     "project": s.project, "project_dir": s.project_dir, "route": s.route,
                     "run_live": s.run_live, "state": self.state.state_of(s, time.time()),
                     "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
-                    "transcript_path": s.transcript_path}
+                    "transcript_path": s.transcript_path, "ctx_tokens": s.ctx_tokens, "last_ts": s.last_ts}
 
     def route_of(self, session_id: str, s: dict) -> tuple:
         """(model, effort) the session runs on: a window run's own route, else the model last seen."""
@@ -144,6 +144,16 @@ class Hub:
         effort = meta.get("effort") or (s["effort"] if s["effort"] in claude_cli.EFFORTS
                                         else self.cfg["default_effort"])
         return model, effort
+
+    def cold(self, s: dict, model: str, now: float = None):
+        """What a lever would re-read at full price: {idle_s, tokens, cost}, or None. The chat has been
+        idle past cold_after_s (both cache lifetimes are gone) and holds gauge_yellow_tokens or more;
+        cost = tokens x the 5-minute cache-write price of the route's model (the cheaper of the two)."""
+        tokens, idle = s["ctx_tokens"], (now or time.time()) - s["last_ts"]
+        if not tokens or tokens < self.cfg["gauge_yellow_tokens"] or idle < self.cfg["cold_after_s"]:
+            return None
+        price = self.cfg["prices"].get(model) or self.cfg["prices"]["sonnet"]
+        return {"idle_s": int(idle), "tokens": tokens, "cost": round(tokens * price["cache_write_5m"] / 1e6, 2)}
 
     def levers(self, session_id):
         """What each lever would do for this session and why one is off ("" = allowed). The one
@@ -181,7 +191,7 @@ class Hub:
                            "dotclaude/skills/session-handoff to ~/.claude/skills")
         return {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate,
                 "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
-                "fork": not window, "cwd": cwd or ""}
+                "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model)}
 
     def allowed(self, project_dir) -> str:
         """The configured folder matching `project_dir`, or "" (runs only in listed folders)."""
@@ -267,6 +277,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.hub.usage_report())
         if url.path == "/api/chat":
             return self._chat(query.get("session", [""])[0])
+        if url.path == "/api/brief":
+            return self._brief(query.get("session", [""])[0], query.get("kind", ["task"])[0])
         if url.path == "/api/levers":
             data = self.hub.levers(query.get("session", [""])[0])
             return self._json(data) if data else self._error(404, "unknown session")
@@ -372,6 +384,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "unknown session")
         if info[lever]:
             return self._error(409, info[lever])
+        if info["cold"] and body.get("confirm") is not True:  # the page asks with a second click
+            c = info["cold"]
+            return self._error(409, f"cold cache: {c['tokens'] // 1000}K tokens, idle {c['idle_s'] / 3600:.0f} h, "
+                                    f"would be re-read at full price (about ${c['cost']:.2f}); open the session to "
+                                    "confirm, or start a new task there with a brief")
         s = self.hub.session(sid)
         model, effort = self.hub.route_of(sid, s)
         extra, miss = {}, ""
@@ -448,6 +465,25 @@ class Handler(BaseHTTPRequestHandler):
         changed = claude_cli.git_changed(meta["cwd"], meta.get("start_commit", ""))
         return self._json({"items": items, "source": "window", "changed": changed,
                            "live": self.hub.runs.is_live(sid), "start_commit": meta.get("start_commit", "")})
+
+    def _brief(self, sid: str, kind: str):
+        """The text of a new task that takes over a session, built from its transcript, its steps and the
+        folder's git status: no model call, nothing written."""
+        s = self.hub.session(sid)
+        if s is None or kind not in ("task", "verify"):
+            return self._error(404, "unknown session")
+        turns = transcript.turns(s["transcript_path"])
+        files = []
+        for step in self.hub.steps(sid, MAX_STEPS):
+            if step["tool"] in WRITE_TOOLS and step["what"] and step["what"] not in files:
+                files.append(step["what"])
+        folder = s["project_dir"] if os.path.isdir(s["project_dir"] or "") else s["cwd"]
+        text = brief.build(kind, goal=transcript.first_prompt(s["transcript_path"]) or s["title"],
+                           last=next((t["text"] for t in reversed(turns) if t["role"] == "claude"), ""),
+                           files=files, verdict=s["verdict"], detail=s["verdict_detail"],
+                           status=claude_cli.git_status(folder) if os.path.isdir(folder or "") else [],
+                           plan=os.path.isfile(os.path.join(folder or "", "PLAN.md")))
+        return self._json({"text": text, "project_dir": s["project_dir"]})
 
     def _stream(self):
         self.send_response(200)
