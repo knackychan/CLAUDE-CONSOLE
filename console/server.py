@@ -273,10 +273,19 @@ class Hub:
                            "the session-handoff skill is not installed here: copy "
                            "dotclaude/skills/session-handoff to ~/.claude/skills")
         nxt = base or ("" if s["handoff_by"] else "only after a Hand off")  # a new task seeded with the note
-        return {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate, "next": nxt,
-                "deescalate": deescalate, "deescalate_to": "/".join(start) if start else "",
-                "after_verify": list(levers.after_verify(s["verdict"])), "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
-                "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model)}
+        out = {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate, "next": nxt,
+               "deescalate": deescalate, "deescalate_to": "/".join(start) if start else "",
+               "after_verify": list(levers.after_verify(s["verdict"])), "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
+               "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model)}
+        task = self.tasks.get(s["task"]) if s["task"] else None
+        if task and task["state"] in ("planned", "running", "waiting"):  # a working chain owns its steps' turns
+            cs = tasks.current_step(task)
+            asked = (task["state"] == "waiting" and task["why"].startswith("asks: ")
+                     and cs is not None and cs["session"] == session_id)
+            for lever in ("continue", "verify", "handoff", "escalate", "deescalate"):
+                if not (lever == "continue" and asked):  # Continue answers the step's question
+                    out[lever] = base or "a task step: use the task's levers"
+        return out
 
     def pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = ()) -> tuple:
         """Continue (also STOP answers and Resume), Verify, Handoff, Escalate: a new turn of a window
@@ -443,16 +452,16 @@ class Hub:
                 start = "confirm Fable"
             else:
                 start = ""
-            stop = base or ("" if state in ("running", "waiting") else f"task is {state}")
-            pause = base or ("" if owner == "service" and state in ("running", "waiting") else
-                             "already paused" if owner == "fred" and state in ("running", "waiting")
-                             else f"task is {state}")
+            # Stop, Pause and Clear start nothing: they work in a project taken off the list or a folder gone
+            stop = "" if state in ("running", "waiting") else f"task is {state}"
+            pause = ("" if owner == "service" and state in ("running", "waiting") else
+                     "already paused" if owner == "fred" and state in ("running", "waiting") else f"task is {state}")
             resume = base or ("" if owner == "fred" and state in ("running", "waiting") else "not paused")
             retry = base or ("still working: wait until it stops" if live else
                              "" if state in ("stuck", "stopped") else f"task is {state}")
             confirm = base or ("" if state == "waiting" and task["why"] == "confirm Fable" else "nothing to confirm")
-            clear = base or ("still working: wait until it stops" if live else
-                             "" if state in ("done", "stuck", "stopped") else f"task is {state}")
+            clear = ("still working: wait until it stops" if live else
+                     "" if state in ("planned", "done", "stuck", "stopped") else f"task is {state}")
             route = self._route_for(task, nxt) if nxt else None
             return {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry,
                     "confirm": confirm, "clear": clear,
@@ -538,24 +547,45 @@ class Hub:
         acted = []
         with self.tlock:
             for task in list(self.tasks.values()):
-                if task["state"] == "done" and task.get("briefing") and task["id"] not in self.briefing:
-                    self.start_brief(task, task["briefing"])  # the service restarted while the last brief ran
-                    continue
-                if task["owner"] != "service" or task["state"] not in ("planned", "running", "waiting"):
-                    continue
-                cs = tasks.current_step(task)
-                if cs and cs["state"] == "running":
-                    action = self._ended(task, cs)
-                elif task["state"] == "waiting":
-                    action = ""  # a hold or a Fable confirm: Fred acts
-                else:
-                    action = self._go_on(task)
+                try:
+                    action = self._advance_one(task)
+                except Exception as exc:  # one bad task never stops the hub loop: it waits for Fred, stuck
+                    action = self._broken(task, exc)
                 if action:
-                    acted.append((task["id"], action))
+                    acted.append((task.get("id", ""), action))
         return acted
 
+    def _advance_one(self, task: dict) -> str:
+        if task["state"] == "done" and task.get("briefing") and task["id"] not in self.briefing:
+            self.start_brief(task, task["briefing"])  # the service restarted while the last brief ran
+            return ""
+        if task["owner"] != "service" or task["state"] not in ("planned", "running", "waiting"):
+            return ""
+        cs = tasks.current_step(task)
+        if cs and cs["state"] == "running":
+            return self._ended(task, cs)
+        if task["state"] == "waiting":
+            return ""  # a hold or a Fable confirm: Fred acts
+        return self._go_on(task)
+
+    def _broken(self, task: dict, exc: Exception) -> str:
+        """A task move raised (a disk error, a task.json from another version): the task is stuck with the error
+        as its why, saved when the disk lets it."""
+        now, why = time.time(), redact.clip(f"{type(exc).__name__}: {exc}", 200)
+        line = {"ts": now, "step": task.get("current") or 0, "from": f"task:{task.get('state', '')}",
+                "to": "task:stuck", "why": why, "session": ""}
+        task.update(state="stuck", why=why, updated=now)
+        try:
+            self._commit(task, [line])
+        except Exception:  # the window still shows it stuck
+            with self.lock:
+                self.version += 1
+                self.changed.notify_all()
+        return "stuck"
+
     def _ended(self, task: dict, cs: dict) -> str:
-        """The current step's run: still going, waiting for Fred's answer, or ended (README 3.7)."""
+        """The current step's run: still going, waiting for Fred's answer, or ended (README 3.7). The verdict and
+        the question are read in the reply: the Stop hook that also logs them is async and may come late."""
         now, sid = time.time(), cs["session"]
         s = self.session(sid)
         if s is None:  # its first event is not in yet
@@ -566,24 +596,28 @@ class Hub:
                 tasks._task_to(task, "running", "", now, cs, lines)
                 self._commit(task, lines)
             return ""
-        if task["state"] == "waiting" and s["stop_question"]:
-            return ""
-        meta = self.runs.meta(sid)
+        meta = self.runs.meta(sid) or {}
         if meta and not meta.get("ended"):  # the watcher has not closed it yet
             return ""
-        if s["stop_question"]:
+        if task["state"] == "waiting" and "asked" in cs and cs["asked"] == meta.get("started"):
+            return ""  # no answer yet: the turn that asked is still the last one
+        text, subtype = self.final_message(sid)
+        question = s["stop_question"] or tasks.reply_question(text)
+        if question:
+            cs["asked"] = meta.get("started")
             action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
-                                                question=s["stop_question"], now=now)
+                                                question=question, now=now)
             self._commit(task, lines)
             return action
-        text, subtype = self.final_message(sid)
         block = tasks.parse_handoff(text)
         block_error = "no HANDOFF block" if block is None else tasks.check_handoff(block)
-        ok = not (s["interrupted"] or s["stopped"] or s["denied"] or s["failed"]) and subtype == "success"
-        verdict = s["verdict"] if s["verdict_ts"] >= (cs["started"] or 0) else ""
+        # a denial in auto mode is not a failure: the model works around it and its handoff says what is left
+        ok = not (s["interrupted"] or s["stopped"] or s["failed"]) and subtype == "success"
+        verdict, detail = tasks.reply_verdict(text)
+        if not verdict and s["verdict_ts"] >= (cs["started"] or 0):
+            verdict, detail = s["verdict"], s["verdict_detail"]
         action, lines = tasks.on_step_ended(task, ok=ok, block_error=block_error, verdict=verdict,
-                                            verdict_detail=s["verdict_detail"] if verdict else "", question="",
-                                            now=now)
+                                            verdict_detail=detail if verdict else "", question="", now=now)
         cs["cost"] = s["cost"]
         if action in ("next", "fix", "done"):
             tasks.write_note(self.folder, task, cs, block)
@@ -926,6 +960,11 @@ class Handler(BaseHTTPRequestHandler):
         sid, s = self._window_session(body)
         if not sid:
             return self._error(404, "not a window run")
+        task = self.hub.tasks.get(s["task"]) if s["task"] else None
+        cs = tasks.current_step(task) if task else None
+        if cs and cs["session"] == sid and task["state"] in ("running", "waiting"):  # the task's Stop, not a retry
+            code, data = self.hub.task_lever(task["id"], "stop")
+            return self._json({"stop": data["state"], "task": task["id"]} if code == 200 else data, code)
         result = self.hub.runs.stop(sid)
         return self._json({"stop": result})
 

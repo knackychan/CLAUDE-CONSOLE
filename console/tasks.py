@@ -162,6 +162,29 @@ def next_hint(block: str):
     return None
 
 
+# The hook's patterns (cc_events.py runs in the hook and is not imported here). The Stop hook is async and may
+# land after run_ended, so the service reads the verdict and the question in the step's reply itself.
+_VERDICT = re.compile(r"^[\s`*>\-]*VERDICT:\s*(PASS|FAIL)\b[ \t`*:\-]*(.*?)[ \t`*]*$", re.M)
+_STOP = re.compile(r"^[\s`*>\-]*STOP:\s*(.+?)[\s`*]*$", re.M)
+_NO_QUESTION = {"none", "n/a", "-", ""}
+
+
+def reply_verdict(text: str) -> tuple:
+    """(PASS or FAIL, detail) of the last whole `VERDICT:` line; ("", "") when there is none."""
+    found = _VERDICT.findall(str(text or ""))
+    if not found:
+        return "", ""
+    word, detail = found[-1]
+    return word, redact.clip(redact.mask(detail.strip()), 160)
+
+
+def reply_question(text: str) -> str:
+    """The last whole `STOP: <question>` line's question; "" for none (`STOP: none` is not a question)."""
+    found = _STOP.findall(str(text or ""))
+    question = found[-1].strip() if found else ""
+    return "" if question.rstrip(".").lower() in _NO_QUESTION else redact.clip(redact.mask(question), 200)
+
+
 def note_file(task: dict, step: dict) -> str:
     return f"steps/{step['n']:02d}-{step['kind']}.md"
 
@@ -186,6 +209,17 @@ def _blank(n: int, kind: str, goal: str, pick: str = "", checked: int = 0) -> di
     return {"n": n, "kind": kind, "goal": goal, "model": "", "effort": "", "pick": pick, "session": "",
             "state": "planned", "handoff": "", "verdict": "", "verdict_detail": "", "retries": 0, "cost": 0,
             "start_commit": "", "started": None, "ended": None, "notes": [], "checked": checked}
+
+
+TASK_KEYS = ("id", "project_dir", "project", "title", "type", "demand", "effort", "state", "owner", "current",
+             "last_good", "escalated", "fable_ok", "prep", "why", "created", "updated", "steps")
+STEP_KEYS = tuple(_blank(0, "", ""))
+
+
+def whole(task) -> bool:
+    """True when `task` has every key the service reads; a task.json from another version may not."""
+    return (isinstance(task, dict) and all(k in task for k in TASK_KEYS) and isinstance(task["steps"], list)
+            and all(isinstance(s, dict) and all(k in s for k in STEP_KEYS) for s in task["steps"]))
 
 
 def plan_steps(proposed, max_steps: int) -> list:
@@ -410,7 +444,7 @@ def load(home, task_id: str):
         data = json.loads((folder(home, task_id) / "task.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
+    return data if whole(data) else None
 
 
 def load_all(home) -> dict:

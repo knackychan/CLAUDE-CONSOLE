@@ -200,6 +200,16 @@ class HandoffTest(unittest.TestCase):
         both = "Next model: gpt/high\nNext model: opus/low"  # the first one routing.parse accepts
         self.assertEqual(tasks.next_hint(both), ("opus", "low"))
 
+    def test_verdict_and_question_of_a_reply(self):
+        # the Stop hook is async and may land after run_ended: the chain reads them in the reply too
+        reply = f"HANDOFF\n{GOOD}\nEND HANDOFF\n**VERDICT: FAIL** test_add - 3 != 4"
+        self.assertEqual(tasks.reply_verdict(reply), ("FAIL", "test_add - 3 != 4"))
+        self.assertEqual(tasks.reply_verdict("VERDICT: FAIL\nVERDICT: PASS"), ("PASS", ""))  # the last one
+        self.assertEqual(tasks.reply_verdict("end with `VERDICT: PASS` or not"), ("", ""))  # not a whole line
+        self.assertEqual(tasks.reply_question("text\n- STOP: which file?\n"), "which file?")
+        for none in ("STOP: none", "STOP: N/A.", "STOP: -", "no question"):
+            self.assertEqual(tasks.reply_question(none), "", none)
+
     def test_note_file_and_text(self):
         task = {"id": "20261012-101500-3f2a"}
         step = {"n": 2, "kind": "code", "model": "sonnet", "effort": "medium", "session": "abc"}
@@ -502,6 +512,13 @@ class ChainTest(unittest.TestCase):
             (broken / "task.json").write_text("{not json", encoding="utf-8")
             self.assertIsNone(tasks.load(home, "abc-def"))
             self.assertEqual(list(tasks.load_all(home)), [task["id"]])
+            for part in ("state", "steps"):  # a task.json that is not whole would break the hub loop and the list
+                (broken / "task.json").write_text(json.dumps({k: v for k, v in task.items() if k != part}),
+                                                  encoding="utf-8")
+                self.assertIsNone(tasks.load(home, "abc-def"), part)
+            half = dict(task, steps=[{k: v for k, v in task["steps"][0].items() if k != "pick"}])
+            (broken / "task.json").write_text(json.dumps(half), encoding="utf-8")
+            self.assertIsNone(tasks.load(home, "abc-def"))
             with self.assertRaises(ValueError):
                 tasks.folder(home, "../escape")
 

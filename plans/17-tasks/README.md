@@ -220,8 +220,15 @@ brief), `run_brief(cfg, exe, task, step, next_step, prev_brief, raw) -> dict` (b
 | Fred: Clear | task not `running` / `waiting` and no live session | `tasks.clear(home, task, keep_last=False)` removes the folder; the step streams and metas go too; the task leaves `Hub.tasks` and the list |
 | service restart | task `running`, the step's run meta `ended` | the first `advance` treats it as an ended step |
 
-`ok` = the step session's row has no `interrupted`, `stopped`, `denied`, `failed`, and its last run ended with
-subtype `success` (the run meta and the session row carry all of it). A `STOP:` question is not a failure.
+`ok` = the step session's row has no `interrupted`, `stopped`, `failed`, and its last run ended with
+subtype `success` (the run meta and the session row carry all of it). A `STOP:` question is not a failure, and
+neither is an auto-mode denial: the model works around it and its handoff says what is left (review, 2026-10-12).
+
+The verdict and the question are read in the step's reply (`tasks.reply_verdict`, `tasks.reply_question`, the
+hook's patterns); the Stop hook's values are the fallback, since that hook is async and may land after
+`run_ended`. A task move that raises (a disk error, a task.json that is not whole) makes that task `stuck` with
+the error as `why`; it never stops the hub loop. `tasks.load` skips a task.json that lacks a key the service
+reads (`tasks.whole`).
 
 ### 3.8 Model ladder and the rung of a step
 
@@ -260,7 +267,11 @@ validated with `known_model`.
 
 - `Hub.task_levers` is the only gate for `start`, `stop`, `retry`, `pause`, `resume`, `confirm`, `clear`; the hub loop and
   the POST handlers both call it; it uses `Hub.allowed`, the busy checks of `Hub.levers`, and refuses a start
-  when another task of the same project is `running` or `waiting`.
+  when another task of the same project is `running` or `waiting`. Stop, Pause and Clear start nothing, so they
+  do not need the project allowed, claude.exe or the folder.
+- While its task is `planned`, `running` or `waiting`, a step session's own levers (Continue, Verify, Hand off,
+  Escalate, De-escalate) answer `a task step: use the task's levers`, except Continue on the current step while
+  the task waits on its question. `/api/stop` on the current step is the task's Stop (no retry follows).
 - A step is one fresh `claude -p` with `--disallowedTools Agent`; no `Agent` tool call anywhere in the plan. The
   brief pass is a `claude -p` with no tools and one turn; it decides nothing.
 - Stop is `runs.stop` (the stream-json interrupt). The chain never kills a process.

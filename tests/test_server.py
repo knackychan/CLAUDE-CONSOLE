@@ -703,8 +703,8 @@ class TaskServerTest(RunServerTest):
         self.assertEqual((task["steps"][3]["model"], task["steps"][3]["effort"]), ("sonnet", "high"))
         misses = levers.read_misses(self.folder, "proj")
         self.assertEqual(len(misses), 1)
-        self.assertIn(" - proj - code: sonnet/medium failed (test_add - 3 != 4); next time start at sonnet/high.",
-                      misses[0])
+        # the reply's `VERDICT: FAIL x` line wins over the hook's event: the hook is async and may come late
+        self.assertIn(" - proj - code: sonnet/medium failed (x); next time start at sonnet/high.", misses[0])
         task = self.until(tid, self.at(5), "the second verify runs")
         self.verdict(task["steps"][4]["session"], "FAIL", "still 3 != 4")
         task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
@@ -974,6 +974,84 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "turbo"})[0], 400)
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "auto"})[0], 200)
         self.assertEqual(self.call("/api/config")[1]["effort"], "auto")
+
+    # -- review fixes (2026-10-12) ---------------------------------------------------------------------------
+    def loose_task(self, title="Loose"):
+        """A task put in the hub by hand (not through a card): one scout step, planned."""
+        task = tasks.new_task(str(self.project), "proj", title, "goal", tasks.plan_steps(
+            [{"kind": "scout", "goal": "look"}], 6), "normal", {}, "", "auto", time.time())
+        self.hub.tasks[task["id"]] = task
+        return task
+
+    def test_a_broken_task_never_stops_the_hub(self):
+        broken = self.loose_task("Broken")
+        del broken["steps"][0]["pick"]  # a bug, or a task.json from another version
+        self.assertEqual(self.hub.advance(), [(broken["id"], "stuck")])
+        self.assertEqual(broken["state"], "stuck")
+        self.assertTrue(broken["why"].startswith("KeyError"), broken["why"])
+        self.assertEqual(self.hub.advance(), [])  # a stuck task is left for Fred
+        self.assertTrue(any(t["id"] == broken["id"] for t in self.hub.snapshot()["tasks"]))
+        tid = self.make_task(steps=self.TWO)
+        with mock.patch.object(server.tasks, "save", side_effect=PermissionError(13, "in use")):
+            task = self.until(tid, lambda t: t["state"] == "stuck", "a failed save makes the task stuck")
+        self.assertIn("PermissionError", task["why"])
+
+    def test_verdict_and_question_come_from_the_reply(self):
+        """No Stop event here (the hook is async and may land after run_ended): the chain reads the reply."""
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
+        self.hub.tasks[tid]["steps"][1]["goal"] += " VERDICT-PASS"
+        task = self.settled(tid)
+        self.assertEqual((task["steps"][1]["verdict"], task["steps"][1]["retries"]), ("PASS", 0))
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look STOP-ASK"}, self.TWO[1]])
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits")
+        self.assertEqual(task["why"], "asks: which file?")
+        lines = len(self.chain(tid))
+        self.assertEqual(self.hub.advance(), [])
+        self.assertEqual(len(self.chain(tid)), lines)  # waiting writes nothing more
+
+    def test_a_denial_does_not_fail_a_finished_step(self):
+        tid = self.make_task(steps=self.TWO)
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        events.append(self.folder, {"event": "PermissionDenied", "ts": time.time(), "session_id": sid,
+                                    "tool": "Bash", "what": "git push", "reason": "[Push]"})
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertEqual((task["steps"][0]["session"], task["steps"][0]["retries"]), (sid, 0))
+
+    def test_session_levers_leave_task_steps_to_the_chain(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look STOP-ASK"}, self.TWO[1]])
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.until(tid, lambda t: t["state"] == "waiting", "the task waits")
+        lv = self.hub.levers(sid)
+        self.assertEqual(lv["continue"], "")  # Fred answers the step's question here
+        for lever in ("verify", "handoff", "escalate", "deescalate"):
+            self.assertEqual(lv[lever], "a task step: use the task's levers", lever)
+        self.assertEqual(self.call("/api/verify", {"session": sid})[0], 409)
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "calc.py HANDOFF-OK"})[0], 200)
+        self.until(tid, self.at(2), "the next step starts")
+        self.assertEqual(self.hub.levers(sid)["continue"], "a task step: use the task's levers")
+
+    def test_session_stop_stops_the_task(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.assertEqual(self.call("/api/stop", {"session": sid}), (200, {"stop": "stopped", "task": tid}))
+        self.wait_idle(sid)
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["state"], task["owner"], task["steps"][0]["retries"]), ("stopped", "fred", 0))
+        self.assertEqual(self.hub.advance(), [])  # no retry: Fred stopped it
+
+    def test_stop_and_clear_need_no_allowed_project(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.hub.cfg["projects"] = []  # Fred took the project off the list mid-task
+        self.assertTrue(self.task(tid)[1]["levers"]["retry"].startswith("runs are off"))
+        self.assertEqual(self.call("/api/task/stop", {"task": tid}), (200, {"task": tid, "state": "stopped"}))
+        self.wait_idle(sid)
+        self.assertEqual(self.call("/api/task/retry", {"task": tid})[0], 409)
+        self.assertEqual(self.call("/api/task/clear", {"task": tid}), (200, {"task": tid, "state": "cleared"}))
+        planned = self.loose_task("Never ran")
+        self.hub.advance()
+        self.assertEqual(planned["state"], "planned")  # it cannot start here
+        self.assertEqual(self.call("/api/task/clear", {"task": planned["id"]})[0], 200)  # README 3.7: not running
 
 
 for _name in dir(RunServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parent
