@@ -43,6 +43,7 @@ let doneOpen = false;
 let emptyOpen = false;
 let hi = 0;              // the picker's highlighted row
 let draftTimer = null;
+let movedAt = 0;         // when the task target last changed project: its chip is marked for 4 s
 let onTop = true;
 let peekKey = "";        // the event the peek card shows
 let firstSnap = true;
@@ -504,8 +505,9 @@ function renderCompose() {
   if (!snap) return;
   const box = $("c-prompt");
   box.disabled = !!busy || !runnable();
-  box.placeholder = runnable() ? "New task" : "Allow runs first";
-  const chipHtml = `<button class="tgt" data-pick title="Change project (Ctrl+P)">${esc(projectName(project))}<span class="car">&#9662;</span></button>`;
+  box.placeholder = runnable() ? "New task in " + projectName(project) : "Allow runs first";
+  const moved = Date.now() - movedAt < 4000;
+  const chipHtml = `<button class="tgt${moved ? " moved" : ""}" data-pick title="Change project (Ctrl+P)">${esc(projectName(project))}<span class="car">&#9662;</span></button>`;
   let html;
   if (busy) html = `<span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>${esc(busy)}</span>`;
   else if (cfg && !cfg.claude) html = '<span class="r">claude.exe not found: set "claude_exe" in config.json</span>';
@@ -805,6 +807,7 @@ function closePicker() {
 
 function pick(dir) {  // a project scopes the list and becomes the task target; All projects keeps the target
   scope = dir;
+  if (dir && dir !== project) { movedAt = Date.now(); setTimeout(renderCompose, 4000); }  // the chip shows the move
   if (dir) project = dir;
   doneOpen = false;
   closePicker();
@@ -852,6 +855,7 @@ function showPrep() {
   const f = card.fields, steps = card.steps || [];
   $("crumb").textContent = "Prep / " + projectName(card.project_dir);
   $("pscroll").innerHTML = `
+    <div class="blk"><span class="lbl">Project</span><div class="proj m"><b>${esc(projectName(card.project_dir))}</b> <span class="mut">${esc(card.project_dir)}</span></div></div>
     <div class="blk"><span class="lbl">You typed</span><div class="text">${esc(card.raw)}</div></div>
     ${jobFiles(card.id) ? `<div class="blk"><span class="lbl">Sent with the run</span>${chatFiles(preps().find((x) => x.id === card.id).attached, "you")}</div>` : ""}
     ${f.where ? `<div class="blk"><span class="lbl">Scouted</span><div class="m">${esc(f.where)}</div></div>` : ""}
@@ -868,7 +872,7 @@ function showPrep() {
       <div id="p-fable" class="say" hidden>${esc(fableName())} may bill usage credits on this plan; it asks you to confirm before it runs</div>
       <div class="m mut">${esc(effortText())}</div></div>
     <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns</div>`;
-  $("pbar").innerHTML = `<div class="lr"><button class="btn go" data-pact="task" hidden>Run as task</button>
+  $("pbar").innerHTML = `<div class="m runs-in">Runs in <b>${esc(projectName(card.project_dir))}</b></div><div class="lr"><button class="btn go" data-pact="task" hidden>Run as task</button>
     <button class="btn go" data-pact="run">Run</button>
     <button class="btn" data-pact="raw">Run raw</button><button class="btn" data-pact="edit">Edit</button>
     <button class="btn" data-pact="cancel">Cancel</button></div><div id="p-msg" class="say"></div>`;

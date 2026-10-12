@@ -237,6 +237,10 @@ textarea.in.m { font: 12px/1.45 var(--mono); }
   background: transparent; border: 1px solid var(--line); border-radius: 5px; padding: 0 7px; cursor: pointer; max-width: 200px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tgt:hover { border-color: var(--ink); }
+.tgt.moved { border-color: var(--ink); background: var(--raise); }
+.proj { overflow-wrap: anywhere; }
+.runs-in { color: var(--mut); margin-bottom: 6px; }
+.runs-in b { color: var(--ink); }
 .tgt .car { color: var(--mut); font-size: 9px; }
 /* effort slider (plan 17): Auto, then five cells (low .. max); the lit cells run up to the picked level */
 .effort { display: flex; align-items: center; gap: 2px; min-width: 0; }
