@@ -617,7 +617,8 @@ class Hub:
         if not verdict and s["verdict_ts"] >= (cs["started"] or 0):
             verdict, detail = s["verdict"], s["verdict_detail"]
         action, lines = tasks.on_step_ended(task, ok=ok, block_error=block_error, verdict=verdict,
-                                            verdict_detail=detail if verdict else "", question="", now=now)
+                                            verdict_detail=detail if verdict else "", question="", now=now,
+                                            cap=tasks.cap_reason(subtype, meta.get("limits")))
         cs["cost"] = s["cost"]
         if action in ("next", "fix", "done"):
             tasks.write_note(self.folder, task, cs, block)

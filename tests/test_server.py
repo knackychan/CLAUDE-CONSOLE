@@ -737,6 +737,11 @@ class TaskServerTest(RunServerTest):
         task = self.until(tid, self.at(2), "the next step starts")
         self.assertEqual((task["steps"][0]["state"], task["steps"][0]["session"]), ("done", sid))
 
+    def test_turn_cap_is_named_in_the_retry(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "MAXTURNS look"}])
+        task = self.until(tid, lambda t: t["state"] == "stuck", "stuck after the retry")
+        self.assertEqual(task["why"], "it hit the turn cap (? turns) (after one retry)")
+
     def test_stop_interrupts_the_step_never_kills(self):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
         old = self.hub.tasks[tid]["steps"][0]["session"]

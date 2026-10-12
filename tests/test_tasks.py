@@ -359,6 +359,16 @@ class ChainTest(unittest.TestCase):
         action, _ = end(task)  # Fred answered, the step ended well
         self.assertEqual((action, task["state"], task["why"]), ("next", "running", ""))
 
+    def test_cap_reason_names_the_cap(self):
+        self.assertEqual(tasks.cap_reason("error_max_turns", {"max_turns": 12}), "it hit the turn cap (12 turns)")
+        self.assertEqual(tasks.cap_reason("error_max_budget_usd", {"budget": 3}), "it hit the step budget (3.00 USD)")
+        self.assertEqual(tasks.cap_reason("success", {}), "")
+        self.assertEqual(tasks.cap_reason("error_max_turns", None), "it hit the turn cap (? turns)")
+        task = make(("code",))
+        run(task, 1)
+        action, _ = end(task, ok=False, cap="it hit the turn cap (12 turns)")
+        self.assertEqual((action, task["why"]), ("retry", "it hit the turn cap (12 turns)"))
+
     def test_bad_handoff_retries_once_then_stuck(self):
         task = make(("scout", "explain"))
         run(task, 1)

@@ -346,8 +346,18 @@ def _insert_fix(task: dict, s: dict, now: float, detail: str) -> None:
     task["steps"][at:at] = [fix, again]
 
 
+def cap_reason(subtype: str, limits) -> str:
+    """Why a step's run stopped at one of its caps (the result subtypes of the Agent SDK), else ""."""
+    limits = limits or {}
+    if subtype == "error_max_turns":
+        return f"it hit the turn cap ({limits.get('max_turns') or '?'} turns)"
+    if subtype == "error_max_budget_usd":
+        return f"it hit the step budget ({float(limits.get('budget') or 0):.2f} USD)"
+    return ""
+
+
 def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdict_detail: str,
-                  question: str, now: float):
+                  question: str, now: float, cap: str = ""):
     """The current step's session ended (README 3.7). Returns (action, chain lines); action is "wait",
     "next", "done", "fix" (start `current + 1`, the fix), "retry" or "stuck". Mutates `task`."""
     s = current_step(task)
@@ -359,7 +369,7 @@ def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdi
         return "wait", lines
     reason = ""
     if not ok:
-        reason = "the run did not finish cleanly" + (f" ({block_error})" if block_error else "")
+        reason = cap or "the run did not finish cleanly" + (f" ({block_error})" if block_error else "")
     elif block_error:
         reason = block_error
     elif s["kind"] == "verify" and verdict not in ("PASS", "FAIL"):

@@ -14,6 +14,7 @@ Run (--input-format stream-json): per user message prints init / assistant / res
   "VERDICT-PASS" / "VERDICT-FAIL" in the message: it ends with a `VERDICT: PASS` / `VERDICT: FAIL x` line;
   VERDICT-FAIL also waits 1 s before the result line (a test appends the verdict event meanwhile).
   "STOP-ASK" in the message: the assistant text ends with `STOP: which file?`.
+  "MAXTURNS" in the message: the result's subtype is `error_max_turns` (a step that hit its turn cap).
 """
 import json
 import sys
@@ -111,7 +112,7 @@ def run():
         denials = [{"tool_name": "Bash", "tool_input": {"command": "git push"}}] if "DENY" in text else []
         if "VERDICT-FAIL" in text:
             time.sleep(1)  # the test appends the verdict event while the run is still live, as the hook would
-        out(result(sid, denials=denials))
+        out(result(sid, "error_max_turns" if "MAXTURNS" in text else "success", denials=denials))
     return 0
 
 
