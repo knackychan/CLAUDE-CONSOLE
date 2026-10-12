@@ -700,7 +700,8 @@ class Hub:
                 return
             s = tasks.step(task, n)
             why = (f"brief fallback: {res['fallback']}" if res["fallback"] else
-                   f"brief: {len(raw.split())} -> {res['words']} words, ${res['cost']:.2f}")
+                   f"brief: {len(raw.split())} -> {res['words']} words, ${res['cost']:.2f}"
+                   + (f", cut {res['cut']} findings" if res.get("cut") else ""))
             task["briefing"] = 0
             try:
                 tasks.write_brief(self.folder, task, s, res["text"])

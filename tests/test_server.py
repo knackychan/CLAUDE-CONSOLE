@@ -1002,13 +1002,20 @@ class TaskServerTest(RunServerTest):
         self.assertNotIn("# Step 01:", self.prompt_of(task["steps"][1]["session"]))
 
     def test_brief_fallback_never_blocks_the_chain(self):
-        # the brief request holds the next step's goal, so LONG goes in step 2's
-        tid = self.make_task(steps=[self.TWO[0], {"kind": "explain", "goal": "say it LONG"}])
+        # the brief request holds the next step's goal, so HUGE goes in step 2's
+        tid = self.make_task(steps=[self.TWO[0], {"kind": "explain", "goal": "say it HUGE"}])
         task = self.until(tid, self.at(2), "step 2 starts")
         self.assertIn("brief fallback: over 400 words", [c["why"] for c in self.chain(tid)])
         text = (self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").read_text(encoding="utf-8")
         self.assertIn("add() is in calc.py:2", text)
         self.assertEqual(task["steps"][1]["state"], "running")
+
+    def test_a_long_brief_is_cut_not_dropped(self):
+        tid = self.make_task(steps=[self.TWO[0], {"kind": "explain", "goal": "say it LONG"}])
+        self.until(tid, self.at(2), "step 2 starts")
+        whys = [c["why"] for c in self.chain(tid)]
+        self.assertTrue(any(w.startswith("brief: ") and ", cut " in w and w.endswith(" findings") for w in whys), whys)
+        self.assertFalse(any(w.startswith("brief fallback") for w in whys))
 
     def test_task_snapshot_and_get(self):
         tid = self.make_task()

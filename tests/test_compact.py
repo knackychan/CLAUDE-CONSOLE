@@ -114,15 +114,39 @@ class BriefTest(unittest.TestCase):
         self.assertLess(result["words"], 400)
         self.assertEqual(result["words"], len(result["text"].split()))
 
+    def test_run_brief_cuts_an_over_long_answer_instead_of_dropping_it(self):
+        cfg = copy.deepcopy(paths.DEFAULTS)
+        with tempfile.TemporaryDirectory() as project:
+            task = make_task(project)
+            raw = RAW.replace("## Files touched", "word " * 120 + "\n## Files touched") + "\nLONG"
+            result = compact.run_brief(cfg, FAKE, task, tasks.step(task, 1), tasks.step(task, 2), "", raw)
+        self.assertEqual(result["fallback"], "")
+        self.assertGreater(result["cut"], 0)
+        self.assertLessEqual(result["words"], 400)
+        self.assertEqual(result["words"], len(result["text"].split()))
+        self.assertIn("finding 0 says", result["text"])  # the first findings stay, the last are cut
+        self.assertNotIn("finding 79 says", result["text"])
+        self.assertEqual(compact.check(result["text"], 400), "")
+
+    def test_cut_keeps_files_questions_and_next(self):
+        fields = dict(FIELDS, findings=[f"finding {i} " + "w " * 40 for i in range(20)], files=["calc.py"],
+                      questions=["which pi?"], next="Fix add()")
+        cut = compact.cut(fields, 200)
+        self.assertEqual((cut["files"], cut["questions"], cut["next"]), (["calc.py"], ["which pi?"], "Fix add()"))
+        self.assertLessEqual(compact.words(compact.render(cut)), 200)
+        self.assertEqual(cut["findings"], fields["findings"][:len(cut["findings"])])
+        self.assertEqual(len(fields["findings"]), 20)  # the answer itself is not changed
+        self.assertIsNone(compact.cut(dict(fields, questions=["q " * 300]), 200))  # one finding left, still over
+
     def test_run_brief_falls_back_on_a_bad_answer(self):
         cfg = copy.deepcopy(paths.DEFAULTS)
         with tempfile.TemporaryDirectory() as project:
             task = make_task(project)
             one, two = tasks.step(task, 1), tasks.step(task, 2)
-            long = compact.run_brief(cfg, FAKE, task, one, two, "", RAW + "\nLONG")
-            self.assertEqual(long["fallback"], "over 400 words")
-            self.assertEqual(long["text"], compact.fallback("", RAW + "\nLONG"))
-            self.assertEqual(long["cost"], 0.03)  # the pass was paid for even though the answer was dropped
+            huge = compact.run_brief(cfg, FAKE, task, one, two, "", RAW + "\nHUGE")
+            self.assertEqual(huge["fallback"], "over 400 words")  # one finding alone is too long: nothing to cut
+            self.assertEqual(huge["text"], compact.fallback("", RAW + "\nHUGE"))
+            self.assertEqual(huge["cost"], 0.03)  # the pass was paid for even though the answer was dropped
             broken = compact.run_brief(cfg, FAKE, task, one, two, "", RAW + "\nBROKEN")
             self.assertIn("no JSON", broken["fallback"])
             self.assertEqual(broken["text"], compact.fallback("", RAW + "\nBROKEN"))

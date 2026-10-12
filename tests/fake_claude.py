@@ -55,6 +55,8 @@ def prep():
         if "LONG" in raw:
             fields["findings"] = [f"finding {i} says that this long line holds a good many words to pad the brief "
                                   "past its word cap" for i in range(80)]
+        if "HUGE" in raw:
+            fields["findings"] = ["word " * 450]
     if "BROKEN" in raw:
         print("not json")
         return 0

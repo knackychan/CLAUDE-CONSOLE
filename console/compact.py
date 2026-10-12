@@ -85,6 +85,16 @@ def check(block: str, max_words: int, raw: str = "", prev: str = "") -> str:
     return ""
 
 
+def cut(fields: dict, max_words: int):
+    """The answer with its last findings dropped until the rendered brief fits `max_words`; files, questions and
+    next stay whole. None when one finding is left and it is still over. `fields` is not changed."""
+    findings = list(fields.get("findings") or [])
+    while len(findings) > 1 and words(render(dict(fields, findings=findings))) > max_words:
+        findings.pop()
+    out = dict(fields, findings=findings)
+    return out if words(render(out)) <= max_words else None
+
+
 def _sections(text: str) -> dict:
     """heading -> the lines under it, for the four handoff headings (a HANDOFF block is unwrapped first)."""
     text = tasks.parse_handoff(text) or text
@@ -144,15 +154,23 @@ def _ask(cfg: dict, exe: list, project_dir: str, prompt: str):
 
 def run_brief(cfg: dict, exe: list, task: dict, step: dict, next_step, prev_brief: str, raw: str) -> dict:
     """Blocking (about 5 to 15 s; the service runs it in a thread). Never raises: any failure, or an answer
-    that fails `check`, ends in `fallback`. {"text", "cost", "words", "model", "fallback": "" | why}."""
-    cost, why = 0, ""
+    that fails `check` ends in `fallback`, except one that is only too long: its last findings are cut (`cut`
+    counts them) and it is checked again. {"text", "cost", "words", "model", "cut", "fallback": "" | why}."""
+    cost, why, dropped = 0, "", 0
     try:
         prompt = build_prompt(task, step, next_step, prev_brief, raw, budget(cfg, raw, prev_brief))
         fields, cost = _ask(cfg, exe, task["project_dir"], prompt)
         text = render(fields)
         why = check(text, cfg["brief_max_words"], raw, prev_brief)
+        if why.startswith(("over ", "not shorter")):
+            short = cut(fields, min(cfg["brief_max_words"], limit(raw, prev_brief) - 1))
+            if short:
+                dropped = len(fields["findings"]) - len(short["findings"])
+                text = render(short)
+                why = check(text, cfg["brief_max_words"], raw, prev_brief)
     except BriefError as exc:
         text, why = "", str(exc)
     if why:
-        text = fallback(prev_brief, raw)
-    return {"text": text, "cost": cost, "words": len(text.split()), "model": cfg["brief_model"], "fallback": why}
+        text, dropped = fallback(prev_brief, raw), 0
+    return {"text": text, "cost": cost, "words": len(text.split()), "model": cfg["brief_model"], "cut": dropped,
+            "fallback": why}
