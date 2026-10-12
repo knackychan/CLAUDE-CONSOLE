@@ -38,6 +38,7 @@ let card = null;        // the Prep card on screen
 let busy = "";           // what the compose box waits for ("" = nothing)
 let fail = null;         // {title, msg, retry} shown above the compose box
 let draft = "";
+let draftKept = false;   // the box holds a draft from an earlier load: marked until typed over or cleared
 let briefOpen = false;   // the session page's brief, open for the window (window.json)
 let doneOpen = false;
 let emptyOpen = false;
@@ -516,6 +517,7 @@ function renderCompose() {
     <button class="btn sm" data-go="allow">Allow runs</button>`;
   else html = `<span>in</span>${chipHtml}<button class="btn sm" data-attach="compose" title="Images, PDF or text files (or paste, or drop them on the box)">Attach</button>
     <span class="hint"><span class="kbd">Enter</span>Prep</span>`;
+  if (draftKept && !busy) html += '<span class="m mut">Draft kept from last time</span><button class="btn sm" data-go="cleardraft">Clear</button>';
   setHtml($("c-say"), html);
   setHtml($("files-compose"), filesHtml("compose"));
   renderEffort();
@@ -591,6 +593,7 @@ function dropPrep(id) { return api("/api/prep/drop", { job: id }).catch(() => {}
 
 function putBack(text) {  // a Prep's request back in the composer, to edit it
   draft = text;
+  draftKept = false;
   $("c-prompt").value = text;
   saveDraft();
   showPage("list");
@@ -695,6 +698,7 @@ function doPrep() {  // the box empties at once; the Prep runs in the service an
   const text = $("c-prompt").value.trim();
   if (!text || !runnable()) return;
   draft = "";
+  draftKept = false;
   $("c-prompt").value = "";
   saveDraft();
   const files = att.compose;  // they wait with the job in the service until its card runs
@@ -1245,6 +1249,7 @@ async function act(name, button) {
       pick(b.project_dir);
       showPage("list");
       draft = b.text;
+      draftKept = false;
       $("c-prompt").value = draft;
       saveDraft();
       renderCompose();
@@ -1587,6 +1592,7 @@ async function go(name, button) {
     if (n) n.scrollIntoView({ block: "start", behavior: "smooth" });
   }
   if (name === "moredone") { doneOpen = true; render(); }
+  if (name === "cleardraft") { draft = ""; $("c-prompt").value = ""; draftKept = false; saveDraft(); renderCompose(); $("c-prompt").focus(); }
   if (name === "empties") { emptyOpen = !emptyOpen; render(); }
   if (name === "usage") showPage("usage");
   if (name === "fold") await setForm("pill");
@@ -1610,6 +1616,7 @@ async function rawRun() {
   const text = $("c-prompt").value.trim();
   if (!text || !runnable() || !await doRun(project, text, cfg.default_model, rawEffort(), "")) return;
   draft = "";
+  draftKept = false;
   $("c-prompt").value = "";
   saveDraft();
 }
@@ -1670,7 +1677,7 @@ document.addEventListener("dblclick", (e) => {
 });
 
 document.addEventListener("input", (e) => {
-  if (e.target.id === "c-prompt") { draft = e.target.value; fail = null; saveDraft(); renderCompose(); }
+  if (e.target.id === "c-prompt") { draft = e.target.value; draftKept = false; fail = null; saveDraft(); renderCompose(); }
 });
 
 document.addEventListener("change", (e) => { if (e.target.matches("#p-model, [data-smodel], [data-skind]")) stepsChanged(); });
@@ -1763,6 +1770,8 @@ function connect() {
   try { cfg = await api("/api/config"); } catch (e) { cfg = null; }
   try { draft = (await api("/api/draft")).text; } catch (e) { /* no draft */ }
   $("c-prompt").value = draft;
+  draftKept = !!draft.trim();
+  if (draftKept) $("c-prompt").addEventListener("focus", (e) => { setTimeout(() => { if (draftKept) e.target.select(); }); }, { once: true });  // after the click: typing replaces it
   project = (cfg && cfg.project) || "";
   briefOpen = !!(cfg && cfg.brief);
   effortPick = cfg && EFF_LEVELS.includes(cfg.effort) ? cfg.effort : "auto";
