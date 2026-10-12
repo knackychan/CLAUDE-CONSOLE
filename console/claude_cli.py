@@ -53,10 +53,11 @@ def prep_command(exe: list, model: str, schema: dict) -> list:
 
 
 def brief_command(exe: list, model: str, schema: dict) -> list:
-    """Prep's command with no tools at all and one turn: the brief pass reads nothing and decides nothing."""
+    """Prep's command with no tools at all and three turns: the brief pass reads nothing and decides nothing. A
+    structured answer takes 2 turns and a schema re-prompt one more (docs: agent-sdk/structured-outputs)."""
     cmd = prep_command(exe, model, schema)
     cmd[cmd.index("--tools") + 1] = ""
-    return cmd + ["--max-turns", "1"]
+    return cmd + ["--max-turns", "3"]
 
 
 def run_command(exe: list, model: str, effort: str, session_id: str, resume: bool = False,

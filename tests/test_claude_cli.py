@@ -64,11 +64,11 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(json.loads(cmd[cmd.index("--settings") + 1]), {"disableAllHooks": True})
         self.assertEqual(json.loads(cmd[cmd.index("--json-schema") + 1]), {"type": "object"})
 
-    def test_brief_command_has_no_tools_and_one_turn(self):
+    def test_brief_command_has_no_tools_and_three_turns(self):
         cmd = claude_cli.brief_command(["claude.exe"], "haiku", {"type": "object"})
         self.assertEqual(cmd[:2], ["claude.exe", "-p"])
         self.assertEqual(cmd[cmd.index("--tools") + 1], "")
-        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "1")
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "3")  # the answer, plus a schema re-prompt
         self.assertEqual(cmd[cmd.index("--model") + 1], "haiku")
         self.assertEqual(cmd[cmd.index("--effort") + 1], "low")
         self.assertEqual(json.loads(cmd[cmd.index("--settings") + 1]), {"disableAllHooks": True})
