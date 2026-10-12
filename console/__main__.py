@@ -7,7 +7,7 @@ import sys
 import threading
 import urllib.request
 
-from . import events, paths, runs, server
+from . import events, paths, runs, server, tasks
 
 
 def already_running(port: int) -> bool:
@@ -38,6 +38,7 @@ def main(argv=None) -> int:
         return open_window(url)
     events.prune(paths.home(), cfg["retention_days"])
     runs.prune(paths.home(), cfg["retention_days"])
+    tasks.prune(paths.home(), cfg["task_retention_days"])
 
     httpd = None
     try:

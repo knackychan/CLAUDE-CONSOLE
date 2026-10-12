@@ -1,5 +1,6 @@
 """The console service: reads the event log, keeps the state, serves the window over HTTP + SSE,
 starts, stops and resumes window runs (phase 2), and pulls the levers (phase 3)."""
+import copy
 import json
 import os
 import threading
@@ -8,7 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import attach, brief, claude_cli, events, guard, levers, paths, prep, routing, runs, transcript, usage
+from . import (attach, brief, claude_cli, compact, events, guard, levers, paths, prep, redact, routing, runs, tasks,
+               transcript, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -19,6 +21,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
 POLL_S = 1.0
 TICK_S = 15.0
 HISTORY_S = 60.0  # the Usage page's scan of every transcript
+STORAGE_S = 3600.0  # the data folder's size line is recomputed this often
 APP_ID = "claude-console"
 MAX_BODY = 256 * 1024
 MAX_FILES_BODY = attach.MAX_TOTAL * 4 // 3 + MAX_BODY  # /api/prep, /api/run and /api/continue carry base64 files
@@ -44,6 +47,11 @@ class Hub:
         self.user_home = Path.home()  # where ~/.claude/skills is looked up (tests point it elsewhere)
         self.lock = threading.Lock()
         self.changed = threading.Condition(self.lock)
+        self.tasks = tasks.load_all(folder)  # plan 17: id -> task; the dict itself changes under self.lock
+        self.tlock = threading.RLock()  # one task move at a time: advance, create, the lever routes, the brief thread
+        self.briefing = set()  # ids of the tasks whose brief thread is running
+        self.storage = {}  # usage.folder_sizes of the data folder, refreshed hourly on the usage thread
+        self.storage_at = 0.0
         self.version = 0
         self.auto_since = time.time()  # older verdicts never trigger an automatic step
         self._stop = threading.Event()
@@ -79,14 +87,19 @@ class Hub:
         days = usage.merge_days(usage.load_days(self.folder), scanned)
         with self.lock:
             self.usage_days, self.usage_ready = days, True
+        if time.time() - self.storage_at >= STORAGE_S:  # at start, then once an hour: one os.walk
+            sizes = usage.folder_sizes(self.folder)
+            with self.lock:
+                self.storage, self.storage_at = sizes, time.time()
 
     def usage_report(self) -> dict:
         with self.lock:
-            days, ready = self.usage_days, self.usage_ready
+            days, ready, storage = self.usage_days, self.usage_ready, self.storage
         today = usage.day_of(time.time())
         return {"ready": ready, "today": today, "first": min(days) if days else "",
                 "limit": self.cfg["daily_budget_usd"], "days": days,
-                "weeks": usage.weeks(days, today), "months": usage.months(days, today)}
+                "weeks": usage.weeks(days, today), "months": usage.months(days, today),
+                "storage": storage, "storage_warn_mb": self.cfg["storage_warn_mb"]}
 
     def history_loop(self) -> None:
         while not self._stop.is_set():
@@ -148,6 +161,7 @@ class Hub:
         while not self._stop.is_set():
             self.poll_once()
             self.auto_steps()
+            self.advance()
             self.read_costs()
             if time.monotonic() - last_tick >= TICK_S:
                 self.runs.reconcile()
@@ -169,6 +183,8 @@ class Hub:
             snap["preps"] = sorted(({**{k: v for k, v in j.items() if k != "files"},
                                      "attached": attach.summary(j["files"])} for j in self.preps.values()),
                                    key=lambda j: j["ts"])
+            snap["tasks"] = sorted((task_row(t) for t in self.tasks.values()), key=lambda r: r["updated"],
+                                   reverse=True)
             return snap
 
     def steps(self, session_id: str, limit: int = 200) -> list:
@@ -186,7 +202,10 @@ class Hub:
                     "run_live": s.run_live, "state": self.state.state_of(s, time.time()),
                     "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
                     "transcript_path": s.transcript_path, "ctx_tokens": s.ctx_tokens, "last_ts": s.last_ts,
-                    "handoff_by": s.handoff_by if s.handed_off else ""}
+                    "handoff_by": s.handoff_by if s.handed_off else "",
+                    "task": s.task, "step": s.step, "cost": s.cost, "stop_question": s.stop_question,
+                    "interrupted": s.interrupted, "stopped": s.stopped, "denied": s.denied, "failed": s.failed,
+                    "verdict_ts": s.verdict_ts}
 
     def route_of(self, session_id: str, s: dict) -> tuple:
         """(model, effort) the session runs on: a window run's own route, else the model last seen."""
@@ -313,7 +332,8 @@ class Hub:
         now = time.time()
         with self.lock:
             due = [(s.id, "escalate" if st == "verify_failed" else "deescalate")
-                   for s in self.state.sessions.values() if s.window and s.verdict_ts >= self.auto_since
+                   for s in self.state.sessions.values()
+                   if s.window and not s.task and s.verdict_ts >= self.auto_since  # a step's verdict is its chain's
                    for st in [self.state.state_of(s, now)] if st in ("verify_failed", "verified")]
         pulled = []
         for sid, lever in due:
@@ -323,6 +343,371 @@ class Hub:
             except (runs.RunError, OSError):  # a click got there first, or claude did not start
                 continue
         return pulled
+
+    # -- plan 17: the task chain ---------------------------------------------------------
+    def budget(self) -> dict:
+        """model id -> share of its pace used. Sub-plan 18 fills it from the usage windows; {} until then."""
+        return {}
+
+    def tier_budget(self) -> dict:
+        """tier -> the least share over the tier's rungs (a rung budget() does not list counts as unused): a tier
+        is over its pace only when every rung is. What tasks.step_route receives; {} while budget() is."""
+        shares, out = self.budget(), {}
+        for tier, rungs in (self.cfg.get("ladder") or {}).items():
+            if any(rung in shares for rung in rungs):
+                out[tier] = min(shares.get(rung, 0) for rung in rungs)
+        return out
+
+    def model_id(self, tier: str) -> str:
+        """The model to pass for a tier: the first rung of the ladder under budget_warn_at of its pace, else the
+        tier alias."""
+        shares, warn = self.budget(), self.cfg["budget_warn_at"]
+        rungs = (self.cfg.get("ladder") or {}).get(tier) or [tier]
+        return next((rung for rung in rungs if shares.get(rung, 0) < warn), tier)
+
+    def last_reply(self, sid: str) -> str:
+        """Claude's last message in a session: its window run's stream, or its transcript."""
+        if self.runs.meta(sid):
+            items = runs.chat(self.runs.stream_path(sid))
+        else:
+            s = self.session(sid)
+            items = transcript.turns(s["transcript_path"]) if s else []
+        return next((i["text"] for i in reversed(items) if i["role"] == "claude"), "")
+
+    def final_message(self, sid: str) -> tuple:
+        """(the last assistant text, the last result's subtype) of a window run, whole: runs.chat cuts a text at
+        4000 characters, and a step's HANDOFF block stands at the end of its final message."""
+        _, lines = runs.read_lines(self.runs.stream_path(sid), 0)
+        text, subtype = "", ""
+        for d in lines:
+            if d.get("type") == "assistant" and not d.get("parent_tool_use_id"):
+                for block in (d.get("message") or {}).get("content") or []:
+                    if block.get("type") == "text" and block.get("text", "").strip():
+                        text = block["text"]
+            elif d.get("type") == "result":
+                subtype = d.get("subtype", "")
+        return text, subtype
+
+    def _next_step(self, task: dict):
+        """The step that would start now: the first of a planned task, the current step when it was reset to
+        planned (a retry), the one after a done current step; None when nothing is left."""
+        cs = tasks.current_step(task)
+        if cs is None:
+            return task["steps"][0] if task["steps"] else None
+        if cs["state"] == "planned":
+            return cs
+        if cs["state"] == "done" and cs["n"] < len(task["steps"]):
+            return tasks.step(task, cs["n"] + 1)
+        return None
+
+    def _route_for(self, task: dict, s: dict) -> dict:
+        """tasks.step_route for step `s`, with everything it reads: the checked step, the misses, the last note."""
+        return tasks.step_route(
+            s["kind"], pick=s["pick"], checked=tasks.checked_route(task, s), demand=task["demand"],
+            misses=levers.read_misses(self.folder, task["project"]),
+            prev=tasks.read_note(self.folder, task, task["last_good"]),
+            budget=self.tier_budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"])
+
+    def task_levers(self, task_id) -> dict:
+        """What each task lever would do and why one is off ("" = allowed); None for an unknown id. The one
+        gate: advance and the POST handlers both ask it."""
+        with self.tlock:
+            task = self.tasks.get(task_id) if isinstance(task_id, str) else None
+            if task is None:
+                return None
+            state, owner, cs, nxt = task["state"], task["owner"], tasks.current_step(task), self._next_step(task)
+            if not self.allowed(task["project_dir"]):
+                base = "runs are off in this project: pick it on the home view and allow runs"
+            elif not self.runs.exe:
+                base = "claude.exe not found; set \"claude_exe\" in config.json"
+            elif not os.path.isdir(task["project_dir"]):
+                base = "the task's folder is gone"
+            else:
+                base = ""
+            live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
+            here = os.path.normcase(os.path.abspath(task["project_dir"]))
+            busy = any(t is not task and t["state"] in ("running", "waiting")
+                       and os.path.normcase(os.path.abspath(t["project_dir"])) == here for t in self.tasks.values())
+            if base:
+                start = base
+            elif owner != "service" or (state not in ("planned", "running")
+                                        and not (state == "waiting" and task["why"] == "confirm Fable")):
+                start = f"task is {state}" + (" and paused" if owner == "fred" else "")
+            elif cs and cs["state"] == "running":
+                start = "a step is running"
+            elif nxt is None:
+                start = "no step to start"
+            elif busy:
+                start = "another task is working in this project"
+            elif claude_cli.tier_of(nxt["pick"]) == "fable" and not task["fable_ok"]:
+                start = "confirm Fable"
+            else:
+                start = ""
+            stop = base or ("" if state in ("running", "waiting") else f"task is {state}")
+            pause = base or ("" if owner == "service" and state in ("running", "waiting") else
+                             "already paused" if owner == "fred" and state in ("running", "waiting")
+                             else f"task is {state}")
+            resume = base or ("" if owner == "fred" and state in ("running", "waiting") else "not paused")
+            retry = base or ("still working: wait until it stops" if live else
+                             "" if state in ("stuck", "stopped") else f"task is {state}")
+            confirm = base or ("" if state == "waiting" and task["why"] == "confirm Fable" else "nothing to confirm")
+            clear = base or ("still working: wait until it stops" if live else
+                             "" if state in ("done", "stuck", "stopped") else f"task is {state}")
+            route = self._route_for(task, nxt) if nxt else None
+            return {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry,
+                    "confirm": confirm, "clear": clear,
+                    "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
+                    "next_route": f"{route['model']}/{route['effort']}" if route and not route["hold"] else "",
+                    "cwd": task["project_dir"]}
+
+    def _commit(self, task: dict, lines=()) -> None:
+        """Chain lines to chain.jsonl, task.json whole, and a new snapshot for the window."""
+        if lines:
+            tasks.log(self.folder, task["id"], list(lines))
+        tasks.save(self.folder, task)
+        with self.lock:
+            self.version += 1
+            self.changed.notify_all()
+
+    def create_task(self, card: dict, steps: list, effort: str, title: str = "") -> str:
+        """A task from a Prep card and the step list Fred edited on it; step 1 starts at once."""
+        folder = self.allowed(card.get("project_dir"))
+        if not folder:
+            raise runs.RunError("runs are off in this project: pick it on the home view and allow runs")
+        planned = tasks.plan_steps(steps, self.cfg["task_max_steps"])
+        if not planned:
+            raise runs.RunError("a task needs at least one step")
+        # plan_steps keeps tier aliases only; a rung of the ladder that Fred picked on the card is put back
+        shown = [i for i in steps if isinstance(i, dict) and i.get("kind") in tasks.PREP_KINDS
+                 and isinstance(i.get("goal"), str) and i["goal"].strip()][:self.cfg["task_max_steps"]]
+        for item, step in zip(shown, [p for p in planned if p["kind"] in tasks.PREP_KINDS]):
+            if item.get("model") not in claude_cli.MODELS and claude_cli.known_model(self.cfg, item.get("model")):
+                step["pick"] = item["model"]
+        with self.tlock:
+            here = os.path.normcase(os.path.abspath(folder))
+            if any(t["state"] in ("running", "waiting") and os.path.normcase(os.path.abspath(t["project_dir"])) == here
+                   for t in self.tasks.values()):
+                raise runs.RunError("another task is working in this project")
+            name = redact.clip(title or (card.get("fields") or {}).get("goal") or card.get("raw") or "task", 80)
+            task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], planned,
+                                  (card.get("route") or {}).get("type") or "", card.get("demand") or {}, card["id"],
+                                  effort, time.time())
+            tasks.folder(self.folder, task["id"]).mkdir(parents=True, exist_ok=True)
+            (tasks.folder(self.folder, task["id"]) / "prompt.md").write_text(task["goal"], encoding="utf-8")
+            tasks.save(self.folder, task)
+            with self.lock:
+                self.tasks[task["id"]] = task
+            self.drop_prep(card["id"])
+            self.advance()
+            self.poll_once()
+        return task["id"]
+
+    def start_step(self, task: dict, n: int) -> None:
+        """Route step `n` and start its run; a hold waits for Fred, a run that cannot start makes the task stuck."""
+        s, now, lines = tasks.step(task, n), time.time(), []
+        route = self._route_for(task, s)
+        if route["hold"]:
+            tasks._task_to(task, "waiting", route["hold"], now, s, lines)
+            return self._commit(task, lines)
+        kind, tier = s["kind"], route["model"]
+        pick = s["pick"]  # a rung Fred picked is used as given, unless the budget moved the step to another tier
+        model = pick if pick and pick not in claude_cli.MODELS and claude_cli.tier_of(pick) == tier \
+            else self.model_id(tier)
+        retry = task["why"] if s["retries"] == 1 and s["state"] == "planned" else ""
+        prompt = tasks.step_prompt(task, s, tasks.read_brief(self.folder, task, task["last_good"]), retry)
+        max_turns = self.cfg["opus_max_turns"] if kind == "design" and tier == "opus" else 0
+        try:
+            sid = self.runs.start(
+                task["project_dir"], prompt, model, route["effort"],
+                title=f"{task['title']} · {n}/{len(task['steps'])} {kind}", route=kind,
+                reason=" · ".join(route["notes"]), prep=task["prep"], kind="task",
+                extra={"task": task["id"], "step": n}, disallow=tasks.DISALLOW, tools=tasks.RULES[kind][2],
+                budget=self.cfg["task_step_budget_usd"], max_turns=max_turns)
+        except (runs.RunError, OSError) as exc:
+            tasks._task_to(task, "stuck", str(exc), now, s, lines)
+            return self._commit(task, lines)
+        lines = tasks.start_step(task, n, sid, dict(route, model=model),
+                                 (self.runs.meta(sid) or {}).get("start_commit", ""), now)
+        s["tier"] = tier
+        self._commit(task, lines)
+        self.poll_once()
+
+    def advance(self) -> list:
+        """One pass over the tasks the service owns (the hub loop calls it every second): read the state and the
+        files, call tasks.* for every decision, start what may start. Returns [(task id, action)]."""
+        acted = []
+        with self.tlock:
+            for task in list(self.tasks.values()):
+                if task["state"] == "done" and task.get("briefing") and task["id"] not in self.briefing:
+                    self.start_brief(task, task["briefing"])  # the service restarted while the last brief ran
+                    continue
+                if task["owner"] != "service" or task["state"] not in ("planned", "running", "waiting"):
+                    continue
+                cs = tasks.current_step(task)
+                if cs and cs["state"] == "running":
+                    action = self._ended(task, cs)
+                elif task["state"] == "waiting":
+                    action = ""  # a hold or a Fable confirm: Fred acts
+                else:
+                    action = self._go_on(task)
+                if action:
+                    acted.append((task["id"], action))
+        return acted
+
+    def _ended(self, task: dict, cs: dict) -> str:
+        """The current step's run: still going, waiting for Fred's answer, or ended (README 3.7)."""
+        now, sid = time.time(), cs["session"]
+        s = self.session(sid)
+        if s is None:  # its first event is not in yet
+            return ""
+        if s["run_live"]:
+            if task["state"] == "waiting":  # Fred answered the question
+                lines = []
+                tasks._task_to(task, "running", "", now, cs, lines)
+                self._commit(task, lines)
+            return ""
+        if task["state"] == "waiting" and s["stop_question"]:
+            return ""
+        meta = self.runs.meta(sid)
+        if meta and not meta.get("ended"):  # the watcher has not closed it yet
+            return ""
+        if s["stop_question"]:
+            action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
+                                                question=s["stop_question"], now=now)
+            self._commit(task, lines)
+            return action
+        text, subtype = self.final_message(sid)
+        block = tasks.parse_handoff(text)
+        block_error = "no HANDOFF block" if block is None else tasks.check_handoff(block)
+        ok = not (s["interrupted"] or s["stopped"] or s["denied"] or s["failed"]) and subtype == "success"
+        verdict = s["verdict"] if s["verdict_ts"] >= (cs["started"] or 0) else ""
+        action, lines = tasks.on_step_ended(task, ok=ok, block_error=block_error, verdict=verdict,
+                                            verdict_detail=s["verdict_detail"] if verdict else "", question="",
+                                            now=now)
+        cs["cost"] = s["cost"]
+        if action in ("next", "fix", "done"):
+            tasks.write_note(self.folder, task, cs, block)
+        if action == "fix":
+            levers.add_miss(self.folder, task["miss"])
+        if action in ("next", "fix", "done"):
+            task["briefing"] = cs["n"]  # saved with the transition, so a restart finds the unfinished brief
+        self._commit(task, lines)
+        if action in ("next", "fix", "done"):  # the last step gets a brief too: Start next chat reads it
+            self.start_brief(task, cs["n"])
+        if action in ("next", "fix", "retry"):
+            self._go_on(task)
+        return action
+
+    def start_brief(self, task: dict, n: int) -> None:
+        """The brief between step `n` and the next: Haiku compacts the note in a thread, the code fallback stands
+        in when it fails or brief_on is off. task["briefing"] = n until steps/NN-<kind>.brief.md is written."""
+        s = tasks.step(task, n)
+        nxt = tasks.step(task, n + 1) if n < len(task["steps"]) else None
+        raw = tasks.read_note(self.folder, task, n)
+        prev = tasks.read_brief(self.folder, task, n - 1)
+        task["briefing"] = n
+        if not self.cfg["brief_on"]:
+            text = compact.fallback(prev, raw)
+            self._brief_done(task["id"], n, {"text": text, "cost": 0, "words": len(text.split()),
+                                             "fallback": "brief is off"}, raw)
+            return
+        self.briefing.add(task["id"])
+        threading.Thread(target=self._brief_job, args=(copy.deepcopy(task), copy.deepcopy(s), copy.deepcopy(nxt),
+                                                       prev, raw), name="cc-brief", daemon=True).start()
+
+    def _brief_job(self, task: dict, s: dict, nxt, prev: str, raw: str) -> None:
+        model = self.cfg["brief_model"]
+        cfg = dict(self.cfg, brief_model=self.model_id(model) if model in claude_cli.MODELS else model)
+        try:
+            res = compact.run_brief(cfg, self.runs.exe, task, s, nxt, prev, raw)
+        except Exception as exc:  # run_brief never raises; if it does, the chain still goes on
+            text = compact.fallback(prev, raw)
+            res = {"text": text, "cost": 0, "words": len(text.split()), "fallback": f"{type(exc).__name__}: {exc}"}
+        self._brief_done(task["id"], s["n"], res, raw)
+
+    def _brief_done(self, task_id: str, n: int, res: dict, raw: str) -> None:
+        """Write the brief, clear the flag, log it; a task that reached done is cleared now (README 3.9)."""
+        with self.tlock:
+            self.briefing.discard(task_id)
+            task = self.tasks.get(task_id)
+            if task is None:  # cleared while the pass ran
+                return
+            s = tasks.step(task, n)
+            why = (f"brief fallback: {res['fallback']}" if res["fallback"] else
+                   f"brief: {len(raw.split())} -> {res['words']} words, ${res['cost']:.2f}")
+            task["briefing"] = 0
+            try:
+                tasks.write_brief(self.folder, task, s, res["text"])
+                lines = [tasks._line(time.time(), s, "briefing", "briefed", why)]
+                if task["state"] == "done" and self.cfg["task_clear_on_done"] and not task.get("cleared"):
+                    lines.append(self._clear_done(task, s))
+                self._commit(task, lines)
+            except OSError:  # the folder is gone (cleared by hand, or the data folder was removed)
+                pass
+
+    def _clear_done(self, task: dict, s: dict) -> dict:
+        """task_clear_on_done: the notes but the last, and the step streams. Returns the chain line."""
+        freed = 0
+        for sid in tasks.clear(self.folder, task, keep_last=True):
+            try:
+                freed += self.runs.forget(sid)
+            except runs.RunError:  # already forgotten, or still going
+                continue
+        return tasks._line(time.time(), s, "task:done", "task:cleared", f"{freed} bytes freed")
+
+    def _go_on(self, task: dict) -> str:
+        """Start the step that may start: step 1 of a planned task, a retry, the one after a done step."""
+        nxt, now = self._next_step(task), time.time()
+        if nxt is None:
+            return ""
+        cs = tasks.current_step(task)
+        if cs and cs["state"] == "done" and task.get("briefing"):  # between steps: the next one reads the brief
+            if task["id"] not in self.briefing:
+                self.start_brief(task, task["briefing"])  # the service restarted while it ran
+            if task.get("briefing"):
+                return ""
+        if claude_cli.tier_of(nxt["pick"]) == "fable" and not task["fable_ok"]:
+            lines = []
+            tasks._task_to(task, "waiting", "confirm Fable", now, nxt, lines)
+            self._commit(task, lines)
+            return "wait"
+        if self.task_levers(task["id"])["start"]:
+            return ""
+        self.start_step(task, nxt["n"])
+        return "start"
+
+    def task_lever(self, task_id, lever: str) -> tuple:
+        """Fred's Stop, Pause, Resume, Retry, Confirm and Clear. task_levers decides first; Stop is the run's
+        interrupt (runs.stop), never a kill. Returns (status, body)."""
+        with self.tlock:
+            info = self.task_levers(task_id)
+            if info is None:
+                return 404, {"error": "unknown task"}
+            if info[lever]:
+                return 409, {"error": info[lever]}
+            task, now = self.tasks[task_id], time.time()
+            if lever == "clear":
+                for sid in tasks.clear(self.folder, task, keep_last=False):
+                    try:
+                        self.runs.forget(sid)
+                    except runs.RunError:
+                        continue
+                with self.lock:
+                    del self.tasks[task_id]
+                    self.version += 1
+                    self.changed.notify_all()
+                return 200, {"task": task_id, "state": "cleared"}
+            cs = tasks.current_step(task)
+            if lever == "stop" and cs and cs["state"] == "running" and self.runs.is_live(cs["session"]):
+                self.runs.stop(cs["session"])
+            ok, why, lines = tasks.fred(task, lever, now)
+            if not ok:
+                return 409, {"error": why}
+            self._commit(task, lines)
+            if lever in ("retry", "confirm"):
+                self.advance()
+            self.poll_once()
+            return 200, {"task": task_id, "state": task["state"]}
 
     def allowed(self, project_dir) -> str:
         """The configured folder matching `project_dir`, or "" (runs only in listed folders)."""
@@ -351,6 +736,19 @@ class Hub:
                 projects.append(folder)
             self.cfg["projects"] = projects
             return projects
+
+
+def task_row(t: dict) -> dict:
+    """A task as the window's list shows it (the whole task.json is GET /api/task)."""
+    cs = tasks.current_step(t)
+    return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
+            "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
+            "why": t["why"], "updated": t["updated"], "effort": t["effort"],
+            "cost": round(sum(s["cost"] or 0 for s in t["steps"]), 4),
+            "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
+            "briefing": t.get("briefing") or 0, "cleared": bool(t.get("cleared")),
+            "steps": [{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
+                                         "cost")} for s in t["steps"]]}
 
 
 def project_list(cfg: dict) -> list:
@@ -403,7 +801,9 @@ class Handler(BaseHTTPRequestHandler):
                                "default_effort": cfg["default_effort"], "claude": bool(self.hub.runs.exe),
                                "config_path": str(self.hub.folder / "config.json"),
                                "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
-                               "project": window.get("project", ""), "brief": window.get("brief") is True})
+                               "project": window.get("project", ""), "brief": window.get("brief") is True,
+                               "ladder": cfg["ladder"], "effort": window.get("effort", "auto"),
+                               "kinds": tasks.PREP_KINDS})
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())
         if url.path == "/api/image":
@@ -415,6 +815,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/levers":
             data = self.hub.levers(query.get("session", [""])[0])
             return self._json(data) if data else self._error(404, "unknown session")
+        if url.path == "/api/task":
+            return self._task(query.get("id", [""])[0])
         if url.path == "/api/draft":
             try:
                 text = (self.hub.folder / "draft.txt").read_text(encoding="utf-8")
@@ -430,9 +832,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden", "text/plain")
         routes = {"/api/prep": self._prep, "/api/prep/drop": self._prep_drop, "/api/run": self._run, "/api/stop": self._stop,
                   "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
-                  "/api/done": self._done}
+                  "/api/done": self._done, "/api/task": self._task_new}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
+        for lever in ("stop", "pause", "resume", "retry", "confirm", "clear"):
+            routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
         path = urlparse(self.path).path
         handler = routes.get(path)
         if handler is None:
@@ -491,7 +895,7 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.hub.cfg
         model = body.get("model") or cfg["default_model"]
         effort = body.get("effort") or cfg["default_effort"]
-        if model not in claude_cli.MODELS or effort not in claude_cli.EFFORTS:
+        if not claude_cli.known_model(cfg, model) or effort not in claude_cli.EFFORTS:
             return self._error(400, "unknown model or effort")
         card = prep.load(self.hub.folder, body.get("prep")) if body.get("prep") else None
         if card:
@@ -543,6 +947,29 @@ class Handler(BaseHTTPRequestHandler):
                                    body.get("confirm") is True, files)
         return self._json(data, code)
 
+    def _task_new(self, body):
+        """Run as task: the card (Prep job id), its prompt as edited on the page and the step list."""
+        card = prep.load(self.hub.folder, body.get("prep")) if isinstance(body.get("prep"), str) else None
+        if card is None:
+            return self._error(404, "unknown Prep card")
+        if not self.hub.allowed(card.get("project_dir")):
+            return self._error(403, "not a project listed in config.json")
+        text, effort, steps = self._text(body, "prompt"), body.get("effort", "auto"), body.get("steps")
+        if not text:
+            return self._error(400, "empty prompt")
+        if effort != "auto" and effort not in claude_cli.EFFORTS:
+            return self._error(400, "unknown effort")
+        if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
+            return self._error(400, "bad steps")
+        if any(s.get("model") and not claude_cli.known_model(self.hub.cfg, s["model"]) for s in steps):
+            return self._error(400, "unknown model")
+        title = body.get("title") if isinstance(body.get("title"), str) else ""
+        return self._json({"task": self.hub.create_task(dict(card, prompt=text), steps, effort, title.strip())})
+
+    def _task_lever(self, body, lever):
+        code, data = self.hub.task_lever(body.get("task"), lever)
+        return self._json(data, code)
+
     def _terminal(self, body):
         sid, s = self._window_session(body)
         if not sid:
@@ -567,15 +994,18 @@ class Handler(BaseHTTPRequestHandler):
         """The unsent prompt (draft.txt) and, when given, the compose project and whether the session
         page keeps its brief open (window.json)."""
         text, project, brief = body.get("text"), body.get("project"), body.get("brief")
+        effort = body.get("effort")
         if not isinstance(text, str) or len(text) > MAX_PROMPT:
             return self._error(400, "bad draft")
         if project is not None and (not isinstance(project, str) or len(project) > 1000):
             return self._error(400, "bad project")
         if brief is not None and not isinstance(brief, bool):
             return self._error(400, "bad brief")
+        if effort is not None and effort != "auto" and effort not in claude_cli.EFFORTS:
+            return self._error(400, "bad effort")
         self.hub.folder.mkdir(parents=True, exist_ok=True)
         (self.hub.folder / "draft.txt").write_text(text, encoding="utf-8")
-        fields = {k: v for k, v in (("project", project), ("brief", brief)) if v is not None}
+        fields = {k: v for k, v in (("project", project), ("brief", brief), ("effort", effort)) if v is not None}
         if fields:
             paths.save_window(self.hub.folder, **fields)
         return self._json({"ok": True})
@@ -618,11 +1048,15 @@ class Handler(BaseHTTPRequestHandler):
         s = self.hub.session(sid)
         if s is None or kind not in ("task", "verify", "next"):
             return self._error(404, "unknown session")
+        task = self.hub.tasks.get(s["task"]) if s["task"] else None
+        note = tasks.read_brief(self.hub.folder, task, s["step"]) if task and kind == "next" else ""
+        if note:  # a task's step session: the next chat starts from the step's brief
+            return self._json({"text": brief.build("next", last=note), "project_dir": s["project_dir"]})
         if kind == "next":  # after a Hand off: the next task starts from the skill's note
             off = self.hub.levers(sid)["next"]
             if off:
                 return self._error(409, off)
-            return self._json({"text": brief.build("next", last=self._last_reply(s["handoff_by"])),
+            return self._json({"text": brief.build("next", last=self.hub.last_reply(s["handoff_by"])),
                                "project_dir": s["project_dir"]})
         turns = transcript.turns(s["transcript_path"])
         files = []
@@ -637,14 +1071,14 @@ class Handler(BaseHTTPRequestHandler):
                            plan=os.path.isfile(os.path.join(folder or "", "PLAN.md")))
         return self._json({"text": text, "project_dir": s["project_dir"]})
 
-    def _last_reply(self, sid: str) -> str:
-        """Claude's last message in a session: its window run's stream, or its transcript."""
-        if self.hub.runs.meta(sid):
-            items = runs.chat(self.hub.runs.stream_path(sid))
-        else:
-            s = self.hub.session(sid)
-            items = transcript.turns(s["transcript_path"]) if s else []
-        return next((i["text"] for i in reversed(items) if i["role"] == "claude"), "")
+    def _task(self, task_id: str):
+        task = self.hub.tasks.get(task_id) if tasks.safe_id(task_id) else None
+        if task is None:
+            return self._error(404, "unknown task")
+        last = task["last_good"]
+        return self._json({"task": task, "levers": self.hub.task_levers(task_id),
+                           "note": tasks.read_note(self.hub.folder, task, last),
+                           "brief": tasks.read_brief(self.hub.folder, task, last)})
 
     def _stream(self):
         self.send_response(200)

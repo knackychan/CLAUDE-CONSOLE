@@ -7,8 +7,9 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from console import attach, brief, events, guard, levers, paths, server
+from console import attach, brief, claude_cli, events, guard, levers, paths, server, tasks
 
 
 class GuardTest(unittest.TestCase):
@@ -579,6 +580,405 @@ class RunServerTest(unittest.TestCase):
         config = self.call("/api/config")[1]
         self.assertEqual((config["brief"], config["project"]), (True, str(self.project)))  # project kept
         self.assertEqual(self.call("/api/draft", {"text": "", "brief": "yes"})[0], 400)
+
+
+class TaskServerTest(RunServerTest):
+    """Plan 17 Task 4: the supervisor. The hub loop does not run in these tests: `advance()` is called by hand
+    (through `until`), so every pass is one the test can see."""
+
+    def prep_card(self, text="CHAIN fix add"):
+        job = self.call("/api/prep", {"project_dir": str(self.project), "prompt": text})[1]["job"]
+        row = self.prep_job(job)
+        self.assertEqual(row["state"], "done")
+        return row["card"]
+
+    def post_task(self, card, words="HANDOFF-OK", steps=None, effort="auto"):
+        """POST /api/task with the card's steps (or `steps`); `words` ride in the prompt, which every step carries."""
+        steps = steps or [{"kind": s["kind"], "goal": s["goal"]} for s in card["steps"]]
+        return self.call("/api/task", {"prep": card["id"], "prompt": f"{card['prompt']}\n{words}".strip(),
+                                       "steps": steps, "effort": effort})
+
+    def make_task(self, text="CHAIN fix add", **kwargs):
+        status, data = self.post_task(self.prep_card(text), **kwargs)
+        self.assertEqual(status, 200, data)
+        return data["task"]
+
+    def task(self, tid):
+        return self.call(f"/api/task?id={tid}")
+
+    def until(self, tid, cond, what, seconds=25):
+        """advance() until cond(task) holds; fails with the task's state when it never does."""
+        end = time.time() + seconds
+        while time.time() < end:
+            self.hub.poll_once()
+            self.hub.advance()
+            task = self.hub.tasks[tid]
+            if cond(task):
+                return task
+            time.sleep(0.1)
+        self.fail(f"{what}: state {task['state']} ({task['why']}), steps "
+                  f"{[(s['n'], s['kind'], s['state']) for s in task['steps']]}")
+
+    def at(self, n, state="running"):
+        return lambda task: any(s["n"] == n and s["state"] == state for s in task["steps"])
+
+    def prompt_of(self, sid):
+        return next(i["text"] for i in self.call(f"/api/chat?session={sid}")[1]["items"] if i["role"] == "you")
+
+    def chain(self, tid):
+        path = self.folder / "tasks" / tid / "chain.jsonl"
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+    def test_chain_starts_step_one_from_the_card(self):
+        card = self.prep_card()
+        status, data = self.post_task(card)
+        self.assertEqual(status, 200)
+        tid = data["task"]
+        folder = self.folder / "tasks" / tid
+        self.assertTrue((folder / "task.json").is_file())
+        self.assertIn("HANDOFF-OK", (folder / "prompt.md").read_text(encoding="utf-8"))
+        task = self.task(tid)[1]["task"]
+        step = task["steps"][0]
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])
+        self.assertEqual((task["state"], task["current"], step["state"], step["model"], step["effort"]),
+                         ("running", 1, "running", "haiku", "low"))
+        row = self.session(step["session"])
+        self.assertEqual((row["task"], row["step"], row["kind"]), (tid, 1, "task"))
+        limits = self.hub.runs.meta(step["session"])["limits"]
+        self.assertEqual((limits["disallow"], limits["tools"], limits["budget"]), (["Agent"], "Read,Grep,Glob", 3))
+        self.assertEqual(self.hub.snapshot()["preps"], [])  # the card became the task
+        # a second task in the same project waits: one at a time
+        other = tasks.new_task(str(self.project), "proj", "Other", "goal", tasks.plan_steps(
+            [{"kind": "scout", "goal": "look"}], 6), "normal", {}, "", "auto", time.time())
+        self.hub.tasks[other["id"]] = other
+        self.assertEqual(self.hub.task_levers(other["id"])["start"], "another task is working in this project")
+        status, data = self.post_task(self.prep_card("CHAIN again"))
+        self.assertEqual(status, 409)
+        self.assertIn("another task", data["error"])
+        self.assertIsNone(self.hub.task_levers("nope"))
+
+    def test_good_handoff_starts_the_next_step(self):
+        tid = self.make_task()
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step1, step2 = task["steps"][0], task["steps"][1]
+        note = (self.folder / "tasks" / tid / "steps" / "01-scout.md").read_text(encoding="utf-8")
+        self.assertTrue(note.startswith(f"# Step 01: scout on haiku/low, session {step1['session']}\n\n"))
+        self.assertIn("## Findings\nadd() is in calc.py:2", note)
+        self.assertEqual((step1["state"], step1["handoff"], task["last_good"]), ("done", "steps/01-scout.md", 1))
+        self.assertEqual((step2["model"], step2["effort"]), ("sonnet", "medium"))
+        task = self.until(tid, self.at(3), "the verify step starts")
+        verify = task["steps"][2]
+        self.assertEqual((verify["model"], verify["effort"]), ("opus", "medium"))  # one model up from sonnet/medium
+        moves = [(c["step"], c["from"], c["to"]) for c in self.chain(tid)]
+        for move in ((1, "planned", "running"), (1, "running", "done"), (2, "planned", "running"),
+                     (2, "running", "done"), (3, "planned", "running")):
+            self.assertIn(move, moves)
+
+    def test_missing_handoff_retries_once_then_stuck(self):
+        tid = self.make_task(words="")
+        first = self.hub.tasks[tid]["steps"][0]["session"]
+        task = self.until(tid, lambda t: t["steps"][0]["retries"] == 1 and t["steps"][0]["session"] != first
+                          and t["steps"][0]["state"] == "running", "step 1 runs again")
+        step = task["steps"][0]
+        self.assertEqual((step["model"], step["effort"]), ("haiku", "low"))  # the same route
+        self.assertIn("ended without a handoff: no HANDOFF block", self.prompt_of(step["session"]))
+        self.assertNotIn("ended without a handoff", self.prompt_of(first))
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        self.assertEqual(task["why"], "no HANDOFF block (after one retry)")
+        self.assertEqual(self.call("/api/task/retry", {"task": tid}), (200, {"task": tid, "state": "running"}))
+        self.assertEqual(self.hub.tasks[tid]["steps"][0]["state"], "running")
+        self.assertEqual(self.call("/api/task/retry", {"task": tid})[0], 409)  # running now
+
+    def test_verify_fail_inserts_fix_and_verify(self):
+        tid = self.make_task()
+        verify = self.hub.tasks[tid]["steps"][2]
+        verify["goal"] += " VERDICT-FAIL"  # the fake claude waits 1 s, so the verdict event can land while it runs
+        task = self.until(tid, self.at(3), "the verify runs")
+        self.verdict(task["steps"][2]["session"], "FAIL", "test_add - 3 != 4")
+        task = self.until(tid, lambda t: len(t["steps"]) == 5, "fix and verify are inserted")
+        task["steps"][4]["goal"] += " VERDICT-FAIL"  # the second verify fails the same way
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify", "fix", "verify"])
+        self.assertEqual(task["escalated"], "sonnet/medium -> sonnet/high")
+        task = self.until(tid, self.at(4), "the fix runs")
+        self.assertEqual((task["steps"][3]["model"], task["steps"][3]["effort"]), ("sonnet", "high"))
+        misses = levers.read_misses(self.folder, "proj")
+        self.assertEqual(len(misses), 1)
+        self.assertIn(" - proj - code: sonnet/medium failed (test_add - 3 != 4); next time start at sonnet/high.",
+                      misses[0])
+        task = self.until(tid, self.at(5), "the second verify runs")
+        self.verdict(task["steps"][4]["session"], "FAIL", "still 3 != 4")
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        self.assertTrue(task["why"].startswith("verify failed twice"), task["why"])
+
+    TWO = [{"kind": "scout", "goal": "look around"}, {"kind": "explain", "goal": "say what you saw"}]  # no verify
+
+    def settled(self, tid, state="done"):
+        """advance() until the task has `state` and its brief thread is over."""
+        return self.until(tid, lambda t: t["state"] == state and not t.get("briefing"), f"the task is {state}")
+
+    def over(self, tier):
+        """A budget() with every rung of the tier over its pace."""
+        return lambda: {rung: 0.9 for rung in self.hub.cfg["ladder"][tier]}
+
+    def test_stop_question_waits_for_fred(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look STOP-ASK"}, self.TWO[1]])
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        events.append(self.folder, {"event": "Stop", "ts": time.time(), "session_id": sid,  # what the hook logs
+                                    "stop_question": "which file?"})
+        self.wait_idle(sid)
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits")
+        self.assertEqual(task["why"], "asks: which file?")
+        self.assertEqual(self.hub.advance(), [])  # nothing moves until Fred answers
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "calc.py HANDOFF-OK"}),
+                         (200, {"session": sid}))
+        self.hub.poll_once()
+        self.hub.advance()
+        self.assertEqual(self.hub.tasks[tid]["state"], "running")  # the answer is running
+        task = self.until(tid, self.at(2), "the next step starts")
+        self.assertEqual((task["steps"][0]["state"], task["steps"][0]["session"]), ("done", sid))
+
+    def test_stop_interrupts_the_step_never_kills(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
+        old = self.hub.tasks[tid]["steps"][0]["session"]
+        self.assertEqual(self.call("/api/task/stop", {"task": tid}), (200, {"task": tid, "state": "stopped"}))
+        self.wait_idle(old)
+        self.assertIn("[Request interrupted", self.hub.runs.stream_path(old).read_text(encoding="utf-8"))
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["state"], task["owner"], task["steps"][0]["state"]), ("stopped", "fred", "failed"))
+        self.assertEqual(self.hub.advance(), [])
+        self.assertEqual(self.call("/api/task/retry", {"task": tid}), (200, {"task": tid, "state": "running"}))
+        step = self.hub.tasks[tid]["steps"][0]
+        self.assertEqual((step["state"], self.hub.tasks[tid]["owner"]), ("running", "service"))
+        self.assertNotEqual(step["session"], old)
+        self.assertIsNotNone(self.session(old))  # the old session row stays
+
+    def test_pause_and_resume(self):
+        tid = self.make_task(steps=self.TWO)
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.assertEqual(self.call("/api/task/pause", {"task": tid}), (200, {"task": tid, "state": "running"}))
+        self.assertEqual(self.hub.tasks[tid]["owner"], "fred")
+        self.wait_idle(sid)
+        self.hub.poll_once()
+        self.assertEqual(self.hub.advance(), [])  # the step finished; nothing starts after it
+        self.assertEqual(len([s for s in self.hub.tasks[tid]["steps"] if s["session"]]), 1)
+        self.assertEqual(self.call("/api/task/resume", {"task": tid}), (200, {"task": tid, "state": "running"}))
+        self.until(tid, self.at(2), "step 2 starts")
+
+    def test_task_only_in_allowed_projects(self):
+        other = Path(self.tmp.name) / "other"
+        other.mkdir()
+        card = {"id": "20260101-000000-abcd", "project_dir": str(other), "raw": "x", "prompt": "x", "fields": {},
+                "route": {}, "demand": {}, "steps": []}
+        (self.folder / "preps").mkdir(parents=True, exist_ok=True)
+        (self.folder / "preps" / f"{card['id']}.json").write_text(json.dumps(card), encoding="utf-8")
+        status, _ = self.post_task(card, steps=self.TWO)
+        self.assertEqual(status, 403)
+        self.assertEqual(self.hub.tasks, {})
+        self.assertEqual(self.call("/api/task", {"prep": "nope", "prompt": "x", "steps": []})[0], 404)
+
+    def test_auto_steps_skip_task_sessions(self):
+        tid = self.make_task(steps=self.TWO)
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.wait_idle(sid)
+        self.verdict(sid, "FAIL", "test_add - 3 != 4")
+        self.assertEqual(self.hub.auto_steps(), [])  # the chain owns the verdicts of its steps
+
+    def test_restart_resumes_the_chain(self):
+        tid = self.make_task(steps=self.TWO)
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.wait_idle(sid)
+        again = server.Hub(self.hub.cfg, self.folder, self.hub.runs.exe)  # the service restarted
+        again.user_home = self.hub.user_home
+        again.poll_once()
+        self.assertEqual(again.tasks[tid]["steps"][0]["state"], "running")  # as the old service left it
+        end = time.time() + 25
+        while time.time() < end and not again.tasks[tid]["steps"][1]["session"]:
+            again.poll_once()
+            again.advance()
+            time.sleep(0.1)
+        task = again.tasks[tid]
+        self.assertEqual((task["steps"][0]["state"], bool(task["steps"][1]["session"])), ("done", True))
+        while time.time() < end and (again.runs.live or again.briefing):  # let its run and brief end before cleanup
+            time.sleep(0.1)
+
+    def test_fable_needs_a_confirm(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look", "model": "fable"}])
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["state"], task["why"], task["steps"][0]["session"]), ("waiting", "confirm Fable", ""))
+        levers_ = self.task(tid)[1]["levers"]
+        self.assertEqual((levers_["start"], levers_["confirm"]), ("confirm Fable", ""))
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid}), (200, {"task": tid, "state": "running"}))
+        step = self.hub.tasks[tid]["steps"][0]
+        self.assertEqual((step["state"], self.hub.runs.meta(step["session"])["model"]), ("running", "fable"))
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 409)
+
+    def test_budget_hold_waits_for_fred(self):
+        self.hub.budget = self.over("opus")
+        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it"}])  # a design step drops one model
+        step = self.hub.tasks[tid]["steps"][0]
+        self.assertEqual((step["model"], step["effort"]), ("sonnet", "xhigh"))
+        self.assertIn("budget: opus 90 % -> sonnet/xhigh", self.session(step["session"])["route_reason"])
+        self.settled(tid)
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])  # its verify would run on opus: it holds
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the verify holds")
+        self.assertEqual(task["why"], "opus over its pace")
+        self.assertEqual([s["state"] for s in task["steps"]], ["done", "planned"])
+        self.assertEqual(self.hub.advance(), [])  # it waits for Fred, it does not poll the budget
+
+    def test_nothing_written_outside_home(self):
+        tid = self.make_task(steps=self.TWO)
+        self.settled(tid)
+        self.assertEqual(list(self.project.iterdir()), [])  # the fake claude writes no file, and nor does the service
+        folder = self.folder / "tasks" / tid
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["chain.jsonl", "prompt.md", "steps", "task.json"])
+
+    def test_done_task_is_cleared(self):
+        tid = self.make_task(steps=self.TWO)
+        self.settled(tid)
+        sids = [s["session"] for s in self.hub.tasks[tid]["steps"]]
+        self.assertEqual(len(sids), 2)
+        for sid in sids:
+            self.assertFalse(self.hub.runs.stream_path(sid).exists())
+            self.assertFalse(self.hub.runs.meta_path(sid).exists())
+        folder = self.folder / "tasks" / tid
+        self.assertEqual(sorted(p.name for p in (folder / "steps").iterdir()),
+                         ["02-explain.brief.md", "02-explain.md"])  # the last note and its brief
+        saved = tasks.load(self.folder, tid)
+        self.assertTrue(saved["cleared"])
+        self.assertEqual((saved["state"], saved["steps"][0]["handoff"], saved["steps"][1]["handoff"]),
+                         ("done", "", "steps/02-explain.md"))
+        last = self.chain(tid)[-1]
+        self.assertEqual((last["from"], last["to"]), ("task:done", "task:cleared"))
+        self.assertIsNotNone(self.session(sids[0]))  # the session rows (the event log) stay
+
+    def test_done_task_stays_whole_without_the_setting(self):
+        self.hub.cfg["task_clear_on_done"] = False
+        tid = self.make_task(steps=self.TWO)
+        self.settled(tid)
+        sids = [s["session"] for s in self.hub.tasks[tid]["steps"]]
+        self.assertTrue(all(self.hub.runs.stream_path(sid).exists() for sid in sids))
+        self.assertIn("01-scout.md", [p.name for p in (self.folder / "tasks" / tid / "steps").iterdir()])
+        self.assertFalse(self.hub.tasks[tid].get("cleared"))
+
+    def test_clear_removes_a_stuck_task(self):
+        tid = self.make_task(words="", steps=self.TWO)
+        self.assertEqual(self.call("/api/task/clear", {"task": tid})[0], 409)  # running
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        sid = task["steps"][0]["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.call("/api/task/clear", {"task": tid}), (200, {"task": tid, "state": "cleared"}))
+        self.assertFalse((self.folder / "tasks" / tid).exists())
+        self.assertFalse(self.hub.runs.stream_path(sid).exists())
+        self.assertEqual([t["id"] for t in self.hub.snapshot()["tasks"]], [])
+        self.assertEqual(self.call("/api/task/clear", {"task": tid})[0], 404)
+
+    def test_brief_runs_between_steps(self):
+        tid = self.make_task(steps=self.TWO)
+        self.until(tid, lambda t: t.get("briefing") == 1, "step 1 is briefed")
+        row = self.hub.snapshot()["tasks"][0]
+        self.assertEqual((row["id"], row["briefing"]), (tid, 1))
+        task = self.until(tid, self.at(2), "step 2 starts")
+        brief_file = self.folder / "tasks" / tid / "steps" / "01-scout.brief.md"
+        text = brief_file.read_text(encoding="utf-8")
+        for heading in tasks.HEADINGS:
+            self.assertIn(heading, text)
+        self.assertLess(len(text.split()), 400)
+        self.assertIn("test_add covers it", text)  # the Haiku pass wrote it, not the code fallback
+        brief_lines = [c["why"] for c in self.chain(tid) if c["why"].startswith("brief")]
+        self.assertEqual(len(brief_lines), 1)
+        self.assertRegex(brief_lines[0], r"^brief: \d+ -> \d+ words, \$0\.0\d$")
+        prompt = self.prompt_of(task["steps"][1]["session"])
+        self.assertIn("test_add covers it", prompt)  # step 2 reads the brief ...
+        self.assertNotIn("# Step 01:", prompt)  # ... and not the raw note
+
+    def test_brief_is_the_code_fallback_when_off(self):
+        self.hub.cfg["brief_on"] = False
+        with mock.patch.object(server.compact, "run_brief", side_effect=AssertionError("no second claude")) as ask:
+            tid = self.make_task(steps=self.TWO)
+            task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertEqual(ask.call_count, 0)
+        text = (self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").read_text(encoding="utf-8")
+        self.assertIn("add() is in calc.py:2", text)
+        self.assertNotIn("test_add covers it", text)
+        self.assertTrue(any(c["why"].startswith("brief fallback:") for c in self.chain(tid)))
+        self.assertNotIn("# Step 01:", self.prompt_of(task["steps"][1]["session"]))
+
+    def test_brief_fallback_never_blocks_the_chain(self):
+        # the brief request holds the next step's goal, so LONG goes in step 2's
+        tid = self.make_task(steps=[self.TWO[0], {"kind": "explain", "goal": "say it LONG"}])
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("brief fallback: over 400 words", [c["why"] for c in self.chain(tid)])
+        text = (self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").read_text(encoding="utf-8")
+        self.assertIn("add() is in calc.py:2", text)
+        self.assertEqual(task["steps"][1]["state"], "running")
+
+    def test_task_snapshot_and_get(self):
+        tid = self.make_task()
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        for key in ("id", "title", "project", "project_dir", "state", "owner", "current", "count", "why", "updated",
+                    "effort", "cost", "route", "steps"):
+            self.assertIn(key, row)
+        self.assertEqual((row["project"], row["state"], row["owner"], row["current"], row["count"], row["route"]),
+                         ("proj", "running", "service", 1, 3, "haiku/low"))
+        self.assertEqual([(s["n"], s["kind"], s["state"]) for s in row["steps"]],
+                         [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
+        self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
+                                                          "verdict", "retries", "cost"]))
+        self.until(tid, self.at(2), "step 2 starts")
+        status, data = self.task(tid)
+        self.assertEqual(status, 200)
+        self.assertEqual(data["task"]["id"], tid)
+        self.assertEqual(data["levers"]["route"], "sonnet/medium")
+        self.assertEqual(data["levers"]["start"], "a step is running")
+        self.assertIn("## Findings\nadd() is in calc.py:2", data["note"])
+        self.assertIn("test_add covers it", data["brief"])
+        self.assertEqual(self.task("../x")[0], 404)
+        self.assertEqual(self.task("20260101-000000-ffff")[0], 404)
+
+    def test_rung_under_budget_pressure(self):
+        self.hub.budget = lambda: {"opus": 0.9}  # the alias is over, the older rungs are not
+        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it"}])
+        step = self.hub.tasks[tid]["steps"][0]
+        self.assertEqual((step["tier"], step["model"], step["effort"]), ("opus", "claude-opus-4-8", "high"))
+        self.assertEqual(self.hub.runs.meta(step["session"])["model"], "claude-opus-4-8")
+        self.settled(tid)
+        self.hub.budget = self.over("opus")  # every rung over: the tier drop of step_route
+        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it again"}])
+        step = self.hub.tasks[tid]["steps"][0]
+        self.assertEqual((step["tier"], step["model"], step["effort"]), ("sonnet", "sonnet", "xhigh"))
+
+    def test_a_rung_can_be_run_by_hand(self):
+        run = {"project_dir": str(self.project), "prompt": "fix add", "effort": "low"}
+        status, data = self.call("/api/run", dict(run, model="claude-haiku-4-5"))
+        self.assertEqual(status, 200)
+        self.assertEqual(self.hub.runs.meta(data["session"])["model"], "claude-haiku-4-5")
+        self.assertEqual(self.call("/api/run", dict(run, model="claude-haiku-3"))[0], 400)
+        self.assertEqual(self.call("/api/config")[1]["ladder"]["haiku"], ["haiku", "claude-haiku-4-5"])
+        self.wait_idle(data["session"])
+
+    def test_usage_reports_storage(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add"})[1]["session"]
+        self.wait_idle(sid)
+        self.hub.read_history()
+        data = self.call("/api/usage")[1]
+        self.assertGreater(data["storage"]["runs"], 0)
+        self.assertGreaterEqual(data["storage"]["total"], data["storage"]["runs"])
+        self.assertEqual(sorted(data["storage"]), ["events", "other", "preps", "runs", "tasks", "total"])
+        self.assertEqual(data["storage_warn_mb"], 500)
+
+    def test_draft_keeps_the_effort(self):
+        self.assertEqual(self.call("/api/config")[1]["effort"], "auto")
+        self.assertEqual(self.call("/api/draft", {"text": "", "effort": "max"}), (200, {"ok": True}))
+        config = self.call("/api/config")[1]
+        self.assertEqual((config["effort"], config["kinds"]), ("max", list(tasks.PREP_KINDS)))
+        self.assertEqual(self.call("/api/draft", {"text": "", "effort": "turbo"})[0], 400)
+        self.assertEqual(self.call("/api/draft", {"text": "", "effort": "auto"})[0], 200)
+        self.assertEqual(self.call("/api/config")[1]["effort"], "auto")
+
+
+for _name in dir(RunServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parent
+    if _name.startswith("test_"):
+        setattr(TaskServerTest, _name, None)
 
 
 if __name__ == "__main__":

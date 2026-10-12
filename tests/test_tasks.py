@@ -561,6 +561,16 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(tasks.read_brief(home, task, 0), "")
             self.assertEqual(tasks.read_brief(home, task, 9), "")
 
+    def test_write_brief_mirrors_write_note(self):
+        task = make(("scout", "explain"))
+        run(task, 1)
+        with tempfile.TemporaryDirectory() as home:
+            rel = tasks.write_brief(home, task, tasks.step(task, 1), "## Findings\nthe brief")
+            self.assertEqual(rel, "steps/01-scout.brief.md")
+            self.assertEqual(tasks.read_brief(home, task, 1), "## Findings\nthe brief")
+            self.assertEqual(tasks.read_brief(home, task, 2), "")
+            self.assertEqual(tasks.step(task, 1)["handoff"], "")  # task.json has no brief key: nothing is set
+
     def test_clear_keeps_the_last_brief_too(self):
         with tempfile.TemporaryDirectory() as home:
             task = make(("scout", "explain"))

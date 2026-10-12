@@ -275,3 +275,24 @@ def save_days(folder, days: dict, today: str) -> bool:
     tmp.write_text(json.dumps({"days": dict(sorted(merged.items()))}, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return True
+
+
+def folder_sizes(home) -> dict:
+    """Bytes in the data folder by what they are (README 3.9): runs/, tasks/, preps/, the daily event logs, and
+    everything else (config, drafts, usage-days.json, the misses file); one os.walk."""
+    root, sizes = Path(home), {"runs": 0, "tasks": 0, "events": 0, "preps": 0, "other": 0}
+    for where, _, names in os.walk(root):
+        top = Path(where).relative_to(root).parts[:1]
+        for name in names:
+            try:
+                size = os.path.getsize(os.path.join(where, name))
+            except OSError:
+                continue
+            if top and top[0] in ("runs", "tasks", "preps"):
+                sizes[top[0]] += size
+            elif not top and name.startswith("events-"):
+                sizes["events"] += size
+            else:
+                sizes["other"] += size
+    sizes["total"] = sum(sizes.values())
+    return sizes

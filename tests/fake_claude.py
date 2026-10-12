@@ -9,6 +9,11 @@ Prep (--json-schema): reads the prompt on stdin, prints one result object.
 Run (--input-format stream-json): per user message prints init / assistant / result.
   "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
   "DENY" in the message: the result carries one permission denial.
+  The echo quotes the step prompt's own HANDOFF template lines ("> HANDOFF"), so a step has no block by default.
+  "HANDOFF-OK" in the message: the assistant text ends with a valid HANDOFF block.
+  "VERDICT-PASS" / "VERDICT-FAIL" in the message: it ends with a `VERDICT: PASS` / `VERDICT: FAIL x` line;
+  VERDICT-FAIL also waits 1 s before the result line (a test appends the verdict event meanwhile).
+  "STOP-ASK" in the message: the assistant text ends with `STOP: which file?`.
 """
 import json
 import sys
@@ -59,6 +64,26 @@ def prep():
     return 0
 
 
+HANDOFF_BLOCK = ("HANDOFF\n## Findings\nadd() is in calc.py:2\n## Files touched\n- (none)\n"
+                 "## Open questions\n- (none)\n## Next\nGo on\nEND HANDOFF")
+
+
+def reply(text):
+    """The assistant text: the user message echoed, the step prompt's own HANDOFF template defanged (a quoted
+    marker is not a block), then what the words in the message ask for."""
+    lines = [("> " + line) if line.strip() in ("HANDOFF", "END HANDOFF") else line for line in text.splitlines()]
+    body = "\n".join(lines)
+    if "HANDOFF-OK" in text:
+        body += "\n\n" + HANDOFF_BLOCK
+    if "VERDICT-PASS" in text:
+        body += "\nVERDICT: PASS"
+    if "VERDICT-FAIL" in text:
+        body += "\nVERDICT: FAIL x"
+    if "STOP-ASK" in text:
+        body += "\nSTOP: which file?"
+    return body
+
+
 def run():
     sid = arg("--session-id") or arg("--resume")
     for line in sys.stdin:
@@ -71,7 +96,7 @@ def run():
         out({"type": "system", "subtype": "init", "session_id": sid, "cwd": "."})
         out({"type": "assistant", "session_id": sid, "parent_tool_use_id": None, "message": {
             "role": "assistant", "content": [
-                {"type": "text", "text": "echo: " + text},
+                {"type": "text", "text": "echo: " + reply(text)},
                 {"type": "tool_use", "name": "Read", "input": {"file_path": "calc.py"}}]}})
         if "SLOW" in text:
             nxt = sys.stdin.readline()
@@ -84,6 +109,8 @@ def run():
                 out(result(sid, "error_during_execution"))
                 return 1
         denials = [{"tool_name": "Bash", "tool_input": {"command": "git push"}}] if "DENY" in text else []
+        if "VERDICT-FAIL" in text:
+            time.sleep(1)  # the test appends the verdict event while the run is still live, as the hook would
         out(result(sid, denials=denials))
     return 0
 

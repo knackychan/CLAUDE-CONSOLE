@@ -454,6 +454,15 @@ def read_brief(home, task: dict, n: int) -> str:
         return ""
 
 
+def write_brief(home, task: dict, step: dict, text: str) -> str:
+    """The compacted note of `step` (compact.run_brief's text) in its brief file; returns the relative name."""
+    rel = brief_file(task, step)
+    path = folder(home, task["id"]) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return rel
+
+
 def prune(home, days: float, now: float = None) -> list:
     """Remove the task folders of `done`, `stopped` and `stuck` tasks whose task.json is older than `days`."""
     cutoff = (time.time() if now is None else now) - days * 86400

@@ -186,16 +186,16 @@ goals it sends.
 
 ## Steps
 
-- [ ] 1. Fake claude words `HANDOFF-OK`, `VERDICT-FAIL` (1 s delay), `STOP-ASK`; docstring lines. Run the suite:
+- [x] 1. Fake claude words `HANDOFF-OK`, `VERDICT-FAIL` (1 s delay), `STOP-ASK`; docstring lines. Run the suite:
       169 + Tasks 1-3 OK (nothing uses the words yet).
-- [ ] 2. Write `TaskServerTest` with the first four tests. Run: 404 on the routes.
-- [ ] 3. `Hub.tasks`, `budget`, `last_reply`, `task_levers`, `create_task`, `start_step`, `advance`, the loop call,
+- [x] 2. Write `TaskServerTest` with the first four tests. Run: 404 on the routes.
+- [x] 3. `Hub.tasks`, `budget`, `last_reply`, `task_levers`, `create_task`, `start_step`, `advance`, the loop call,
       `GET /api/task`, `POST /api/task`. Run the four: pass.
-- [ ] 4. Write the remaining tests. Run: fail on the lever routes and the skips.
-- [ ] 5. `task_lever`, the six POST routes, the clear on done, `start_brief` and the `briefing` flag, the `auto_steps` skip, the snapshot rows, `tasks.prune` in the
+- [x] 4. Write the remaining tests. Run: fail on the lever routes and the skips.
+- [x] 5. `task_lever`, the six POST routes, the clear on done, `start_brief` and the `briefing` flag, the `auto_steps` skip, the snapshot rows, `tasks.prune` in the
       sweep, `/api/draft` `effort`, `/api/config` `effort` / `kinds` / `ladder`, `model_id` and `tier_budget`, `known_model`
       in the run route, `usage.folder_sizes` and `storage` in `/api/usage`. Run: pass.
-- [ ] 6. Whole suite OK. Commit: `feat: task chain supervisor in the service: advance, levers, routes (plan 17 Task 4)`.
+- [x] 6. Whole suite OK. Commit: `feat: task chain supervisor in the service: advance, levers, routes (plan 17 Task 4)`.
 
 ## Drift guards
 
