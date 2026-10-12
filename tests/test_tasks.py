@@ -270,7 +270,12 @@ class ChainTest(unittest.TestCase):
         self.assertEqual([s["pick"] for s in picked], ["fable", ""])
         self.assertEqual(tasks.plan_steps([], 6), [])
         self.assertEqual(tasks.plan_steps("junk", 6), [])
-        self.assertEqual(len(tasks.plan_steps([{"kind": "scout", "goal": "x" * 500}], 6)[0]["goal"]), 200)
+
+    def test_plan_steps_keeps_a_long_goal(self):
+        goal = " ".join(["word"] * 180)  # 899 characters
+        self.assertEqual(tasks.plan_steps([{"kind": "scout", "goal": goal}], 6)[0]["goal"], goal)
+        cut = tasks.plan_steps([{"kind": "scout", "goal": "x" * 1500}], 6)[0]["goal"]
+        self.assertEqual((len(cut), cut[-1]), (1000, "…"))
 
     def test_verify_goes_after_the_last_edit_step(self):
         steps = tasks.plan_steps([{"kind": "code", "goal": "a"}, {"kind": "explain", "goal": "b"}], 6)
