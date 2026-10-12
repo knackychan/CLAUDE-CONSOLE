@@ -182,6 +182,7 @@ fallback), `test_brief_command_has_no_tools_and_one_turn` (in `tests/test_claude
 Steps: tests first (fail on the missing module and flag), then `brief_command`, `compact.py`, the prompt file,
 the fake words, `tasks.brief_file` / `read_brief`; whole suite OK; commit
 `feat: brief pass: the handoff compacted between steps (plan 17 Task 1b)`.
+Done 2026-10-12 (223 tests OK). `clear(keep_last=True)` also keeps the last brief (design 4.12).
 
 ## Tests: `tests/test_tasks.py`
 
@@ -265,17 +266,17 @@ Two classes. Every test is written before the code it covers, run once to see it
 
 ## Steps
 
-- [ ] 1. Add the eight keys to `paths.DEFAULTS` (README section 4). Run the suite: 169 OK.
-- [ ] 2. Write `tests/test_tasks.py` with `RulesTest` and `HandoffTest` (every test above except
+- [x] 1. Add the eight keys to `paths.DEFAULTS` (README section 4). Run the suite: 169 OK.
+- [x] 2. Write `tests/test_tasks.py` with `RulesTest` and `HandoffTest` (every test above except
       `test_kinds_table_matches_prompt`). Run `py -m unittest tests.test_tasks`: every test errors on the missing
       module.
-- [ ] 3. Write `console/tasks.py` constants, `safe_id`, `verify_route`, `step_route`, the handoff functions. Run
+- [x] 3. Write `console/tasks.py` constants, `safe_id`, `verify_route`, `step_route`, the handoff functions. Run
       the two classes: all pass. Fix the code, not the tests, when one fails.
-- [ ] 4. Write `ChainTest`. Run: errors on the missing functions.
-- [ ] 5. Write `plan_steps`, `new_task`, `step`, `current_step`, `start_step`, `on_step_ended`, `fred`, the file
+- [x] 4. Write `ChainTest`. Run: errors on the missing functions.
+- [x] 5. Write `plan_steps`, `new_task`, `step`, `current_step`, `start_step`, `on_step_ended`, `fred`, the file
       functions, `step_prompt` and `console/step_prompt.md`. Run `ChainTest`: all pass.
-- [ ] 6. Run the whole suite: 169 + the new tests OK.
-- [ ] 7. Commit: `feat: tasks module: step rules, handoff check, chain transitions, task files (plan 17 Task 1)`.
+- [x] 6. Run the whole suite: 169 + the new tests OK.
+- [x] 7. Commit: `feat: tasks module: step rules, handoff check, chain transitions, task files (plan 17 Task 1)`.
 
 ## Drift guards
 

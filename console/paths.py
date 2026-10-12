@@ -41,6 +41,10 @@ DEFAULTS = {
     },
     "storage_warn_mb": 500,
     "task_clear_on_done": True,
+    "brief_on": True,  # the Haiku pass that compacts a step's note into the next step's brief
+    "brief_model": "haiku",
+    "brief_max_words": 400,
+    "brief_timeout_s": 60,
     # USD per million tokens, API list prices (claude-api skill, 2026-10-06); fast mode costs 2x.
     # Haiku's higher price for prompts over 100K tokens is left out.
     "prices": {

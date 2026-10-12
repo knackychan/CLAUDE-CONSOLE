@@ -537,6 +537,34 @@ class ChainTest(unittest.TestCase):
             self.assertFalse(folder.exists())
             self.assertIsNone(tasks.load(home, task["id"]))
 
+    def test_brief_file_and_read_brief(self):
+        task = make(("scout", "explain"))
+        run(task, 1)
+        self.assertEqual(tasks.brief_file(task, tasks.step(task, 1)), "steps/01-scout.brief.md")
+        with tempfile.TemporaryDirectory() as home:
+            self.assertEqual(tasks.read_brief(home, task, 1), "")
+            path = tasks.folder(home, task["id"]) / "steps" / "01-scout.brief.md"
+            path.parent.mkdir(parents=True)
+            path.write_text("the brief", encoding="utf-8")
+            self.assertEqual(tasks.read_brief(home, task, 1), "the brief")
+            self.assertEqual(tasks.read_brief(home, task, 0), "")
+            self.assertEqual(tasks.read_brief(home, task, 9), "")
+
+    def test_clear_keeps_the_last_brief_too(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = make(("scout", "explain"))
+            for n in (1, 2):
+                run(task, n)
+                end(task)
+                tasks.write_note(home, task, tasks.step(task, n), GOOD)
+                brief = tasks.folder(home, task["id"]) / tasks.brief_file(task, tasks.step(task, n))
+                brief.write_text(f"brief {n}", encoding="utf-8")
+            folder = tasks.folder(home, task["id"])
+            tasks.save(home, task)
+            tasks.clear(home, task, keep_last=True)
+            files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
+            self.assertEqual(files, ["steps/02-explain.brief.md", "steps/02-explain.md", "task.json"])
+
     def test_step_prompt_text(self):
         task = make(("scout", "code"))
         run(task, 1)

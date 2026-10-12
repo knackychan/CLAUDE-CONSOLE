@@ -42,6 +42,19 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(json.loads(cmd[cmd.index("--settings") + 1]), {"disableAllHooks": True})
         self.assertEqual(json.loads(cmd[cmd.index("--json-schema") + 1]), {"type": "object"})
 
+    def test_brief_command_has_no_tools_and_one_turn(self):
+        cmd = claude_cli.brief_command(["claude.exe"], "haiku", {"type": "object"})
+        self.assertEqual(cmd[:2], ["claude.exe", "-p"])
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "1")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "haiku")
+        self.assertEqual(cmd[cmd.index("--effort") + 1], "low")
+        self.assertEqual(json.loads(cmd[cmd.index("--settings") + 1]), {"disableAllHooks": True})
+        self.assertEqual(json.loads(cmd[cmd.index("--json-schema") + 1]), {"type": "object"})
+        for flag in ("--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config"):
+            self.assertIn(flag, cmd)
+        self.assertEqual(cmd.count("--tools"), 1)
+
     def test_messages(self):
         self.assertEqual(json.loads(claude_cli.user_message("hé")),
                          {"type": "user", "message": {"role": "user", "content": "hé"}})

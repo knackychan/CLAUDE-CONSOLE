@@ -52,6 +52,13 @@ def prep_command(exe: list, model: str, schema: dict) -> list:
                   "--output-format", "json", "--json-schema", json.dumps(schema)]
 
 
+def brief_command(exe: list, model: str, schema: dict) -> list:
+    """Prep's command with no tools at all and one turn: the brief pass reads nothing and decides nothing."""
+    cmd = prep_command(exe, model, schema)
+    cmd[cmd.index("--tools") + 1] = ""
+    return cmd + ["--max-turns", "1"]
+
+
 def run_command(exe: list, model: str, effort: str, session_id: str, resume: bool = False,
                 name: str = "", fork: str = "") -> list:
     """D5: auto mode, nobody answers prompts (a denial ends up in the result). Prompts go in on stdin.

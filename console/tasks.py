@@ -167,6 +167,11 @@ def note_file(task: dict, step: dict) -> str:
     return f"steps/{step['n']:02d}-{step['kind']}.md"
 
 
+def brief_file(task: dict, step: dict) -> str:
+    """The compacted note the next step reads (compact.py)."""
+    return f"steps/{step['n']:02d}-{step['kind']}.brief.md"
+
+
 def note_text(task: dict, step: dict, block: str) -> str:
     body = redact.mask(block)
     raw = body.encode("utf-8")
@@ -442,6 +447,13 @@ def read_note(home, task: dict, n: int) -> str:
         return ""
 
 
+def read_brief(home, task: dict, n: int) -> str:
+    try:
+        return (folder(home, task["id"]) / brief_file(task, step(task, n))).read_text(encoding="utf-8")
+    except (KeyError, OSError):
+        return ""
+
+
 def prune(home, days: float, now: float = None) -> list:
     """Remove the task folders of `done`, `stopped` and `stuck` tasks whose task.json is older than `days`."""
     cutoff = (time.time() if now is None else now) - days * 86400
@@ -463,14 +475,17 @@ def prune(home, days: float, now: float = None) -> list:
 
 
 def clear(home, task: dict, keep_last: bool = True) -> list:
-    """Remove what is only history. `keep_last`: every note but the last good one (task.json, chain.jsonl and
-    prompt.md stay); else the whole folder. Returns the step session ids so the caller can forget their runs."""
+    """Remove what is only history. `keep_last`: every note but the last good one and its brief (task.json,
+    chain.jsonl and prompt.md stay); else the whole folder. Returns the step session ids so the caller can
+    forget their runs."""
     sessions = [s["session"] for s in task["steps"] if s["session"]]
     root = folder(home, task["id"])
     if keep_last:
-        keep = note_file(task, step(task, task["last_good"])) if task["last_good"] else ""
+        last = step(task, task["last_good"]) if task["last_good"] else None
+        keep = note_file(task, last) if last else ""
+        kept = {keep, brief_file(task, last) if last else ""}
         for path in sorted((root / "steps").glob("*.md")):
-            if f"steps/{path.name}" != keep:
+            if f"steps/{path.name}" not in kept:
                 path.unlink(missing_ok=True)
         for s in task["steps"]:
             if s["handoff"] != keep:
