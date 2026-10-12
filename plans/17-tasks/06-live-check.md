@@ -9,17 +9,18 @@ its keys (the five new ones take their defaults).
 
 - [ ] 1. **Slider.** Type a task, pick `high` on the slider, reload the window: the pick is still `high`
       (`window.json` `effort`). Put it back to Auto.
-- [ ] 2. **Prep with steps.** Enter a request that has a reading part and a writing part (for example: "find
-      where the calendar export is built, then add a CSV export next to it with a test"). The card lists steps
-      (scout, code, verify expected). Edit one goal. Run as task.
+- [ ] 2. **Prep with steps.** Enter a request that has a reading part and a writing part (for example, in CONTENT MANAGER:
+      "find where build_export_payload builds the export in library/export.py, then add a CSV export next to it
+      with a test"). The card lists steps (scout, code, verify expected). Edit one goal. Run as task. (corrected by
+      plan 19)
 - [ ] 3. **Chain.** The list shows the task under Working with `step 1 / 3 · scout · haiku low`; its session row
       carries the `step 1/3` tag; the Task page shows the chain. When step 1 ends: `steps/01-scout.md` exists
       under `~/.claude/console/tasks/<id>/` with the four headings; step 2 starts on sonnet/medium by itself;
       step 3 on opus/medium. The verify's `VERDICT:` line decides: PASS -> task Done; FAIL -> a fix on sonnet/high
       and a second verify, with a new line in `routing-misses.md` tagged `CONTENT MANAGER - code`.
-- [ ] 4. **Bad handoff.** Start a one-step task whose goal says "do not write the HANDOFF block" (through a
-      `code` step with an empty edit). The step ends, runs once more with the retry sentence, then the task is
-      Stuck with `(after one retry)`; Retry starts it again.
+- [ ] 4. **Bad handoff.** Start a one-step task with an edit step whose goal says "change nothing and do not
+      write the HANDOFF block". The step ends, runs once more with the retry sentence, then the task is Stuck with
+      `(after one retry)`; Retry starts it again. (corrected by plan 19)
 - [ ] 5. **Stop and Retry.** Stop a running step from the Task page (two clicks): the stream shows the interrupt,
       the task is Stopped, owner fred; Retry starts the step again as a new session.
 - [ ] 6. **Question.** A step that ends with `STOP: <question>` puts the task on Waiting; answer on the session
@@ -30,9 +31,11 @@ its keys (the five new ones take their defaults).
 - [ ] 9. **Nothing outside the data folder.** `git status --short` in CONTENT MANAGER shows only what the steps
       edited; no `.claude/tasks` or note files in the repo; `~/.claude/console/hook-errors.log` has no new line.
 - [ ] 10. **Plain Run unchanged.** A plain Prep + Run and a Run raw still work with the slider on Auto.
-- [ ] 11. **Older rung.** Run raw with `claude-haiku-4-5` picked on the card: the row shows `haiku 4.5`, the
-      result's `modelUsage` names it; then look at `/usage` in a terminal session before and after a
-      `claude-opus-4-6` run to see whether the plan counts it with Opus 5.5 or apart (the open fact of decision 17).
+- [ ] 11. **Older rung.** Plain Run with the haiku 4.5 rung picked on the card's route (Run raw uses
+      `cfg.default_model` by design, not the card's select): the row shows `haiku 4.5` and the result's
+      `modelUsage` names it. `/usage` in a terminal has no line per Opus version, so this check cannot tell whether
+      the plan counts `claude-opus-4-6` apart from Opus 5.5: decision 17's open fact stays open (local Stats lists
+      Opus 4.6 as its own row). (corrected by plan 19)
 - [ ] 12. **Storage line.** The Usage page foot shows the folder size by subfolder; `runs/` is the big one.
 - [ ] 14. **Brief.** After step 1 of the item 3 task the row says briefing for a few seconds, then
       `steps/01-scout.brief.md` exists, shorter than the raw note, four headings; step 2's Chat shows the brief in its
