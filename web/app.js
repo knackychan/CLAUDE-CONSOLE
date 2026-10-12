@@ -16,8 +16,56 @@ const PILL_CHIPS = 9;
 const DONE_SHOWN = 2;     // done sessions listed before "Show N more"
 const TABS = [["chat", "Chat"], ["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"]];
 const EFF_LEVELS = ["auto", "low", "medium", "high", "xhigh", "max"];  // the slider's values, in order
-const TASK_WORD = { planned: ["▶", "Task", "n"], running: ["▶", "Task", "n"], waiting: ["?", "Waiting", "y"],
-  stuck: ["×", "Stuck", "r"], done: ["✓", "Done", "g"], stopped: ["‖", "Stopped", "q"] };  // [glyph, word, tone]
+const TASK_WORD = { planned: ["Task", "n"], running: ["Task", "n"], waiting: ["Waiting", "y"],
+  stuck: ["Stuck", "r"], done: ["Done", "g"], stopped: ["Stopped", "q"] };  // [word, tone]
+const SESSION_SPRITE = { running: "running", stop: "waiting", blocked: "stuck", done: "done" };  // session state -> sprite
+
+const px = (tone, ...rows) => rows.join("").split("").map((c) => (c === "x" ? tone : ""));  // one class per cell, "" is an off cell
+const QMARK = px("y", ".xxx.", "x...x", "...x.", ".....", "..x..");  // the dot is the last cell: the second frame has it off
+// Running: a sliding puzzle. Eight tiles of three shades and one hole; the hole walks through the board (every step is next to the
+// last), then the walk is played back, so the 16 frames loop without a jump.
+const BOARD = ["l4", "l2", "l3", "l3", "l4", "l2", "l2", "l3", ""];  // 3 x 3, row-major; the hole is the last cell
+const HOLE_WALK = [8, 7, 4, 3, 0, 1, 2, 5, 8];
+function slideFrames() {
+  const b = BOARD.slice(), states = [b.slice()];
+  for (let k = 1; k < HOLE_WALK.length; k++) {
+    b[HOLE_WALK[k - 1]] = b[HOLE_WALK[k]];
+    b[HOLE_WALK[k]] = "";
+    states.push(b.slice());
+  }
+  return states.concat(states.slice(1, -1).reverse());
+}
+const SPRITE = {  // grid (5 by default), ms per frame, frames as one class per cell
+  running: { grid: 3, step: 100, frames: slideFrames() },
+  waiting: { step: 250, frames: [QMARK, QMARK.slice(0, -1).concat("")] },
+  paused: { frames: [px("f", ".x.x.", ".x.x.", ".x.x.", ".x.x.", ".x.x.")] },
+  stopped: { frames: [px("q", ".....", ".xxx.", ".xxx.", ".xxx.", ".....")] },
+  stuck: { frames: [px("r", "x...x", ".x.x.", "..x..", ".x.x.", "x...x")] },
+  done: { frames: [px("g", ".....", "....x", "...x.", "x.x..", ".x...")] },
+  planned: { frames: [Array.from({ length: 25 }, (_, k) => (k === 12 ? "l2" : ""))] },
+};
+function sprite(name, flip = false) {
+  const sp = SPRITE[name];
+  if (!sp) return "";
+  const n = sp.frames.length;
+  const fr = sp.frames.map((cls, k) => `<span class="cells fr" style="--k:${k}">${cls.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("")}</span>`).join("");
+  return `<span class="spr${sp.grid === 3 ? " g3" : ""}${n > 1 ? " anim n" + n : ""}${flip ? " flip" : ""}" style="--s:${sp.step || 0}ms" aria-hidden="true">${fr}</span>`;
+}
+
+const lastSeen = new Map(), freshUntil = new Map();
+function fresh(kind, id, value, ms) {  // true for ms after value changed from a value painted before; never on the first paint
+  const key = kind + id, was = lastSeen.get(key), now = Date.now();
+  lastSeen.set(key, value);
+  if (was !== undefined && was !== value) freshUntil.set(key, now + ms);
+  return (freshUntil.get(key) || 0) > now;
+}
+const taskSprite = (t) => (t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? "paused" : t.state);
+const sessionMark = (s, glyph, tn) => {  // the sprite of a session state, or its glyph (a finished session with a FAIL verdict keeps its x)
+  const name = SESSION_SPRITE[s.state];
+  return !name || (name === "done" && tn !== "g") ? glyph + " " : sprite(name, fresh("f", "s" + s.id, s.state, 240));
+};
+const taskMark = (t) => sprite(taskSprite(t), fresh("f", "t" + t.id, t.state, 240));
+const enterClass = (id, needs) => (fresh("n", id, needs ? "needs" : "", 600) && needs ? " enter" : "");  // the card flashes when it enters Needs you
 
 let snap = null;
 let cfg = null;          // /api/config
@@ -294,7 +342,7 @@ function needButtons(s, where, withOpen) {
 
 function peekCard(s) {
   const t = tone(s), age = `<span class="age m">${ago(snap.now - s.last_ts)}</span>`;
-  const head = `<div class="l1"><span class="st ${t}">${s.symbol} ${esc(label(s))}</span><span class="t">${esc(s.title)}</span>${age}</div>`;
+  const head = `<div class="l1"><span class="st ${t}">${sessionMark(s, s.symbol, t)}${esc(label(s))}</span><span class="t">${esc(s.title)}</span>${age}</div>`;
   if (s.state === "stop") {
     return `<div class="askbox">${head}<div class="q">${esc(s.stop_question)}</div>
       <div class="lr"><input id="pk" aria-label="Answer" placeholder="Type your answer">
@@ -452,15 +500,15 @@ function taskTag(s) {  // "step 2/4" after the title of a session that runs a ta
 }
 
 function taskCard(t) {
-  const [glyph, word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = taskStep(t);
+  const [word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = taskStep(t);
   const cells = t.steps.map((x) => x.state === "running" ? "f live" : x.state === "failed" || x.verdict === "FAIL" ? "r" : x.state === "done" ? "g" : "");
   const ask = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
   const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.why;
   const third = (why ? `<div class="why m mut">${esc(why)}</div>` : "")
     + (t.briefing ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>Haiku is compacting the note</span></div>' : "")
     + (ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "");
-  return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
-    <div class="l1"><span class="st ${tn}">${glyph} ${word}</span><span class="t">${esc(t.title)}</span>
+  return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
+    <div class="l1"><span class="st ${tn}">${taskMark(t)}${word}</span><span class="t">${esc(t.title)}</span>
     <span class="age m" title="since the last change">${ago(snap.now - t.updated)}</span></div>
     <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(cur.model, cur.effort))}</span>` : ""}</span>
     <span class="cost">${money(t.cost)}</span><span class="ctx"><span class="cells" style="--n:${cells.length}">${cellsHtml(cells)}</span></span></div>${third}</div>`;
@@ -486,9 +534,9 @@ function cardHtml(s) {
   }
   if (cardMsg[s.id]) third += `<div class="say" data-stay><span class="r">${esc(cardMsg[s.id])}</span></div>`;
   const hand = s.handoff_hint ? ` <span class="st ${s.ctx_tone === "red" ? "r" : "q"}">· HAND OFF</span>` : "";
-  return `<div class="card${t === "y" || t === "r" ? " " + t : ""}" data-open="${esc(s.id)}" tabindex="0" role="button"
+  return `<div class="card${t === "y" || t === "r" ? " " + t : ""}${enterClass("s" + s.id, s.group === "needs")}" data-open="${esc(s.id)}" tabindex="0" role="button"
     aria-label="${esc(label(s) + ": " + s.title)}">
-    <div class="l1"><span class="st ${t}">${s.symbol} ${esc(label(s))}${hand}</span><span class="t">${esc(s.title)}</span>${taskTag(s)}
+    <div class="l1"><span class="st ${t}">${sessionMark(s, s.symbol, t)}${esc(label(s))}${hand}</span><span class="t">${esc(s.title)}</span>${taskTag(s)}
     <span class="age m" title="since the last event">${ago(snap.now - s.last_ts)}</span></div>
     <div class="l2 m"><span class="who">${esc(s.project)}${s.two_writers ? " · 2 writers" : ""}<span class="route"> · ${esc(routeText(s))}</span></span>
     <span class="cost">${spentText(s)}</span>${ctxMini(s)}</div>${third}</div>`;
@@ -499,7 +547,7 @@ function quietHtml(s, showProject) {
   const hand = s.handoff_hint ? ' <span class="st q">· HAND OFF</span>' : "";
   const reply = (s.state === "idle" || s.state === "replied") && s.reply ? `<div class="reply mut" title="${esc(s.reply)}">${esc(s.reply)}</div>` : "";
   return `<div class="card quiet${s.state === "idle" || s.state === "replied" ? " " + s.state : ""}" data-open="${esc(s.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + s.title)}">
-    <div class="l1"><span class="st ${t}">${glyph} ${esc(word)}${hand}</span><span class="t">${esc(s.title)}${showProject ? ` <span class="m mut">· ${esc(s.project)}</span>` : ""}</span>${taskTag(s)}
+    <div class="l1"><span class="st ${t}">${sessionMark(s, glyph, t)}${esc(word)}${hand}</span><span class="t">${esc(s.title)}${showProject ? ` <span class="m mut">· ${esc(s.project)}</span>` : ""}</span>${taskTag(s)}
     <span class="age m">${s.state === "replied" ? ago(snap.now - s.last_ts) : spentText(s)}</span></div>${reply}</div>`;
 }
 
@@ -586,19 +634,21 @@ function rawEffort() { return effortPick !== "auto" ? effortPick : cfg.default_e
 function preps() { return (snap && snap.preps) || []; }
 
 function prepJobHtml(j) {
-  const where = esc(projectName(j.project_dir)), id = esc(j.id);
+const prepSeen = new Set();  // a Prep row grows in once, the first time it is painted
+  const where = esc(projectName(j.project_dir)), id = esc(j.id), grow = prepSeen.has(j.id) ? "" : " grow";
+  prepSeen.add(j.id);
   if (j.state === "running") {
-    return `<div class="card" style="cursor:default"><div class="l1"><span class="st n">&#9676; Prep</span><span class="t">${esc(j.raw)}</span>
+    return `<div class="card${grow}" style="cursor:default"><div class="l1"><span class="st n">&#9676; Prep</span><span class="t">${esc(j.raw)}</span>
       <span class="age m">${ago(snap.now - j.ts)}</span></div>
       <span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>Haiku is reading ${where}, 10 to 30 s</span></div>`;
   }
   if (j.state === "failed") {
-    return `<div class="card r" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">Prep: ${esc(j.raw)}</span></div>
+    return `<div class="card r${grow}" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">Prep: ${esc(j.raw)}</span></div>
       <div class="m mut">${esc(j.error)}</div><div class="lr"><button class="btn go sm" data-prep="${id}" data-pdo="retry">Try again</button>
       <button class="btn sm" data-prep="${id}" data-pdo="edit">Edit</button><button class="btn sm" data-prep="${id}" data-pdo="drop">Dismiss</button></div></div>`;
   }
   const c = j.card, goal = c.fields.goal || c.raw;
-  return `<div class="card" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Prep ready: " + goal)}">
+  return `<div class="card${grow}" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Prep ready: " + goal)}">
     <div class="l1"><span class="st g">&#9654; Ready to run</span><span class="t">${esc(goal)}</span><span class="age m">${ago(snap.now - c.ts)}</span></div>
     <div class="l2 m"><span class="who">${where}<span class="route"> · ${esc(modelText(c.route.model, c.route.effort))}</span>${j.attached.length ? ` · ${j.attached.length} file${j.attached.length === 1 ? "" : "s"}` : ""}</span>
     <span class="cost">${money(c.cost)}</span></div></div>`;
@@ -1124,7 +1174,7 @@ function renderSession() {
   const t = tone(s);
   const when = BUSY.has(s.state) ? "turn " + ago(snap.now - s.turn_ts) : (s.state === "stop" ? "waiting " : "") + ago(snap.now - s.last_ts);
   const src = s.source === "?" ? "" : s.source + " / ";
-  setHtml($("sbody"), `<div class="head"><span class="st ${t}">${s.symbol} ${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>${taskLink(s)}
+  setHtml($("sbody"), `<div class="head"><span class="st ${t}">${sessionMark(s, s.symbol, t)}${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>${taskLink(s)}
     <div class="where"><span class="m" title="${esc(s.route_reason || "")}">${esc(s.project)} / ${esc(src)}${esc(s.route)}</span>
     ${s.model ? `<span class="mdl" title="${esc(s.model)}">${esc(modelText(s.model, s.effort))}</span>` : ""}
     ${s.project_dir ? `<button class="btn sm" data-here="${esc(s.project_dir)}">New task here</button>` : ""}</div></div>
@@ -1133,7 +1183,7 @@ function renderSession() {
   renderLevers(s).catch(() => {});
 }
 
-const LIVE = '<span class="cells"><i class="f live"></i></span>';
+const LIVE = sprite("running");
 function logRow(x, mark = "", tag = "") {  // `tag`: the step's model when it is not main's
   return `<div${x.denied ? ' class="r"' : ""}><span>${mark}</span><span>${hms(x.ts)}</span><span>${esc(x.agent_type)}</span><span>${tag ? `<span class="tag">${esc(tag)}</span>` : ""}${esc(x.tool)} ${esc(x.what)}</span></div>`;
 }
@@ -1190,12 +1240,12 @@ async function renderProc(s) {
   const newest = steps.slice().reverse();
   let body = "";
   if (wanted === "steps") {
-    const mark = s.state === "running" ? LIVE : s.state === "stop" ? '<span class="st y">?</span>' : s.state === "blocked" ? '<span class="st r">■</span>' : "";
+    const mark = s.state === "running" ? LIVE : s.state === "stop" ? sprite("waiting") : s.state === "blocked" ? sprite("stuck") : "";
     const tag = stepTag(s);
     body = newest.length ? `<div class="log">${newest.map((x, k) => logRow(x, k === 0 ? mark : "", tag(x))).join("")}</div>` : '<p class="none">No step yet.</p>';
   } else if (wanted === "agents") {
     body = `<div class="alist">${rows.map((r) => {
-      const m = r.word === "working" && s.state === "running" ? LIVE : r.word === "done" ? '<span class="st g">✓</span>'
+      const m = r.word === "working" && s.state === "running" ? LIVE : r.word === "done" ? sprite("done")
         : `<span class="st ${r.word === "waiting" ? "q" : tone(s)}">${r.word === "waiting" ? "○" : s.symbol}</span>`;
       return `<div class="arow">${m}<span class="nm">${esc(r.nm)}${r.verdict ? " " + esc(r.verdict) : ""}</span><span class="m">${esc(r.word)}${r.model ? " · " + esc(alias(r.model)) : ""}</span>
         <span class="m">${r.steps} steps</span><span class="m c">${r.cost == null ? "&ndash;" : money(r.cost)}</span>
@@ -1352,7 +1402,7 @@ function chainRow(t, s) {
   const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
   const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), esc(s.goal)].filter(Boolean).join(" · ");
-  return `<div class="row${s.n === t.current ? " cur" : ""}"><span class="cells">${cells}</span>
+  return `<div class="row${s.n === t.current ? " cur" : ""}${fresh("c", "t" + t.id + "." + s.n, s.state, 300) && s.state === "done" ? " adv" : ""}${s.note ? " n-" + s.note : ""}"><span class="cells">${cells}</span>
     <span class="nm m">${two(s.n)} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(modelText(s.model, s.effort))}</span>` : ""}</span>
     <span class="m c">${s.cost ? money(s.cost) : ""}</span>
     ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
@@ -1367,17 +1417,17 @@ function drawTask() {
     setHtml($("tbar"), "");
     return;
   }
-  const t = d.task, lv = d.levers || {}, [glyph, word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = t.steps.find((s) => s.n === t.current);
+  const t = d.task, lv = d.levers || {}, [word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = t.steps.find((s) => s.n === t.current);
   const paused = t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? " · paused" : "";
   const dir = taskDir(t.id), row = (snap.tasks || []).find((x) => x.id === t.id) || {};
-  const head = `<div class="head tk"><span class="st ${tn}">${glyph} ${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
+  const head = `<div class="head tk"><span class="st ${tn}">${taskMark(t)}${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
     <h2>${esc(t.title)}</h2>
     <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)} · $${money(row.cost)}</span></div>
     ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>${row.paused_after
     ? `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>` : ""}`;
   const asked = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
   const why = (t.state === "waiting" || t.state === "stuck") && t.why
-    ? `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${glyph} ${word}</span><div class="q">${esc(t.why)}</div>
+    ? `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state)}${word}</span><div class="q">${esc(t.why)}</div>
        ${asked ? `<div class="lr"><button class="btn you" data-open="${esc(cur.session)}">Answer on the session page</button></div>` : ""}</div>`
     : t.why ? `<p class="note m">${esc(t.why)}</p>` : "";
   const chain = `<div class="blk"><span class="lbl">Steps · ${t.steps.length}</span><div class="chain">${t.steps.map((s) => chainRow(t, s)).join("")}</div>

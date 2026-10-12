@@ -1,0 +1,181 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status sprites (option B, for Fred to lock)</title>
+<style>
+/* Proposal for plan 21: 5 x 5 pixel sprites of 3 px cells (the chipcell size) replace the text glyphs for task and
+   session states; the state word stays beside them. Tokens and the cell motif are copied from console-cells.html.
+   The CSS and the SPRITE table below are the exact code plan 21 puts in web/style.css and web/app.js. */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a; --wip: #7aa7ff;
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; color-scheme: light; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 13px/1.45 var(--ui); padding: 24px 16px 48px; }
+h1 { font: 600 15px var(--ui); margin: 0 0 4px; }
+h2 { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); margin: 26px 0 8px; }
+p.note { color: var(--mut); max-width: 62ch; margin: 4px 0; }
+.m { font-family: var(--mono); font-size: 12px; }
+.mut { color: var(--mut); }
+.wrap { max-width: 1000px; margin: 0 auto; }
+.bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+button { font: 12px var(--mono); background: var(--raise); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+
+/* ---- cells (as web/style.css) ---- */
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); }
+.cells i.y { background: var(--you); }
+.cells i.r { background: var(--bad); }
+.cells i.g { background: var(--ok); }
+.cells i.q { background: var(--mut); }
+.cells i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.cells i.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+.cells i.l4 { background: var(--ink); }
+.st { font: 600 11px var(--mono); white-space: nowrap; letter-spacing: .02em; text-transform: uppercase; display: inline-flex; align-items: center; }
+.st.y { color: var(--you); } .st.r { color: var(--bad); } .st.g { color: var(--ok); } .st.n { color: var(--ink); } .st.q { color: var(--mut); }
+
+/* ---- plan 21: sprites ---- */
+.spr { display: inline-grid; margin-right: 6px; }
+.spr .fr { grid-area: 1 / 1; grid-template-columns: repeat(5, 3px); }
+.spr .fr + .fr { opacity: 0; }
+.spr.g3 .fr { grid-template-columns: repeat(3, 5px); gap: 2px; }  /* the puzzle: 3 x 3 tiles of 5 px, the same 19 px square as the 5 x 5 sprites */
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.still) .spr.anim .fr { animation-timing-function: steps(1); animation-iteration-count: infinite; animation-delay: calc(var(--k) * var(--s)); }
+  body:not(.still) .spr.n4 .fr { animation-name: spr4; animation-duration: calc(var(--s) * 4); }
+  body:not(.still) .spr.n16 .fr { animation-name: spr16; animation-duration: calc(var(--s) * 16); }
+  body:not(.still) .spr.n2 .fr { animation-name: spr2; animation-duration: calc(var(--s) * 2); }
+  body:not(.still) .spr.flip { animation: sprin 240ms steps(3) 1; }
+  body:not(.still) .card.enter { animation: need 600ms steps(1) 1; }
+  body:not(.still) .row.adv .cells i { animation: cellon 50ms steps(1) backwards; }
+  body:not(.still) .row.adv .cells i:nth-child(2) { animation-delay: 50ms; }
+  body:not(.still) .row.adv .cells i:nth-child(3) { animation-delay: 100ms; }
+  body:not(.still) .row.adv .cells i:nth-child(4) { animation-delay: 150ms; }
+  body:not(.still) .row.adv .cells i:nth-child(5) { animation-delay: 200ms; }
+  body:not(.still) .row.adv .cells i:nth-child(6) { animation-delay: 250ms; }
+  body:not(.still) .grow { animation: grow 160ms ease-out 1; }
+}
+@keyframes spr4 { 0% { opacity: 1; } 25%, 100% { opacity: 0; } }
+@keyframes spr16 { 0% { opacity: 1; } 6.25%, 100% { opacity: 0; } }
+@keyframes spr2 { 0% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes sprin { from { opacity: 0; } to { opacity: 1; } }
+@keyframes need { 0%, 66% { outline: 2px solid var(--you); outline-offset: -2px; } 33%, 100% { outline: 2px solid transparent; outline-offset: -2px; } }
+@keyframes cellon { from { background: var(--off); } }
+@keyframes grow { from { max-height: 0; opacity: 0; } to { max-height: 8em; opacity: 1; } }
+
+/* ---- mock window (as the real cards) ---- */
+.stage { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+.win { background: var(--win); border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 6px; align-content: start; }
+.win.w400 { width: 400px; } .win.w340 { width: 340px; }
+.card { background: var(--raise); border-radius: 6px; padding: 8px 10px; display: grid; gap: 4px; }
+.card .l1 { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.card .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.card .l2 { display: flex; gap: 8px; color: var(--mut); align-items: center; }
+.card .l2 .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .cells { grid-template-columns: repeat(var(--n, 5), 3px); }
+.head .st { font-size: 11px; }
+.row { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+.row .cells { grid-template-columns: repeat(6, 6px); }
+.prep { overflow: hidden; }
+.log { display: grid; gap: 4px; }
+.log .arow { display: flex; gap: 6px; align-items: center; }
+
+/* ---- the table of all marks ---- */
+.tbl { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.tc { background: var(--win); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+.zoom .cells { grid-template-columns: repeat(5, 12px); gap: 2px; }
+.zoom .spr { margin: 0; }
+.film { display: flex; flex-wrap: wrap; gap: 8px; }
+.film .cells { grid-template-columns: repeat(3, 10px); gap: 3px; background: var(--win); border: 1px solid var(--line); padding: 5px; border-radius: 6px; }
+.zoom .spr .fr { grid-template-columns: repeat(5, 12px); }
+.zoom .spr.g3 .fr { grid-template-columns: repeat(3, 20px); gap: 8px; }
+</style>
+<div class="wrap">
+  <h1>Status sprites (plan 21): locked 2026-10-12</h1>
+  <p class="note">Each task and session state gets a 5 x 5 sprite of 3 px cells, the same size as the pill's context cells, in front of the
+    state word. Only the running puzzle and the waiting dot move. Everything else is still. Reduced motion shows frame 0 and no motion at all.</p>
+  <div class="bar">
+    <button id="still">Simulate reduced motion: off</button>
+    <button id="flip">State flip (motion 1)</button>
+    <button id="enter">Enter Needs you (motion 2)</button>
+    <button id="adv">Chain step done (motion 3)</button>
+    <button id="addprep">New Prep row (motion 4)</button>
+  </div>
+
+  <h2>All marks, 4x zoom and real size</h2>
+  <div class="tbl" id="tbl"></div>
+  <h2>Running mark, every frame in order (static)</h2>
+  <div class="film" id="film"></div>
+
+  <h2>400 px and 340 px: task cards, task head, session steps</h2>
+  <div class="stage" id="stage"></div>
+</div>
+<script>
+const px = (tone, ...rows) => rows.join("").split("").map((c) => (c === "x" ? tone : ""));  // one class per cell, "" is an off cell
+const QMARK = px("y", ".xxx.", "x...x", "...x.", ".....", "..x..");  // the dot is the last cell: the second frame has it off
+// Running: a sliding puzzle (Fred picked it over a turning cube face, 2026-10-12). Eight tiles of three shades and one hole; the hole walks through the board
+// (every step is next to the last), then the walk is played back, so the 16 frames loop without a jump.
+const BOARD = ["l4", "l2", "l3", "l3", "l4", "l2", "l2", "l3", ""];  // 3 x 3, row-major; the hole is the last cell
+const HOLE_WALK = [8, 7, 4, 3, 0, 1, 2, 5, 8];
+function slideFrames() {
+  const b = BOARD.slice(), states = [b.slice()];
+  for (let k = 1; k < HOLE_WALK.length; k++) {
+    b[HOLE_WALK[k - 1]] = b[HOLE_WALK[k]];
+    b[HOLE_WALK[k]] = "";
+    states.push(b.slice());
+  }
+  return states.concat(states.slice(1, -1).reverse());
+}
+const SPRITE = {  // grid (5 by default), ms per frame, frames as one class per cell
+  running: { grid: 3, step: 100, frames: slideFrames() },
+  waiting: { step: 250, frames: [QMARK, QMARK.slice(0, -1).concat("")] },
+  paused: { frames: [px("f", ".x.x.", ".x.x.", ".x.x.", ".x.x.", ".x.x.")] },
+  stopped: { frames: [px("q", ".....", ".xxx.", ".xxx.", ".xxx.", ".....")] },
+  stuck: { frames: [px("r", "x...x", ".x.x.", "..x..", ".x.x.", "x...x")] },
+  done: { frames: [px("g", ".....", "....x", "...x.", "x.x..", ".x...")] },
+  planned: { frames: [Array.from({ length: 25 }, (_, k) => (k === 12 ? "l2" : ""))] },
+};
+function sprite(name, flip) {
+  const sp = SPRITE[name];
+  if (!sp) return "";
+  const n = sp.frames.length;
+  const fr = sp.frames.map((cls, k) => `<span class="cells fr" style="--k:${k}">${cls.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("")}</span>`).join("");
+  return `<span class="spr${sp.grid === 3 ? " g3" : ""}${n > 1 ? " anim n" + n : ""}${flip ? " flip" : ""}" style="--s:${sp.step || 0}ms" aria-hidden="true">${fr}</span>`;
+}
+const WORD = { planned: ["Task", "n"], running: ["Task", "n"], waiting: ["Waiting", "y"], stuck: ["Stuck", "r"], done: ["Done", "g"], stopped: ["Stopped", "q"], paused: ["Paused", "n"] };
+const st = (name, flip) => `<span class="st ${WORD[name][1]}">${sprite(name, flip)}${WORD[name][0]}</span>`;
+
+const paintTable = () => document.getElementById("tbl").innerHTML = Object.keys(SPRITE).map((k) =>
+  `<div class="tc"><div class="zoom">${sprite(k)}</div><div>${st(k)}</div><div class="m mut">${k}${SPRITE[k].frames.length > 1 ? `, ${SPRITE[k].frames.length} frames x ${SPRITE[k].step} ms` : ", still"}</div></div>`).join("");
+
+const card = (name, title, id) => `<div class="card" ${id ? `id="${id}"` : ""}><div class="l1">${st(name)}<span class="t">${title}</span><span class="m mut">2m</span></div>
+  <div class="l2 m"><span class="who">CLAUDE CONSOLE · step 2 / 4 · code</span><span>$0.84</span><span class="cells" style="--n:4"><i class="g"></i><i class="f"></i><i></i><i></i></span></div></div>`;
+const chain = (n, id) => `<div class="row" ${id ? `id="${id}"` : ""}><span class="cells">${Array.from({ length: 6 }, (_, k) => `<i class="${k < n ? "g" : ""}"></i>`).join("")}</span><span class="m">02 code</span></div>`;
+const win = (w) => `<div class="win w${w}"><div class="m mut">${w} px</div>
+  ${["running", "waiting", "stuck", "done", "stopped", "planned"].map((n) => card(n, "Add animated pixel-art status marks", n === "running" ? "r" + w : "")).join("")}
+  <div class="head card"><div class="l1">${st("running")}<span class="m mut">· 2m</span></div><div class="l1"><span class="t" style="white-space:normal">Add animated pixel-art status marks</span></div></div>
+  <div class="head card"><div class="l1">${st("paused")}<span class="m mut">· 2m · step 2 ended</span></div></div>
+  <div class="card log"><div class="arow">${sprite("running")}<span>main</span><span class="m mut">working</span></div>
+    <div class="arow">${sprite("waiting")}<span>session asks</span></div><div class="arow">${sprite("stuck")}<span>blocked</span></div>
+    <div class="arow">${sprite("done")}<span>reviewer</span></div></div>
+  <div class="card">${chain(2, "c" + w)}</div>
+  <div class="prep-slot" id="p${w}"></div></div>`;
+const paintStage = () => document.getElementById("stage").innerHTML = win(400) + win(340);
+const paintFilm = () => document.getElementById("film").innerHTML = SPRITE.running.frames.map((f) => `<span class="cells">${f.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("")}</span>`).join("");
+paintTable(); paintStage(); paintFilm();
+
+const body = document.body;
+const redo = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); };
+document.getElementById("flip").onclick = () => document.querySelectorAll(".spr").forEach((s) => redo(s, "flip"));
+document.getElementById("enter").onclick = () => document.querySelectorAll("#r400, #r340").forEach((c) => redo(c, "enter"));
+document.getElementById("adv").onclick = () => document.querySelectorAll("#c400, #c340").forEach((c) => redo(c, "adv"));
+document.getElementById("addprep").onclick = () => document.querySelectorAll(".prep-slot").forEach((s) => {
+  s.insertAdjacentHTML("beforeend", `<div class="prep grow"><div class="card"><div class="l1"><span class="st n">Prep</span><span class="t">new job</span></div></div></div>`);
+});
+</script>

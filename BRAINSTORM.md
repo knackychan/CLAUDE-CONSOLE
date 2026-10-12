@@ -232,8 +232,9 @@ in `design/references/`.
   for "needs you", red and green only for state. State is never colour alone (glyph + word).
 - Type: Segoe UI for titles and text, Cascadia Mono for figures, Doto (dot matrix, bundled as a
   local woff2, OFL) for the one focal figure per screen.
-- Dials (anti-slop Design Read): ENERGY 2 / RHYTHM 2 / MOTION 1; the only motion is one blinking
-  cell on the working agent, off for reduced-motion.
+- Dials (anti-slop Design Read): ENERGY 2 / RHYTHM 2 / MOTION 2; motion only on a running or waiting
+  status mark (a 3 x 3 slide puzzle, a blinking `?` dot; `design/rework/locked/status-sprites.html`, plan 21) and on a
+  state change (flip, Needs you flash, chain cells, Prep row), all off for reduced-motion.
 - Needs from the service: estimated cost per session and agent (transcript usage x a price table
   in `config.json`), per-minute activity buckets, `daily_budget_usd`. Open check: resizing a
   frameless pywebview window from code on Windows (pill to open window).

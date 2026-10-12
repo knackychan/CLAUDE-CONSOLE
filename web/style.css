@@ -54,6 +54,35 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (prefers-reduced-motion: no-preference) { .cells i.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
 @keyframes blink { 50% { background: var(--off); } }
 
+.cells i.q { background: var(--mut); }
+
+/* status sprites (BRAINSTORM 7.5, plan 21): 5 x 5 cells of 3 px, one .fr layer per frame in one grid area; frame 0 is the still state */
+.spr { display: inline-grid; margin-right: 6px; flex: none; }
+.spr .cells.fr { grid-area: 1 / 1; grid-template-columns: repeat(5, 3px); }  /* .cells.fr: stronger than .log .cells and .arow .cells */
+.spr .fr + .fr { opacity: 0; }
+.spr.g3 .cells.fr { grid-template-columns: repeat(3, 5px); gap: 2px; }  /* the running puzzle: 3 x 3 tiles of 5 px, a 19 px square like the 5 x 5 sprites */
+.st:has(.spr) { display: inline-flex; align-items: center; }
+.st:has(.spr) .lc, .st:has(.spr) .st { margin-left: .6em; }  /* flex drops the space before a nested span */
+@media (prefers-reduced-motion: no-preference) {
+  .spr.anim .fr { animation-timing-function: steps(1); animation-iteration-count: infinite; animation-delay: calc(var(--k) * var(--s)); }
+  .spr.n16 .fr { animation-name: spr16; animation-duration: calc(var(--s) * 16); }
+  .spr.n2 .fr { animation-name: spr2; animation-duration: calc(var(--s) * 2); }
+  .spr.flip { animation: sprin 240ms steps(3) 1; }
+  .card.enter { animation: need 600ms steps(1) 1; }
+  .card.grow { overflow: hidden; animation: grow 160ms ease-out 1; }
+  .chain .row.adv .cells i { animation: cellon 50ms steps(1) backwards; }
+  .chain .row.adv .cells i:nth-child(2) { animation-delay: 50ms; }
+  .chain .row.adv .cells i:nth-child(3) { animation-delay: 100ms; }
+  .chain .row.adv .cells i:nth-child(4) { animation-delay: 150ms; }
+  .chain .row.adv .cells i:nth-child(5) { animation-delay: 200ms; }
+  .chain .row.adv .cells i:nth-child(6) { animation-delay: 250ms; }
+}
+@keyframes spr16 { 0% { opacity: 1; } 6.25%, 100% { opacity: 0; } }
+@keyframes spr2 { 0% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes sprin { from { opacity: 0; } to { opacity: 1; } }
+@keyframes need { 0%, 66% { outline: 2px solid var(--you); outline-offset: -2px; } 33%, 100% { outline: 2px solid transparent; outline-offset: -2px; } }
+@keyframes cellon { from { background: var(--off); } }
+@keyframes grow { from { max-height: 0; opacity: 0; } to { max-height: 8em; opacity: 1; } }
 /* session chips (the pill) */
 .chipcell { position: relative; display: grid; justify-items: center; gap: 1px; border: 0; background: transparent;
   padding: 3px 4px; border-radius: 6px; cursor: pointer; color: var(--ink); }
@@ -352,7 +381,7 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
   scrollbar-color: var(--off) transparent; }
 .pane .none { margin: 4px 0 0; color: var(--mut); font-size: 13px; }
 .log { display: grid; gap: 1px; }
-.log > div { display: grid; grid-template-columns: 8px 58px 80px minmax(0, 1fr); gap: 8px; align-items: center;
+.log > div { display: grid; grid-template-columns: 19px 58px 80px minmax(0, 1fr); gap: 8px; align-items: center;
   font: 11.5px/19px var(--mono); color: var(--mut); font-variant-numeric: tabular-nums; }
 .log > div > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .log > div > span:last-child { color: var(--ink); }
@@ -360,7 +389,8 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .log .cells { grid-template-columns: 6px; }
 .log .st { font-size: 11px; }
 .alist { display: grid; gap: 12px; }
-.arow { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto 34px; gap: 2px 8px; align-items: center; }
+.log .spr, .arow .spr { margin-right: 0; }
+.arow { display: grid; grid-template-columns: 19px minmax(0, 1fr) auto auto 34px; gap: 2px 8px; align-items: center; }
 .arow .cells { grid-template-columns: 6px; }
 .arow .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .arow .m { color: var(--mut); white-space: nowrap; }
