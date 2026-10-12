@@ -440,7 +440,8 @@ class Hub:
             if base:
                 start = base
             elif owner != "service" or (state not in ("planned", "running")
-                                        and not (state == "waiting" and task["why"] == "confirm Fable")):
+                                        and not (state == "waiting" and task["why"] == "confirm Fable")
+                                        and not tasks.held(task)):
                 start = f"task is {state}" + (" and paused" if owner == "fred" else "")
             elif cs and cs["state"] == "running":
                 start = "a step is running"
@@ -459,7 +460,8 @@ class Hub:
             resume = base or ("" if owner == "fred" and state in ("running", "waiting") else "not paused")
             retry = base or ("still working: wait until it stops" if live else
                              "" if state in ("stuck", "stopped") else f"task is {state}")
-            confirm = base or ("" if state == "waiting" and task["why"] == "confirm Fable" else "nothing to confirm")
+            confirm = base or ("" if (state == "waiting" and task["why"] == "confirm Fable") or tasks.held(task)
+                               else "nothing to confirm")
             clear = ("still working: wait until it stops" if live else
                      "" if state in ("planned", "done", "stuck", "stopped") else f"task is {state}")
             route = self._route_for(task, nxt) if nxt else None
@@ -515,9 +517,12 @@ class Hub:
         """Route step `n` and start its run; a hold waits for Fred, a run that cannot start makes the task stuck."""
         s, now, lines = tasks.step(task, n), time.time(), []
         route = self._route_for(task, s)
-        if route["hold"]:
+        if route["hold"] and task.get("hold_ok") != n:
             tasks._task_to(task, "waiting", route["hold"], now, s, lines)
             return self._commit(task, lines)
+        if route["hold"]:  # Fred's Run anyway, for this step only
+            route = dict(route, notes=route["notes"] + ["budget: hold released by Fred"], hold="")
+            task.pop("hold_ok", None)
         kind, tier = s["kind"], route["model"]
         pick = s["pick"]  # a rung Fred picked is used as given, unless the budget moved the step to another tier
         model = pick if pick and pick not in claude_cli.MODELS and claude_cli.tier_of(pick) == tier \
@@ -755,7 +760,7 @@ class Hub:
             cs = tasks.current_step(task)
             if lever == "stop" and cs and cs["state"] == "running" and self.runs.is_live(cs["session"]):
                 self.runs.stop(cs["session"])
-            ok, why, lines = tasks.fred(task, lever, now)
+            ok, why, lines = tasks.fred(task, lever, now, next_n=(self._next_step(task) or {}).get("n", 0))
             if not ok:
                 return 409, {"error": why}
             self._commit(task, lines)

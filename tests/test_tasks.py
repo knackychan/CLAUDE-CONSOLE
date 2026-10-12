@@ -465,6 +465,17 @@ class ChainTest(unittest.TestCase):
         self.assertEqual(end(other, verdict="FAIL", block_error="missing: ## Next")[0], "retry")
         self.assertEqual(other["escalated"], "")
 
+    def test_fred_confirm_releases_a_hold(self):
+        task = make(("code",))
+        run(task, 1)
+        end(task)
+        task.update(state="waiting", why="opus over its pace")
+        ok, why, lines = tasks.fred(task, "confirm", NOW, next_n=2)
+        self.assertEqual((ok, why, task["state"], task["hold_ok"], task["fable_ok"]), (True, "", "running", 2, False))
+        self.assertEqual(lines[-1]["to"], "task:running")
+        task.update(state="waiting", why="something else")
+        self.assertEqual(tasks.fred(task, "confirm", NOW, next_n=2)[:2], (False, "nothing to confirm"))
+
     def test_fred_levers(self):
         task = make(("scout", "explain"))
         run(task, 1)

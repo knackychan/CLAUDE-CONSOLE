@@ -883,6 +883,18 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([s["state"] for s in task["steps"]], ["done", "planned"])
         self.assertEqual(self.hub.advance(), [])  # it waits for Fred, it does not poll the budget
 
+    def test_budget_hold_released_by_confirm(self):
+        self.hub.budget = self.over("opus")
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
+        self.until(tid, lambda t: t["state"] == "waiting", "the verify holds")
+        self.assertEqual(self.hub.task_levers(tid)["confirm"], "")
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(2), "the verify starts")
+        step = task["steps"][1]
+        self.assertEqual(claude_cli.tier_of(step["model"]), "opus")
+        self.assertIn("budget: hold released by Fred", step["notes"])
+        self.assertNotIn("hold_ok", task)
+
     def test_nothing_written_outside_home(self):
         tid = self.make_task(steps=self.TWO)
         self.settled(tid)

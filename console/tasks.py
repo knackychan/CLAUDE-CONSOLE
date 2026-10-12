@@ -417,8 +417,14 @@ def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdi
     return "done", lines
 
 
-def fred(task: dict, lever: str, now: float):
-    """Fred's levers on the task state. (True, "", chain lines) when it applies, else (False, why, [])."""
+def held(task: dict) -> bool:
+    """The task waits because a step's model is over its pace (step_route's hold)."""
+    return task["state"] == "waiting" and task["why"].endswith(" over its pace")
+
+
+def fred(task: dict, lever: str, now: float, next_n: int = 0):
+    """Fred's levers on the task state. (True, "", chain lines) when it applies, else (False, why, []).
+    Confirm is the Fable confirm, or Run anyway for a budget hold of step `next_n` (that step only)."""
     state, s, lines = task["state"], current_step(task), []
     if lever == "stop":
         if state in ("done", "stopped"):
@@ -450,9 +456,12 @@ def fred(task: dict, lever: str, now: float):
         _task_to(task, "running" if s else "planned", "", now, s, lines)
         task["owner"] = "service"
     elif lever == "confirm":
-        if not (state == "waiting" and task["why"] == "confirm Fable"):
+        if held(task):
+            task["hold_ok"] = next_n
+        elif state == "waiting" and task["why"] == "confirm Fable":
+            task["fable_ok"] = True
+        else:
             return False, "nothing to confirm", []
-        task["fable_ok"] = True
         _task_to(task, "running", "", now, s, lines)
     else:
         return False, f"unknown lever: {lever}", []
