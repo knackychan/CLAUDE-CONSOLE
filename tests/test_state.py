@@ -125,6 +125,15 @@ class StateTest(unittest.TestCase):
                          (True, False, 0.25, "p1", "abc"))
         self.assertEqual(row["model"], "claude-sonnet-5-5")
 
+    def test_task_and_step_on_the_row(self):
+        self.feed(ev("run_started", T0, sid="s2", task="20261012-101500-3f2a", step=2),
+                  ev("run_ended", T0 + 5, sid="s2", subtype="success"))
+        row = self.row(T0 + 6, "s2")
+        self.assertEqual((row["task"], row["step"]), ("20261012-101500-3f2a", 2))
+        self.feed(ev("run_started", T0 + 10, sid="s3"))
+        row = self.row(T0 + 11, "s3")
+        self.assertEqual((row["task"], row["step"]), ("", 0))
+
     def test_interrupted_stopped_and_denied_runs(self):
         self.feed(ev("run_started", T0), ev("run_ended", T0 + 5, interrupted=True))
         row = self.row(T0 + 6)

@@ -70,11 +70,11 @@ max_turns=0) -> list`
 
 ## Steps
 
-- [ ] 1. Write the three tests. Run them: fail (unknown keyword, missing key).
-- [ ] 2. `run_command` limits, `tier_of`, `known_model`. Run `tests.test_claude_cli`: pass.
-- [ ] 3. `runs.start` limits and meta reuse on resume, `forget`. Run `tests.test_runs`: pass.
-- [ ] 4. `state` fields and row. Run `tests.test_state`: pass.
-- [ ] 5. Whole suite OK. Commit: `feat: step limits on window runs, task and step on run_started (plan 17 Task 2)`.
+- [x] 1. Write the three tests. Run them: fail (unknown keyword, missing key).
+- [x] 2. `run_command` limits, `tier_of`, `known_model`. Run `tests.test_claude_cli`: pass.
+- [x] 3. `runs.start` limits and meta reuse on resume, `forget`. Run `tests.test_runs`: pass.
+- [x] 4. `state` fields and row. Run `tests.test_state`: pass.
+- [x] 5. Whole suite OK. Commit: `feat: step limits on window runs, task and step on run_started (plan 17 Task 2)`.
 
 ## Drift guards
 

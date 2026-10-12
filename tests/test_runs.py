@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import attach, events, paths, runs
+from console import attach, events, paths, runs, tasks
 
 FAKE = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
 
@@ -119,6 +119,43 @@ class RunsTest(unittest.TestCase):
         claude = [i["text"] for i in runs.chat(self.mgr.stream_path(sid)) if i["role"] == "claude"]
         self.assertEqual(claude, ["echo: /session-handoff"])  # no STOP footer after a /skill
         self.assertEqual(self.mgr.meta(sid)["model"], "sonnet")
+
+    def test_run_started_carries_task_and_step(self):
+        sid = self.mgr.start(str(self.project), "step", "haiku", "low", extra={"task": "t1", "step": 2},
+                             disallow=tasks.DISALLOW, tools="Read,Grep,Glob", budget=3)
+        self.assertTrue(wait_for(lambda: self.ended(sid)))
+        started = [r for r in self.log() if r["event"] == "run_started"][0]
+        self.assertEqual((started["task"], started["step"]), ("t1", 2))
+        limits = {"disallow": ["Agent"], "tools": "Read,Grep,Glob", "budget": 3, "max_turns": 0}
+        self.assertEqual(self.mgr.meta(sid)["limits"], limits)
+        self.assertEqual(len(self.ended(sid)), 1)  # the fake claude ran, whatever the flags
+        with mock.patch.object(runs.claude_cli, "run_command", wraps=runs.claude_cli.run_command) as cmd:
+            self.assertEqual(self.mgr.start(str(self.project), "retry", "haiku", "low", resume=sid), sid)
+            self.assertTrue(wait_for(lambda: len(self.ended(sid)) == 2))
+        self.assertEqual(self.mgr.meta(sid)["limits"], limits)
+        kwargs = cmd.call_args.kwargs
+        self.assertEqual((kwargs["disallow"], kwargs["tools"], kwargs["budget"], kwargs["max_turns"]),
+                         (("Agent",), "Read,Grep,Glob", 3, 0))
+        plain = self.mgr.start(str(self.project), "plain", "sonnet", "low")  # no limits given: none kept
+        self.assertTrue(wait_for(lambda: self.ended(plain)))
+        self.assertEqual(self.mgr.meta(plain)["limits"],
+                         {"disallow": [], "tools": "", "budget": 0.0, "max_turns": 0})
+
+    def test_forget_deletes_an_ended_run_only(self):
+        sid = self.mgr.start(str(self.project), "first", "sonnet", "low")
+        self.assertTrue(wait_for(lambda: self.ended(sid)))
+        size = self.mgr.stream_path(sid).stat().st_size + self.mgr.meta_path(sid).stat().st_size
+        self.assertEqual(self.mgr.forget(sid), size)
+        self.assertFalse(self.mgr.stream_path(sid).exists())
+        self.assertFalse(self.mgr.meta_path(sid).exists())
+        slow = self.mgr.start(str(self.project), "SLOW task", "sonnet", "low")
+        self.assertTrue(wait_for(lambda: "echo: SLOW" in self.mgr.stream_path(slow).read_text(encoding="utf-8")))
+        with self.assertRaises(runs.RunError):
+            self.mgr.forget(slow)
+        self.assertTrue(self.mgr.stream_path(slow).exists())
+        self.assertTrue(self.mgr.meta_path(slow).exists())
+        with self.assertRaises(runs.RunError):
+            self.mgr.forget("nope")
 
     def test_reconcile_marks_a_cut_run_interrupted(self):
         self.mgr.runs.mkdir(parents=True)

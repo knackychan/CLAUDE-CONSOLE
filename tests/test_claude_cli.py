@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import shutil
@@ -8,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import claude_cli
+from console import claude_cli, paths
 
 
 class CommandTest(unittest.TestCase):
@@ -30,6 +31,27 @@ class CommandTest(unittest.TestCase):
         i = cmd.index("--resume")
         self.assertEqual(cmd[i:i + 5], ["--resume", "old", "--fork-session", "--session-id", "new"])
         self.assertEqual(cmd[cmd.index("--name") + 1], "↳ x")
+
+    def test_step_command_has_no_agent_tool(self):
+        cmd = claude_cli.run_command(["claude.exe"], "haiku", "low", "abc", disallow=("Agent",),
+                                     tools="Read,Grep,Glob", budget=3, max_turns=12)
+        for flag, value in (("--disallowedTools", "Agent"), ("--tools", "Read,Grep,Glob"),
+                            ("--max-budget-usd", "3.00"), ("--max-turns", "12")):
+            self.assertEqual(cmd[cmd.index(flag) + 1], value, flag)
+        self.assertLess(cmd.index("--verbose"), cmd.index("--disallowedTools"))
+        self.assertLess(cmd.index("--max-turns"), cmd.index("--session-id"))
+        plain = claude_cli.run_command(["claude.exe"], "haiku", "low", "abc")
+        for flag in ("--disallowedTools", "--tools", "--max-budget-usd", "--max-turns"):
+            self.assertNotIn(flag, plain)
+        two = claude_cli.run_command(["claude.exe"], "haiku", "low", "abc", disallow=("Agent", "Edit"))
+        self.assertEqual(two[two.index("--disallowedTools") + 1], "Agent,Edit")
+
+    def test_tier_of_and_known_model(self):
+        self.assertEqual([claude_cli.tier_of(m) for m in ("claude-opus-4-6", "opus", "gpt")], ["opus", "opus", ""])
+        cfg = copy.deepcopy(paths.DEFAULTS)
+        self.assertTrue(claude_cli.known_model(cfg, "claude-haiku-4-5"))
+        self.assertFalse(claude_cli.known_model(cfg, "claude-haiku-3"))
+        self.assertTrue(claude_cli.known_model(cfg, "sonnet"))
 
     def test_model_alias(self):
         names = ("claude-sonnet-5-5", "claude-haiku-4-5-20251001", "opus", "gpt-9", None)

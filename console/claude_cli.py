@@ -60,12 +60,22 @@ def brief_command(exe: list, model: str, schema: dict) -> list:
 
 
 def run_command(exe: list, model: str, effort: str, session_id: str, resume: bool = False,
-                name: str = "", fork: str = "") -> list:
+                name: str = "", fork: str = "", disallow: tuple = (), tools: str = None,
+                budget: float = 0.0, max_turns: int = 0) -> list:
     """D5: auto mode, nobody answers prompts (a denial ends up in the result). Prompts go in on stdin.
-    `fork`: start `session_id` as a copy of that chat (its context, a new id; the original is not touched)."""
+    `fork`: start `session_id` as a copy of that chat (its context, a new id; the original is not touched).
+    Step limits (plan 17): `disallow` tool names, `tools` (the --tools list), a spend cap, a turn cap."""
     cmd = exe + ["-p", "--model", model, "--effort", effort, "--permission-mode", "auto",
                  "--permission-prompts", "none", "--input-format", "stream-json",
                  "--output-format", "stream-json", "--verbose"]
+    if disallow:
+        cmd += ["--disallowedTools", ",".join(disallow)]
+    if tools is not None:
+        cmd += ["--tools", tools]
+    if budget and budget > 0:
+        cmd += ["--max-budget-usd", f"{budget:.2f}"]
+    if max_turns and max_turns > 0:
+        cmd += ["--max-turns", str(int(max_turns))]
     if fork:
         cmd += ["--resume", fork, "--fork-session", "--session-id", session_id]
     elif resume:
@@ -81,6 +91,16 @@ def model_alias(model: str) -> str:
     """claude-sonnet-5-5 -> sonnet (the names routes use); "" when unknown."""
     low = str(model or "").lower()
     return next((m for m in MODELS if m in low), "")
+
+
+def tier_of(model: str) -> str:
+    """The tier alias of an alias or a ladder rung (claude-opus-4-6 -> opus); "" when none."""
+    return model_alias(model)
+
+
+def known_model(cfg: dict, model: str) -> bool:
+    """A tier alias or a rung of the configured ladder."""
+    return model in MODELS or any(model in rungs for rungs in (cfg.get("ladder") or {}).values())
 
 
 def terminal_command(exe: list, session_id: str, model: str = "", effort: str = "") -> list:

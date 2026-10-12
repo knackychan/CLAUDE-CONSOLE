@@ -118,6 +118,8 @@ class Session:
     chat_handoff: bool = False  # this turn ran /session-handoff inside the chat: its Stop makes it Done
     run_costs: list = field(default_factory=list)  # [ts, cost] per finished window run: exact spend
     transcript_path: str = ""  # read by usage.Usage for the estimated cost
+    task: str = ""             # the task a step session belongs to (plan 17), for good
+    step: int = 0              # its step number in that task
 
 
 def is_empty(s: Session) -> bool:
@@ -273,6 +275,8 @@ class State:
             s.stop_question = ""
             s.kind = rec.get("kind") or "run"
             s.handoff = s.kind == "handoff"
+            if rec.get("task"):
+                s.task, s.step = rec["task"], int(rec.get("step") or 0)
             if rec.get("escalated"):
                 s.escalated, s.escalated_ts = rec["escalated"], ts
             parent = self.sessions.get(rec.get("forked_from") or "")
@@ -469,6 +473,7 @@ class State:
                 "escalated_ts": s.escalated_ts,
                 "prep_model": s.prep_model, "prep_cost": s.prep_cost, "prep_turns": s.prep_turns,
                 "models": shares(fams(files)),
+                "task": s.task, "step": s.step,
                 "kind": s.kind, "handoff": s.handoff, "handoff_by": s.handoff_by if s.handed_off else "", "forked_from": s.forked_from, "forks": list(s.forks),
                 "follow_ups": follow_ups,
                 "handoff_hint": state not in DONE and (

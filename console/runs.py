@@ -147,10 +147,13 @@ class RunManager:
     # -- start ----------------------------------------------------------------------
     def start(self, cwd: str, prompt: str, model: str, effort: str, resume: str = None,
               title: str = "", route: str = "", reason: str = "", prep: str = "",
-              fork: str = "", kind: str = "run", extra: dict = None, files: list = ()) -> str:
+              fork: str = "", kind: str = "run", extra: dict = None, files: list = (),
+              disallow: tuple = (), tools: str = "", budget: float = 0.0, max_turns: int = 0) -> str:
         """A new run, a new turn of a window run (`resume`), or a window copy of another chat (`fork`).
         `kind` (run, continue, verify, handoff, escalate) and `extra` go into the run_started line.
-        `files` (attach.parse) go inline after the prompt; the stream file keeps their summary only."""
+        `files` (attach.parse) go inline after the prompt; the stream file keeps their summary only.
+        The step limits (`disallow`, `tools` where "" is the default set, `budget`, `max_turns`) are kept in the
+        run meta; a resumed turn given none reuses them, so a retry or a STOP answer keeps its restrictions."""
         if not self.exe:
             raise RunError("claude.exe not found; set \"claude_exe\" in config.json")
         sid = resume or str(uuid.uuid4())
@@ -162,8 +165,14 @@ class RunManager:
             fh.write(json.dumps({"type": "cc_prompt", "ts": time.time(), "text": prompt,
                                  "files": attach.summary(files)}, ensure_ascii=False) + "\n")
         offset = path.stat().st_size
+        old = self.meta(sid) or {}
+        limits = {"disallow": list(disallow), "tools": tools or "", "budget": budget, "max_turns": max_turns}
+        if resume and not (disallow or tools or budget or max_turns) and old.get("limits"):
+            limits = old["limits"]
         cmd = claude_cli.run_command(self.exe, model, effort, sid, resume=bool(resume),
-                                     name=redact.clip(title, 60), fork=fork)
+                                     name=redact.clip(title, 60), fork=fork,
+                                     disallow=tuple(limits["disallow"]), tools=limits["tools"] or None,
+                                     budget=limits["budget"], max_turns=limits["max_turns"])
         proc = self._spawn(cmd, cwd, path)
         footer = "" if prompt.startswith("/") else claude_cli.STOP_FOOTER  # a /skill takes no footer
         proc.stdin.write(claude_cli.user_message(prompt + footer, attach.blocks(files)))
@@ -172,11 +181,11 @@ class RunManager:
             self.live[sid] = proc
             self.stopping.discard(sid)
         start_commit = claude_cli.git_head(cwd)
-        old = self.meta(sid) or {}
         self._save_meta({"session_id": sid, "pid": proc.pid, "cwd": cwd, "model": model, "effort": effort,
                          "offset": offset, "started": time.time(), "ended": None,
                          "start_commit": old.get("start_commit") or start_commit,
-                         "start_route": old.get("start_route") or f"{model}/{effort}"})  # de-escalate goes back here
+                         "start_route": old.get("start_route") or f"{model}/{effort}",  # de-escalate goes back here
+                         "limits": limits})
         rec = {"event": "run_started", "session_id": sid, "cwd": cwd, "project": Path(cwd).name,
                "project_dir": cwd, "pid": proc.pid,
                "model": model, "effort": effort, "resume": bool(resume), "start_commit": start_commit,
@@ -259,6 +268,22 @@ class RunManager:
             claude_cli.kill_tree(meta["pid"])
             return "killed"
         return "not running"
+
+    def forget(self, sid: str) -> int:
+        """Delete the stream and the meta of an ended run (the task clear); returns the bytes freed."""
+        if self.meta(sid) is None:
+            raise RunError("not a window run")
+        if self.is_live(sid):
+            raise RunError("this session is still running")
+        freed = 0
+        for path in (self.stream_path(sid), self.meta_path(sid)):
+            try:
+                size = path.stat().st_size
+                path.unlink()
+                freed += size
+            except OSError:
+                pass
+        return freed
 
     # -- recovery -------------------------------------------------------------------
     def reconcile(self) -> int:
