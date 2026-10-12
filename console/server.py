@@ -440,9 +440,6 @@ class Hub:
             else:
                 base = ""
             live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
-            here = os.path.normcase(os.path.abspath(task["project_dir"]))
-            busy = any(t is not task and t["state"] in ("running", "waiting")
-                       and os.path.normcase(os.path.abspath(t["project_dir"])) == here for t in self.tasks.values())
             if base:
                 start = base
             elif owner != "service" or (state not in ("planned", "running")
@@ -453,8 +450,6 @@ class Hub:
                 start = "a step is running"
             elif nxt is None:
                 start = "no step to start"
-            elif busy:
-                start = "another task is working in this project"
             elif claude_cli.tier_of(nxt["pick"]) == "fable" and not task["fable_ok"]:
                 start = "confirm Fable"
             else:
@@ -501,10 +496,6 @@ class Hub:
             if item.get("model") not in claude_cli.MODELS and claude_cli.known_model(self.cfg, item.get("model")):
                 step["pick"] = item["model"]
         with self.tlock:
-            here = os.path.normcase(os.path.abspath(folder))
-            if any(t["state"] in ("running", "waiting") and os.path.normcase(os.path.abspath(t["project_dir"])) == here
-                   for t in self.tasks.values()):
-                raise runs.RunError("another task is working in this project")
             name = redact.clip(title or (card.get("fields") or {}).get("goal") or card.get("raw") or "task", 80)
             task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], planned,
                                   (card.get("route") or {}).get("type") or "", card.get("demand") or {}, card["id"],

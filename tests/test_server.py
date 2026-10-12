@@ -667,14 +667,11 @@ class TaskServerTest(RunServerTest):
         limits = self.hub.runs.meta(step["session"])["limits"]
         self.assertEqual((limits["disallow"], limits["tools"], limits["budget"]), (["Agent"], "Read,Grep,Glob", 3))
         self.assertEqual(self.hub.snapshot()["preps"], [])  # the card became the task
-        # a second task in the same project waits: one at a time
+        # a second task in the same project starts beside the first (plan 20: parallel tasks per project)
         other = tasks.new_task(str(self.project), "proj", "Other", "goal", tasks.plan_steps(
             [{"kind": "scout", "goal": "look"}], 6), "normal", {}, "", "auto", time.time())
         self.hub.tasks[other["id"]] = other
-        self.assertEqual(self.hub.task_levers(other["id"])["start"], "another task is working in this project")
-        status, data = self.post_task(self.prep_card("CHAIN again"))
-        self.assertEqual(status, 409)
-        self.assertIn("another task", data["error"])
+        self.assertEqual(self.hub.task_levers(other["id"])["start"], "")
         self.assertIsNone(self.hub.task_levers("nope"))
 
     def test_good_handoff_starts_the_next_step(self):

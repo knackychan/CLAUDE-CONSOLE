@@ -266,12 +266,16 @@ validated with `known_model`.
 ### 3.10 Hard rules (from CLAUDE.md and BRAINSTORM, never relaxed by a task)
 
 - `Hub.task_levers` is the only gate for `start`, `stop`, `retry`, `pause`, `resume`, `confirm`, `clear`; the hub loop and
-  the POST handlers both call it; it uses `Hub.allowed`, the busy checks of `Hub.levers`, and refuses a start
-  when another task of the same project is `running` or `waiting`. Stop, Pause and Clear start nothing, so they
+  the POST handlers both call it; it uses `Hub.allowed` and the busy checks of `Hub.levers`. Several tasks of the
+  same project may run at once (plan 20 replaced the old one-at-a-time refusal). Stop, Pause and Clear start nothing, so they
   do not need the project allowed, claude.exe or the folder.
 - While its task is `planned`, `running` or `waiting`, a step session's own levers (Continue, Verify, Hand off,
   Escalate, De-escalate) answer `a task step: use the task's levers`, except Continue on the current step while
   the task waits on its question. `/api/stop` on the current step is the task's Stop (no retry follows).
+- Once the task is `stopped`, Continue on the current step's session (not live: `Hub.levers` still refuses it
+  while the run is going) is a new turn of that same session and resumes the task (`tasks.fred(task, "continue")`):
+  the step goes back to `running`, the task to `running` with `owner` `service`, and `_ended` reads that turn's end
+  like any step's (handoff, then the next step). Retry stays a fresh session from `last_good`.
 - A step is one fresh `claude -p` with `--disallowedTools Agent`; no `Agent` tool call anywhere in the plan. The
   brief pass is a `claude -p` with no tools and one turn; it decides nothing.
 - Stop is `runs.stop` (the stream-json interrupt). The chain never kills a process.
@@ -282,7 +286,7 @@ validated with `known_model`.
 
 ### 3.11 Drift guards for the executor
 
-- Do not add a queue, a priority, a timer, a lock file, a lease, a second retry, a branch or a parallel step.
+- Do not add a queue, a priority, a timer, a lock file, a lease, a second retry, a branch or a parallel step inside one task. Parallel tasks in one project are allowed (plan 20).
 - Do not let a model write into the task folder; the service writes every file there.
 - The next step's prompt carries the brief only: never the raw note, never earlier briefs, never a transcript.
 - Do not pass a `--model` that is not a tier alias or a rung of the configured ladder; do not pin ids in code.
