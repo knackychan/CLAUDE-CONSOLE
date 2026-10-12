@@ -27,6 +27,20 @@ DEFAULTS = {
     "delegate_after_reads": 10,
     "daily_budget_usd": 15,
     "cold_after_s": 3600,  # idle this long: both prompt-cache lifetimes (5 min, 1 h) are gone
+    # plan 17, task chain: see plans/17-tasks/README.md section 4
+    "task_retention_days": 90,
+    "task_step_budget_usd": 3,
+    "task_max_steps": 6,
+    "opus_max_turns": 12,
+    "budget_warn_at": 0.8,  # share of a model's pace at which a step moves one model down
+    "ladder": {  # newest rung first per tier, the alias first
+        "haiku": ["haiku", "claude-haiku-4-5"],
+        "sonnet": ["sonnet", "claude-sonnet-4-6"],
+        "opus": ["opus", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
+        "fable": ["fable"],
+    },
+    "storage_warn_mb": 500,
+    "task_clear_on_done": True,
     # USD per million tokens, API list prices (claude-api skill, 2026-10-06); fast mode costs 2x.
     # Haiku's higher price for prompts over 100K tokens is left out.
     "prices": {
