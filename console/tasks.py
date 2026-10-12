@@ -42,7 +42,7 @@ MARK_START, MARK_END = "HANDOFF", "END HANDOFF"
 NOTE_MAX = 20 * 1024
 GOAL_MAX = 6000
 STEP_GOAL_MAX = 1000
-TASK_STATES = ("planned", "running", "waiting", "stuck", "done", "stopped")
+TASK_STATES = ("planned", "running", "waiting", "stuck", "done", "stopped", "handed")  # handed: Fred handed off
 STEP_STATES = ("planned", "running", "done", "failed")
 EFFORT_CAP = {m: claude_cli.EFFORTS[-1] for m in claude_cli.MODELS}  # every alias took `max` (CLI 2.1.296)
 _TOP = ("opus", "high")  # the most a step runs on unless Fred picks fable
@@ -144,6 +144,25 @@ def parse_handoff(text: str):
             blocks.append("\n".join(lines[start + 1:i]))
             start = None
     return blocks[-1] if blocks else None
+
+
+def live_note(text: str) -> str:
+    """What a running step's reply says about its note so far: "writing" (no HANDOFF line, or no END HANDOFF yet)
+    or "unchecked" (the whole block stands; the check runs when the run ends)."""
+    return "unchecked" if parse_handoff(text) is not None else "writing"
+
+
+def note_state(task: dict, s: dict, live: str = "") -> str:
+    """The state of step `s`'s handoff note for the window: "" (none yet), "writing" / "unchecked" (`live`, the
+    step runs), "checked" (it passed; the brief is made or there is no next step), "ready" (passed, briefed,
+    the next step has not started), "sent" (the next step started)."""
+    if s["state"] == "running":
+        return live or "writing"
+    if not s.get("handoff") or s["state"] != "done":
+        return ""
+    if task.get("briefing") == s["n"] or s["n"] >= len(task["steps"]):
+        return "checked"
+    return "ready" if step(task, s["n"] + 1)["state"] == "planned" else "sent"
 
 
 def check_handoff(block: str) -> str:
@@ -424,7 +443,10 @@ def held(task: dict) -> bool:
 
 def fred(task: dict, lever: str, now: float, next_n: int = 0):
     """Fred's levers on the task state. (True, "", chain lines) when it applies, else (False, why, []).
-    Confirm is the Fable confirm, or Run anyway for a budget hold of step `next_n` (that step only)."""
+    Confirm is the Fable confirm, or Run anyway for a budget hold of step `next_n` (that step only). Continue is
+    Fred's Continue in the session of a stopped task's current step: the task runs on in that session. Handoff is
+    Fred's Hand off in the current step's chat: the task is handed over and nothing more starts. Done is Fred's
+    Mark done on a task that waits, is stuck, stopped or handed over."""
     state, s, lines = task["state"], current_step(task), []
     if lever == "stop":
         if state in ("done", "stopped"):
@@ -455,6 +477,25 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0):
             s["state"] = "planned"
         _task_to(task, "running" if s else "planned", "", now, s, lines)
         task["owner"] = "service"
+    elif lever == "continue":  # Fred's Continue in the stopped step's own session: the step runs on there
+        if state != "stopped" or not s or s["state"] != "failed":
+            return False, "not a stopped step", []
+        lines.append(_line(now, s, "failed", "running", "continued by Fred"))
+        s.update(state="running", ended=None)
+        if s.get("attempts"):  # the same session: its cost is read again once the new turn ends
+            s["attempts"][-1].update(ended=None, why="", final=False)
+        _task_to(task, "running", "", now, s, lines)
+        task["owner"] = "service"
+    elif lever in ("handoff", "done"):
+        if lever == "handoff" and state in ("done", "handed"):
+            return False, f"task is {state}", []
+        if lever == "done" and state not in ("waiting", "stuck", "stopped", "handed"):
+            return False, f"task is {state}", []
+        why = "handed off by Fred" if lever == "handoff" else "marked done by Fred"
+        if s and s["state"] == "running":  # its turn is over (asks, or a hold): the step ends here
+            _finish(task, s, "done", now, lines, why)
+        _task_to(task, "handed" if lever == "handoff" else "done", why, now, s, lines)
+        task["owner"] = "fred"
     elif lever == "confirm":
         if held(task):
             task["hold_ok"] = next_n
@@ -545,14 +586,14 @@ def write_brief(home, task: dict, step: dict, text: str) -> str:
 
 
 def prune(home, days: float, now: float = None) -> list:
-    """Remove the task folders of `done`, `stopped` and `stuck` tasks whose task.json is older than `days`."""
+    """Remove the task folders of `done`, `stopped`, `stuck` and `handed` tasks whose task.json is older than `days`."""
     cutoff = (time.time() if now is None else now) - days * 86400
     root, removed = Path(home) / "tasks", []
     if not root.is_dir():
         return removed
     for entry in sorted(root.iterdir()):
         task = load(home, entry.name)
-        if not task or task.get("state") not in ("done", "stopped", "stuck"):
+        if not task or task.get("state") not in ("done", "stopped", "stuck", "handed"):
             continue
         try:
             old = (entry / "task.json").stat().st_mtime < cutoff

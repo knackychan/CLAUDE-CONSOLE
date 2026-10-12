@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -114,6 +115,45 @@ class CommandTest(unittest.TestCase):
         proc.wait()
         self.assertFalse(claude_cli.pid_alive(proc.pid))
         self.assertFalse(claude_cli.pid_alive(None))
+
+
+@unittest.skipUnless(os.name == "nt", "job objects are Windows only")
+class ServiceJobTest(unittest.TestCase):
+    def test_a_run_joins_the_service_job_and_a_child_joins_too(self):
+        import ctypes
+        from ctypes import wintypes
+        child = subprocess.Popen([sys.executable, "-c",
+                                  "import subprocess,sys,time; "
+                                  "subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+                                  "time.sleep(30)"],
+                                 creationflags=claude_cli.NO_WINDOW)
+        self.addCleanup(lambda: (claude_cli.kill_tree(child.pid), child.wait()))
+        self.assertTrue(claude_cli.join_service_job(child.pid))
+        k = ctypes.windll.kernel32
+        k.OpenProcess.restype = ctypes.c_void_p
+        k.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        handle = k.OpenProcess(0x1000, False, child.pid)
+        in_job = wintypes.BOOL()
+        k.IsProcessInJob.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL)]
+        self.assertTrue(k.IsProcessInJob(handle, None, ctypes.byref(in_job)))
+        k.CloseHandle(handle)
+        self.assertTrue(in_job.value)
+
+    def test_the_child_ends_when_the_service_exits(self):
+        # a service process that exits without cleaning up: its run must not stay behind as an orphan
+        root = str(Path(__file__).resolve().parent.parent)
+        service = ("import subprocess, sys; from console import claude_cli; "
+                   "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], "
+                   "creationflags=claude_cli.NO_WINDOW | claude_cli.BREAKAWAY); "
+                   "claude_cli.join_service_job(c.pid); print(c.pid, flush=True)")
+        out = subprocess.run([sys.executable, "-c", service], cwd=root, capture_output=True, text=True,
+                             timeout=30, creationflags=claude_cli.NO_WINDOW)
+        pid = int(out.stdout.strip().splitlines()[-1])
+        for _ in range(50):  # the OS ends the job's members a moment after the service's handles close
+            if not claude_cli.pid_alive(pid):
+                break
+            time.sleep(0.1)
+        self.assertFalse(claude_cli.pid_alive(pid))
 
 
 if __name__ == "__main__":

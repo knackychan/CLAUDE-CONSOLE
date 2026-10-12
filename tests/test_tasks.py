@@ -476,6 +476,48 @@ class ChainTest(unittest.TestCase):
         task.update(state="waiting", why="something else")
         self.assertEqual(tasks.fred(task, "confirm", NOW, next_n=2)[:2], (False, "nothing to confirm"))
 
+    def test_fred_hands_off_or_marks_done(self):
+        task = make(("scout", "code"))
+        run(task, 1)
+        self.assertEqual(tasks.fred(task, "done", NOW + 5)[:2], (False, "task is running"))  # Stop it first
+        end(task, question="which file?")
+        ok, why, lines = tasks.fred(task, "handoff", NOW + 6)
+        self.assertEqual((ok, task["state"], task["why"], task["owner"]), (True, "handed", "handed off by Fred", "fred"))
+        self.assertEqual(tasks.step(task, 1)["state"], "done")  # the asking step ends; step 2 never starts
+        self.assertEqual([(c["from"], c["to"]) for c in lines], [("running", "done"), ("task:waiting", "task:handed")])
+        self.assertEqual(tasks.fred(task, "handoff", NOW + 7)[:2], (False, "task is handed"))
+        ok, _, lines = tasks.fred(task, "done", NOW + 8)  # handed over, then Fred calls it done
+        self.assertEqual((ok, task["state"], task["why"]), (True, "done", "marked done by Fred"))
+        stuck = make(("scout",))
+        run(stuck, 1)
+        stuck.update(state="stuck")
+        tasks.step(stuck, 1)["state"] = "failed"
+        self.assertTrue(tasks.fred(stuck, "done", NOW + 9)[0])
+        self.assertEqual((stuck["state"], tasks.step(stuck, 1)["state"]), ("done", "failed"))  # a failed step stays
+
+    def test_fred_continue_runs_the_stopped_step_on(self):
+        task = make(("scout", "code"))
+        run(task, 1)
+        end(task)
+        run(task, 2)
+        self.assertEqual(tasks.fred(task, "continue", NOW + 5)[:2], (False, "not a stopped step"))  # running
+        tasks.fred(task, "stop", NOW + 6)
+        step = tasks.step(task, 2)
+        self.assertEqual((step["state"], step["attempts"][-1]["why"]), ("failed", "stopped by Fred"))
+        ok, why, lines = tasks.fred(task, "continue", NOW + 7)
+        self.assertEqual((ok, why, task["state"], task["owner"], task["current"]), (True, "", "running", "service", 2))
+        self.assertEqual((step["state"], step["session"], step["ended"], step["retries"]), ("running", "s2", None, 0))
+        self.assertEqual(len(step["attempts"]), 1)  # the same session: its cost is the session's, not counted twice
+        self.assertEqual((step["attempts"][-1]["ended"], step["attempts"][-1]["final"]), (None, False))
+        self.assertEqual([(c["from"], c["to"], c["why"]) for c in lines],
+                         [("failed", "running", "continued by Fred"), ("task:stopped", "task:running", "")])
+        self.assertEqual(end(task)[0], "next")  # its end is read like any step's: the verify comes next
+        done = make(("scout", "code"))
+        run(done, 1)
+        end(done)
+        tasks.fred(done, "stop", NOW + 8)  # stopped between steps: step 1 is done, Retry starts step 2
+        self.assertEqual(tasks.fred(done, "continue", NOW + 9)[:2], (False, "not a stopped step"))
+
     def test_fred_levers(self):
         task = make(("scout", "explain"))
         run(task, 1)
@@ -697,6 +739,31 @@ class ChainTest(unittest.TestCase):
         self.assertNotIn("Your earlier attempt", code)
         long = dict(task, goal="g" * 9000)
         self.assertLess(len(tasks.step_prompt(long, tasks.step(long, 1), "")), 9000)
+
+
+class NoteStateTest(unittest.TestCase):
+    def test_live_note(self):
+        self.assertEqual(tasks.live_note("thinking"), "writing")
+        self.assertEqual(tasks.live_note("HANDOFF\n## Findings\nx"), "writing")
+        self.assertEqual(tasks.live_note("HANDOFF\n## Findings\nx\nEND HANDOFF"), "unchecked")
+
+    def test_note_state_follows_the_chain(self):
+        task = make()
+        one, two = tasks.step(task, 1), tasks.step(task, 2)
+        self.assertEqual(tasks.note_state(task, one), "")
+        one["state"] = "running"
+        self.assertEqual(tasks.note_state(task, one), "writing")
+        self.assertEqual(tasks.note_state(task, one, "unchecked"), "unchecked")
+        one.update(state="done", handoff="steps/01-scout.md")
+        task["briefing"] = 1
+        self.assertEqual(tasks.note_state(task, one), "checked")
+        task["briefing"] = 0
+        self.assertEqual(tasks.note_state(task, one), "ready")
+        two["state"] = "running"
+        self.assertEqual(tasks.note_state(task, one), "sent")
+        last = tasks.step(task, len(task["steps"]))
+        last.update(state="done", handoff="x")
+        self.assertEqual(tasks.note_state(task, last), "checked")
 
 
 if __name__ == "__main__":

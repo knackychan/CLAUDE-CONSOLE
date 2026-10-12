@@ -210,6 +210,46 @@ class StateTest(unittest.TestCase):
         self.feed(ev("Stop", T0 + 34, sid="v"))
         self.assertEqual(self.row(T0 + 35, "v")["state"], "verified")
 
+    def failed_chat(self, **stop):
+        """A VS Code chat whose last turn ended with a Verify FAIL (a copy cannot be resumed in place)."""
+        self.feed(ev("UserPromptSubmit", T0, sid="orig"), ev("Stop", T0 + 5, sid="orig", verdict="FAIL",
+                                                              verdict_detail="a.py:3 - boom", **stop))
+
+    def test_a_verify_fail_nobody_handles_needs_you(self):
+        self.failed_chat()
+        self.assertEqual((self.row(T0 + 6, "orig")["state"], self.row(T0 + 6, "orig")["group"]),
+                         ("verify_failed", "needs"))
+        self.assertEqual(self.state.snapshot(T0 + 6)["counts"]["needs"], 1)
+        # the Verify copy that judged it started before the verdict: it is not a fix
+        self.feed(ev("run_started", T0 + 2, sid="copy", kind="verify", forked_from="orig"),
+                  ev("run_ended", T0 + 6, sid="copy", subtype="success"))
+        self.assertEqual(self.row(T0 + 7, "orig")["group"], "needs")
+
+    def test_a_verify_fail_with_an_escalate_or_fix_running_leaves_needs_you(self):
+        for kind in ("escalate", "continue"):
+            with self.subTest(kind=kind):
+                self.setUp()
+                self.failed_chat(context_tokens=330000)  # a red gauge must not keep it in Needs you
+                self.feed(ev("run_started", T0 + 30, sid="fix", kind=kind, forked_from="orig"))
+                row = self.row(T0 + 31, "orig")
+                self.assertEqual(row["state"], "verify_failed")  # the page still says what the verdict was
+                self.assertNotEqual(row["group"], "needs")
+                snap = self.state.snapshot(T0 + 31)
+                self.assertEqual(snap["counts"]["needs"], 0)
+                self.assertEqual(self.row(T0 + 31, "fix")["group"], "working")
+                self.feed(ev("run_ended", T0 + 60, sid="fix", subtype="success"))  # the fix ended: still handled
+                self.assertNotEqual(self.row(T0 + 61, "orig")["group"], "needs")
+
+    def test_a_window_escalate_running_in_place_with_a_red_gauge_is_not_needs_you(self):
+        self.feed(ev("run_started", T0, sid="w", kind="run"), ev("Stop", T0 + 5, sid="w", verdict="FAIL",
+                                                                  context_tokens=330000),
+                  ev("run_ended", T0 + 6, sid="w", subtype="success"))
+        self.assertEqual(self.row(T0 + 7, "w")["group"], "needs")
+        self.feed(ev("run_started", T0 + 10, sid="w", kind="escalate"))
+        row = self.row(T0 + 11, "w")
+        self.assertEqual((row["state"], row["ctx_tone"]), ("running", "red"))
+        self.assertEqual((row["group"], self.state.snapshot(T0 + 11)["counts"]["needs"]), ("working", 0))
+
     def test_a_verify_copy_hands_its_verdict_to_the_original(self):
         self.feed(ev("UserPromptSubmit", T0, sid="orig"), ev("Stop", T0 + 5, sid="orig"),
                   ev("run_started", T0 + 10, sid="copy", kind="verify", forked_from="orig"),

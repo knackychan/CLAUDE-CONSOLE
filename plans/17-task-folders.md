@@ -193,8 +193,11 @@ guard; nothing starts a step without it). `Hub.advance()` runs in the hub loop r
 | step ended, no or bad HANDOFF, or `run_ended` with `interrupted`, an error subtype or a denial | first time (`retries` 0) | step `failed`, `retries` 1, then started again on the same route with the `last_good` note and a line "Your earlier attempt ended without a handoff: <reason>" |
 | same, `retries` 1 | | task `stuck` |
 | any, Fred clicks Stop | | `runs.stop(session)` (the stream-json interrupt, never a kill), task `stopped`, `owner` `fred` |
+| `stopped`, current step `failed` and its run ended, Fred clicks Continue on that step's session | | a new turn of the same session (`--resume`); step `running` again, task `running`, `owner` `service`; its `run_ended` is checked like any step's end |
 | `stopped` or `stuck`, Fred clicks Retry | | `current` started again from `last_good` (a fresh session id; the old step session stays as it was), `owner` `service` |
 | `running`, Fred clicks Pause | | `owner` `fred`: the live step finishes its turn, nothing starts after it until Resume |
+| `waiting` on the step's question (or `stuck` / `stopped`), Fred clicks Hand off on the current step's session (Task page or session page) | | the handoff turn runs in that session; the asking step `done`, task `handed` (handed off by Fred), `owner` `fred`; nothing starts after it (Fred, 2026-10-12) |
+| `waiting`, `stuck`, `stopped` or `handed`, no live run, Fred clicks Mark done | | a running step `done`, task `done` (marked done by Fred), `owner` `fred` (Fred, 2026-10-12) |
 | service restart | `task.json` says `running` and the step's run is gone | `reconcile` emits `run_ended` as today; the next `advance` treats it like any ended step (handoff check, then on or retry) |
 
 Every transition appends one line to `chain.jsonl` and rewrites `task.json`. `Hub.auto_steps` (plan 16) skips

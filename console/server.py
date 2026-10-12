@@ -49,6 +49,7 @@ class Hub:
         self.changed = threading.Condition(self.lock)
         self.tasks = tasks.load_all(folder)  # plan 17: id -> task; the dict itself changes under self.lock
         self.tlock = threading.RLock()  # one task move at a time: advance, create, the lever routes, the brief thread
+        self._notes = {}  # session id -> (stream size, live note state), for _live_note
         self.briefing = set()  # ids of the tasks whose brief thread is running
         self.storage = {}  # usage.folder_sizes of the data folder, refreshed hourly on the usage thread
         self.storage_at = 0.0
@@ -183,13 +184,14 @@ class Hub:
             snap["preps"] = sorted(({**{k: v for k, v in j.items() if k != "files"},
                                      "attached": attach.summary(j["files"])} for j in self.preps.values()),
                                    key=lambda j: j["ts"])
-            snap["tasks"] = sorted((task_row(t) for t in self.tasks.values()), key=lambda r: r["updated"],
-                                   reverse=True)
+            rows = {r["id"]: r for r in snap["sessions"]}
+            snap["tasks"] = sorted((task_row(t, self._live_note, rows) for t in self.tasks.values()),
+                                   key=lambda r: r["updated"], reverse=True)
             loose = [r for r in snap["sessions"] if not r.get("task")]  # a task counts once, not per step session
             count = lambda g: sum(1 for r in loose if r["group"] == g)
-            tg = lambda states: sum(1 for t in snap["tasks"] if t["state"] in states)
-            snap["counts"] = {"needs": count("needs") + tg(("waiting", "stuck")),
-                              "replied": count("replied"), "working": count("working") + tg(("planned", "running")),
+            tg = lambda g: sum(1 for t in snap["tasks"] if t["group"] == g)
+            snap["counts"] = {"needs": count("needs") + tg("needs"),
+                              "replied": count("replied"), "working": count("working") + tg("working"),
                               "done": count("done"), "empty": count("empty")}
             return snap
 
@@ -289,7 +291,7 @@ class Hub:
             asked = (task["state"] == "waiting" and task["why"].startswith("asks: ")
                      and cs is not None and cs["session"] == session_id)
             for lever in ("continue", "verify", "handoff", "escalate", "deescalate"):
-                if not (lever == "continue" and asked):  # Continue answers the step's question
+                if not (lever in ("continue", "handoff") and asked):  # answer the step's question, or hand off
                     out[lever] = base or "a task step: use the task's levers"
         return out
 
@@ -330,13 +332,23 @@ class Hub:
             model, effort = new_model, new_effort
             extra = {"escalated": f"{route_from} -> {route_to}"}
         fork = sid if info["fork"] else ""
-        new = self.runs.start(info["cwd"], text, model, effort, resume=None if fork else sid, fork=fork,
-                              title="↳ " + (s["title"] or sid[:8]) if fork else "",
-                              route=s["route"] if fork else "", kind=lever, extra=extra,
-                              files=files if lever == "continue" else ())
-        if miss:
-            levers.add_miss(self.folder, miss)
-        self.poll_once()
+        with self.tlock:  # Continue in the current step of a stopped task resumes the task there; Hand off in the
+            # current step hands the task over (tasks.fred)
+            task = self.tasks.get(s["task"]) if s["task"] and lever in ("continue", "handoff") and not fork else None
+            if task and ((lever == "continue" and task["state"] != "stopped")
+                         or (tasks.current_step(task) or {}).get("session") != sid):
+                task = None
+            new = self.runs.start(info["cwd"], text, model, effort, resume=None if fork else sid, fork=fork,
+                                  title="↳ " + (s["title"] or sid[:8]) if fork else "",
+                                  route=s["route"] if fork else "", kind=lever, extra=extra,
+                                  files=files if lever == "continue" else ())
+            if miss:
+                levers.add_miss(self.folder, miss)
+            self.poll_once()  # the run_started line first: _ended reads this turn, not the stopped one
+            if task:
+                ok, _, lines = tasks.fred(task, lever, time.time())
+                if ok:
+                    self._commit(task, lines)
         return 200, {"session": new}
 
     def auto_steps(self) -> list:
@@ -388,6 +400,19 @@ class Hub:
             s = self.session(sid)
             items = transcript.turns(s["transcript_path"]) if s else []
         return next((i["text"] for i in reversed(items) if i["role"] == "claude"), "")
+
+    def _live_note(self, sid: str) -> str:
+        """tasks.live_note of a running step's reply so far; the stream is read again only when it grew."""
+        path = self.runs.stream_path(sid)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return "writing"
+        key, hit = self._notes.get(sid, (None, ""))
+        if key != size:
+            hit = tasks.live_note(self.final_message(sid)[0])
+            self._notes[sid] = (size, hit)
+        return hit
 
     def final_message(self, sid: str) -> tuple:
         """(the last assistant text, the last result's subtype) of a window run, whole: runs.chat cuts a text at
@@ -464,10 +489,12 @@ class Hub:
             confirm = base or ("" if (state == "waiting" and task["why"] == "confirm Fable") or tasks.held(task)
                                else "nothing to confirm")
             clear = ("still working: wait until it stops" if live else
-                     "" if state in ("planned", "done", "stuck", "stopped") else f"task is {state}")
+                     "" if state in ("planned", "done", "stuck", "stopped", "handed") else f"task is {state}")
+            done = ("still working: wait until it stops" if live else  # Mark done starts nothing
+                    "" if state in ("waiting", "stuck", "stopped", "handed") else f"task is {state}")
             route = self._route_for(task, nxt) if nxt else None
             return {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry,
-                    "confirm": confirm, "clear": clear,
+                    "confirm": confirm, "clear": clear, "done": done,
                     "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
                     "next_route": f"{route['model']}/{route['effort']}" if route and not route["hold"] else "",
                     "cwd": task["project_dir"]}
@@ -735,7 +762,7 @@ class Hub:
         return "start"
 
     def task_lever(self, task_id, lever: str) -> tuple:
-        """Fred's Stop, Pause, Resume, Retry, Confirm and Clear. task_levers decides first; Stop is the run's
+        """Fred's Stop, Pause, Resume, Retry, Confirm, Clear and Mark done. task_levers decides first; Stop is the run's
         interrupt (runs.stop), never a kill. Returns (status, body)."""
         with self.tlock:
             info = self.task_levers(task_id)
@@ -796,10 +823,22 @@ class Hub:
             return projects
 
 
-def task_row(t: dict) -> dict:
-    """A task as the window's list shows it (the whole task.json is GET /api/task)."""
+def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
+    """A task as the window's list shows it (the whole task.json is GET /api/task). `live(session)` is the
+    note state of a running step's reply (Hub._live_note); `sessions` (id -> snapshot row) gives the current step's
+    chat. A step whose turn is over and asks a STOP question or shows a hand-off hint needs Fred, even before
+    task.json says so (its run may not have ended yet)."""
     cs = tasks.current_step(t)
+    r = (sessions or {}).get(cs["session"]) if cs and cs["session"] else None
+    over = r is not None and r["state"] not in BUSY and cs["state"] != "done" and t["state"] not in ("done", "stopped", "handed")
+    asks = (t["why"][len("asks: "):] if t["state"] == "waiting" and t["why"].startswith("asks: ") else
+            r["stop_question"] if over and r["state"] == "stop" else "")
+    hand_off = ("" if not (over and r["handoff_hint"]) else
+                "the context is large" if r["ctx_tone"] == "red" else f"{r['follow_ups']} follow-ups")
+    group = ("needs" if t["state"] in ("waiting", "stuck") or asks or hand_off else
+             "working" if t["state"] in ("planned", "running") else "done")
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
+            "group": group, "asks": asks, "hand_off": hand_off,
             "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
             "why": t["why"], "updated": t["updated"], "effort": t["effort"],
             "cost": round(sum(tasks.step_cost(s) for s in t["steps"]), 4),
@@ -810,6 +849,7 @@ def task_row(t: dict) -> dict:
             "hold": t["why"].endswith(" over its pace"),
             "steps": [{**{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
                                             "cost")},
+                       "note": tasks.note_state(t, s, live(s["session"]) if s["state"] == "running" else ""),
                        "attempts": [{"session": a["session"], "cost": a["cost"], "why": a["why"]}
                                     for a in tasks.attempts(s)]} for s in t["steps"]]}
 
@@ -898,7 +938,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/done": self._done, "/api/task": self._task_new}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
-        for lever in ("stop", "pause", "resume", "retry", "confirm", "clear"):
+        for lever in ("stop", "pause", "resume", "retry", "confirm", "clear", "done"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
         path = urlparse(self.path).path
         handler = routes.get(path)
@@ -1147,8 +1187,9 @@ class Handler(BaseHTTPRequestHandler):
         task = self.hub.tasks.get(task_id) if tasks.safe_id(task_id) else None
         if task is None:
             return self._error(404, "unknown task")
-        last = task["last_good"]
+        last, cs = task["last_good"], tasks.current_step(task)
         return self._json({"task": task, "levers": self.hub.task_levers(task_id),
+                           "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last)})
 

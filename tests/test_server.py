@@ -920,6 +920,59 @@ class TaskServerTest(RunServerTest):
         counts = self.hub.snapshot()["counts"]
         self.assertEqual((counts["needs"], counts["done"]), (1, 0))  # a hold needs Fred; its ended step is no row
 
+    def test_a_step_that_asks_or_should_hand_off_needs_fred(self):
+        # task.json still says running (the run has not ended), but the step's chat waits for Fred
+        now, ids = time.time(), {}
+        for sid, prompts, question in (("asks", 1, "which file?"), ("long", 3, "")):
+            task = tasks.new_task(str(self.project), "proj", sid, "goal", tasks.plan_steps(
+                [{"kind": "code", "goal": "write it"}], 6), "normal", {}, "", "auto", now)
+            task.update(state="running", current=1)
+            task["steps"][0].update(state="running", session=sid, model="sonnet", effort="high")
+            self.hub.tasks[task["id"]] = ids[sid] = task
+            events.append(self.folder, {"event": "run_started", "ts": now, "session_id": sid, "cwd": str(self.project),
+                                        "project_dir": str(self.project),
+                                        "task": task["id"], "step": 1, "kind": "task"})
+            for k in range(prompts):
+                events.append(self.folder, {"event": "UserPromptSubmit", "ts": now + k, "session_id": sid,
+                                            "prompt": f"turn {k}"})
+            events.append(self.folder, {"event": "Stop", "ts": now + 5, "session_id": sid,
+                                        "stop_question": question})
+        self.hub.poll_once()
+        snap = self.hub.snapshot()
+        rows = {r["id"]: r for r in snap["tasks"]}
+        asks, long = rows[ids["asks"]["id"]], rows[ids["long"]["id"]]
+        self.assertEqual((asks["group"], asks["asks"], asks["hand_off"]), ("needs", "which file?", ""))
+        self.assertEqual((long["group"], long["asks"], long["hand_off"]), ("needs", "", "2 follow-ups"))
+        self.assertEqual((snap["counts"]["needs"], snap["counts"]["working"]), (2, 0))  # steps not counted again
+        page = self.task(ids["asks"]["id"])[1]
+        # the Task page's answer and Hand off buttons ask Hub.levers: no run_ended yet, so not before it lands
+        self.assertEqual(page["step_levers"]["continue"], "still working: wait until it stops")
+        self.hub.tasks[ids["long"]["id"]]["state"] = "stopped"  # Fred stopped it: not his turn any more
+        self.assertEqual(next(r for r in self.hub.snapshot()["tasks"] if r["id"] == ids["long"]["id"])["group"],
+                         "done")
+
+    def test_hand_off_of_an_asking_step_hands_the_task_over(self):
+        skill = self.project / ".claude" / "skills" / "session-handoff"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "STOP-ASK look"}, self.TWO[1]])
+        self.until(tid, lambda t: t["state"] == "waiting", "the step asks")
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.assertEqual(self.hub.levers(sid)["handoff"], "")  # Hand off instead of an answer
+        self.assertEqual(self.hub.task_levers(tid)["done"], "")
+        self.assertEqual(self.call("/api/handoff", {"session": sid}), (200, {"session": sid}))
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["state"], task["steps"][0]["state"], task["steps"][1]["state"]),
+                         ("handed", "done", "planned"))
+        self.wait_idle(sid)
+        self.hub.advance()
+        self.assertEqual((task["state"], task["steps"][1]["state"]), ("handed", "planned"))  # nothing starts after
+        self.assertEqual(self.session(sid)["kind"], "handoff")
+        row = next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)
+        self.assertEqual(row["group"], "done")
+        self.assertEqual(self.call("/api/task/done", {"task": tid}), (200, {"task": tid, "state": "done"}))
+        self.assertEqual(self.call("/api/task/done", {"task": tid}), (409, {"error": "task is done"}))
+
     def test_nothing_written_outside_home(self):
         tid = self.make_task(steps=self.TWO)
         self.settled(tid)
@@ -1025,8 +1078,12 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([(s["n"], s["kind"], s["state"]) for s in row["steps"]],
                          [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
         self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
-                                                          "verdict", "retries", "cost", "attempts"]))
+                                                          "verdict", "retries", "cost", "note", "attempts"]))
+        self.assertIn(row["steps"][0]["note"], ("writing", "unchecked"))
         self.until(tid, self.at(2), "step 2 starts")
+        steps = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)["steps"]
+        self.assertEqual(steps[0]["note"], "sent")
+        self.assertIn(steps[1]["note"], ("writing", "unchecked"))
         status, data = self.task(tid)
         self.assertEqual(status, 200)
         self.assertEqual(data["task"]["id"], tid)
@@ -1124,9 +1181,13 @@ class TaskServerTest(RunServerTest):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "look STOP-ASK"}, self.TWO[1]])
         sid = self.hub.tasks[tid]["steps"][0]["session"]
         self.until(tid, lambda t: t["state"] == "waiting", "the task waits")
+        skill = self.hub.user_home / ".claude" / "skills" / "session-handoff"  # Hand off needs the skill here
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# session-handoff\n", encoding="utf-8")
         lv = self.hub.levers(sid)
         self.assertEqual(lv["continue"], "")  # Fred answers the step's question here
-        for lever in ("verify", "handoff", "escalate", "deescalate"):
+        self.assertEqual(lv["handoff"], "")  # a question leaves Hand off open too
+        for lever in ("verify", "escalate", "deescalate"):
             self.assertEqual(lv[lever], "a task step: use the task's levers", lever)
         self.assertEqual(self.call("/api/verify", {"session": sid})[0], 409)
         self.assertEqual(self.call("/api/continue", {"session": sid, "text": "calc.py HANDOFF-OK"})[0], 200)
@@ -1141,6 +1202,43 @@ class TaskServerTest(RunServerTest):
         task = self.hub.tasks[tid]
         self.assertEqual((task["state"], task["owner"], task["steps"][0]["retries"]), ("stopped", "fred", 0))
         self.assertEqual(self.hub.advance(), [])  # no retry: Fred stopped it
+
+    def test_continue_on_the_stopped_step_resumes_the_task(self):
+        tid = self.make_task(steps=[self.TWO[0], {"kind": "code", "goal": "fix it SLOW"},
+                                   {"kind": "explain", "goal": "say what changed"}])
+        task = self.until(tid, self.at(2), "step 2 runs")
+        sid = task["steps"][1]["session"]
+        self.assertEqual(self.call("/api/stop", {"session": sid}), (200, {"stop": "stopped", "task": tid}))
+        self.wait_idle(sid)
+        self.hub.poll_once()
+        self.assertEqual((task["state"], task["owner"], task["steps"][1]["state"]), ("stopped", "fred", "failed"))
+        self.assertEqual(self.hub.levers(sid)["continue"], "")
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "found it in calc.py HANDOFF-OK"}),
+                         (200, {"session": sid}))
+        step = task["steps"][1]
+        self.assertEqual((task["state"], task["owner"], step["state"], step["session"]),
+                         ("running", "service", "running", sid))  # the same session, resumed
+        task = self.until(tid, self.at(3), "step 3 starts")
+        self.assertEqual((step["state"], step["handoff"], step["retries"], task["last_good"]),
+                         ("done", "steps/02-code.md", 0, 2))
+        self.assertNotEqual(task["steps"][2]["session"], sid)
+        moves = [(c["step"], c["from"], c["to"], c["why"]) for c in self.chain(tid)]
+        self.assertIn((2, "failed", "running", "continued by Fred"), moves)
+        self.assertIn((2, "running", "done", ""), moves)
+        task = self.until(tid, lambda t: t["steps"][1]["attempts"][-1]["final"], "both turns' cost")
+        self.assertAlmostEqual(task["steps"][1]["cost"], 0.02)  # one session, two turns, counted once
+
+    def test_continue_on_a_stopped_step_still_live_is_refused(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
+        task = self.hub.tasks[tid]
+        sid = task["steps"][0]["session"]
+        tasks.fred(task, "stop", time.time())  # stopped, and the interrupt has not ended the run yet
+        self.assertEqual(self.hub.levers(sid)["continue"], "still working: wait until it stops")
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "go on HANDOFF-OK"}),
+                         (409, {"error": "still working: wait until it stops"}))
+        self.assertEqual((task["state"], task["owner"]), ("stopped", "fred"))
+        self.hub.runs.stop(sid)
+        self.wait_idle(sid)
 
     def test_stop_and_clear_need_no_allowed_project(self):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])

@@ -17,7 +17,7 @@ const DONE_SHOWN = 2;     // done sessions listed before "Show N more"
 const TABS = [["chat", "Chat"], ["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"]];
 const EFF_LEVELS = ["auto", "low", "medium", "high", "xhigh", "max"];  // the slider's values, in order
 const TASK_WORD = { planned: ["Task", "n"], running: ["Task", "n"], waiting: ["Waiting", "y"],
-  stuck: ["Stuck", "r"], done: ["Done", "g"], stopped: ["Stopped", "q"] };  // [word, tone]
+  stuck: ["Stuck", "r"], done: ["Done", "g"], stopped: ["Stopped", "q"], handed: ["Handed off", "g"] };  // [word, tone]
 const SESSION_SPRITE = { running: "running", stop: "waiting", blocked: "stuck", done: "done" };  // session state -> sprite
 
 const px = (tone, ...rows) => rows.join("").split("").map((c) => (c === "x" ? tone : ""));  // one class per cell, "" is an off cell
@@ -59,7 +59,7 @@ function fresh(kind, id, value, ms) {  // true for ms after value changed from a
   if (was !== undefined && was !== value) freshUntil.set(key, now + ms);
   return (freshUntil.get(key) || 0) > now;
 }
-const taskSprite = (t) => (t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? "paused" : t.state);
+const taskSprite = (t) => (t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? "paused" : t.state === "handed" ? "done" : t.state);
 const sessionMark = (s, glyph, tn) => {  // the sprite of a session state, or its glyph (a finished session with a FAIL verdict keeps its x)
   const name = SESSION_SPRITE[s.state];
   return !name || (name === "done" && tn !== "g") ? glyph + " " : sprite(name, fresh("f", "s" + s.id, s.state, 240));
@@ -460,13 +460,12 @@ function render() {
 }
 
 // -- list page ---------------------------------------------------------------------------
-function spendRow(sp) {  // one row: hatched = estimated (list prices), orange outline at 80 % of the limit
+function spendRow(sp) {  // 30 cells = $15 soft limit; capped so cells never collapse at high spend
   const all = Math.round(sp.today / SPEND_CELL);
   const mark = sp.budget > 0 ? Math.ceil(sp.budget * 0.8 / SPEND_CELL) - 1 : -1;
-  const cols = Math.max(30, all, mark + 1);
-  const cls = Array.from({ length: cols }, (_, k) =>
+  const cls = Array.from({ length: 30 }, (_, k) =>
     [k < all ? "h" : "", k === mark ? "mk" : ""].filter(Boolean).join(" "));
-  return { cols, html: cellsHtml(cls) };
+  return { html: cellsHtml(cls) };
 }
 
 function renderTop() {
@@ -475,7 +474,7 @@ function renderTop() {
   $("needsbtn").textContent = `${n} ${n === 1 ? "needs" : "need"} you`;
   $("scopenm").textContent = scope ? projectName(scope) : "All projects";
   const sp = snap.spend, row = spendRow(sp);
-  setHtml($("today"), `<span class="big">${money(sp.today)}</span><span class="cells row30" style="--cols:${row.cols}">${row.html}</span>
+  setHtml($("today"), `<span class="big">${money(sp.today)}</span><span class="cells row30">${row.html}</span>
     <span class="sub m"><span>today<span class="usd">, USD</span> · $${money(sp.burn)} / min</span>
     <span>${sp.budget > 0 ? "limit $" + sp.budget : "no limit"}</span></span>`);
   setHtml($("todaymore"), `<div class="legend"><span><i class="h"></i>estimated $${money(sp.today)} (list prices)</span>
@@ -488,7 +487,9 @@ function renderTop() {
 
 // -- tasks (plan 17): a card in the list, the step tag on its sessions ---------------------------------
 function sameDir(a, b) { const n = (p) => String(p || "").replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase(); return n(a) === n(b); }
-function taskGroup(t) { return t.state === "waiting" || t.state === "stuck" ? "needs" : t.state === "running" || t.state === "planned" ? "work" : "done"; }
+function taskGroup(t) { return t.group === "working" ? "work" : t.group; }  // the service decides (task_row), counts read the same
+const taskShown = (t) => (t.state === "running" && (t.asks || t.hand_off) ? "waiting" : t.state);  // a step's chat waits for Fred
+const handText = (h) => `↻ hand off: ${h}, one task = one chat`;
 function taskGroups() {  // the scope's tasks by group; a finished or stopped task leaves the list a day after its last change
   const mine = (snap.tasks || []).filter((t) => !scope || sameDir(t.project_dir, scope));
   const by = (g) => mine.filter((t) => taskGroup(t) === g && (g !== "done" || snap.now - t.updated < 86400));
@@ -502,15 +503,18 @@ function taskTag(s) {  // "step 2/4" after the title of a session that runs a ta
 }
 
 function taskCard(t) {
-  const [word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = taskStep(t);
+  const [word, tn] = TASK_WORD[taskShown(t)] || TASK_WORD.running, cur = taskStep(t);
   const cells = t.steps.map((x) => x.state === "running" ? "f live" : x.state === "failed" || x.verdict === "FAIL" ? "r" : x.state === "done" ? "g" : "");
-  const ask = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
-  const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.why;
+  const live = t.steps.find((x) => x.note === "writing" || x.note === "unchecked" || x.note === "ready");
+  const ask = (t.asks || t.hand_off) && cur && cur.session;
+  const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.asks ? "" : t.why;
   const third = (why ? `<div class="why m mut">${esc(why)}</div>` : "")
+    + (t.asks ? `<div class="q">${esc(t.asks)}</div>` : "") + (t.hand_off ? `<div class="why m y">${esc(handText(t.hand_off))}</div>` : "")
     + (t.briefing ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>Haiku is compacting the note</span></div>' : "")
+    + (live ? noteChip(live, t) : "")
     + (ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "");
   return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
-    <div class="l1"><span class="st ${tn}">${taskMark(t)}${word}</span><span class="t">${esc(t.title)}</span>
+    <div class="l1"><span class="st ${tn}">${taskMark({ ...t, state: taskShown(t) })}${word}</span><span class="t">${esc(t.title)}</span>
     <span class="age m" title="since the last change">${ago(snap.now - t.updated)}</span></div>
     <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(cur.model, cur.effort))}</span>` : ""}</span>
     <span class="cost">${money(t.cost)}</span><span class="ctx"><span class="cells" style="--n:${cells.length}">${cellsHtml(cells)}</span></span></div>${third}</div>`;
@@ -1399,8 +1403,20 @@ function stepTries(s) {  // the earlier attempts of a step, each a link to its c
   const all = s.attempts && s.attempts.length ? s.attempts : (s.session ? [{ session: s.session, why: "" }] : []);
   return all.slice(0, -1).map((a, k) => `<span class="link" data-open="${esc(a.session)}">try ${k + 1}</span>${a.why ? " " + esc(a.why) : ""}`).join(" · ");
 }
+function noteChip(s, t) {  // what the step does now, by its handoff note from the snapshot row's `note`
+  if (!s.note) return "";
+  const me = `${two(s.n)} ${s.kind}`, nxt = two(s.n + 1);
+  const [word, tip] = {
+    writing: [`${me} running`, "not written yet"],
+    unchecked: [`${me} running · note written`, "written, checked when the run ends"],
+    checked: ["✓ note checked", "checked"],
+    ready: [`✓ note ready for step ${nxt}`, `checked, step ${nxt} has not started`],
+    sent: [`note sent to step ${nxt}`, `step ${nxt} started with it`],
+  }[s.note] || [s.note, ""];
+  return `<span class="hn ${s.note}" title="the HANDOFF note of step ${s.n}: ${esc(tip)}">${esc(word)}</span>`;
+}
 function chainRow(t, s) {
-  const tn = s.state === "failed" || s.verdict === "FAIL" ? "r" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
+  const tn = s.state === "failed" || s.verdict === "FAIL" ? "r" : s.note === "unchecked" ? "w" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
   const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
   const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), esc(s.goal)].filter(Boolean).join(" · ");
@@ -1408,7 +1424,7 @@ function chainRow(t, s) {
     <span class="nm m">${two(s.n)} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(modelText(s.model, s.effort))}</span>` : ""}</span>
     <span class="m c">${s.cost ? money(s.cost) : ""}</span>
     ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
-    ${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+    ${noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
 }
 
 function drawTask() {
@@ -1419,20 +1435,29 @@ function drawTask() {
     setHtml($("tbar"), "");
     return;
   }
-  const t = d.task, lv = d.levers || {}, [word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = t.steps.find((s) => s.n === t.current);
+  const t = d.task, lv = d.levers || {}, cur = t.steps.find((s) => s.n === t.current);
+  const dir = taskDir(t.id), row = (snap.tasks || []).find((x) => x.id === t.id) || {}, shown = row.id ? taskShown(row) : t.state;
+  const [word, tn] = TASK_WORD[shown] || TASK_WORD.running;
   const paused = t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? " · paused" : "";
-  const dir = taskDir(t.id), row = (snap.tasks || []).find((x) => x.id === t.id) || {};
-  const head = `<div class="head tk"><span class="st ${tn}">${taskMark(t)}${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
+  const head = `<div class="head tk"><span class="st ${tn}">${taskMark({ ...t, state: shown })}${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
     <h2>${esc(t.title)}</h2>
     <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)} · $${money(row.cost)}</span></div>
     ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>${row.paused_after
     ? `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>` : ""}`;
-  const asked = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
-  const why = (t.state === "waiting" || t.state === "stuck") && t.why
-    ? `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state)}${word}</span><div class="q">${esc(t.why)}</div>
-       ${asked ? `<div class="lr"><button class="btn you" data-open="${esc(cur.session)}">Answer on the session page</button></div>` : ""}</div>`
+  const sl = d.step_levers || {}, ask = cur && cur.session ? row.asks : "", hand = cur && cur.session ? row.hand_off : "";
+  const why = ask || hand  // the step's question or hand-off hint, answered here; Hub.levers says when (step_levers)
+    ? `<div class="askbox"><span class="st y">${sprite("waiting")}${ask ? "Asks you" : "Hand off"} <span class="lc">· step ${cur.n}</span></span>
+       ${ask ? `<div class="q">${esc(ask)}</div>
+       <textarea class="in" id="t-answer" rows="3" aria-label="Answer" placeholder="Your answer continues step ${cur.n} in its chat."></textarea>` : ""}
+       ${hand ? `<p class="note m"><span class="y">${esc(handText(hand))}</span>${sl.handoff ? ` · <span class="mut">Hand off off: ${esc(sl.handoff)}</span>` : ""}</p>` : ""}
+       <div class="lr">${ask ? '<button class="btn you" data-tact="answer">Send answer</button>' : ""}
+       ${sl.handoff === "" ? '<button class="btn go" data-tact="handoff" title="Hand the task over: the chat of this step writes its handoff note, nothing more starts">Hand off</button>' : ""}
+       <button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button></div><div id="ta-msg" class="say"></div></div>`
+    : (t.state === "waiting" || t.state === "stuck") && t.why
+    ? `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state)}${word}</span><div class="q">${esc(t.why)}</div></div>`
     : t.why ? `<p class="note m">${esc(t.why)}</p>` : "";
-  const chain = `<div class="blk"><span class="lbl">Steps · ${t.steps.length}</span><div class="chain">${t.steps.map((s) => chainRow(t, s)).join("")}</div>
+  const notes = new Map((row.steps || []).map((x) => [x.n, x.note]));  // the note state is in the snapshot row, not task.json
+  const chain = `<div class="blk"><span class="lbl">Steps · ${t.steps.length}</span><div class="chain">${t.steps.map((s) => chainRow(t, { ...s, note: notes.get(s.n) || "" })).join("")}</div>
     ${t.cleared ? '<p class="m mut" style="margin:0">cleared: notes and streams removed</p>' : ""}</div>`;
   const text = rawOpen ? d.note : d.brief;
   const body = t.briefing ? `<span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Haiku is compacting the note</span>`
@@ -1447,6 +1472,7 @@ function drawTask() {
   if (lv.resume === "") buttons += b("resume", " go", "Resume");
   if (lv.retry === "") buttons += b("retry", " go", "Retry");
   if (lv.confirm === "") buttons += b("confirm", " you", row.hold ? "Run anyway" : `Confirm to use ${fableName()}`);
+  if (lv.done === "") buttons += b("done", "", "Mark done");
   if (lv.clear === "") buttons += b("clear", "", "Clear");
   const off = new Map();  // the reasons, one line each: "Retry, Clear off: task is running"
   const keys = ["stop", "pause", "retry", "clear", ...(paused ? ["resume"] : [])];  // why Resume is off, while paused
@@ -1458,7 +1484,7 @@ function drawTask() {
 async function renderTaskPage() {  // GET /api/task when the task's row changed; the drawing follows every snapshot
   const row = (snap.tasks || []).find((x) => x.id === taskId), at = row && row.steps.find((x) => x.n === row.current);
   const run = at && snap.sessions.find((x) => x.id === at.session);
-  const sig = row ? [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, run ? run.state + run.run_live : ""].join("|") : "gone";
+  const sig = row ? [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, row.steps.map((x) => x.note).join(), row.asks, row.hand_off, run ? run.state + run.run_live : ""].join("|") : "gone";
   if (sig !== taskSig) {
     taskSig = sig;
     const id = taskId, data = await api("/api/task?id=" + encodeURIComponent(id)).catch(() => false);
@@ -1480,7 +1506,8 @@ let tArmTimer = null;
 async function taskAct(name, button) {
   if (name === "raw") { rawOpen = !rawOpen; drawTask(); return; }  // page only: the brief or the raw note
   if (!taskId) return;
-  const arm = { stop: "Stop the task? Click again", clear: "Delete its notes and streams? Click again" }[name];
+  const arm = { stop: "Stop the task? Click again", clear: "Delete its notes and streams? Click again",
+    handoff: "Hand off ends the task? Click again", done: "Mark the task done? Click again" }[name];
   if (arm && !button.dataset.armed) {  // two clicks: a stop loses the running step, a clear deletes the notes
     button.dataset.armed = "1";
     button.dataset.label = button.textContent;
@@ -1489,6 +1516,7 @@ async function taskAct(name, button) {
     tArmTimer = setTimeout(() => { delete button.dataset.armed; button.textContent = button.dataset.label; }, 3000);
     return;
   }
+  if (name === "answer" || name === "handoff") return stepAct(name, button);  // session levers on the step's chat
   button.disabled = true;
   try {
     await api("/api/task/" + name, { task: taskId });
@@ -1498,6 +1526,23 @@ async function taskAct(name, button) {
   } catch (e) {
     button.disabled = false;
     const msg = $("t-msg");
+    if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
+  }
+}
+
+async function stepAct(name, button) {  // the current step's question or hand-off, from the Task page: a session lever
+  const t = taskData && taskData.task, cur = t && t.steps.find((s) => s.n === t.current), box = $("t-answer");
+  const text = name === "answer" && box ? box.value.trim() : "";
+  if (!cur || !cur.session || (name === "answer" && !text)) return;
+  button.disabled = true;
+  try {
+    await api("/api/" + (name === "answer" ? "continue" : "handoff"), name === "answer" ? { session: cur.session, text } : { session: cur.session });
+    if (box) box.value = "";
+    taskSig = "";  // redraw now, not at the next snapshot
+    renderTaskPage();
+  } catch (e) {
+    button.disabled = false;
+    const msg = $("ta-msg");
     if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
 }

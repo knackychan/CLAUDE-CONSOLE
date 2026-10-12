@@ -382,6 +382,17 @@ class State:
             return "replied"
         return "idle"
 
+    def handled(self, s: Session) -> bool:
+        """A Verify FAIL the Console already acts on: a copy of the chat started after the verdict (Escalate, a
+        fix or a new Verify on a VS Code / terminal chat, which is only ever forked), or an Escalate running
+        in place in a window run. The FAIL stays the chat's verdict; it just no longer needs Fred. The copy
+        itself, while it runs, is handled too (it inherits the red gauge of the chat it was cut from)."""
+        parent = self.sessions.get(s.forked_from)
+        if s.run_live and (s.kind == "escalate" or (parent and parent.verdict == "FAIL"
+                                                    and parent.verdict_ts < s.started_ts)):
+            return True
+        return s.verdict == "FAIL" and any(f.started_ts > s.verdict_ts for f in map(self.sessions.get, s.forks) if f)
+
     def gauge(self, tokens):
         """(fill, tone): fill is tokens / gauge_red_tokens, capped at 1.0.
 
@@ -451,8 +462,11 @@ class State:
                 continue
             state = self.state_of(s, now)
             pct, tone = self.gauge(s.ctx_tokens)
+            handled = state in ("verify_failed", "running", "quiet") and self.handled(s)
             if state == "empty":
                 group = "empty"
+            elif handled:
+                group = "working"
             elif state in NEEDS_YOU or (tone == "red" and state not in DONE):
                 group = "needs"
             elif state in DONE:

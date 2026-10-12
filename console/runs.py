@@ -206,9 +206,11 @@ class RunManager:
             kwargs = dict(cwd=cwd, stdin=subprocess.PIPE, stdout=out, stderr=subprocess.STDOUT,
                           env=claude_cli.child_env())
             try:  # leave any job object so closing the window's parent cannot take the run with it
-                return subprocess.Popen(cmd, creationflags=claude_cli.NO_WINDOW | claude_cli.BREAKAWAY, **kwargs)
+                proc = subprocess.Popen(cmd, creationflags=claude_cli.NO_WINDOW | claude_cli.BREAKAWAY, **kwargs)
             except OSError:
-                return subprocess.Popen(cmd, creationflags=claude_cli.NO_WINDOW, **kwargs)
+                proc = subprocess.Popen(cmd, creationflags=claude_cli.NO_WINDOW, **kwargs)
+            claude_cli.join_service_job(proc.pid)  # the run ends with this service, never as an orphan
+            return proc
         finally:
             out.close()
 
@@ -287,8 +289,9 @@ class RunManager:
 
     # -- recovery -------------------------------------------------------------------
     def reconcile(self) -> int:
-        """Runs started by an earlier service: emit run_ended once their process is gone.
-        No result line means the turn was cut (crash, shutdown): Interrupted."""
+        """Runs started by an earlier service: emit run_ended once their process is gone, or once its turn
+        has a result line (an orphan left alive after its service died; no service can write to it again).
+        No result line and a dead process means the turn was cut (crash, shutdown): Interrupted."""
         if not self.runs.exists():
             return 0
         done = 0
@@ -298,10 +301,12 @@ class RunManager:
                 if sid in self.live:
                     continue
             meta = self.meta(sid)
-            if not meta or meta.get("ended") or claude_cli.pid_alive(meta.get("pid")):
+            if not meta or meta.get("ended"):
                 continue
             _, lines = read_lines(self.stream_path(sid), meta.get("offset", 0))
             result = next((d for d in reversed(lines) if d.get("type") == "result"), None)
+            if result is None and claude_cli.pid_alive(meta.get("pid")):
+                continue
             self._finish(sid, result, None)
             done += 1
         return done

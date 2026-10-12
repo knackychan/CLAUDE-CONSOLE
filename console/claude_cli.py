@@ -151,6 +151,56 @@ def kill_tree(pid) -> None:
                    creationflags=NO_WINDOW)
 
 
+class _BasicLimits(ctypes.Structure):
+    _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", ctypes.c_ulong), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_ulong),
+                ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_ulong),
+                ("SchedulingClass", ctypes.c_ulong)]
+
+
+class _ExtendedLimits(ctypes.Structure):
+    _fields_ = [("Basic", _BasicLimits), ("IoCounters", ctypes.c_ulonglong * 6),
+                ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+
+_service_job = None  # the job object every run joins; its handle closes when this process exits
+
+
+def join_service_job(pid) -> bool:
+    """Put a run into the service's job. The job kills its members when its last handle closes, which is when
+    this service exits for any reason (crash, quit, restart), so no run outlives its service as an orphan.
+    Windows only; False elsewhere or when the job cannot be used."""
+    global _service_job
+    if os.name != "nt":
+        return False
+    k = ctypes.windll.kernel32
+    k.CreateJobObjectW.restype = ctypes.c_void_p  # handles are 64-bit: no int truncation
+    k.OpenProcess.restype = ctypes.c_void_p
+    k.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    k.SetInformationJobObject.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+    k.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    k.CloseHandle.argtypes = [ctypes.c_void_p]
+    if _service_job is None:
+        job = k.CreateJobObjectW(None, None)
+        if not job:
+            return False
+        info = _ExtendedLimits()
+        info.Basic.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):  # 9: extended limits
+            k.CloseHandle(job)
+            return False
+        _service_job = job
+    proc = k.OpenProcess(0x0100 | 0x0001, False, int(pid))  # PROCESS_SET_QUOTA | PROCESS_TERMINATE
+    if not proc:
+        return False
+    try:
+        return bool(k.AssignProcessToJobObject(_service_job, proc))
+    finally:
+        k.CloseHandle(proc)
+
+
 def git_head(cwd: str) -> str:
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True,

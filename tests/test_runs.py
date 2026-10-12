@@ -167,6 +167,23 @@ class RunsTest(unittest.TestCase):
             self.assertEqual(self.mgr.reconcile(), 0)
         self.assertEqual(self.ended("dead")[0]["interrupted"], True)
 
+    def test_reconcile_ends_an_orphan_whose_turn_has_a_result(self):
+        # the service that owned the run died; its claude process is alive but its turn is done
+        self.mgr.runs.mkdir(parents=True)
+        self.mgr.stream_path("orphan").write_text(
+            '{"type":"cc_prompt","text":"x"}\n{"type":"result","subtype":"success","total_cost_usd":0.1}\n',
+            encoding="utf-8")
+        self.mgr._save_meta({"session_id": "orphan", "pid": 4, "cwd": str(self.project), "offset": 0,
+                             "model": "sonnet", "effort": "low", "ended": None})
+        self.mgr.stream_path("working").write_text('{"type":"cc_prompt","text":"x"}\n', encoding="utf-8")
+        self.mgr._save_meta({"session_id": "working", "pid": 5, "cwd": str(self.project), "offset": 0,
+                             "model": "sonnet", "effort": "low", "ended": None})
+        with mock.patch.object(runs.claude_cli, "pid_alive", return_value=True):
+            self.assertEqual(self.mgr.reconcile(), 1)
+        self.assertIsNotNone(self.mgr.meta("orphan")["ended"])
+        self.assertEqual(self.ended("orphan")[0]["interrupted"], False)
+        self.assertIsNone(self.mgr.meta("working")["ended"])
+
     def test_result_record_lists_denials(self):
         rec = runs.result_record("s", {"subtype": "success", "total_cost_usd": 0.2, "permission_denials": [
             {"tool_name": "Bash", "tool_input": {"command": "git push --force"}}]}, 0, False)
