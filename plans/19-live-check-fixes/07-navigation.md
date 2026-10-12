@@ -19,6 +19,7 @@
 | N7 | Session page of a plain run (path 5) | the pager steps through the folded list (`2 of 2`), `New task here` scopes the list and focuses the box | none: works |
 | N8 | Prep card (path 1) | Back and Esc keep the card on the strip, Open again shows it, Cancel drops it | none: works |
 | N9 | Usage page from the today strip (path 8) | `←` returns to the list at its scroll | none: works |
+| N10 | A step session whose task was cleared (found on the second walk, path 7: a chip of a cleared task's step) | its task is in neither `snap.tasks` nor `taskData`, so `navList()` fell back to every session: `7 of 26` | `stepNav()` returns `[]` for a session with a `task` it cannot find: no pager, `‹ ›` off |
 
 Walked 2026-10-12 at 400 px on the scratch home (fake claude, CDP script in the scratchpad). Confirmed by the walk:
 N1 (Task page `Open` and `try 1`, the task card's `Open` on a question: `←` and Esc land on the list), N2 (the

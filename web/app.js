@@ -28,6 +28,7 @@ let openId = null;
 let taskId = null;       // the Task page's task
 let taskData = null;     // GET /api/task for it: {task, levers, note, brief}
 let taskSig = "";
+let backTo = null;       // {page: "task", id} or {page: "session", id}: where the session or Task page's back arrow returns
 let rawOpen = false;     // the Task page shows the raw note instead of the brief
 let tab = "chat";       // chat | steps | agents | timeline
 let tlMin = -1;          // the Timeline's selected minute (minutes since 1970; -1: the last busy one)
@@ -359,7 +360,16 @@ function groups() {
     work: work.filter((s) => BUSY.has(s.state)),
     idle: work.filter((s) => !BUSY.has(s.state)).sort((a, b) => b.last_ts - a.last_ts), done: mine.filter((s) => s.group === "done").sort((a, b) => b.last_ts - a.last_ts) };
 }
+function stepNav() {  // a task step's session: the task's steps that ran, in order, as {id: last attempt, ids: every attempt}
+  const s = current(), old = !s && oldStep(openId), tid = s ? s.task : old ? old[0].id : "";
+  const t = tid && ((snap.tasks || []).find((x) => x.id === tid) || (old && old[0]));
+  if (!t) return tid ? [] : null;  // a step of a cleared task: no pager, never every session
+  return t.steps.filter((x) => x.session).map((x) => ({ id: x.session, ids: (x.attempts || []).map((a) => a.session) }));
+}
+function navAt(nav) { return nav.findIndex((x) => x.id === openId || (x.ids || []).includes(openId)); }
 function navList() {  // the sessions ‹ › step through: the list in its order, or all when the open one is out of scope
+  const steps = stepNav();
+  if (steps) return steps;
   const g = groups(), all = [...g.needs, ...g.replied, ...g.work, ...g.idle, ...g.done];
   if (all.some((s) => s.id === openId)) return all;
   return [...snap.sessions].sort((a, b) => (a.group === "needs" ? 0 : 1) - (b.group === "needs" ? 0 : 1));
@@ -1058,8 +1068,8 @@ async function renderOldChat(id) {  // a step session out of the snapshot: its t
   procShown = id + "|old";
 }
 function renderSession() {
-  const s = current(), nav = navList(), k = nav.findIndex((x) => x.id === openId);
-  $("pos").textContent = k >= 0 ? `${k + 1} of ${nav.length}` : "";
+  const s = current(), nav = navList(), k = navAt(nav);
+  $("pos").textContent = k >= 0 ? `${stepNav() ? "step " : ""}${k + 1} of ${nav.length}` : "";
   $("prev").disabled = k <= 0;
   $("next").disabled = k < 0 || k >= nav.length - 1;
   if (!s) {
@@ -1278,8 +1288,15 @@ async function act(name, button) {
 }
 
 function step(d) {  // ‹ › and Up / Down: the neighbouring session in the list's order
-  const nav = navList(), k = nav.findIndex((x) => x.id === openId), to = nav[k + d];
+  const nav = navList(), k = navAt(nav), to = nav[k + d];
   if (k >= 0 && to) { openSession(to.id, tab); }
+}
+function goBack() {  // the session page and the Task page: back where they came from, else the list
+  const b = backTo;
+  backTo = null;
+  if (b && b.page === "task" && (snap.tasks || []).some((t) => t.id === b.id)) return openTask(b.id);
+  if (b && b.page === "session") return openSession(b.id, tab);
+  showPage("list");
 }
 
 // -- task page (plan 17): the chain, the brief for the next step, the levers ----------------------------------
@@ -1307,7 +1324,7 @@ function chainRow(t, s) {
 function drawTask() {
   const d = taskData;
   if (!d) {
-    setHtml($("tscroll"), d === false ? '<p class="mut">This task is gone: it was cleared or its folder was removed.</p>'
+    setHtml($("tscroll"), d === false ? '<p class="mut">This task is gone: it was cleared or its folder was removed. <span class="link" data-go="list">Back to the list</span></p>'
       : `<span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Reading the task</span>`);
     setHtml($("tbar"), "");
     return;
@@ -1584,7 +1601,8 @@ $("uscroll").addEventListener("scroll", () => { $("utip").hidden = true; });
 
 // -- events ------------------------------------------------------------------------------
 async function go(name, button) {
-  if (name === "list") showPage("list");
+  if (name === "list") { backTo = null; showPage("list"); }
+  if (name === "back") goBack();
   if (name === "new") { if (form === "pill") await setForm("open"); showPage("list"); $("c-prompt").focus(); }
   if (name === "needs") {
     if (scope) pick("");
@@ -1627,6 +1645,11 @@ document.addEventListener("click", (e) => {
   const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
+  if (t.dataset.open || t.dataset.task) {  // a session opened from a task returns to it, a task opened from a session too
+    const card = t.closest(".card.task");
+    backTo = t.dataset.open && (t.closest("#tscroll") || card) ? { page: "task", id: card ? card.dataset.task : taskId }
+      : t.dataset.task && page === "session" ? { page: "session", id: openId } : null;
+  }
   if (t.dataset.eff) setEffort(t.dataset.eff);
   else if (t.dataset.task) openTask(t.dataset.task);
   else if (t.dataset.tact) taskAct(t.dataset.tact, t);
@@ -1719,7 +1742,8 @@ document.addEventListener("keydown", (e) => {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();
     else if (page === "prep") prepAct("back");
-    else if (page === "session" || page === "usage" || page === "task") showPage("list");
+    else if (page === "session" || page === "task") goBack();
+    else if (page === "usage") showPage("list");
     return;
   }
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
