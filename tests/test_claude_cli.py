@@ -45,6 +45,9 @@ class CommandTest(unittest.TestCase):
     def test_messages(self):
         self.assertEqual(json.loads(claude_cli.user_message("hé")),
                          {"type": "user", "message": {"role": "user", "content": "hé"}})
+        image = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBO"}}
+        self.assertEqual(json.loads(claude_cli.user_message("see", [image]))["message"]["content"],
+                         [{"type": "text", "text": "see"}, image])
         self.assertEqual(json.loads(claude_cli.interrupt_message("r1"))["request"], {"subtype": "interrupt"})
 
     def test_child_env_drops_session_variables_only(self):

@@ -12,6 +12,9 @@ window (and its WebView2) runs as its own process only while it is open.
 2. **Not taken:** pywebview hidden to the tray (WebView2 keeps about 208 MB while hidden); a tray icon opening the
    page in Edge `--app` (drops the pill, always-on-top and the rounded borderless window, 210 MB when open, no gain);
    a Tk or Win32 popup (cannot draw the locked design; a second UI to keep).
+3. **No pre-warmed window** (Fred, 2026-10-11): a click shows the window in about 0.7 s and its content in about
+   0.95 s (measured warm: .NET + WinForms load 0.33 s, form + WebView2 0.27 s, page 0.22 s); that is fast enough,
+   and a hidden window kept ready would cost about 290 MB idle.
 
 ## Measured (2026-10-11, Windows 11 26200, 60 s each, private MB)
 
@@ -28,7 +31,8 @@ Opening the window adds the old cost (6 WebView2 processes); closing it frees th
 ## Behaviour
 
 - `py -m console` (and `run.bat`): service + tray icon, and the window opens at start as before.
-- Left click on the icon: open the window, or close it when open. Right click: `Open` / `Close window`, `Quit Claude Console`.
+- Left click on the icon: open the window, or close it when open (the close waits the double-click time). Double click:
+  open it, never a second one (2026-10-11: the second click of a double click used to kill the window it had started). Right click: `Open` / `Close window`, `Quit Claude Console`.
 - The close button on the page ends the window process only; the service and runs keep going. Quit is in the tray menu.
 - The icon is the logo (plan 14, `console/icon.py`): its signal cell is orange (`--you`) when something needs Fred, its
   route ink (`--ink`) while sessions work, muted (`--mut`) when quiet, on a `--win` tile; the tooltip says `Claude Console: 2 need you, 1 working` or `quiet`.

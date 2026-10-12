@@ -1,3 +1,4 @@
+import base64
 import http.client
 import json
 import sys
@@ -7,7 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
-from console import brief, events, guard, levers, paths, server
+from console import attach, brief, events, guard, levers, paths, server
 
 
 class GuardTest(unittest.TestCase):
@@ -98,6 +99,30 @@ class ServerTest(unittest.TestCase):
         for page in ("/", "/style.css", "/app.js"):  # the window makes no network calls
             self.assertNotIn(b"https://", self.get(page)[1], page)
 
+    def test_image_thumbnails_from_the_transcript_and_the_folder(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+        folder = Path(self.tmp.name) / "proj"
+        (folder / "out").mkdir(parents=True)
+        (folder / "out" / "grid.png").write_bytes(png)
+        (folder / "notes.md").write_text("# not an image", encoding="utf-8")
+        (Path(self.tmp.name) / "secret.png").write_bytes(png)  # outside the session's folder
+        transcript = Path(self.tmp.name) / "s3.jsonl"
+        transcript.write_text(json.dumps({"type": "user", "uuid": "u-1", "message": {"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                         "data": base64.b64encode(png).decode()}},
+            {"type": "text", "text": "look"}]}}) + "\n", encoding="utf-8")
+        with open(Path(self.tmp.name) / "events-2026-10-10.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": 9e12, "event": "UserPromptSubmit", "session_id": "s3", "prompt": "look",
+                                 "cwd": str(folder), "transcript_path": str(transcript)}) + "\n")
+        self.hub.poll_once()
+        self.assertEqual(self.get("/api/image?session=s3&at=u-1&k=0"), (200, png))
+        self.assertEqual(self.get("/api/image?session=s3&path=out/grid.png"), (200, png))
+        for bad in ("at=u-1&k=1", "at=u-2&k=0", "at=u-1&k=x", "path=notes.md", "path=../secret.png",
+                    "path=" + str(Path(self.tmp.name) / "secret.png")):
+            self.assertEqual(self.get("/api/image?session=s3&" + bad)[0], 404, bad)
+        self.assertEqual(self.get("/api/image?session=nope&at=u-1&k=0")[0], 404)
+        self.assertEqual(self.get("/api/image?session=s3&at=u-1&k=0", host="evil.example")[0], 403)
+
     def test_hub_reads_transcripts_for_the_estimate(self):
         transcript = Path(self.tmp.name) / "s2.jsonl"
         transcript.write_text(json.dumps({"type": "assistant", "timestamp": "2026-10-10T10:00:00Z", "message": {
@@ -162,9 +187,22 @@ class RunServerTest(unittest.TestCase):
                                                 "model": "gpt-9"})[0], 400)
         self.assertEqual(self.call("/api/stop", {"session": "nope"})[0], 404)
 
+    def prep_job(self, job, end=None):
+        """The job as the snapshot shows it, once it has left `running` (None when it is gone)."""
+        end = end or time.time() + 15
+        while True:
+            row = next((j for j in self.hub.snapshot()["preps"] if j["id"] == job), None)
+            if row is None or row["state"] != "running" or time.time() > end:
+                return row
+            time.sleep(0.05)
+
     def test_prep_then_run_then_chat(self):
-        status, card = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "fix add"})
+        status, data = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "fix add"})
         self.assertEqual(status, 200)
+        job = self.prep_job(data["job"])
+        self.assertEqual((job["state"], job["raw"], job["project_dir"]), ("done", "fix add", str(self.project)))
+        card = job["card"]
+        self.assertEqual(card["id"], data["job"])
         status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": card["prompt"],
                                               "model": "sonnet", "effort": "low", "prep": card["id"]})
         self.assertEqual(status, 200)
@@ -173,6 +211,7 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual((row["source"], row["title"], row["route"]),
                          ("window", "Fix add() in calc.py", "mechanical"))
         self.assertEqual((row["prep_model"], row["prep_cost"], row["prep_turns"]), ("haiku", 0.03, 5))
+        self.assertEqual(self.hub.snapshot()["preps"], [])  # the run took the Prep card off the strip
         end = time.time() + 15
         while time.time() < end and self.session(sid)["run_live"]:
             time.sleep(0.1)
@@ -181,10 +220,80 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual([i["role"] for i in chat["items"]], ["you", "claude", "tool", "result"])
         self.assertFalse(chat["live"])
 
+    def test_prep_runs_in_the_background(self):
+        start = time.monotonic()
+        status, data = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "SLOW fix add"})
+        self.assertEqual(status, 200)
+        self.assertLess(time.monotonic() - start, 1.5)  # the answer does not wait for Haiku (2 s here)
+        running = next(j for j in self.hub.snapshot()["preps"] if j["id"] == data["job"])
+        self.assertEqual((running["state"], running["raw"]), ("running", "SLOW fix add"))
+        self.assertNotIn("card", running)
+        version = self.hub.version
+        self.assertEqual(self.prep_job(data["job"])["state"], "done")
+        self.assertGreater(self.hub.version, version)  # the stream pushed the finished card
+
+    def test_failed_prep_stays_on_the_strip_until_dropped(self):
+        job = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "BROKEN"})[1]["job"]
+        row = self.prep_job(job)
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("Prep returned no JSON", row["error"])
+        self.assertEqual(self.call("/api/prep/drop", {"job": job}), (200, {"job": job}))
+        self.assertEqual(self.hub.snapshot()["preps"], [])
+        self.assertEqual(self.call("/api/prep/drop", {"job": job})[0], 404)
+
+    def test_prep_job_never_spins_forever(self):
+        def boom(*args, **kwargs):
+            raise OSError("disk full")
+        real, server.prep.run_prep = server.prep.run_prep, boom
+        try:
+            job = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "x"})[1]["job"]
+            row = self.prep_job(job)
+        finally:
+            server.prep.run_prep = real
+        self.assertEqual((row["state"], row["error"]), ("failed", "disk full"))
+
     def wait_idle(self, sid):
         end = time.time() + 15
         while time.time() < end and (self.session(sid) is None or self.session(sid)["run_live"]):
             time.sleep(0.1)
+
+    def test_run_and_continue_take_files(self):
+        big = {"name": "shot.png", "data": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x01" * 1024 * 1024).decode()}
+        status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "look", "files": [big]})
+        self.assertEqual(status, 200)  # over the 256 KB of the other routes
+        sid = data["session"]
+        self.wait_idle(sid)
+        chat = self.call(f"/api/chat?session={sid}")[1]
+        self.assertEqual(chat["items"][0]["files"], [{"name": "shot.png", "kind": "image", "bytes": 1024 * 1024 + 8}])
+        note = {"name": "n.txt", "data": base64.b64encode(b"more").decode()}
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "and this", "files": [note]}),
+                         (200, {"session": sid}))
+        self.wait_idle(sid)
+        you = [i for i in self.call(f"/api/chat?session={sid}")[1]["items"] if i["role"] == "you"]
+        self.assertEqual(you[1]["files"][0]["name"], "n.txt")
+        zip_ = {"name": "a.docx", "data": base64.b64encode(b"PK\x03\x04\x14\x00\x00").decode()}
+        status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "x", "files": [zip_]})
+        self.assertEqual((status, data["error"]), (400, "a.docx: send " + attach.SENDABLE))
+
+    def test_prep_job_keeps_files_for_its_run(self):
+        shot = {"name": "shot.png", "data": base64.b64encode(b"\x89PNG\r\n\x1a\nPIXELS").decode()}
+        old = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "fix it", "files": [shot]})[1]["job"]
+        job = self.prep_job(old)
+        self.assertEqual(job["attached"], [{"name": "shot.png", "kind": "image", "bytes": 14}])
+        self.assertNotIn("files", job)  # the bytes never reach the snapshot
+        self.assertNotIn(shot["data"], json.dumps(self.hub.snapshot()))
+        self.assertEqual(job["card"]["raw"], "fix it")  # as typed; Prep read the names too:
+        saved = json.loads((self.folder / "preps" / f"{old}.json").read_text(encoding="utf-8"))
+        self.assertTrue(saved["raw"].endswith("sent with the run: shot.png (image)."))
+        new = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "fix it", "files_from": old})[1]["job"]
+        self.assertEqual(self.prep_job(new)["attached"][0]["name"], "shot.png")  # Try again keeps them
+        card = self.prep_job(new)["card"]
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": card["prompt"], "prep": card["id"]})[1]["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.call(f"/api/chat?session={sid}")[1]["items"][0]["files"][0]["name"], "shot.png")
+        raw = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix it", "files_from": old})[1]["session"]
+        self.wait_idle(raw)  # Run raw from a card: its job's files too
+        self.assertEqual(self.call(f"/api/chat?session={raw}")[1]["items"][0]["files"][0]["name"], "shot.png")
 
     def test_continue_resumes_and_stop_interrupts(self):
         sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "SLOW one"})[1]["session"]
@@ -342,6 +451,52 @@ class RunServerTest(unittest.TestCase):
         self.assertTrue(you[1].startswith("Check the work of this session."))
         self.assertIn("`~/.claude/agents`", you[1])  # the user-level verifier counts too (plan 04 Task 5)
         self.assertTrue(you[2].startswith("The checks failed: test_add - 3 != 4. You now run on opus/high"))
+
+    def verdict(self, sid, verdict, detail=""):
+        events.append(self.folder, {"event": "Stop", "ts": time.time(), "session_id": sid,  # what the hook logs
+                                    "verdict": verdict, "verdict_detail": detail})
+        self.hub.poll_once()
+
+    def test_route_steps_run_by_themselves_through_levers(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.hub.auto_steps(), [])  # no verdict, no step
+        self.assertEqual(self.hub.pull(sid, "deescalate"), (409, {"error": "only after a PASS verdict"}))
+        self.verdict(sid, "FAIL", "test_add - 3 != 4")
+        self.assertEqual(self.hub.auto_steps(), [(sid, "escalate")])
+        self.assertEqual(self.hub.runs.meta(sid)["model"], "sonnet")
+        self.assertEqual(self.hub.runs.meta(sid)["effort"], "high")
+        self.wait_idle(sid)
+        self.assertEqual(self.session(sid)["escalated"], "sonnet/medium -> sonnet/high")
+        self.verdict(sid, "FAIL", "still 3 != 4")
+        self.assertEqual(self.hub.auto_steps(), [])  # once per task: levers says "escalated once already"
+        self.verdict(sid, "PASS")
+        lv = self.call(f"/api/levers?session={sid}")[1]
+        self.assertEqual((lv["deescalate"], lv["deescalate_to"]), ("", "sonnet/medium"))
+        self.assertEqual(self.hub.auto_steps(), [(sid, "deescalate")])
+        meta = self.hub.runs.meta(sid)
+        self.assertEqual((meta["model"], meta["effort"], meta["start_route"]), ("sonnet", "medium", "sonnet/medium"))
+        self.assertFalse(self.hub.runs.is_live(sid))  # de-escalate starts no turn
+        lv = self.call(f"/api/levers?session={sid}")[1]
+        self.assertEqual((lv["deescalate"], lv["route"]), ("already on the task's starting route", "sonnet/medium"))
+        self.assertEqual(self.hub.auto_steps(), [])
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "next"}), (200, {"session": sid}))
+        self.assertEqual(self.hub.runs.meta(sid)["effort"], "medium")  # the next turn runs on the lower route
+        self.wait_idle(sid)
+
+    def test_route_steps_skip_old_verdicts_and_vscode_chats(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.hub.auto_since = time.time() + 60  # as if the service started after this verdict
+        self.verdict(sid, "FAIL")
+        self.assertEqual(self.hub.auto_steps(), [])
+        self.hub.auto_since = 0
+        self.idle_chat("c4", hours=0, tokens=1000)  # a VS Code chat: Escalate only by a click (a fork)
+        self.verdict("c4", "FAIL")
+        self.assertEqual(self.hub.levers("c4")["escalate"], "")  # a click may, the service does not
+        self.assertEqual([lever for s, lever in self.hub.auto_steps() if s == "c4"], [])
 
     def test_handoff_marks_the_session_done(self):
         skill = self.project / ".claude" / "skills" / "session-handoff"

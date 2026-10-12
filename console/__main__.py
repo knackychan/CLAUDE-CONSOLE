@@ -79,8 +79,8 @@ def open_window(url: str) -> int:
     x, y = api._place()
     # Not transparent: a WinForms form cannot be, its corners showed grey. Windows 11 rounds it instead
     # (window.round_corners) and the background matches the page.
-    win = webview.create_window(window.TITLE, url, js_api=api, width=window.OPEN_W, height=window.OPEN_H,
-                                x=x, y=y, min_size=(window.PILL_W, window.PILL_H), frameless=True,
+    win = webview.create_window(window.TITLE, url, js_api=api, width=api.open_size()[0],
+                                height=api.open_size()[1], x=x, y=y, min_size=(window.OPEN_MIN_W, window.PILL_H), frameless=True,
                                 easy_drag=False, background_color=window.BACKGROUND, on_top=api.state()["on_top"])
     api._attach(win)
     win.events.closing += api._remember_place

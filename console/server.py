@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import brief, claude_cli, events, guard, levers, paths, prep, runs, transcript, usage
+from . import attach, brief, claude_cli, events, guard, levers, paths, prep, routing, runs, transcript, usage
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -21,6 +21,8 @@ TICK_S = 15.0
 HISTORY_S = 60.0  # the Usage page's scan of every transcript
 APP_ID = "claude-console"
 MAX_BODY = 256 * 1024
+MAX_FILES_BODY = attach.MAX_TOTAL * 4 // 3 + MAX_BODY  # /api/prep, /api/run and /api/continue carry base64 files
+FILE_ROUTES = ("/api/prep", "/api/run", "/api/continue")
 MAX_PROMPT = 20000
 BUSY = {"running", "quiet", "stall"}
 
@@ -38,10 +40,12 @@ class Hub:
         self.history = usage.History(cfg["prices"])
         self.usage_days = {}  # day -> totals: every transcript merged with usage-days.json
         self.usage_ready = False
+        self.preps = {}  # Prep jobs on the window's strip: id -> {id, project_dir, raw, ts, state, card | error}
         self.user_home = Path.home()  # where ~/.claude/skills is looked up (tests point it elsewhere)
         self.lock = threading.Lock()
         self.changed = threading.Condition(self.lock)
         self.version = 0
+        self.auto_since = time.time()  # older verdicts never trigger an automatic step
         self._stop = threading.Event()
 
     def poll_once(self) -> int:
@@ -92,6 +96,46 @@ class Hub:
                 pass
             self._stop.wait(HISTORY_S)
 
+    def start_prep(self, project_dir: str, raw: str, files: list = ()) -> str:
+        """Prep in its own thread: the request answers at once and the strip shows the job as it runs.
+        `files` (attach.parse) wait with the job, in memory only, for the run its card starts."""
+        job = prep.new_id()
+        with self.lock:
+            self.preps[job] = {"id": job, "project_dir": project_dir, "raw": raw, "ts": time.time(),
+                               "state": "running", "files": list(files)}
+            self.version += 1
+            self.changed.notify_all()
+        threading.Thread(target=self._prep_job, args=(job, project_dir, raw, attach.note(files)),
+                         name="cc-prep", daemon=True).start()
+        return job
+
+    def prep_files(self, job) -> list:
+        """The files waiting with a Prep job ([] for an unknown job)."""
+        with self.lock:
+            return list(self.preps.get(job, {}).get("files") or []) if isinstance(job, str) else []
+
+    def _prep_job(self, job: str, project_dir: str, raw: str, note: str = "") -> None:
+        """`note` names the attached files for Prep; the card on the strip keeps the text as typed."""
+        try:
+            card = prep.run_prep(self.cfg, self.folder, project_dir, raw + note, self.runs.exe, job)
+            end = {"state": "done", "card": dict(card, raw=raw)}
+        except Exception as exc:  # whatever went wrong, the job ends: a pill never spins forever
+            end = {"state": "failed", "error": str(exc) or type(exc).__name__}
+        with self.lock:
+            if job in self.preps:  # dropped while it ran: nothing to show
+                self.preps[job].update(end)
+                self.version += 1
+                self.changed.notify_all()
+
+    def drop_prep(self, job: str) -> bool:
+        """Off the strip: the card was run, edited or dismissed. Its preps/<id>.json stays."""
+        with self.lock:
+            if self.preps.pop(job, None) is None:
+                return False
+            self.version += 1
+            self.changed.notify_all()
+        return True
+
     def tick(self) -> None:
         """Time-based states (Quiet, Stall?, Stale?) change without new events."""
         with self.lock:
@@ -103,6 +147,7 @@ class Hub:
         last_tick = time.monotonic()
         while not self._stop.is_set():
             self.poll_once()
+            self.auto_steps()
             self.read_costs()
             if time.monotonic() - last_tick >= TICK_S:
                 self.runs.reconcile()
@@ -120,7 +165,11 @@ class Hub:
     def snapshot(self) -> dict:
         now = time.time()
         with self.lock:
-            return self.state.snapshot(now, self.usage, self.usage_days.get(usage.day_of(now)))
+            snap = self.state.snapshot(now, self.usage, self.usage_days.get(usage.day_of(now)))
+            snap["preps"] = sorted(({**{k: v for k, v in j.items() if k != "files"},
+                                     "attached": attach.summary(j["files"])} for j in self.preps.values()),
+                                   key=lambda j: j["ts"])
+            return snap
 
     def steps(self, session_id: str, limit: int = 200) -> list:
         with self.lock:
@@ -188,13 +237,92 @@ class Hub:
             escalate = "already on the top route"
         else:
             escalate = ""
+        start = routing.parse((meta or {}).get("start_route"))
+        if base:
+            deescalate = base
+        elif not window:
+            deescalate = "only for window runs"
+        elif s["verdict"] != "PASS":
+            deescalate = "only after a PASS verdict"
+        elif not start:
+            deescalate = "no starting route recorded"
+        elif routing.rank(start) >= routing.rank((model, effort)):
+            deescalate = "already on the task's starting route"
+        else:
+            deescalate = ""
         handoff = base or ("" if levers.handoff_ready(s["project_dir"], self.user_home) else
                            "the session-handoff skill is not installed here: copy "
                            "dotclaude/skills/session-handoff to ~/.claude/skills")
         nxt = base or ("" if s["handoff_by"] else "only after a Hand off")  # a new task seeded with the note
         return {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate, "next": nxt,
+                "deescalate": deescalate, "deescalate_to": "/".join(start) if start else "",
                 "after_verify": list(levers.after_verify(s["verdict"])), "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
                 "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model)}
+
+    def pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = ()) -> tuple:
+        """Continue (also STOP answers and Resume), Verify, Handoff, Escalate: a new turn of a window
+        run, or a window copy (fork) of a VS Code / terminal chat, which stays as it is. De-escalate starts
+        no turn: the next one runs on the task's starting route. Returns (status, body); a click and the
+        automatic step (auto_steps) pass the same gate, self.levers. `files` (attach.parse) go with a
+        Continue only."""
+        info = self.levers(sid)
+        if info is None:
+            return 404, {"error": "unknown session"}
+        if info[lever]:
+            return 409, {"error": info[lever]}
+        if info["cold"] and not confirm and lever != "deescalate":  # the page asks with a second click
+            c = info["cold"]
+            return 409, {"error": f"cold cache: {c['tokens'] // 1000}K tokens, idle {c['idle_s'] / 3600:.0f} h, "
+                                  f"would be re-read at full price (about ${c['cost']:.2f}); open the session to "
+                                  "confirm, or start a new task there with a brief"}
+        if lever == "deescalate":
+            self.runs.set_route(sid, *routing.parse(info["deescalate_to"]))
+            return 200, {"session": sid, "route": info["deescalate_to"]}
+        s = self.session(sid)
+        model, effort = self.route_of(sid, s)
+        extra, miss = {}, ""
+        if lever == "continue":
+            if not text:
+                return 400, {"error": "empty prompt"}
+        elif lever == "verify":
+            text = levers.VERIFY_TEXT
+        elif lever == "handoff":
+            text = levers.HANDOFF_TEXT
+        else:  # escalate: one step up, once, and the miss is logged for Prep
+            new_model, new_effort = levers.escalate_step(model, effort)
+            route_from, route_to = f"{model}/{effort}", f"{new_model}/{new_effort}"
+            miss = levers.miss_line(s["project"], s["route"], route_from, route_to, s["verdict_detail"])
+            text = levers.escalate_text(s["verdict_detail"], new_model, new_effort)
+            model, effort = new_model, new_effort
+            extra = {"escalated": f"{route_from} -> {route_to}"}
+        fork = sid if info["fork"] else ""
+        new = self.runs.start(info["cwd"], text, model, effort, resume=None if fork else sid, fork=fork,
+                              title="↳ " + (s["title"] or sid[:8]) if fork else "",
+                              route=s["route"] if fork else "", kind=lever, extra=extra,
+                              files=files if lever == "continue" else ())
+        if miss:
+            levers.add_miss(self.folder, miss)
+        self.poll_once()
+        return 200, {"session": new}
+
+    def auto_steps(self) -> list:
+        """Plan 16 (Fred: b): when a window run's turn ends with a verdict, the service takes the route
+        step itself: Escalate after FAIL, de-escalate after PASS. Only verdicts about the last turn that
+        arrived while this service runs, never a VS Code or terminal chat, never past a cold-cache
+        confirm, and only what self.levers allows. Returns the (session, lever) pairs it pulled."""
+        now = time.time()
+        with self.lock:
+            due = [(s.id, "escalate" if st == "verify_failed" else "deescalate")
+                   for s in self.state.sessions.values() if s.window and s.verdict_ts >= self.auto_since
+                   for st in [self.state.state_of(s, now)] if st in ("verify_failed", "verified")]
+        pulled = []
+        for sid, lever in due:
+            try:
+                if self.pull(sid, lever)[0] == 200:
+                    pulled.append((sid, lever))
+            except (runs.RunError, OSError):  # a click got there first, or claude did not start
+                continue
+        return pulled
 
     def allowed(self, project_dir) -> str:
         """The configured folder matching `project_dir`, or "" (runs only in listed folders)."""
@@ -278,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
                                "project": window.get("project", ""), "brief": window.get("brief") is True})
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())
+        if url.path == "/api/image":
+            return self._image(query)
         if url.path == "/api/chat":
             return self._chat(query.get("session", [""])[0])
         if url.path == "/api/brief":
@@ -298,28 +428,31 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not guard.host_ok(self.headers.get("Host"), self._port()) or not guard.post_ok(self.headers):
             return self._send(403, b"forbidden", "text/plain")
-        routes = {"/api/prep": self._prep, "/api/run": self._run, "/api/stop": self._stop,
+        routes = {"/api/prep": self._prep, "/api/prep/drop": self._prep_drop, "/api/run": self._run, "/api/stop": self._stop,
                   "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
                   "/api/done": self._done}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
-        handler = routes.get(urlparse(self.path).path)
+        path = urlparse(self.path).path
+        handler = routes.get(path)
         if handler is None:
             return self._send(404, b"not found", "text/plain")
-        body = self._body()
+        body = self._body(MAX_FILES_BODY if path in FILE_ROUTES else MAX_BODY)
         if body is None:
             return self._error(400, "expected a JSON object")
         try:
             return handler(body)
+        except attach.AttachError as exc:
+            return self._error(400, str(exc))
         except (runs.RunError, prep.PrepError) as exc:
             return self._error(409, str(exc))
 
-    def _body(self):
+    def _body(self, limit: int = MAX_BODY):
         try:
             size = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             return None
-        if size <= 0 or size > MAX_BODY:
+        if size <= 0 or size > limit:
             return None
         try:
             data = json.loads(self.rfile.read(size).decode("utf-8"))
@@ -340,7 +473,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "empty prompt")
         if not self.hub.runs.exe:
             return self._error(409, "claude.exe not found; set \"claude_exe\" in config.json")
-        return self._json(prep.run_prep(self.hub.cfg, self.hub.folder, folder, raw, self.hub.runs.exe))
+        files = attach.parse(body.get("files")) or self.hub.prep_files(body.get("files_from"))  # Try again: the old job's
+        return self._json({"job": self.hub.start_prep(folder, raw, files)})
+
+    def _prep_drop(self, body):
+        job = body.get("job")
+        if not isinstance(job, str) or not self.hub.drop_prep(job):
+            return self._error(404, "unknown Prep job")
+        return self._json({"job": job})
 
     def _run(self, body):
         folder, text = self.hub.allowed(body.get("project_dir")), self._text(body, "prompt")
@@ -362,8 +502,12 @@ class Handler(BaseHTTPRequestHandler):
                      "prep_turns": card.get("turns")}  # the Route block's first row
         else:
             title, route, reason, prep_id, extra = text, "raw", "", "", None
+        # sent now (the composer), or waiting with the card's Prep job (Run, or Run raw with files_from)
+        files = attach.parse(body.get("files")) or self.hub.prep_files(prep_id or body.get("files_from"))
         sid = self.hub.runs.start(folder, text, model, effort, title=title, route=route,
-                                  reason=reason, prep=prep_id, extra=extra)
+                                  reason=reason, prep=prep_id, extra=extra, files=files)
+        if prep_id:
+            self.hub.drop_prep(prep_id)  # the card became this run
         self.hub.poll_once()
         return self._json({"session": sid})
 
@@ -394,45 +538,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"session": sid})
 
     def _lever(self, body, lever):
-        """Continue (also STOP answers and Resume), Verify, Handoff, Escalate: a new turn of a window
-        run, or a window copy (fork) of a VS Code / terminal chat, which stays as it is."""
-        sid = body.get("session")
-        info = self.hub.levers(sid)
-        if info is None:
-            return self._error(404, "unknown session")
-        if info[lever]:
-            return self._error(409, info[lever])
-        if info["cold"] and body.get("confirm") is not True:  # the page asks with a second click
-            c = info["cold"]
-            return self._error(409, f"cold cache: {c['tokens'] // 1000}K tokens, idle {c['idle_s'] / 3600:.0f} h, "
-                                    f"would be re-read at full price (about ${c['cost']:.2f}); open the session to "
-                                    "confirm, or start a new task there with a brief")
-        s = self.hub.session(sid)
-        model, effort = self.hub.route_of(sid, s)
-        extra, miss = {}, ""
-        if lever == "continue":
-            text = self._text(body, "text")
-            if not text:
-                return self._error(400, "empty prompt")
-        elif lever == "verify":
-            text = levers.VERIFY_TEXT
-        elif lever == "handoff":
-            text = levers.HANDOFF_TEXT
-        else:  # escalate: one step up, once, and the miss is logged for Prep
-            new_model, new_effort = levers.escalate_step(model, effort)
-            route_from, route_to = f"{model}/{effort}", f"{new_model}/{new_effort}"
-            miss = levers.miss_line(s["project"], s["route"], route_from, route_to, s["verdict_detail"])
-            text = levers.escalate_text(s["verdict_detail"], new_model, new_effort)
-            model, effort = new_model, new_effort
-            extra = {"escalated": f"{route_from} -> {route_to}"}
-        fork = sid if info["fork"] else ""
-        new = self.hub.runs.start(info["cwd"], text, model, effort, resume=None if fork else sid, fork=fork,
-                                  title="↳ " + (s["title"] or sid[:8]) if fork else "",
-                                  route=s["route"] if fork else "", kind=lever, extra=extra)
-        if miss:
-            levers.add_miss(self.hub.folder, miss)
-        self.hub.poll_once()
-        return self._json({"session": new})
+        files = attach.parse(body.get("files")) if lever == "continue" else []
+        code, data = self.hub.pull(body.get("session"), lever, self._text(body, "text") if lever == "continue" else "",
+                                   body.get("confirm") is True, files)
+        return self._json(data, code)
 
     def _terminal(self, body):
         sid, s = self._window_session(body)
@@ -483,6 +592,25 @@ class Handler(BaseHTTPRequestHandler):
         changed = claude_cli.git_changed(meta["cwd"], meta.get("start_commit", ""))
         return self._json({"items": items, "source": "window", "changed": changed,
                            "live": self.hub.runs.is_live(sid), "start_commit": meta.get("start_commit", "")})
+
+    def _image(self, query):
+        """A Chat thumbnail: an image Fred pasted into a transcript (`at` = line uuid, `k` = block), or an
+        image Claude wrote inside the session's folder (`path`, relative). Read only; images only."""
+        one = lambda key: query.get(key, [""])[0]
+        sid = one("session")
+        s = self.hub.session(sid) if sid else None
+        if not s:
+            return self._error(404, "unknown session")
+        if one("path"):
+            meta = self.hub.runs.meta(sid) if all(c.isalnum() or c == "-" for c in sid) else None
+            found = attach.folder_image((meta or {}).get("cwd") or s["cwd"] or s["project_dir"], one("path"))
+        else:
+            at, k = one("at"), one("k")
+            ok = at and all(c.isalnum() or c == "-" for c in at) and k.isdigit()
+            found = transcript.image(s["transcript_path"], at, int(k)) if ok else None
+        if not found:
+            return self._error(404, "no such image")
+        return self._send(200, *found)
 
     def _brief(self, sid: str, kind: str):
         """The text of a new task that takes over a session, built from its transcript, its steps and the

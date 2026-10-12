@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, levers, redact
+from . import claude_cli, levers, redact, routing
 
 PROMPT_FILE = Path(__file__).resolve().parent / "prep_prompt.md"
 TYPES = ["mechanical", "lookup", "normal", "risky", "vague"]
@@ -21,7 +21,9 @@ SCHEMA = {
             "type": {"type": "string", "enum": TYPES},
             "model": {"type": "string", "enum": claude_cli.MODELS},
             "effort": {"type": "string", "enum": claude_cli.EFFORTS},
-        }, "required": ["type", "model", "effort"]},
+            "reasoning": {"type": "string", "enum": routing.LEVELS},
+            "volume": {"type": "string", "enum": routing.LEVELS},
+        }, "required": ["type", "reasoning", "volume", "model", "effort"]},
     },
     "required": ["goal", "where", "keep", "done_when", "last_decisions", "question", "route", "reason"],
 }
@@ -58,7 +60,12 @@ def parse_output(stdout: str) -> dict:
     if not isinstance(data, dict):
         raise PrepError("Prep returned no JSON object")
     if data.get("is_error"):
-        raise PrepError("Prep failed: " + redact.clip(data.get("result", ""), 200))
+        # an error result has no `result`: the reason is in subtype, terminal_reason and errors
+        errors = data.get("errors")
+        parts = [data.get("subtype"), data.get("terminal_reason"), data.get("result")]
+        parts += errors if isinstance(errors, list) else [errors]
+        detail = "; ".join(str(p) for p in dict.fromkeys(parts) if p)
+        raise PrepError("Prep failed: " + redact.clip(detail or "no reason given", 300))
     fields = data.get("structured_output")
     if not isinstance(fields, dict) or not isinstance(fields.get("route"), dict):
         raise PrepError("Prep returned no structured output")
@@ -72,10 +79,12 @@ def new_id() -> str:
     return time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
 
 
-def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list) -> dict:
-    """Blocking (about 10-30 s). Saves preps/<id>.json and returns the card."""
+def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, prep_id: str = "") -> dict:
+    """Blocking (about 10-30 s; the service runs it in a job thread). Saves preps/<id>.json and returns
+    the card; `prep_id` is the job's id, so the card and its job share one name."""
     cmd = claude_cli.prep_command(exe, cfg["prep_model"], SCHEMA)
-    prompt = build_prompt(raw, levers.read_misses(folder, Path(project_dir).name))
+    misses = levers.read_misses(folder, Path(project_dir).name)
+    prompt = build_prompt(raw, misses)
     try:
         out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"),
                              capture_output=True, timeout=cfg["prep_timeout_s"], env=claude_cli.child_env(),
@@ -86,8 +95,13 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list) -> 
         raise PrepError(f"cannot start claude: {exc}")
     result = parse_output(out.stdout.decode("utf-8", "replace"))
     fields = result["fields"]
+    route, picked = fields["route"], (fields["route"]["model"], fields["route"]["effort"])
+    route["model"], route["effort"] = routing.pick(route, misses)  # the demand rule decides, not Prep
+    if (route["model"], route["effort"]) != picked:
+        fields["reason"] = (f"{fields.get('reason', '')} Demand rule: {'/'.join(picked)} -> "
+                            f"{route['model']}/{route['effort']}.").strip()
     card = {
-        "id": new_id(), "ts": time.time(), "project_dir": project_dir, "raw": raw,
+        "id": prep_id or new_id(), "ts": time.time(), "project_dir": project_dir, "raw": raw,
         "fields": fields, "prompt": format_prompt(fields), "route": fields["route"],
         "reason": fields.get("reason", ""), "cost": result["cost"], "turns": result["turns"],
         "model": cfg["prep_model"],

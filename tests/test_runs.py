@@ -1,3 +1,4 @@
+import base64
 import copy
 import json
 import os
@@ -8,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import events, paths, runs
+from console import attach, events, paths, runs
 
 FAKE = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
 
@@ -59,6 +60,36 @@ class RunsTest(unittest.TestCase):
         self.assertIn("STOP: <question>", items[1]["text"])  # the footer reached claude
         self.assertEqual(items[2]["text"], "Read calc.py")
         self.assertFalse(self.mgr.is_live(sid))
+
+    def test_attached_files_go_inline_and_only_their_summary_is_kept(self):
+        files = attach.parse([{"name": "shot.png", "data": base64.b64encode(b"\x89PNG\r\n\x1a\nPIXELS").decode()},
+                              {"name": "notes.md", "data": base64.b64encode(b"# notes").decode()}])
+        sid = self.mgr.start(str(self.project), "look", "sonnet", "low", files=files)
+        self.assertTrue(wait_for(lambda: self.ended(sid)))
+        items = runs.chat(self.mgr.stream_path(sid), str(self.project))
+        self.assertEqual(items[0]["files"], [{"name": "shot.png", "kind": "image", "bytes": 14},
+                                             {"name": "notes.md", "kind": "text", "bytes": 7}])
+        self.assertIn("+image +document", items[1]["text"])  # the fake claude got the blocks
+        stream = self.mgr.stream_path(sid).read_text(encoding="utf-8")
+        self.assertNotIn(files[0]["data"], stream)
+        self.assertNotIn("# notes", stream)
+
+    def test_chat_puts_files_claude_wrote_under_its_next_words(self):
+        path = self.mgr.runs / "s1.jsonl"
+        self.mgr.runs.mkdir(parents=True)
+        write = lambda p: {"type": "tool_use", "name": "Write", "input": {"file_path": p, "content": "x"}}
+        lines = [{"type": "cc_prompt", "ts": 1, "text": "draw it"},
+                 {"type": "assistant", "parent_tool_use_id": None, "message": {"content": [
+                     write(str(self.project / "out" / "chart.png")), {"type": "text", "text": "Drew it."},
+                     write(str(self.project / "log.txt"))]}},
+                 {"type": "result", "subtype": "success", "total_cost_usd": 0.1, "num_turns": 1}]
+        path.write_text("".join(json.dumps(d) + "\n" for d in lines), encoding="utf-8")
+        items = runs.chat(path, str(self.project))
+        self.assertEqual([(i["role"], i["text"]) for i in items if i["role"] != "tool"][:3],
+                         [("you", "draw it"), ("claude", "Drew it."), ("claude", "")])
+        claude = [i for i in items if i["role"] == "claude"]
+        self.assertEqual([f["name"] for f in claude[0]["files"]], ["out/chart.png"])
+        self.assertEqual((claude[0]["files"][0]["kind"], claude[1]["files"][0]["name"]), ("image", "log.txt"))
 
     def test_stop_sends_an_interrupt(self):
         sid = self.mgr.start(str(self.project), "SLOW task", "sonnet", "low")

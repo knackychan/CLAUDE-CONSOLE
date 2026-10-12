@@ -18,9 +18,22 @@ current folder. Do three things, then answer with the JSON object only.
 | risky | database schema, threading, security, installer or updater, anything near user data | opus | high |
 | vague | design-heavy or unclear (and ask in `question`) | opus | high |
 
+Also rate the task's demand, low / medium / high, in `route`:
+- reasoning: how hard the thinking is. high = design trade-offs, subtle bugs, concurrency, security,
+  a change across many coupled parts. low = the steps are spelled out.
+- volume: how many tokens the work reads or writes. high = many files or long files to read, long
+  logs, bulk edits or generated text. low = a few short files.
+The Console turns the demand into the route: high reasoning runs on opus/high; high volume with low
+reasoning on haiku/low, with medium reasoning on sonnet/medium; otherwise your model and effort.
+
 Fields: goal (one sentence), where (files and functions, short), keep (what must not break),
 done_when (a check that can be run), last_decisions (from PLAN.md History, one line each, or ""),
-question, route {type, model, effort}, reason (one sentence: why this route).
+question, route {type, reasoning, volume, model, effort}, reason (one sentence: why this route).
+
+Output rules: the JSON object has exactly these 8 keys and all 8 are always present: goal, where,
+keep, done_when, last_decisions, question, route, reason. A text field with nothing to say is "" and
+is never left out; with no open question write "question": "". `route` is always an object with
+type, reasoning, volume, model and effort; never put type, reasoning, volume, model or effort at the top level.
 
 Routing misses in this project (Escalate wrote them; newest last):
 $misses

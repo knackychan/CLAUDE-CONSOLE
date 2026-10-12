@@ -8,7 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import claude_cli, events, redact
+from . import attach, claude_cli, events, redact, transcript
 
 WATCH_S = 0.5
 CHAT_TEXT = 4000
@@ -43,34 +43,41 @@ def read_lines(path: Path, start: int):
 
 
 def chat(path: Path, cwd: str = "", limit: int = 200) -> list:
-    """The window run's conversation: prompts, assistant text, tool calls, results."""
+    """The window run's conversation: prompts (with the files Fred attached), assistant text (with the
+    files Claude wrote before it), tool calls, results."""
     _, lines = read_lines(path, 0)
-    items = []
+    items, wrote = [], []
     for d in lines:
         kind = d.get("type")
         if "raw" in d:
             items.append({"role": "note", "text": redact.clip(d["raw"], 300)})
         elif kind == "cc_prompt":
-            items.append({"role": "you", "text": d.get("text", "")[:CHAT_TEXT], "ts": d.get("ts")})
+            transcript.flush_wrote(items, wrote)
+            items.append({"role": "you", "text": d.get("text", "")[:CHAT_TEXT], "ts": d.get("ts"),
+                          "files": d.get("files") or []})
         elif kind == "assistant" and not d.get("parent_tool_use_id"):
             for block in (d.get("message") or {}).get("content") or []:
                 if block.get("type") == "text" and block.get("text", "").strip():
-                    items.append({"role": "claude", "text": block["text"][:CHAT_TEXT]})
+                    items.append({"role": "claude", "text": block["text"][:CHAT_TEXT], "files": wrote[:]})
+                    wrote.clear()
                 elif block.get("type") == "tool_use":
                     what = redact.summarize(block.get("name"), block.get("input"), cwd)
                     items.append({"role": "tool", "text": f"{block.get('name', '')} {what}".strip()})
+                    transcript.note_write(wrote, block, cwd)
         elif kind == "user" and not d.get("parent_tool_use_id"):
             content = (d.get("message") or {}).get("content")
             if isinstance(content, list) and any("[Request interrupted" in str(b.get("text", ""))
                                                  for b in content if isinstance(b, dict)):
                 items.append({"role": "note", "text": "stopped"})
         elif kind == "result":
+            transcript.flush_wrote(items, wrote)
             cost = d.get("total_cost_usd") or 0
             denials = len(d.get("permission_denials") or [])
             text = f"{d.get('subtype', '')} · ${cost:.2f} · {d.get('num_turns', 0)} turns"
             if denials:
                 text += f" · {denials} denied"
             items.append({"role": "result", "text": text})
+    transcript.flush_wrote(items, wrote)
     return items[-limit:]
 
 
@@ -118,6 +125,13 @@ class RunManager:
     def _save_meta(self, meta: dict) -> None:
         self.meta_path(meta["session_id"]).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
+    def set_route(self, sid: str, model: str, effort: str) -> None:
+        """The route the next turn of this window run starts on (de-escalate starts no turn itself)."""
+        meta = self.meta(sid)
+        if meta:
+            meta.update(model=model, effort=effort)
+            self._save_meta(meta)
+
     def emit(self, rec: dict) -> None:
         rec = dict(rec, ts=round(time.time(), 3))
         events.append(self.folder, rec)
@@ -133,9 +147,10 @@ class RunManager:
     # -- start ----------------------------------------------------------------------
     def start(self, cwd: str, prompt: str, model: str, effort: str, resume: str = None,
               title: str = "", route: str = "", reason: str = "", prep: str = "",
-              fork: str = "", kind: str = "run", extra: dict = None) -> str:
+              fork: str = "", kind: str = "run", extra: dict = None, files: list = ()) -> str:
         """A new run, a new turn of a window run (`resume`), or a window copy of another chat (`fork`).
-        `kind` (run, continue, verify, handoff, escalate) and `extra` go into the run_started line."""
+        `kind` (run, continue, verify, handoff, escalate) and `extra` go into the run_started line.
+        `files` (attach.parse) go inline after the prompt; the stream file keeps their summary only."""
         if not self.exe:
             raise RunError("claude.exe not found; set \"claude_exe\" in config.json")
         sid = resume or str(uuid.uuid4())
@@ -144,21 +159,24 @@ class RunManager:
         self.runs.mkdir(parents=True, exist_ok=True)
         path = self.stream_path(sid)
         with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"type": "cc_prompt", "ts": time.time(), "text": prompt}, ensure_ascii=False) + "\n")
+            fh.write(json.dumps({"type": "cc_prompt", "ts": time.time(), "text": prompt,
+                                 "files": attach.summary(files)}, ensure_ascii=False) + "\n")
         offset = path.stat().st_size
         cmd = claude_cli.run_command(self.exe, model, effort, sid, resume=bool(resume),
                                      name=redact.clip(title, 60), fork=fork)
         proc = self._spawn(cmd, cwd, path)
         footer = "" if prompt.startswith("/") else claude_cli.STOP_FOOTER  # a /skill takes no footer
-        proc.stdin.write(claude_cli.user_message(prompt + footer))
+        proc.stdin.write(claude_cli.user_message(prompt + footer, attach.blocks(files)))
         proc.stdin.flush()
         with self.lock:
             self.live[sid] = proc
             self.stopping.discard(sid)
         start_commit = claude_cli.git_head(cwd)
+        old = self.meta(sid) or {}
         self._save_meta({"session_id": sid, "pid": proc.pid, "cwd": cwd, "model": model, "effort": effort,
                          "offset": offset, "started": time.time(), "ended": None,
-                         "start_commit": (self.meta(sid) or {}).get("start_commit") or start_commit})
+                         "start_commit": old.get("start_commit") or start_commit,
+                         "start_route": old.get("start_route") or f"{model}/{effort}"})  # de-escalate goes back here
         rec = {"event": "run_started", "session_id": sid, "cwd": cwd, "project": Path(cwd).name,
                "project_dir": cwd, "pid": proc.pid,
                "model": model, "effort": effort, "resume": bool(resume), "start_commit": start_commit,

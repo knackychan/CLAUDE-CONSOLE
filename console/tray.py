@@ -1,6 +1,7 @@
 """The tray icon (BRAINSTORM D14): the service lives in this process and the pywebview window is a child
 process that exists only while it is open, so a hidden console costs about 40 MB instead of about 330
-(WebView2). Left click opens or closes the window; the right-click menu has Open / Close window and Quit.
+(WebView2). Left click opens or closes the window, a double click opens it; the right-click menu has
+Open / Close window and Quit.
 The icon is the logo (console/icon.py): its signal cell is orange when something needs Fred, its route ink
 while sessions work, muted when all is quiet.
 Win32 through ctypes, no new package."""
@@ -18,8 +19,9 @@ ROOT = Path(__file__).resolve().parent.parent
 EVERY_S = 2.0  # at most one snapshot per 2 s for the icon
 CLOSE_WAIT_S = 3.0
 
-WM_NULL, WM_CLOSE, WM_COMMAND = 0x0000, 0x0010, 0x0111
-WM_LBUTTONUP, WM_RBUTTONUP = 0x0202, 0x0205
+WM_NULL, WM_CLOSE, WM_COMMAND, WM_TIMER = 0x0000, 0x0010, 0x0111, 0x0113
+WM_LBUTTONUP, WM_LBUTTONDBLCLK, WM_RBUTTONUP = 0x0202, 0x0203, 0x0205
+CLOSE_TIMER = 1  # a click on an open window closes it once the double-click time has passed
 WM_TRAY = 0x8000 + 1  # WM_APP + 1
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
@@ -99,6 +101,9 @@ def _dlls():
     user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     user32.DestroyWindow.argtypes = [wintypes.HWND]
+    user32.SetTimer.argtypes = [wintypes.HWND, ctypes.c_size_t, wintypes.UINT, wintypes.LPVOID]
+    user32.SetTimer.restype = ctypes.c_size_t
+    user32.KillTimer.argtypes = [wintypes.HWND, ctypes.c_size_t]
     user32.CreateIconIndirect.argtypes = [ctypes.POINTER(ICONINFO)]
     user32.CreateIconIndirect.restype = wintypes.HICON
     user32.DestroyIcon.argtypes = [wintypes.HICON]
@@ -123,6 +128,7 @@ class Tray:
         self.hwnd = None
         self.icons = {}
         self.shown = None
+        self.doubled = False
 
     def alive(self) -> bool:
         return self.child is not None and self.child.poll() is None
@@ -147,6 +153,23 @@ class Tray:
 
     def toggle(self) -> None:
         self.close() if self.alive() else self.open()
+
+    def click(self) -> None:
+        """Left click: a closed window opens at once; an open one closes after the double-click time, so the
+        first click of a double click cannot close it. A double click sends up, double, up: the last up is
+        not a click."""
+        if self.doubled:
+            self.doubled = False
+        elif self.alive():
+            self.user32.SetTimer(self.hwnd, CLOSE_TIMER, self.user32.GetDoubleClickTime(), None)
+        else:
+            self.open()
+
+    def double_click(self) -> None:
+        """Double click: the window stays or comes up, never a second one."""
+        self.user32.KillTimer(self.hwnd, CLOSE_TIMER)
+        self.doubled = True
+        self.open()
 
     def watch(self) -> None:
         """Repaint the icon when the state changes (also on the hub's 15 s tick), at most every EVERY_S."""
@@ -240,7 +263,14 @@ class Tray:
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         if msg == WM_TRAY and lparam == WM_LBUTTONUP:
-            self.toggle()
+            self.click()
+            return 0
+        if msg == WM_TRAY and lparam == WM_LBUTTONDBLCLK:
+            self.double_click()
+            return 0
+        if msg == WM_TIMER and wparam == CLOSE_TIMER:
+            self.user32.KillTimer(self.hwnd, CLOSE_TIMER)
+            self.close()
             return 0
         if msg == WM_TRAY and lparam == WM_RBUTTONUP:
             self._menu()

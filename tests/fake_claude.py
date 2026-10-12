@@ -1,12 +1,15 @@
 """A stand-in for claude.exe in tests: same flags, same JSON shapes (recorded from Claude Code 2.1.288).
 
 Prep (--json-schema): reads the prompt on stdin, prints one result object.
+  "SLOW" in the request: waits 2 s first (Prep runs in the background).
+  "THINK" / "BULK" in the request: the route rates reasoning / token volume high.
 Run (--input-format stream-json): per user message prints init / assistant / result.
   "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
   "DENY" in the message: the result carries one permission denial.
 """
 import json
 import sys
+import time
 
 
 def out(obj):
@@ -27,11 +30,18 @@ def prep():
     raw = sys.stdin.read()
     fields = {"goal": "Fix add() in calc.py", "where": "calc.py:2", "keep": "the signature",
               "done_when": "py -m unittest passes", "last_decisions": "", "question": "",
-              "route": {"type": "mechanical", "model": "sonnet", "effort": "low"},
+              "route": {"type": "mechanical", "reasoning": "low", "volume": "low", "model": "sonnet",
+                        "effort": "low"},
               "reason": "one-line fix with a clear spec"}
+    if "THINK" in raw:
+        fields["route"]["reasoning"] = "high"
+    if "BULK" in raw:
+        fields["route"]["volume"] = "high"
     if "BROKEN" in raw:
         print("not json")
         return 0
+    if "SLOW" in raw:
+        time.sleep(2)
     out({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.03,
          "num_turns": 5, "result": json.dumps(fields), "structured_output": fields})
     return 0
@@ -44,6 +54,8 @@ def run():
         if msg.get("type") != "user":
             continue
         text = msg["message"]["content"]
+        if isinstance(text, list):  # attached files: the text block, then one block per file
+            text = text[0]["text"] + " +" + " +".join(b["type"] for b in text[1:])
         out({"type": "system", "subtype": "init", "session_id": sid, "cwd": "."})
         out({"type": "assistant", "session_id": sid, "parent_tool_use_id": None, "message": {
             "role": "assistant", "content": [

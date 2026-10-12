@@ -1,3 +1,4 @@
+import base64
 import json
 import tempfile
 import unittest
@@ -61,6 +62,47 @@ class TranscriptTest(unittest.TestCase):
         self.addCleanup(setattr, transcript, "TAIL_BYTES", old)
         got = transcript.turns(self.path, limit=50)
         self.assertTrue(0 < len(got) < 40 and got[-1]["text"].startswith("turn 39"))
+
+    def test_files_fred_attached_and_files_claude_wrote(self):
+        image = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "A" * 400}}
+        doc = {"type": "document", "title": "spec.md",
+               "source": {"type": "text", "media_type": "text/plain", "data": "# spec"}}
+        pdf = {"type": "document", "title": "brief.pdf",
+               "source": {"type": "base64", "media_type": "application/pdf", "data": "B" * 40}}
+        write = {"type": "tool_use", "name": "Write", "input": {"file_path": "D:/p/out/chart.png", "content": "x"}}
+        self.write(
+            user([image, image, {"type": "text", "text": "match these"}], imagePasteIds=[1, 2]),
+            user([doc, pdf]),  # files with no words still make a turn
+            claude([write]) | {"cwd": "D:/p"},
+            claude([{"type": "tool_use", "name": "Write", "input": {"file_path": "D:/p/notes.md"}}]) | {"cwd": "D:/p"},
+            claude([{"type": "tool_use", "name": "Write", "input": {"file_path": "C:/Temp/smoke.py"}}]) | {"cwd": "D:/p"},
+            claude([{"type": "text", "text": "Done."}]),
+            claude([{"type": "tool_use", "name": "Edit", "input": {"file_path": "D:/p/a.py"}}]),
+            claude([write]) | {"cwd": "D:/p"},
+            user("next"),
+        )
+        got = transcript.turns(self.path, limit=10)
+        self.assertEqual([(t["role"], t["text"]) for t in got],
+                         [("you", "match these"), ("you", ""), ("claude", "Done."), ("claude", ""), ("you", "next")])
+        self.assertEqual(got[0]["files"], [{"name": "image 1", "kind": "image", "bytes": 300},
+                                           {"name": "image 2", "kind": "image", "bytes": 300}])
+        self.assertEqual(got[1]["files"], [{"name": "spec.md", "kind": "text", "bytes": 6},
+                                           {"name": "brief.pdf", "kind": "pdf", "bytes": 30}])
+        self.assertEqual([(f["name"], f["kind"]) for f in got[2]["files"]],
+                         [("out/chart.png", "image"), ("notes.md", "file")])
+        self.assertEqual(got[3]["files"][0]["name"], "out/chart.png")  # wrote, then Fred spoke: its own row
+        self.assertEqual(got[4]["files"], [])
+
+    def test_a_pasted_image_says_where_it_is_for_its_thumbnail(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x01" * 30
+        image = {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": base64.b64encode(png).decode()}}
+        self.write(user([{"type": "text", "text": "see"}, image], uuid="u-7"))
+        self.assertEqual(transcript.turns(self.path)[0]["files"][0]["at"], ["u-7", 1])
+        self.assertEqual(transcript.image(self.path, "u-7", 1), (png, "image/png"))
+        self.assertIsNone(transcript.image(self.path, "u-7", 0))  # the text block
+        self.assertIsNone(transcript.image(self.path, "u-8", 1))
+        self.assertIsNone(transcript.image(Path(self.tmp.name) / "none.jsonl", "u-7", 1))
 
     def test_masks_and_ignores_other_files(self):
         self.write(user("use key sk-abcdefghijkl1234 now"))

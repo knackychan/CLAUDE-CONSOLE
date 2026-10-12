@@ -129,6 +129,8 @@ function focusKey(el) {
 }
 function setHtml(el, html, scroller) {
   if (el._html === html) return false;
+  const picked = getSelection();  // text being selected stays put; the next snapshot swaps it in
+  if (picked && !picked.isCollapsed && el.contains(picked.anchorNode)) return false;
   const active = document.activeElement, key = active && el.contains(active) ? focusKey(active) : "";
   const fields = [...el.querySelectorAll("input[id],textarea[id]")].map((f) => [f.id, f.value, f.selectionStart, f.selectionEnd]);
   const old = scroller && el.querySelector(scroller.sel);
@@ -180,6 +182,32 @@ async function setForm(name) {
   else if (native()) await window.pywebview.api.form("open");
   render();
 }
+
+// -- resize grip: the corner drives WindowApi.resize; the size is kept when the drag ends ------
+let grip = null;
+
+async function gripSize(e, keep) {
+  const g = grip;
+  if (g.busy && !keep) return;  // one resize at a time; the next move carries the latest size
+  g.busy = true;
+  try { await window.pywebview.api.resize(e.screenX - g.x, e.screenY - g.y, keep); } finally { g.busy = false; }
+}
+
+function gripEnd(e) {
+  if (!grip) return;
+  gripSize(e, true).catch(() => {});
+  grip = null;
+}
+
+$("rsz").addEventListener("pointerdown", (e) => {
+  if (!native() || form !== "open" || e.button !== 0) return;
+  e.currentTarget.setPointerCapture(e.pointerId);
+  grip = { x: e.screenX - window.innerWidth, y: e.screenY - window.innerHeight, busy: false };
+  e.preventDefault();
+});
+$("rsz").addEventListener("pointermove", (e) => { if (grip) gripSize(e, false).catch(() => {}); });
+$("rsz").addEventListener("pointerup", gripEnd);
+$("rsz").addEventListener("pointercancel", gripEnd);
 
 async function fitPill() {
   if (native() && form === "pill") await window.pywebview.api.form("pill", Math.ceil($("folded").getBoundingClientRect().height));
@@ -293,6 +321,7 @@ function showPage(name) {
 
 async function openSession(id, list = "chat") {
   if (form === "pill") await setForm("open");
+  if (id !== openId) att.answer = att.fu = [];  // files were for the other session's boxes
   openId = id;
   tab = list;
   tlMin = -1;
@@ -432,24 +461,149 @@ function renderCompose() {
   else if (!project) html = "To run: start a Claude Code session in a project first";
   else if (!runnable()) html = `<span>Runs are off in ${chipHtml}: a run would use this repo's hooks and settings without asking.</span>
     <button class="btn sm" data-go="allow">Allow runs</button>`;
-  else html = `<span>in</span>${chipHtml}<span class="hint"><span class="kbd">Enter</span>Prep</span>`;
+  else html = `<span>in</span>${chipHtml}<button class="btn sm" data-attach="compose" title="Images, PDF or text files (or paste, or drop them on the box)">Attach</button>
+    <span class="hint"><span class="kbd">Enter</span>Prep</span>`;
   setHtml($("c-say"), html);
+  setHtml($("files-compose"), filesHtml("compose"));
+  setHtml($("preps"), preps().map(prepJobHtml).join(""));
+  spin();
   setHtml($("prepfail"), fail ? `<div class="card r" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">${esc(fail.title)}</span></div>
     <div class="m mut">${esc(fail.msg)}</div>${fail.retry ? '<div class="lr"><button class="btn go sm" data-go="retry">Try again</button></div>' : ""}</div>` : "");
 }
 
+// -- Prep jobs: the strip above the composer; each runs in the service, then waits for Run ---------
+function preps() { return (snap && snap.preps) || []; }
+
+function prepJobHtml(j) {
+  const where = esc(projectName(j.project_dir)), id = esc(j.id);
+  if (j.state === "running") {
+    return `<div class="card" style="cursor:default"><div class="l1"><span class="st n">&#9676; Prep</span><span class="t">${esc(j.raw)}</span>
+      <span class="age m">${ago(snap.now - j.ts)}</span></div>
+      <span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>Haiku is reading ${where}, 10 to 30 s</span></div>`;
+  }
+  if (j.state === "failed") {
+    return `<div class="card r" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">Prep: ${esc(j.raw)}</span></div>
+      <div class="m mut">${esc(j.error)}</div><div class="lr"><button class="btn go sm" data-prep="${id}" data-pdo="retry">Try again</button>
+      <button class="btn sm" data-prep="${id}" data-pdo="edit">Edit</button><button class="btn sm" data-prep="${id}" data-pdo="drop">Dismiss</button></div></div>`;
+  }
+  const c = j.card, goal = c.fields.goal || c.raw;
+  return `<div class="card" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Prep ready: " + goal)}">
+    <div class="l1"><span class="st g">&#9654; Ready to run</span><span class="t">${esc(goal)}</span><span class="age m">${ago(snap.now - c.ts)}</span></div>
+    <div class="l2 m"><span class="who">${where}<span class="route"> · ${esc(c.route.model)} ${esc(c.route.effort)}</span>${j.attached.length ? ` · ${j.attached.length} file${j.attached.length === 1 ? "" : "s"}` : ""}</span>
+    <span class="cost">${money(c.cost)}</span></div></div>`;
+}
+
+async function prepJob(id, what) {
+  const j = preps().find((x) => x.id === id);
+  if (!j) return;
+  if (what === "open") { if (j.card) { card = j.card; showPrep(); } return; }
+  if (what === "retry") await startPrep(j.project_dir, j.raw, [], id);  // the new job takes the old one's files first
+  await dropPrep(id);
+  if (what === "edit") { putBack(j.raw); if (j.attached.length) filesNotKept(); }
+}
+
+function jobFiles(id) { const j = preps().find((x) => x.id === id); return j ? j.attached.length : 0; }
+function filesNotKept() {  // a job's files live in the service, not in this page: Edit cannot bring them back
+  fail = { title: "Files not kept", msg: "Edit puts back the text only: attach the files again.", retry: "" };
+  renderCompose();
+}
+
+function dropPrep(id) { return api("/api/prep/drop", { job: id }).catch(() => {}); }
+
+function putBack(text) {  // a Prep's request back in the composer, to edit it
+  draft = text;
+  $("c-prompt").value = text;
+  saveDraft();
+  showPage("list");
+  $("c-prompt").focus();
+}
+
+// -- attachments: files sent inline with a prompt (console/attach.py checks them) ------------------
+const ATTACH_FILES = 5, ATTACH_BYTES = 5 * 1024 * 1024;  // attach.MAX_FILES, attach.MAX_BYTES
+const THUMB_PX = 160, THUMB_MAX = 24 * 1024;              // drawn here; attach.THUMB_MAX keeps it
+const att = { compose: [], answer: [], fu: [] };          // per prompt box: {name, kind, bytes, data (base64), thumb}
+let pickFor = "";                                         // the box the file dialog adds to
+function sizeText(n) { return n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
+function fileKind(f) { return f.type.startsWith("image/") ? "image" : f.type === "application/pdf" ? "pdf" : "text"; }
+async function makeThumb(f) {  // a small JPEG of an image, kept with the prompt for the Chat ("" when it cannot be drawn)
+  try {
+    const bmp = await createImageBitmap(f), r = Math.min(1, THUMB_PX / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(bmp.width * r));
+    c.height = Math.max(1, Math.round(bmp.height * r));
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff";  // JPEG has no alpha: transparent parts on white
+    g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    const url = c.toDataURL("image/jpeg", 0.72);
+    return url.length <= THUMB_MAX ? url : "";
+  } catch (e) { return ""; }
+}
+function fileChip(f, remove = "", src = "") {  // `src`: the thumbnail (a kept data URL, or /api/image)
+  src = src || f.thumb || "";
+  return `<li class="file">${src ? `<img class="thumb" src="${esc(src)}" alt="" loading="lazy" title="Click to enlarge">` : ""}<span class="k">${esc(f.kind)}</span><span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>${f.bytes == null ? "" : `<span class="m">${sizeText(f.bytes)}</span>`}${remove}</li>`;
+}
+function filesHtml(key) {  // the chips under a prompt box, each with its remove button
+  return att[key].map((f, k) => fileChip(f, `<button data-unattach="${key}" data-k="${k}" aria-label="Remove ${esc(f.name)}" title="Remove">&#10005;</button>`)).join("");
+}
+function imageSrc(f, role, sid) {  // a transcript's pasted image, or an image Claude wrote in the folder: read by the service
+  if (!sid || f.kind !== "image" || f.thumb) return "";
+  const q = "/api/image?session=" + encodeURIComponent(sid);
+  if (f.at) return `${q}&at=${encodeURIComponent(f.at[0])}&k=${f.at[1]}`;
+  return role === "claude" ? `${q}&path=${encodeURIComponent(f.name)}` : "";
+}
+function chatFiles(files, role, sid = "") {  // a Chat turn's files: what Fred attached, or what Claude wrote before its words
+  if (!files || !files.length) return "";
+  return `<ul class="files" aria-label="${role === "claude" ? "Files Claude wrote" : "Attached files"}">${role === "claude" ? '<li class="by">wrote</li>' : ""}${files.map((f) => fileChip(f, "", imageSrc(f, role, sid))).join("")}</ul>`;
+}
+function wire(list) { return list.map(({ name, data, thumb }) => ({ name, data, thumb })); }
+function sendable(key) { return wire(att[key]); }
+function boxKey(el) { return el.closest(".compose") ? "compose" : el.closest(".askbox") ? "answer" : el.closest("#levers") && $("fu") ? "fu" : ""; }
+function attachSay(key, text) {
+  if (key === "compose") { fail = { title: "Attach failed", msg: text, retry: "" }; renderCompose(); }
+  else { const m = $(key === "answer" ? "a-msg" : "f-msg"); if (m) m.innerHTML = `<span class="r">${esc(text)}</span>`; }
+}
+function paintFiles(key) {
+  if (key === "compose") renderCompose();
+  else if (key === "answer") renderSession();
+  else { leversSig = ""; const s = current(); if (s) renderLevers(s).catch(() => {}); }
+}
+async function addFiles(key, list) {
+  if (!key) return;
+  for (const f of list) {
+    if (att[key].length >= ATTACH_FILES) { attachSay(key, `at most ${ATTACH_FILES} files per prompt`); break; }
+    if (f.size > ATTACH_BYTES) { attachSay(key, `${f.name}: over 5 MB`); continue; }
+    const data = await new Promise((ok, ko) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result).split(",")[1] || "");
+      r.onerror = () => ko(r.error);
+      r.readAsDataURL(f);
+    }).catch(() => null);
+    if (data === null) { attachSay(key, `${f.name}: could not be read`); continue; }
+    const kind = fileKind(f), thumb = kind === "image" ? await makeThumb(f) : "";
+    att[key].push({ name: f.name || "pasted." + (f.type.split("/")[1] || "png"), kind, bytes: f.size, data, thumb });
+  }
+  paintFiles(key);
+}
+
 let loadingTimer = null;
+function spin() {  // the loading cells step while the composer waits or a Prep job runs
+  const want = (!!busy || preps().some((j) => j.state === "running")) && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (want === !!loadingTimer) return;
+  clearInterval(loadingTimer);
+  loadingTimer = null;
+  if (!want) return;
+  let k = 0;
+  loadingTimer = setInterval(() => {
+    document.querySelectorAll(".loading .cells").forEach((row) => row.querySelectorAll("i").forEach((c, j) => { c.className = j === k % 6 ? "f" : ""; }));
+    k++;
+  }, 300);
+}
+
 function setBusy(text) {
   busy = text;
   fail = null;
-  clearInterval(loadingTimer);
-  if (text && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    let k = 0;
-    loadingTimer = setInterval(() => {
-      document.querySelectorAll(".loading .cells i").forEach((c, j) => { c.className = j === k % 6 ? "f" : ""; });
-      k++;
-    }, 300);
-  }
   renderCompose();
 }
 
@@ -458,36 +612,47 @@ function saveDraft() {
   draftTimer = setTimeout(() => api("/api/draft", { text: draft, project, brief: briefOpen }).catch(() => {}), 600);
 }
 
-async function doPrep() {
+function doPrep() {  // the box empties at once; the Prep runs in the service and shows on the strip
   const text = $("c-prompt").value.trim();
-  if (!text || busy || !runnable()) return;
-  setBusy(`Haiku is reading ${projectName(project)}, 10 to 30 s`);
-  try {
-    card = await api("/api/prep", { project_dir: project, prompt: text });
-    setBusy("");
-    showPrep();
-  } catch (e) {
-    setBusy("");
-    fail = { title: "Prep failed", msg: e.message, retry: "prep" };
-    renderCompose();
-  }
+  if (!text || !runnable()) return;
+  draft = "";
+  $("c-prompt").value = "";
+  saveDraft();
+  const files = att.compose;  // they wait with the job in the service until its card runs
+  att.compose = [];
+  renderCompose();  // the chips leave with the text, before the service answers
+  startPrep(project, text, files);
 }
 
-async function doRun(projectDir, prompt, model, effort, prepId) {
-  if (busy) return;
+async function startPrep(projectDir, text, files = [], from = "") {  // `from`: Try again takes that job's files
+  fail = null;
+  try {
+    await api("/api/prep", { project_dir: projectDir, prompt: text, files: wire(files), files_from: from });
+  } catch (e) {
+    if (!$("c-prompt").value.trim()) { draft = text; $("c-prompt").value = text; saveDraft(); }  // nothing typed since: the text comes back
+    if (!att.compose.length) att.compose = files;
+    fail = { title: "Prep failed", msg: e.message, retry: "prep" };
+  }
+  renderCompose();
+}
+
+async function doRun(projectDir, prompt, model, effort, prepId, from = "") {  // true once the run started
+  if (busy) return false;
+  const mine = !prepId && !from;  // from the composer: its files go now; a card's wait with its job
   setBusy("Starting the run ...");
   try {
-    const r = await api("/api/run", { project_dir: projectDir, prompt, model, effort, prep: prepId || "" });
-    draft = "";
-    $("c-prompt").value = "";
-    saveDraft();
+    const r = await api("/api/run", { project_dir: projectDir, prompt, model, effort, prep: prepId || "",
+      files: mine ? sendable("compose") : [], files_from: from });
+    if (mine) att.compose = [];
     card = null;
     setBusy("");
     openSession(r.session, "chat");
+    return true;
   } catch (e) {
     setBusy("");
     if (page === "prep") $("p-msg").innerHTML = `<span class="r">${esc(e.message)}</span>`;
     else { fail = { title: "Run failed", msg: e.message, retry: "raw" }; renderCompose(); }
+    return false;
   }
 }
 
@@ -578,6 +743,7 @@ function showPrep() {
   $("crumb").textContent = "Prep / " + projectName(card.project_dir);
   $("pscroll").innerHTML = `
     <div class="blk"><span class="lbl">You typed</span><div class="text">${esc(card.raw)}</div></div>
+    ${jobFiles(card.id) ? `<div class="blk"><span class="lbl">Sent with the run</span>${chatFiles(preps().find((x) => x.id === card.id).attached, "you")}</div>` : ""}
     ${f.where ? `<div class="blk"><span class="lbl">Scouted</span><div class="m">${esc(f.where)}</div></div>` : ""}
     <div class="blk"><span class="lbl">Enhanced prompt (edit freely)</span>
       <textarea id="p-prompt" class="in m" rows="9" spellcheck="false">${esc(card.prompt)}</textarea></div>
@@ -595,12 +761,14 @@ function showPrep() {
   $("p-prompt").focus();
 }
 
-function prepAct(name) {
-  if (busy) return;
-  if (name === "run") doRun(card.project_dir, $("p-prompt").value.trim(), $("p-model").value, $("p-effort").value, card.id);
-  if (name === "raw") doRun(card.project_dir, card.raw, cfg.default_model, cfg.default_effort, "");
-  if (name === "edit") { card = null; showPage("list"); $("c-prompt").focus(); }
-  if (name === "cancel") { card = null; draft = ""; $("c-prompt").value = ""; saveDraft(); showPage("list"); }
+async function prepAct(name) {  // Run drops the card's job in the service; Run raw, Edit and Cancel drop it here
+  if (busy || !card) return;
+  const c = card;
+  if (name === "run") doRun(c.project_dir, $("p-prompt").value.trim(), $("p-model").value, $("p-effort").value, c.id);
+  if (name === "raw" && await doRun(c.project_dir, c.raw, cfg.default_model, cfg.default_effort, "", c.id)) dropPrep(c.id);
+  if (name === "back") { card = null; showPage("list"); }
+  if (name === "edit") { card = null; const had = jobFiles(c.id); await dropPrep(c.id); putBack(c.raw); if (had) filesNotKept(); }
+  if (name === "cancel") { card = null; dropPrep(c.id); showPage("list"); }
 }
 
 // -- session page ------------------------------------------------------------------------
@@ -627,7 +795,9 @@ function askBlock(s) {
       : `Your answer runs in a window copy of this chat. The ${s.source} chat stays as it is.`;
     return `<div class="askbox"><div class="q">${esc(s.stop_question)}</div>
       <textarea class="in" id="answer" rows="3" aria-label="Answer" placeholder="${esc(where)}"></textarea>
+      <ul class="files" aria-label="Attached files">${filesHtml("answer")}</ul>
       <div class="lr"><button class="btn you" data-act="answer">Send answer</button>
+      <button class="btn" data-attach="answer" title="Images, PDF or text files (or paste, or drop them on the box)">Attach</button>
       ${s.window && !s.run_live ? '<button class="btn" data-act="terminal">Open in terminal</button>' : ""}</div>
       <div id="a-msg" class="say"></div></div>`;
   }
@@ -800,9 +970,9 @@ async function renderProc(s) {
     const turns = chat.items.filter((i) => i.role !== "tool");
     const foot = chat.source === "window"
       ? "Streamed from this window run." + (chat.start_commit ? ` start ${esc(chat.start_commit.slice(0, 7))} · ${chat.changed == null ? "?" : chat.changed} file(s) changed since.` : "")
-      : `Read from the ${esc(s.source === "?" ? "chat" : s.source)} transcript, in words; tool output stays in Steps.`;
+      : `Read from the ${esc(s.source === "?" ? "chat" : s.source)} transcript, in words and files; tool output stays in Steps.`;
     body = `<div class="chat">${turns.map((i) => `<div class="turn ${i.role}"><span class="lbl">${i.role === "you" ? "You" : i.role === "claude" ? "Claude" : esc(i.role)}${i.ts ? " · " + hhmm(i.ts) : ""}</span>
-      ${i.role === "claude" ? chatHtml(i.text) : `<p>${esc(i.text)}</p>`}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
+      ${i.role === "claude" ? chatHtml(i.text) : i.text ? `<p>${esc(i.text)}</p>` : ""}${chatFiles(i.files, i.role, s.id)}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
       <p class="src">${foot}</p></div>`;
   }
   const html = `<div class="tabs" role="tablist" aria-label="Process">${TABS.map(([id, nm]) =>
@@ -825,7 +995,8 @@ async function renderLevers(s) {
   let html = "";
   if (lv && !lv.continue && !s.stop_question) {
     html += `<div class="lr"><input id="fu" aria-label="Follow-up" placeholder="${lv.fork ? "Follow-up (runs in a window copy)" : "Follow-up"}">
-      <button class="btn go" data-act="continue">Continue</button></div>`;
+      <button class="btn" data-attach="fu" title="Images, PDF or text files (or paste, or drop them on the box)">Attach</button>
+      <button class="btn go" data-act="continue">Continue</button></div><ul class="files" aria-label="Attached files">${filesHtml("fu")}</ul>`;
   }
   let buttons = "";
   if (s.run_live) buttons += '<button class="btn stop" data-act="stop">Stop</button>';
@@ -897,9 +1068,10 @@ async function act(name, button) {
     if (name === "done") await api("/api/done", { session: s.id });
     if (name === "resume") r = await api("/api/continue", { session: s.id, text: RESUME_TEXT, confirm });
     if (name === "continue" || name === "answer") {
-      const text = $(name === "answer" ? "answer" : "fu").value.trim();
+      const key = name === "answer" ? "answer" : "fu", text = $(key).value.trim();
       if (!text) { button.disabled = false; return; }
-      r = await api("/api/continue", { session: s.id, text, confirm });
+      r = await api("/api/continue", { session: s.id, text, confirm, files: sendable(key) });
+      att[key] = [];
     }
     if (["verify", "handoff", "escalate"].includes(name)) r = await api("/api/" + name, { session: s.id, confirm });
     if (r && r.session !== s.id) { openSession(r.session, "chat"); return; }  // a window copy (fork)
@@ -1125,17 +1297,24 @@ async function go(name, button) {
   if (name === "ontop") { onTop = await window.pywebview.api.on_top(!onTop); renderOnTop(); }
 }
 
-function rawRun() {
+async function rawRun() {
   const text = $("c-prompt").value.trim();
-  if (text && runnable()) doRun(project, text, cfg.default_model, cfg.default_effort, "");
+  if (!text || !runnable() || !await doRun(project, text, cfg.default_model, cfg.default_effort, "")) return;
+  draft = "";
+  $("c-prompt").value = "";
+  saveDraft();
 }
 
 document.addEventListener("click", (e) => {
   if (!$("pop").hidden && !e.target.closest("#pop") && !e.target.closest("[data-pick]")) closePicker();
-  const t = e.target.closest("[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-step],#brief,#today");
+  if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-step],[data-attach],[data-unattach],#brief,#today");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
-  if (t.dataset.go) go(t.dataset.go, t);
+  if (t.dataset.attach) { pickFor = t.dataset.attach; $("filepick").value = ""; $("filepick").click(); }
+  else if (t.dataset.unattach) { att[t.dataset.unattach].splice(Number(t.dataset.k), 1); paintFiles(t.dataset.unattach); }
+  else if (t.dataset.prep) prepJob(t.dataset.prep, t.dataset.pdo);
+  else if (t.dataset.go) go(t.dataset.go, t);
   else if (t.dataset.do) unblock(t);
   else if (t.dataset.open) openSession(t.dataset.open);
   else if (t.dataset.tab) { tab = t.dataset.tab; const s = current(); if (s) renderProc(s).catch(() => {}); }
@@ -1157,6 +1336,20 @@ document.addEventListener("click", (e) => {
     t.setAttribute("aria-expanded", String(open));
     $("todaymore").hidden = !open;
   }
+});
+
+$("filepick").addEventListener("change", (e) => addFiles(pickFor, [...e.target.files]));
+document.addEventListener("error", (e) => {  // an image gone from the transcript or the folder: the chip stays, without it
+  if (e.target instanceof HTMLImageElement && e.target.matches("img.thumb")) e.target.remove();
+}, true);
+document.addEventListener("paste", (e) => {  // a pasted screenshot or copied file joins the box's files
+  const files = [...((e.clipboardData && e.clipboardData.files) || [])], key = boxKey(e.target);
+  if (files.length && key) { e.preventDefault(); addFiles(key, files); }
+});
+document.addEventListener("dragover", (e) => { e.preventDefault(); });  // a file dropped anywhere must not open in the page
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files.length) addFiles(boxKey(e.target), [...e.dataTransfer.files]);
 });
 
 document.addEventListener("dblclick", (e) => {
@@ -1185,17 +1378,21 @@ document.addEventListener("keydown", (e) => {
     else doPrep();
     return;
   }
+  if (id === "answer" && e.key === "Enter" && !e.shiftKey && !e.isComposing) {  // Shift+Enter keeps the newline
+    e.preventDefault();
+    return act("answer", document.querySelector('[data-act="answer"]'));
+  }
   if (id === "fu" && e.key === "Enter") return act("continue", document.querySelector('[data-act="continue"]'));
   if (id === "pk" && e.key === "Enter") return unblock(document.querySelector('[data-do="send"][data-where="peek"]'));
   if (id.startsWith("ca-") && e.key === "Enter") return unblock(e.target.closest("[data-stay]").querySelector('[data-do="send"]'));
-  if (e.key === "Enter" && e.target.matches(".card[data-open]")) { e.target.click(); return; }
+  if (e.key === "Enter" && e.target.matches(".card[data-open],.card[data-prep]")) { e.target.click(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); go("new"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
   if (e.key === "Escape") {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();
-    else if (page === "prep") prepAct("cancel");
+    else if (page === "prep") prepAct("back");
     else if (page === "session" || page === "usage") showPage("list");
     return;
   }

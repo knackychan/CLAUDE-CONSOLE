@@ -1,6 +1,7 @@
 """The borderless pywebview window (BRAINSTORM 7.5): folded, a 380 x 48 pill that grows down for one
-peek card; open, 400 x 640. The page calls this as window.pywebview.api.<method>(...); the form,
-the place on screen and always-on-top are kept in window.json for the next start."""
+peek card; open, 400 x 760 until the grip on the page resizes it. The page calls this as
+window.pywebview.api.<method>(...); the form, the open size, the place on screen and always-on-top are
+kept in window.json for the next start."""
 import ctypes
 import os
 from ctypes import wintypes
@@ -9,7 +10,9 @@ from pathlib import Path
 from . import paths
 
 PILL_W, PILL_H = 380, 48
-OPEN_W, OPEN_H = 400, 640
+OPEN_W, OPEN_H = 400, 760  # the default open size; the grip's size replaces it
+OPEN_MIN_W, OPEN_MIN_H = 340, 420  # 340 is the narrowest layout in style.css
+OPEN_MAX_W, OPEN_MAX_H = 900, 1600
 PEEK_MAX_H = 360  # the pill plus one card, never taller
 TITLE = "ContextCompanion"  # the product name (temporary, Fred 2026-10-11): window title, tray tooltip and menu
 BACKGROUND = "#121315"  # --win in style.css: what the window shows outside the page's own corners
@@ -43,6 +46,15 @@ def _hwnd(title: str = TITLE, pid: int = None) -> int:
     except (AttributeError, OSError):
         return 0
     return found[0] if found else 0
+
+
+def clamp_size(w, h) -> tuple:
+    """(w, h) held between the open window's minimum and maximum; anything not a number is the default."""
+    try:
+        w, h = int(w), int(h)
+    except (TypeError, ValueError, OverflowError):
+        return OPEN_W, OPEN_H
+    return max(OPEN_MIN_W, min(w, OPEN_MAX_W)), max(OPEN_MIN_H, min(h, OPEN_MAX_H))
 
 
 def set_app_id(app_id: str = APP_ID) -> bool:
@@ -122,10 +134,26 @@ class WindowApi:
             self._window.resize(PILL_W, max(PILL_H, min(int(height or PILL_H), PEEK_MAX_H)))
         else:
             name = "open"
-            self._window.resize(OPEN_W, OPEN_H)
+            self._window.resize(*self.open_size())
         self._form = name
         paths.save_window(self._folder, form=name)
         return name
+
+    def open_size(self) -> tuple:
+        """The open window's remembered (w, h), clamped; the default before the grip was ever used."""
+        saved = paths.load_window(self._folder).get("size")
+        return clamp_size(*saved) if isinstance(saved, list) and len(saved) == 2 else (OPEN_W, OPEN_H)
+
+    def resize(self, w: int, h: int, keep: bool = False):
+        """The page's grip: size the open window to (w, h) held to the limits, and with `keep` (the drag
+        ended) write it to window.json. Returns [w, h] as applied, None unless the window is open."""
+        if self._form != "open":
+            return None
+        w, h = clamp_size(w, h)
+        self._window.resize(w, h)
+        if keep:
+            paths.save_window(self._folder, size=[w, h])
+        return [w, h]
 
     def on_top(self, on: bool) -> bool:
         self._on_top = bool(on)

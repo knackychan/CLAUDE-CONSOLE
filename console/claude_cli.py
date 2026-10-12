@@ -86,8 +86,10 @@ def terminal_command(exe: list, session_id: str, model: str = "", effort: str = 
     return cmd
 
 
-def user_message(text: str) -> bytes:
-    msg = {"type": "user", "message": {"role": "user", "content": text}}
+def user_message(text: str, blocks: list = ()) -> bytes:
+    """`blocks`: attached files (console/attach.py), after the text in one content list."""
+    content = [{"type": "text", "text": text}, *blocks] if blocks else text
+    msg = {"type": "user", "message": {"role": "user", "content": content}}
     return (json.dumps(msg, ensure_ascii=False) + "\n").encode("utf-8")
 
 
