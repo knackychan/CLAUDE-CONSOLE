@@ -212,7 +212,7 @@ brief), `run_brief(cfg, exe, task, step, next_step, prev_brief, raw) -> dict` (b
 | step ended, not `ok` or the block is missing or bad | `retries == 0` | step `failed` then `planned` again with `retries = 1`; restarted on the same route with the retry line in its prompt |
 | | `retries == 1` | task `stuck`, `why = "<reason> (after one retry)"` |
 | Fred: Stop | | `runs.stop(session)` when live (the interrupt); task `stopped`, owner `fred` |
-| Fred: Pause | task `running` or `waiting` | owner `fred` (the live step finishes; nothing starts after it) |
+| Fred: Pause | task `running` or `waiting` | owner `fred` (the live step finishes and is closed as usual: note, brief, chain line; nothing starts after it; plan 19) |
 | Fred: Resume | owner `fred`, task not `stuck` / `stopped` | owner `service` |
 | Fred: Retry | task `stuck` or `stopped`, no live session | the current step `planned` again (its `retries` kept), task `running`, owner `service`; the previous step session is left as it is |
 | Fred: Confirm Fable | task `waiting` on `why = "confirm Fable"` | `fable_ok = true`, task `running` |
