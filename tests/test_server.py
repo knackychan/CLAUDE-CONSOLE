@@ -831,6 +831,8 @@ class TaskServerTest(RunServerTest):
         self.assertTrue((self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").exists())
         self.assertEqual(self.hub.advance(), [])  # nothing starts while paused
         self.assertEqual(self.hub.tasks[tid]["steps"][1]["session"], "")
+        row = next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)
+        self.assertEqual((row["paused_after"], row["hold"]), (1, False))
         self.call("/api/task/resume", {"task": tid})
         self.until(tid, self.at(2), "step 2 starts after Resume")
 
@@ -900,6 +902,7 @@ class TaskServerTest(RunServerTest):
         tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
         self.until(tid, lambda t: t["state"] == "waiting", "the verify holds")
         self.assertEqual(self.hub.task_levers(tid)["confirm"], "")
+        self.assertTrue(next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)["hold"])
         self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
         task = self.until(tid, self.at(2), "the verify starts")
         step = task["steps"][1]
@@ -1066,6 +1069,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "max"}), (200, {"ok": True}))
         config = self.call("/api/config")[1]
         self.assertEqual((config["effort"], config["kinds"]), ("max", list(tasks.PREP_KINDS)))
+        self.assertEqual(config["edit_kinds"], sorted(tasks.EDIT_KINDS))
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "turbo"})[0], 400)
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "auto"})[0], 200)
         self.assertEqual(self.call("/api/config")[1]["effort"], "auto")

@@ -813,6 +813,9 @@ def task_row(t: dict) -> dict:
             "cost": round(sum(tasks.step_cost(s) for s in t["steps"]), 4),
             "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
             "briefing": t.get("briefing") or 0, "cleared": bool(t.get("cleared")),
+            "paused_after": cs["n"] if t["owner"] == "fred" and t["state"] in ("running", "waiting") and cs
+            and cs["state"] != "running" else 0,  # the step ended while paused: nothing starts until Resume
+            "hold": t["why"].endswith(" over its pace"),
             "steps": [{**{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
                                             "cost")},
                        "attempts": [{"session": a["session"], "cost": a["cost"], "why": a["why"]}
@@ -871,7 +874,7 @@ class Handler(BaseHTTPRequestHandler):
                                "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
                                "project": window.get("project", ""), "brief": window.get("brief") is True,
                                "ladder": cfg["ladder"], "effort": window.get("effort", "auto"),
-                               "kinds": tasks.PREP_KINDS})
+                               "kinds": tasks.PREP_KINDS, "edit_kinds": sorted(tasks.EDIT_KINDS)})
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())
         if url.path == "/api/image":
