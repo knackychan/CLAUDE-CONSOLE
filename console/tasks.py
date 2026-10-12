@@ -123,12 +123,17 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
 
 # -- the handoff block ------------------------------------------------------------------------------------
 
+def _mark(line: str) -> str:
+    """A marker line as the model may dress it: `**HANDOFF**`, `` `END HANDOFF` ``, `### HANDOFF`."""
+    return line.strip().strip("*_`#").strip()
+
+
 def parse_handoff(text: str):
     """The last block between a line HANDOFF and a line END HANDOFF (markers left out); None when there is none."""
     blocks, start = [], None
     lines = str(text or "").splitlines()
     for i, line in enumerate(lines):
-        mark = line.strip()
+        mark = _mark(line)
         if mark == MARK_START:
             start = i
         elif mark == MARK_END and start is not None:

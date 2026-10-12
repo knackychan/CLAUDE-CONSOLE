@@ -181,6 +181,13 @@ class HandoffTest(unittest.TestCase):
         self.assertIsNone(tasks.parse_handoff(f"see the HANDOFF block: {GOOD} END HANDOFF"))  # not whole lines
         self.assertIsNone(tasks.parse_handoff(""))
 
+    def test_parse_handoff_accepts_dressed_markers(self):
+        body = "## Findings\nx\n## Files touched\n- (none)\n## Open questions\n- (none)\n## Next\ngo"
+        for start, end in (("**HANDOFF**", "**END HANDOFF**"), ("`HANDOFF`", "`END HANDOFF`"),
+                           ("### HANDOFF", "### END HANDOFF"), ("  HANDOFF ", "END HANDOFF  ")):
+            self.assertEqual(tasks.parse_handoff(f"text\n{start}\n{body}\n{end}\n"), body, start)
+        self.assertIsNone(tasks.parse_handoff("**HANDOFF block follows**\n" + body + "\nEND HANDOFF"))
+
     def test_check_handoff_reasons(self):
         self.assertEqual(tasks.check_handoff(GOOD), "")
         self.assertEqual(tasks.check_handoff(GOOD.replace("\n## Next\nRun the tests", "")), "missing: ## Next")
