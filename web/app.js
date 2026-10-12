@@ -228,6 +228,26 @@ $("rsz").addEventListener("pointermove", (e) => { if (grip) gripSize(e, false).c
 $("rsz").addEventListener("pointerup", gripEnd);
 $("rsz").addEventListener("pointercancel", gripEnd);
 
+// -- drag regions: the cursor moves the window in Python (WindowApi.drag_*), in the form's own pixels ------
+let dragging = null;
+
+document.addEventListener("pointerdown", (e) => {
+  const region = e.target.closest(".drag-region");
+  if (!region || !native() || e.button !== 0) return;
+  region.setPointerCapture(e.pointerId);
+  dragging = { busy: false };
+  window.pywebview.api.drag_start().catch(() => {});
+  e.preventDefault();
+});
+document.addEventListener("pointermove", async (e) => {
+  if (!dragging || dragging.busy) return;
+  dragging.busy = true;
+  try { await window.pywebview.api.drag_move(); } catch (err) { /* the window is closing */ } finally { if (dragging) dragging.busy = false; }
+});
+const dragEnd = () => { dragging = null; };
+document.addEventListener("pointerup", dragEnd);
+document.addEventListener("pointercancel", dragEnd);
+
 async function fitPill() {
   if (native() && form === "pill") await window.pywebview.api.form("pill", Math.ceil($("folded").getBoundingClientRect().height));
 }
@@ -235,9 +255,9 @@ async function fitPill() {
 function renderFolded(resize) {
   if (!snap) return;
   const rail = liveSessions(), more = rail.length - PILL_CHIPS;
-  $("pill").innerHTML = `<span class="grip pywebview-drag-region" title="Drag to move">&#8942;&#8942;</span>
+  $("pill").innerHTML = `<span class="grip drag-region" title="Drag to move">&#8942;&#8942;</span>
     ${rail.slice(0, PILL_CHIPS).map(chip).join("")}${more > 0 ? `<span class="more">+${more}</span>` : ""}
-    <span class="sp pywebview-drag-region" title="Drag to move; double-click to open"></span>
+    <span class="sp drag-region" title="Drag to move; double-click to open"></span>
     <span class="big" title="Today, USD">${money(snap.spend.today)}</span>
     <button class="tb" data-go="unfold" aria-label="Open" title="Open (double-click the pill)">&#8964;</button>`;
   const found = snap.sessions.filter((s) => PEEK.has(s.state)).sort((a, b) => a.last_ts - b.last_ts)
@@ -1773,6 +1793,7 @@ document.addEventListener("keydown", (e) => {
 
 window.addEventListener("pywebviewready", async () => {
   document.documentElement.classList.add("native");
+  await window.pywebview.api.fit(window.innerWidth);  // Windows' text size zooms the page, not the form
   const st = await window.pywebview.api.state();
   onTop = st.on_top;
   renderOnTop();

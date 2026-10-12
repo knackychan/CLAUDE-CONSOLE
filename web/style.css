@@ -35,7 +35,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mut { color: var(--mut); }
 .lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
 .lbl.y { color: var(--you); } .lbl.r { color: var(--bad); }
-.pywebview-drag-region { cursor: grab; }
+.drag-region { cursor: grab; }
 .link { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
 /* cells */

@@ -9,10 +9,16 @@ class FakeWindow:
     def __init__(self):
         self.calls = []
         self.x, self.y = 120, 80
+        self.width, self.height = 400, 760
         self.on_top = True
 
     def resize(self, w, h):
+        self.width, self.height = w, h
         self.calls.append(("resize", w, h))
+
+    def move(self, x, y):
+        self.x, self.y = x, y
+        self.calls.append(("move", x, y))
 
     def minimize(self):
         self.calls.append(("minimize",))
@@ -77,6 +83,47 @@ class WindowApiTest(unittest.TestCase):
         self.assertEqual(paths.load_window(self.folder)["size"], [360, 900])
         paths.save_window(self.folder, size=["bad"])
         self.assertEqual(window.WindowApi(self.folder).open_size(), (window.OPEN_W, window.OPEN_H))
+
+    def test_scale_is_form_pixels_per_css_pixel(self):
+        self.assertEqual(window.scale_of(400, 308), 1.3)  # Windows text size 130 %: WebView2 zooms, the form does not
+        self.assertEqual(window.scale_of(400, 400), 1.0)
+        self.assertEqual(window.scale_of(400, 397), 1.0)  # a pixel of frame is not a scale
+        self.assertEqual(window.scale_of(1000, 100), 3.0)
+        for junk in ((400, 0), (0, 400), ("x", 400), (None, None), (400, -5)):
+            self.assertEqual(window.scale_of(*junk), 1.0)
+
+    def test_text_size_scales_every_size_the_page_asks_for(self):
+        self.api.form("open")
+        self.assertEqual(self.api.fit(308), 1.3)  # the page lays out at 308 css px in a 400 px form
+        self.assertEqual(self.win.calls[-1], ("resize", round(400 * 1.3), round(760 * 1.3)))
+        self.assertEqual(paths.load_window(self.folder)["scale"], 1.3)
+        self.assertEqual(self.api.fit(400), 1.3)  # the page now lays out at 400 css px: nothing changes
+        self.assertEqual(len(self.win.calls), 2)
+        self.assertEqual(self.api.resize(360, 900, True), [360, 900])  # css px in and out
+        self.assertEqual(self.win.calls[-1], ("resize", 468, 1170))
+        self.assertEqual(paths.load_window(self.folder)["size"], [360, 900])
+        self.assertEqual(self.api.resize(1, 1), [window.OPEN_MIN_W, window.OPEN_MIN_H])  # 340 css px, not form px
+        self.assertEqual(self.win.calls[-1], ("resize", round(340 * 1.3), round(420 * 1.3)))
+        self.api.form("pill", 100)
+        self.assertEqual(self.win.calls[-1], ("resize", round(380 * 1.3), round(100 * 1.3)))
+        again = window.WindowApi(self.folder)  # the next start opens at the right size at once
+        self.assertEqual(again.open_size(), (468, 1170))
+        self.assertEqual(window.WindowApi(self.folder).state()["form"], "pill")
+
+    def test_drag_follows_the_cursor_in_form_pixels(self):
+        cursor = [(500, 300)]
+        self.addCleanup(setattr, window, "cursor_pos", window.cursor_pos)
+        window.cursor_pos = lambda: cursor[0]
+        self.api.drag_start()
+        cursor[0] = (620, 380)
+        self.api.drag_move()
+        self.assertEqual(self.win.calls[-1], ("move", 240, 160))
+        cursor[0] = (400, 250)
+        self.api.drag_move()
+        self.assertEqual(self.win.calls[-1], ("move", 20, 30))
+        window.cursor_pos = lambda: None  # no cursor: nothing moves
+        self.api.drag_move()
+        self.assertEqual(len(self.win.calls), 2)
 
     def test_hwnd_is_only_this_process_window(self):
         # the test process has no window: an Explorer tab proxy or the real window of the same name
