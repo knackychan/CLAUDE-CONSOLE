@@ -76,10 +76,10 @@ The docstring gains the `CHAIN` line.
 
 ## Steps
 
-- [ ] 1. Write the tests. Run: fail (no `steps` in the schema, no rows in the prompt, no `CHAIN`).
-- [ ] 2. `prep.py` schema and `run_prep`. `fake_claude.py` `CHAIN`. Run `tests.test_prep`: pass.
-- [ ] 3. `prep_prompt.md` block and the two sentences. Run `tests.test_tasks` and `tests.test_dotclaude`: pass.
-- [ ] 4. Whole suite OK. Commit: `feat: Prep proposes task steps; the Console appends the verify (plan 17 Task 3)`.
+- [x] 1. Write the tests. Run: fail (no `steps` in the schema, no rows in the prompt, no `CHAIN`).
+- [x] 2. `prep.py` schema and `run_prep`. `fake_claude.py` `CHAIN`. Run `tests.test_prep`: pass.
+- [x] 3. `prep_prompt.md` block and the two sentences. Run `tests.test_tasks` and `tests.test_dotclaude`: pass.
+- [x] 4. Whole suite OK. Commit: `feat: Prep proposes task steps; the Console appends the verify (plan 17 Task 3)`.
 
 ## Drift guards
 

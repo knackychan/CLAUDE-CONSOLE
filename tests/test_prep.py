@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from console import paths, prep
+from console import paths, prep, tasks
 
 FAKE = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
 FIELDS = {"goal": "Fix add()", "where": "calc.py", "keep": "", "done_when": "tests pass",
@@ -25,10 +25,15 @@ class PrepTest(unittest.TestCase):
 
     def test_schema_shape(self):
         self.assertEqual(set(prep.SCHEMA["required"]), set(FIELDS))
-        self.assertEqual(set(prep.SCHEMA["properties"]), set(FIELDS))
+        self.assertEqual(set(prep.SCHEMA["properties"]), set(FIELDS) | {"steps"})
         route = prep.SCHEMA["properties"]["route"]
         self.assertEqual(route["type"], "object")
         self.assertEqual(set(route["required"]), {"type", "reasoning", "volume", "model", "effort"})
+        steps = prep.SCHEMA["properties"]["steps"]  # optional: a one-step task leaves it empty
+        self.assertNotIn("steps", prep.SCHEMA["required"])
+        self.assertEqual(steps["type"], "array")
+        self.assertEqual(set(steps["items"]["required"]), {"kind", "goal"})
+        self.assertEqual(steps["items"]["properties"]["kind"]["enum"], list(tasks.PREP_KINDS))
 
     def test_prompt_demands_every_key(self):
         # Haiku sometimes left out `question` (nothing to ask) and `route` (flattened into the top level),
@@ -38,6 +43,7 @@ class PrepTest(unittest.TestCase):
             self.assertIn(key, rules)
         self.assertIn('"question": ""', rules)
         self.assertIn("effort at the top level", rules)
+        self.assertIn('"steps": []', rules)
 
     def test_parse_output(self):
         good = json.dumps({"is_error": False, "structured_output": FIELDS, "total_cost_usd": 0.03, "num_turns": 5})
@@ -76,6 +82,17 @@ class PrepTest(unittest.TestCase):
             self.assertEqual(same["id"], "20261012-101010-ab12")  # the background job's id names the card
             self.assertEqual(prep.load(Path(tmp), same["id"])["raw"], "fix it")
 
+
+    def test_run_prep_returns_steps_and_appends_verify(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = copy.deepcopy(paths.DEFAULTS)
+            card = prep.run_prep(cfg, Path(tmp), tmp, "CHAIN fix add", FAKE)
+            self.assertEqual([s["kind"] for s in card["steps"]], ["scout", "code", "verify"])
+            self.assertEqual([s["n"] for s in card["steps"]], [1, 2, 3])
+            self.assertEqual(card["demand"], {"reasoning": "low", "volume": "low"})
+            self.assertEqual(prep.load(Path(tmp), card["id"])["steps"], card["steps"])
+            plain = prep.run_prep(cfg, Path(tmp), tmp, "fix the add function", FAKE)
+            self.assertEqual(plain["steps"], [])
 
     def test_run_prep_routes_by_demand(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -17,7 +17,6 @@ from pathlib import Path
 from string import Template
 
 from . import claude_cli, levers, redact, routing
-from .prep import new_id
 
 RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify and fix are computed.
     "scout": ("haiku", "low", "Read,Grep,Glob"),
@@ -218,6 +217,7 @@ def new_task(project_dir: str, project: str, title: str, goal: str, steps: list,
         raise ValueError("a task needs at least one step")
     if effort != "auto" and effort not in claude_cli.EFFORTS:
         raise ValueError(f"unknown effort: {effort}")
+    from .prep import new_id  # here, not at the top: prep imports this module for PREP_KINDS
     return {"id": new_id(), "project_dir": project_dir, "project": project, "title": title,
             "goal": str(goal or "")[:GOAL_MAX], "type": type_, "demand": dict(demand or {}), "effort": effort,
             "state": "planned", "owner": "service", "current": 0, "last_good": 0, "escalated": "",

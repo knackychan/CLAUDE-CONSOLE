@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import claude_cli, levers, tasks
+from console import claude_cli, levers, prep, tasks
 
 GOOD = ("## Findings\nadd() is in calc.py:2\n## Files touched\n- calc.py (fixed add)\n"
         "## Open questions\n- (none)\n## Next\nRun the tests")
@@ -61,6 +61,17 @@ class RulesTest(unittest.TestCase):
         self.assertEqual(tasks.safe_id("20261012-101500-3f2a"), "20261012-101500-3f2a")
         for bad in ("", "..", "a/b", "ABC", "20261012-101500-3f2a-extra-long", None):
             self.assertEqual(tasks.safe_id(bad), "", bad)
+
+    def test_kinds_table_matches_prompt(self):
+        rows = {}
+        for line in prep.PROMPT_FILE.read_text(encoding="utf-8").splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 4 and cells[0] in tasks.RULES:
+                rows[cells[0]] = (cells[2], cells[3])
+        for kind in tasks.PREP_KINDS:
+            self.assertIn(kind, rows, f"no row for {kind} in the kinds table")
+        for kind, route in rows.items():
+            self.assertEqual(route, tasks.RULES[kind][:2], kind)
 
     def test_verify_runs_one_model_up(self):
         cases = [(("haiku", "low"), ("sonnet", "medium")), (("sonnet", "medium"), ("opus", "medium")),

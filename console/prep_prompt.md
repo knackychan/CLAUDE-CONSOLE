@@ -26,13 +26,34 @@ Also rate the task's demand, low / medium / high, in `route`:
 The Console turns the demand into the route: high reasoning runs on opus/high; high volume with low
 reasoning on haiku/low, with medium reasoning on sonnet/medium; otherwise your model and effort.
 
+Also split the request into steps when it has more than one kind of work, in `steps` (at most 5; an empty list
+when one run should do it all). Each step is one separate run on its own model, so put the reading in a
+scout step and the writing in a later one. Kinds and their models:
+
+| kind | what the step does | model | effort |
+|---|---|---|---|
+| scout | find the files, functions and tests a task touches; quick research summaries | haiku | low |
+| search | docs and web lookups, explain a library or an error | haiku | low |
+| draft | a first draft of docs, plans or prose | haiku | low |
+| proofread | proofreading and wording passes, no code | haiku | low |
+| edit | a 1-2 file edit with a clear spec, a rename, a copy | haiku | low |
+| code | a feature or fix with a clear spec, and its tests | sonnet | medium |
+| document | an important document: a plan, a spec, user-facing docs | sonnet | medium |
+| explain | an in-depth explanation across many files | sonnet | medium |
+| debug | a failing test or a bug with no known cause | sonnet | high |
+| test | run the checks and report, no edits | haiku | low |
+| design | architecture, a novel problem, a critical decision, deep research | opus | high |
+
+Do not add a verify step: the Console adds one after the last step that edits.
+
 Fields: goal (one sentence), where (files and functions, short), keep (what must not break),
 done_when (a check that can be run), last_decisions (from PLAN.md History, one line each, or ""),
-question, route {type, reasoning, volume, model, effort}, reason (one sentence: why this route).
+question, route {type, reasoning, volume, model, effort}, reason (one sentence: why this route),
+steps (a list of {kind, goal}, or []).
 
-Output rules: the JSON object has exactly these 8 keys and all 8 are always present: goal, where,
-keep, done_when, last_decisions, question, route, reason. A text field with nothing to say is "" and
-is never left out; with no open question write "question": "". `route` is always an object with
+Output rules: the JSON object has exactly these 9 keys and all 9 are always present: goal, where,
+keep, done_when, last_decisions, question, route, reason, steps. A text field with nothing to say is "" and
+is never left out; with no open question write "question": "" and with nothing to split write "steps": []. `route` is always an object with
 type, reasoning, volume, model and effort; never put type, reasoning, volume, model or effort at the top level.
 
 Routing misses in this project (Escalate wrote them; newest last):

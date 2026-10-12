@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, levers, redact, routing
+from . import claude_cli, levers, redact, routing, tasks
 
 PROMPT_FILE = Path(__file__).resolve().parent / "prep_prompt.md"
 TYPES = ["mechanical", "lookup", "normal", "risky", "vague"]
@@ -24,6 +24,9 @@ SCHEMA = {
             "reasoning": {"type": "string", "enum": routing.LEVELS},
             "volume": {"type": "string", "enum": routing.LEVELS},
         }, "required": ["type", "reasoning", "volume", "model", "effort"]},
+        "steps": {"type": "array", "items": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": list(tasks.PREP_KINDS)}, "goal": _TEXT,
+        }, "required": ["kind", "goal"]}},
     },
     "required": ["goal", "where", "keep", "done_when", "last_decisions", "question", "route", "reason"],
 }
@@ -100,9 +103,11 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, pre
     if (route["model"], route["effort"]) != picked:
         fields["reason"] = (f"{fields.get('reason', '')} Demand rule: {'/'.join(picked)} -> "
                             f"{route['model']}/{route['effort']}.").strip()
+    steps = tasks.plan_steps(fields.get("steps") or [], cfg["task_max_steps"])  # the only validator
     card = {
         "id": prep_id or new_id(), "ts": time.time(), "project_dir": project_dir, "raw": raw,
         "fields": fields, "prompt": format_prompt(fields), "route": fields["route"],
+        "steps": steps, "demand": {"reasoning": route["reasoning"], "volume": route["volume"]},
         "reason": fields.get("reason", ""), "cost": result["cost"], "turns": result["turns"],
         "model": cfg["prep_model"],
     }

@@ -3,6 +3,7 @@
 Prep (--json-schema): reads the prompt on stdin, prints one result object.
   "SLOW" in the request: waits 2 s first (Prep runs in the background).
   "THINK" / "BULK" in the request: the route rates reasoning / token volume high.
+  "CHAIN" in the request: `steps` holds a scout and a code step (else `steps` is []).
   A request that starts with "Compact the handoff note" is the brief pass: it answers the brief schema
   (findings, files, questions, next); "LONG" in it gives 80 findings (over the word cap), "BROKEN"/"SLOW" as above.
 Run (--input-format stream-json): per user message prints init / assistant / result.
@@ -34,11 +35,14 @@ def prep():
               "done_when": "py -m unittest passes", "last_decisions": "", "question": "",
               "route": {"type": "mechanical", "reasoning": "low", "volume": "low", "model": "sonnet",
                         "effort": "low"},
-              "reason": "one-line fix with a clear spec"}
+              "reason": "one-line fix with a clear spec", "steps": []}
     if "THINK" in raw:
         fields["route"]["reasoning"] = "high"
     if "BULK" in raw:
         fields["route"]["volume"] = "high"
+    if "CHAIN" in raw:
+        fields["steps"] = [{"kind": "scout", "goal": "find the add() callers"},
+                           {"kind": "code", "goal": "fix add() and its test"}]
     if raw.startswith("Compact the handoff note"):  # the brief pass (console/compact.py)
         fields = {"findings": ["add() is in calc.py:2", "test_add covers it"], "files": ["calc.py"],
                   "questions": [], "next": "Fix add() and run the test"}
