@@ -37,6 +37,7 @@ ACTIVITY_STEPS = (1, 3, 6, 10)  # steps in a minute for levels 1-4 (Fred: 1-2, 3
 BURN_S = 300                    # "$ / min now" is the estimated cost of the last 5 minutes / 5
 _PASTED = re.compile(r"</?pasted_content[^>]*>")
 _TAGGED = re.compile(r"<[A-Za-z]")  # an injected block the hook clipped before it closed: not a title
+_FULL = re.compile(r"claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?:[-\[]|$)")  # a date or [1m] may follow
 
 
 def norm_dir(path: str) -> str:
@@ -426,6 +427,17 @@ class State:
                 counts[ACTIVITY_MIN - 1 - back] += 1
         return [sum(c >= t for t in ACTIVITY_STEPS) for c in counts]
 
+    def versions(self) -> dict:
+        """family -> the newest version seen in a full model id ("5.5"), from every session in memory; an alias
+        alone says nothing, a family never seen is left out."""
+        best = {}
+        for s in self.sessions.values():
+            m = _FULL.match(s.model or "")
+            if m:
+                v = (int(m.group(2)), int(m.group(3) or 0))
+                best[m.group(1)] = max(best.get(m.group(1), v), v)
+        return {fam: f"{a}.{b}" for fam, (a, b) in best.items()}
+
     def snapshot(self, now: float, usage=None, day=None) -> dict:
         """`usage` (a usage.Usage) adds the estimated cost; without it every estimate is 0. `day` is today's
         usage.History row ({cost, models}), the spend figure; without it the spend is 0."""
@@ -499,6 +511,7 @@ class State:
             "counts": {g: sum(1 for r in rows if r["group"] == g) for g in ("needs", "replied", "working", "done", "empty")},
             "spend": self.spend(shown, now, usage, day),
             "projects": self.projects(shown, now, usage),
+            "versions": self.versions(),
         }
 
     def rules_warn(self, rules: dict) -> str:

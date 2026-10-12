@@ -50,6 +50,13 @@ class StateTest(unittest.TestCase):
         self.assertEqual(self.row(T0 + 2000)["group"], "done")
         self.assertEqual(self.row(T0 + 30)["title"], "fix the updater retry")
 
+    def test_snapshot_versions_from_seen_models(self):
+        for sid, model in (("a", "claude-opus-5-5"), ("b", "claude-opus-4-8"), ("c", "sonnet"),
+                           ("d", "claude-haiku-4-5-20251001"), ("e", "claude-fable-5-1"), ("f", "claude-sonnet-4-6[1m]")):
+            self.feed(ev("SessionStart", T0, sid=sid, model=model))
+        self.assertEqual(self.state.snapshot(T0 + 1)["versions"], {"opus": "5.5", "haiku": "4.5", "fable": "5.1",
+                                                                "sonnet": "4.6"})
+
     def test_stop_question_blocked_failed_done(self):
         self.feed(ev("UserPromptSubmit", T0), ev("Stop", T0 + 5, stop_question="how many retries?"))
         self.assertEqual((self.row(T0 + 6)["state"], self.row(T0 + 6)["group"]), ("stop", "needs"))
