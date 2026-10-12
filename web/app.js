@@ -1020,15 +1020,30 @@ function taskLink(s) {  // "task · step 2/4" under the title of a step's sessio
   return t ? `<div class="m"><span class="link" data-task="${esc(t.id)}">${text}</span></div>` : `<div class="m mut">${text}</div>`;
 }
 
+function oldStep(id) {  // [task, step] when `id` is a session of the task on the Task page; else null
+  const t = taskData && taskData.task;
+  const s = t && t.steps.find((x) => x.session === id || (x.attempts || []).some((a) => a.session === id));
+  return s ? [t, s] : null;
+}
+async function renderOldChat(id) {  // a step session out of the snapshot: its transcript, no tabs
+  const seq = ++procSeq, chat = await api("/api/chat?session=" + encodeURIComponent(id));
+  if (seq !== procSeq || openId !== id) return;
+  setHtml($("proc"), `<div class="pane" id="pane" tabindex="0">${chatPane(chat, id, "chat")}</div>`, { sel: ".pane", end: true, reset: procShown !== id + "|old" });
+  procShown = id + "|old";
+}
 function renderSession() {
   const s = current(), nav = navList(), k = nav.findIndex((x) => x.id === openId);
   $("pos").textContent = k >= 0 ? `${k + 1} of ${nav.length}` : "";
   $("prev").disabled = k <= 0;
   $("next").disabled = k < 0 || k >= nav.length - 1;
   if (!s) {
-    setHtml($("sbody"), '<div class="mut">Starting ... (the session shows up with its first event)</div>');
-    $("proc").innerHTML = "";
-    $("proc")._html = "";
+    const old = oldStep(openId);
+    setHtml($("sbody"), old ? `<div class="head"><h2>${esc(old[0].title)}</h2>
+      <div class="m">step ${old[1].n}/${old[0].steps.length} · ${esc(old[1].kind)} · older than a day: the Chat reads its transcript</div>
+      <div class="m"><span class="link" data-task="${esc(old[0].id)}">task</span></div></div>`
+      : '<div class="mut">Starting ... (the session shows up with its first event)</div>');
+    if (old) renderOldChat(openId).catch(() => {});
+    else { $("proc").innerHTML = ""; $("proc")._html = ""; }
     setHtml($("levers"), "");
     return;
   }
@@ -1081,6 +1096,16 @@ function chatHtml(text) {
   return out.join("");
 }
 
+function chatPane(chat, sid, source) {  // the Chat tab's markup: a window run's stream or a transcript's turns
+  const turns = chat.items.filter((i) => i.role !== "tool");
+  const foot = chat.source === "window"
+    ? "Streamed from this window run." + (chat.start_commit ? ` start ${esc(chat.start_commit.slice(0, 7))} · ${chat.changed == null ? "?" : chat.changed} file(s) changed since.` : "")
+    : `Read from the ${esc(source === "?" ? "chat" : source)} transcript, in words and files; tool output stays in Steps.`;
+  return `<div class="chat">${turns.map((i) => `<div class="turn ${i.role}"><span class="lbl">${i.role === "you" ? "You" : i.role === "claude" ? "Claude" : esc(i.role)}${i.ts ? " · " + hhmm(i.ts) : ""}</span>
+    ${i.role === "claude" ? chatHtml(i.text) : i.text ? `<p>${esc(i.text)}</p>` : ""}${chatFiles(i.files, i.role, sid)}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
+    <p class="src">${foot}</p></div>`;
+}
+
 async function renderProc(s) {
   const seq = ++procSeq, wanted = tab;
   let steps = [], chat = null;
@@ -1115,13 +1140,7 @@ async function renderProc(s) {
       <div class="hd at"><span class="lbl">${hhmm(at(sel))} · ${inMin.length} step${inMin.length === 1 ? "" : "s"}</span><span class="m">← → other minutes</span></div>
       ${inMin.length ? `<div class="log">${inMin.map((x) => logRow(x, "", stepTag(s)(x))).join("")}</div>` : '<p class="none">No step in this minute.</p>'}</div>`;
   } else {
-    const turns = chat.items.filter((i) => i.role !== "tool");
-    const foot = chat.source === "window"
-      ? "Streamed from this window run." + (chat.start_commit ? ` start ${esc(chat.start_commit.slice(0, 7))} · ${chat.changed == null ? "?" : chat.changed} file(s) changed since.` : "")
-      : `Read from the ${esc(s.source === "?" ? "chat" : s.source)} transcript, in words and files; tool output stays in Steps.`;
-    body = `<div class="chat">${turns.map((i) => `<div class="turn ${i.role}"><span class="lbl">${i.role === "you" ? "You" : i.role === "claude" ? "Claude" : esc(i.role)}${i.ts ? " · " + hhmm(i.ts) : ""}</span>
-      ${i.role === "claude" ? chatHtml(i.text) : i.text ? `<p>${esc(i.text)}</p>` : ""}${chatFiles(i.files, i.role, s.id)}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
-      <p class="src">${foot}</p></div>`;
+    body = chatPane(chat, s.id, s.source);
   }
   const html = `<div class="tabs" role="tablist" aria-label="Process">${TABS.map(([id, nm]) =>
     `<button role="tab" id="tab-${id}" data-tab="${id}" aria-selected="${wanted === id}" aria-controls="pane" tabindex="${wanted === id ? 0 : -1}">${nm}${id === "agents" ? ` <span class="n">${rows.length}</span>` : ""}</button>`).join("")}</div>
