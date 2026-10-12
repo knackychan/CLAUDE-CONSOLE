@@ -22,13 +22,15 @@ class BriefError(Exception):
     pass
 
 
-def build_prompt(task: dict, step: dict, next_step, prev_brief: str, raw: str) -> str:
-    """compact_prompt.md filled in; `next_step` is None after the last step."""
+def build_prompt(task: dict, step: dict, next_step, prev_brief: str, raw: str, words_target: int = 400) -> str:
+    """compact_prompt.md filled in; `next_step` is None after the last step. The task is named by its goal (the
+    title is an 80-character clip), `words_target` is the length asked for (`budget`)."""
     nxt = next_step or {"n": "-", "kind": "none",
                         "goal": "none, this was the last step: keep what a follow-up chat on this task needs"}
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
-        title=task["title"], next_n=nxt["n"], m=len(task["steps"]), next_kind=nxt["kind"], next_goal=nxt["goal"],
-        prev=prev_brief or "(none: this is the first brief)", n=step["n"], kind=step["kind"], raw=raw)
+        task=redact.clip(task.get("goal") or task["title"], 400), next_n=nxt["n"], m=len(task["steps"]),
+        next_kind=nxt["kind"], next_goal=nxt["goal"], prev=prev_brief or "(none: this is the first brief)",
+        n=step["n"], kind=step["kind"], raw=raw, words=words_target)
 
 
 def _bullets(items) -> str:
@@ -53,6 +55,11 @@ def words(text: str) -> int:
 def limit(raw: str, prev: str) -> int:
     """What a brief compacts: the raw note plus the earlier brief it carries forward. It never adds to them."""
     return words(raw) + words(prev)
+
+
+def budget(cfg: dict, raw: str, prev: str) -> int:
+    """The word target the prompt asks for: 60 % of what it compacts, at least 60, at most brief_max_words."""
+    return max(60, min(cfg["brief_max_words"], limit(raw, prev) * 6 // 10))
 
 
 def _open(text: str) -> list:
@@ -140,9 +147,10 @@ def run_brief(cfg: dict, exe: list, task: dict, step: dict, next_step, prev_brie
     that fails `check`, ends in `fallback`. {"text", "cost", "words", "model", "fallback": "" | why}."""
     cost, why = 0, ""
     try:
-        fields, cost = _ask(cfg, exe, task["project_dir"], build_prompt(task, step, next_step, prev_brief, raw))
+        prompt = build_prompt(task, step, next_step, prev_brief, raw, budget(cfg, raw, prev_brief))
+        fields, cost = _ask(cfg, exe, task["project_dir"], prompt)
         text = render(fields)
-        why = check(text, cfg["brief_max_words"])
+        why = check(text, cfg["brief_max_words"], raw, prev_brief)
     except BriefError as exc:
         text, why = "", str(exc)
     if why:

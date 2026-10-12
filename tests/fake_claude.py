@@ -65,8 +65,10 @@ def prep():
     return 0
 
 
-HANDOFF_BLOCK = ("HANDOFF\n## Findings\nadd() is in calc.py:2\n## Files touched\n- (none)\n"
-                 "## Open questions\n- (none)\n## Next\nGo on\nEND HANDOFF")
+HANDOFF_BLOCK = ("HANDOFF\n## Findings\nadd() is in calc.py:2\n"
+                 "test_add in tests/test_calc.py covers it and fails on a negative number\n"
+                 "the callers in report.py and cli.py pass ints only\n## Files touched\n- (none)\n"
+                 "## Open questions\n- (none)\n## Next\nGo on\nEND HANDOFF")  # longer than the fake brief
 
 
 def reply(text):

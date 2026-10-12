@@ -91,6 +91,19 @@ class BriefTest(unittest.TestCase):
         last = compact.build_prompt(task, tasks.step(task, 3), None, "", RAW)
         self.assertIn("this was the last step", last)
 
+    def test_prompt_names_the_goal_and_a_word_target(self):
+        task = make_task()
+        task["goal"] = "Goal: " + "g" * 600
+        text = compact.build_prompt(task, tasks.step(task, 1), tasks.step(task, 2), "", RAW, 120)
+        self.assertIn("Task: Goal: ggg", text)
+        self.assertNotIn("g" * 400, text)
+        self.assertIn("at most 120 words in all", text)
+        self.assertIn("never drop one", text)
+        self.assertNotIn("$", text)
+        self.assertEqual(compact.budget({"brief_max_words": 400}, "w " * 1000, ""), 400)
+        self.assertEqual(compact.budget({"brief_max_words": 400}, "w " * 50, ""), 60)
+        self.assertEqual(compact.budget({"brief_max_words": 400}, "w " * 200, "w " * 100), 180)
+
     def test_run_brief_uses_the_fake(self):
         cfg = copy.deepcopy(paths.DEFAULTS)
         with tempfile.TemporaryDirectory() as project:
