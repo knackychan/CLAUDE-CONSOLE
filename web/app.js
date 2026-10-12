@@ -107,12 +107,12 @@ function routeText(s) {
   return run ? s.route + " · " + run : s.route;
 }
 function version(model) {  // claude-opus-4-8 -> "4.8", claude-haiku-4-5-20251001 -> "4.5"; an alias or an unversioned name -> ""
-  const m = String(model || "").match(/(?:fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?=-|$)/);
+  const m = String(model || "").match(/(?:fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?=[-[]|$)/);  // a date or [1m] may follow
   return m ? m[1] + (m[2] ? "." + m[2] : "") : "";
 }
-function modelText(model, effort) {
-  const fam = alias(model), v = version(model);
-  return [v && fam !== model ? fam + " " + v : fam, effort].filter(Boolean).join(" ");
+function modelText(model, effort) {  // an alias shows the newest version the service has seen (snap.versions)
+  const fam = alias(model), v = version(model) || (fam === model && snap && snap.versions ? snap.versions[fam] || "" : "");
+  return [v ? fam + " " + v : fam, effort].filter(Boolean).join(" ");
 }
 function routeRows(s, rows) {  // the Route block: the Prep that wrote the prompt, then main and the agents
   const prep = s.prep
@@ -564,7 +564,7 @@ function prepJobHtml(j) {
   const c = j.card, goal = c.fields.goal || c.raw;
   return `<div class="card" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Prep ready: " + goal)}">
     <div class="l1"><span class="st g">&#9654; Ready to run</span><span class="t">${esc(goal)}</span><span class="age m">${ago(snap.now - c.ts)}</span></div>
-    <div class="l2 m"><span class="who">${where}<span class="route"> · ${esc(c.route.model)} ${esc(c.route.effort)}</span>${j.attached.length ? ` · ${j.attached.length} file${j.attached.length === 1 ? "" : "s"}` : ""}</span>
+    <div class="l2 m"><span class="who">${where}<span class="route"> · ${esc(modelText(c.route.model, c.route.effort))}</span>${j.attached.length ? ` · ${j.attached.length} file${j.attached.length === 1 ? "" : "s"}` : ""}</span>
     <span class="cost">${money(c.cost)}</span></div></div>`;
 }
 
