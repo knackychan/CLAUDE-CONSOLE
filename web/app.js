@@ -349,7 +349,7 @@ async function openSession(id, list = "chat") {
 
 function inScope(s) { return !scope || s.project_dir === scope; }
 function groups() {
-  const mine = snap.sessions.filter(inScope);
+  const mine = snap.sessions.filter((s) => inScope(s) && !s.task);  // a step session: its task row is the way in
   const work = mine.filter((s) => s.group === "working");
   const byAge = (g) => mine.filter((s) => s.group === g).sort((a, b) => b.last_ts - a.last_ts);
   return { needs: mine.filter((s) => s.group === "needs"), replied: byAge("replied"), empty: byAge("empty"),
