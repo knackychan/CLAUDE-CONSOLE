@@ -577,9 +577,11 @@ class Hub:
         if task["state"] == "done" and task.get("briefing") and task["id"] not in self.briefing:
             self.start_brief(task, task["briefing"])  # the service restarted while the last brief ran
             return ""
+        cs = tasks.current_step(task)
+        if task["owner"] == "fred" and task["state"] in ("running", "waiting") and cs and cs["state"] == "running":
+            return self._ended(task, cs)  # paused: the step that ended is closed; nothing starts after it
         if task["owner"] != "service" or task["state"] not in ("planned", "running", "waiting"):
             return ""
-        cs = tasks.current_step(task)
         if cs and cs["state"] == "running":
             return self._ended(task, cs)
         if task["state"] == "waiting":
@@ -647,7 +649,7 @@ class Hub:
         self._commit(task, lines)
         if action in ("next", "fix", "done"):  # the last step gets a brief too: Start next chat reads it
             self.start_brief(task, cs["n"])
-        if action in ("next", "fix", "retry"):
+        if action in ("next", "fix", "retry") and task["owner"] == "service":
             self._go_on(task)
         return action
 
@@ -711,7 +713,7 @@ class Hub:
     def _go_on(self, task: dict) -> str:
         """Start the step that may start: step 1 of a planned task, a retry, the one after a done step."""
         nxt, now = self._next_step(task), time.time()
-        if nxt is None:
+        if nxt is None or task["owner"] != "service":  # paused: Resume starts it
             return ""
         cs = tasks.current_step(task)
         if cs and cs["state"] == "done" and task.get("briefing"):  # between steps: the next one reads the brief

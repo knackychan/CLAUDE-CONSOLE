@@ -794,11 +794,25 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.call("/api/task/pause", {"task": tid}), (200, {"task": tid, "state": "running"}))
         self.assertEqual(self.hub.tasks[tid]["owner"], "fred")
         self.wait_idle(sid)
-        self.hub.poll_once()
-        self.assertEqual(self.hub.advance(), [])  # the step finished; nothing starts after it
-        self.assertEqual(len([s for s in self.hub.tasks[tid]["steps"] if s["session"]]), 1)
+        self.until(tid, lambda t: t["steps"][0]["state"] == "done", "step 1 closed while paused")
+        self.assertEqual(len([s for s in self.hub.tasks[tid]["steps"] if s["session"]]), 1)  # nothing after it
         self.assertEqual(self.call("/api/task/resume", {"task": tid}), (200, {"task": tid, "state": "running"}))
         self.until(tid, self.at(2), "step 2 starts")
+
+    def test_pause_closes_an_ended_step(self):
+        tid = self.make_task(steps=self.TWO)
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.call("/api/task/pause", {"task": tid})
+        self.wait_idle(sid)
+        task = self.until(tid, lambda t: t["steps"][0]["state"] == "done", "step 1 closed while paused")
+        self.assertEqual((task["owner"], task["steps"][1]["session"]), ("fred", ""))
+        self.assertTrue((self.folder / "tasks" / tid / "steps" / "01-scout.md").exists())
+        self.until(tid, lambda t: not t.get("briefing"), "the brief ran while paused")
+        self.assertTrue((self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").exists())
+        self.assertEqual(self.hub.advance(), [])  # nothing starts while paused
+        self.assertEqual(self.hub.tasks[tid]["steps"][1]["session"], "")
+        self.call("/api/task/resume", {"task": tid})
+        self.until(tid, self.at(2), "step 2 starts after Resume")
 
     def test_task_only_in_allowed_projects(self):
         other = Path(self.tmp.name) / "other"
