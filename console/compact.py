@@ -46,9 +46,36 @@ def render(fields: dict) -> str:
     return redact.mask(text)
 
 
-def check(block: str, max_words: int) -> str:
-    """"" when the block has the four headings and fits `max_words`; else the reason."""
-    return tasks.check_handoff(block) or (f"over {max_words} words" if len(str(block).split()) > max_words else "")
+def words(text: str) -> int:
+    return len(str(text or "").split())
+
+
+def limit(raw: str, prev: str) -> int:
+    """What a brief compacts: the raw note plus the earlier brief it carries forward. It never adds to them."""
+    return words(raw) + words(prev)
+
+
+def _open(text: str) -> list:
+    """The open questions of a note or a brief: the lines under `## Open questions` that are not a none."""
+    lines = _sections(text).get("## Open questions", "").splitlines()
+    out = [line.strip().lstrip("-* ").strip() for line in lines]
+    return [q for q in out if q and q.strip("().").lower() not in ("none", "n/a", "")]
+
+
+def check(block: str, max_words: int, raw: str = "", prev: str = "") -> str:
+    """"" when the block has the four headings, fits `max_words`, is shorter than what it compacts (when `raw` is
+    given) and keeps the open questions; else the reason."""
+    why = tasks.check_handoff(block)
+    if why:
+        return why
+    n = words(block)
+    if n > max_words:
+        return f"over {max_words} words"
+    if raw and n >= limit(raw, prev):
+        return f"not shorter than what it compacts ({n} >= {limit(raw, prev)} words)"
+    if (_open(raw) or _open(prev)) and not _open(block):
+        return "dropped the open questions"
+    return ""
 
 
 def _sections(text: str) -> dict:

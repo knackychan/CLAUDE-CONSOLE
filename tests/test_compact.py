@@ -42,6 +42,26 @@ class BriefTest(unittest.TestCase):
         self.assertIn("- two lines here\n- key ***\n", messy)
         self.assertTrue(messy.endswith("## Next\na b"))
 
+    def test_check_rejects_a_first_brief_not_shorter_than_its_note(self):
+        brief = compact.render(FIELDS)
+        self.assertEqual(compact.check(brief, 400, RAW + " pad" * 40, ""), "")
+        short_raw = "## Findings\nx\n## Files touched\n- (none)\n## Open questions\n- (none)\n## Next\ngo"
+        self.assertTrue(compact.check(brief, 400, short_raw, "").startswith("not shorter than what it compacts"))
+
+    def test_check_lets_a_rolling_brief_carry_the_earlier_brief(self):
+        prev = compact.render(dict(FIELDS, findings=["earlier step found " + "x " * 30]))
+        brief = compact.render(dict(FIELDS, findings=FIELDS["findings"] + ["earlier step found it"]))
+        self.assertGreater(compact.words(brief), compact.words(RAW))
+        self.assertEqual(compact.check(brief, 400, RAW, prev), "")
+
+    def test_check_rejects_a_brief_that_drops_open_questions(self):
+        raw = RAW.replace("## Open questions\n- (none)", "## Open questions\n- Fred: green suite or no new failures?")
+        raw += " pad" * 40
+        dropped = compact.render(FIELDS)
+        kept = compact.render(dict(FIELDS, questions=["Fred: green suite or no new failures?"]))
+        self.assertEqual(compact.check(dropped, 400, raw, ""), "dropped the open questions")
+        self.assertEqual(compact.check(kept, 400, raw, ""), "")
+
     def test_fallback_keeps_files_and_cuts_findings(self):
         raw = ("# Step 01: scout on haiku/low, session s1\n\n## Findings\n" + "a" * 3000 +
                "\n## Files touched\n- a.py (x)\n- b.py (y)\n## Open questions\n- which one?\n## Next\nDo the thing")
