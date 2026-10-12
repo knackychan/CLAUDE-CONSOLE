@@ -895,6 +895,19 @@ class TaskServerTest(RunServerTest):
         self.assertIn("budget: hold released by Fred", step["notes"])
         self.assertNotIn("hold_ok", task)
 
+    def test_counts_fold_task_steps_into_their_task(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "STOP-ASK look"}])
+        self.until(tid, lambda t: t["state"] == "waiting", "the step asks")
+        counts = self.hub.snapshot()["counts"]
+        self.assertEqual((counts["needs"], counts["working"]), (1, 0))  # the task, not also its step session
+
+    def test_counts_a_held_task_as_needs(self):
+        self.hub.budget = self.over("opus")
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
+        self.until(tid, lambda t: t["state"] == "waiting" and not t.get("briefing"), "the verify holds")
+        counts = self.hub.snapshot()["counts"]
+        self.assertEqual((counts["needs"], counts["done"]), (1, 0))  # a hold needs Fred; its ended step is no row
+
     def test_nothing_written_outside_home(self):
         tid = self.make_task(steps=self.TWO)
         self.settled(tid)

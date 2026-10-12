@@ -185,6 +185,12 @@ class Hub:
                                    key=lambda j: j["ts"])
             snap["tasks"] = sorted((task_row(t) for t in self.tasks.values()), key=lambda r: r["updated"],
                                    reverse=True)
+            loose = [r for r in snap["sessions"] if not r.get("task")]  # a task counts once, not per step session
+            count = lambda g: sum(1 for r in loose if r["group"] == g)
+            tg = lambda states: sum(1 for t in snap["tasks"] if t["state"] in states)
+            snap["counts"] = {"needs": count("needs") + tg(("waiting", "stuck")),
+                              "replied": count("replied"), "working": count("working") + tg(("planned", "running")),
+                              "done": count("done"), "empty": count("empty")}
             return snap
 
     def steps(self, session_id: str, limit: int = 200) -> list:
