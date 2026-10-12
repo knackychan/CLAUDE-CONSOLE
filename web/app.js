@@ -114,6 +114,7 @@ function modelText(model, effort) {  // an alias shows the newest version the se
   const fam = alias(model), v = version(model) || (fam === model && snap && snap.versions ? snap.versions[fam] || "" : "");
   return [v ? fam + " " + v : fam, effort].filter(Boolean).join(" ");
 }
+function fableName() { return snap && snap.versions && snap.versions.fable ? "Fable " + snap.versions.fable : "Fable"; }
 function routeRows(s, rows) {  // the Route block: the Prep that wrote the prompt, then main and the agents
   const prep = s.prep
     ? { nm: "Prep", word: "done", model: s.prep_model, steps: s.prep_turns, unit: "t", cost: s.prep_cost }
@@ -422,7 +423,8 @@ function taskCard(t) {
   const [glyph, word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = taskStep(t);
   const cells = t.steps.map((x) => x.state === "running" ? "f live" : x.state === "failed" || x.verdict === "FAIL" ? "r" : x.state === "done" ? "g" : "");
   const ask = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
-  const third = (t.why ? `<div class="why m mut">${esc(t.why)}</div>` : "")
+  const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.why;
+  const third = (why ? `<div class="why m mut">${esc(why)}</div>` : "")
     + (t.briefing ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>Haiku is compacting the note</span></div>' : "")
     + (ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "");
   return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
@@ -711,13 +713,13 @@ async function startPrep(projectDir, text, files = [], from = "") {  // `from`: 
   renderCompose();
 }
 
-async function doRun(projectDir, prompt, model, effort, prepId, from = "") {  // true once the run started
+async function doRun(projectDir, prompt, model, effort, prepId, from = "", fableOk = false) {  // true once the run started
   if (busy) return false;
   const mine = !prepId && !from;  // from the composer: its files go now; a card's wait with its job
   setBusy("Starting the run ...");
   try {
     const r = await api("/api/run", { project_dir: projectDir, prompt, model, effort, prep: prepId || "",
-      files: mine ? sendable("compose") : [], files_from: from });
+      files: mine ? sendable("compose") : [], files_from: from, fable_ok: fableOk });
     if (mine) att.compose = [];
     card = null;
     setBusy("");
@@ -840,7 +842,7 @@ function stepsChanged() {  // the verify row, numbers, the Fable note and Run as
   if (!edits && fixed) fixed.remove();
   const rows = [...document.querySelectorAll("#p-steps .srow")];
   rows.forEach((r, k) => { r.querySelector(".n").textContent = k + 1; });
-  const fable = [...document.querySelectorAll("#p-steps [data-smodel]")].some((s) => s.value.includes("fable"));
+  const fable = [...document.querySelectorAll("#p-model, #p-steps [data-smodel]")].some((s) => s.value.includes("fable"));
   const note = $("p-fable"), run = document.querySelector('#pbar [data-pact="task"]');
   if (note) note.hidden = !fable;
   if (run) run.hidden = rows.length < 2;
@@ -863,7 +865,7 @@ function showPrep() {
       ${card.reason ? `<div class="mut">${esc(card.reason)}</div>` : ""}</div>
     <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
       <div id="p-steps">${steps.map(stepRowHtml).join("") || '<p class="m mut" data-nosteps>Prep proposed no steps. Add steps to run this as a task.</p>'}</div>
-      <div id="p-fable" class="say" hidden>Fable may bill usage credits on this plan; the task will ask once</div>
+      <div id="p-fable" class="say" hidden>${esc(fableName())} may bill usage credits on this plan; it asks you to confirm before it runs</div>
       <div class="m mut">${esc(effortText())}</div></div>
     <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns</div>`;
   $("pbar").innerHTML = `<div class="lr"><button class="btn go" data-pact="task" hidden>Run as task</button>
@@ -912,7 +914,17 @@ async function prepAct(name, button) {  // Run drops the card's job in the servi
   }
   if (name === "rmstep") { button.closest(".srow").remove(); stepsChanged(); }
   if (name === "task") runAsTask(c, button);
-  if (name === "run") doRun(c.project_dir, $("p-prompt").value.trim(), $("p-model").value, $("p-effort").value, c.id);
+  if (name === "run") {
+    const fable = alias($("p-model").value) === "fable";
+    if (fable && !button.dataset.armed) {  // two clicks, like the Task page's Stop: Fable may bill usage credits
+      button.dataset.armed = "1";
+      button.dataset.label = button.textContent;
+      button.textContent = `Confirm to use ${fableName()}`;
+      setTimeout(() => { delete button.dataset.armed; button.textContent = button.dataset.label; }, 3000);
+      return;
+    }
+    doRun(c.project_dir, $("p-prompt").value.trim(), $("p-model").value, $("p-effort").value, c.id, "", fable);
+  }
   if (name === "raw" && await doRun(c.project_dir, c.raw, cfg.default_model, rawEffort(), "", c.id)) dropPrep(c.id);
   if (name === "back") { card = null; showPage("list"); }
   if (name === "edit") { card = null; const had = jobFiles(c.id); await dropPrep(c.id); putBack(c.raw); if (had) filesNotKept(); }
@@ -1318,7 +1330,7 @@ function drawTask() {
   if (lv.pause === "") buttons += b("pause", "", "Pause");
   if (lv.resume === "") buttons += b("resume", " go", "Resume");
   if (lv.retry === "") buttons += b("retry", " go", "Retry");
-  if (lv.confirm === "") buttons += b("confirm", " you", row.hold ? "Run anyway" : "Confirm Fable");
+  if (lv.confirm === "") buttons += b("confirm", " you", row.hold ? "Run anyway" : `Confirm to use ${fableName()}`);
   if (lv.clear === "") buttons += b("clear", "", "Clear");
   const off = new Map();  // the reasons, one line each: "Retry, Clear off: task is running"
   const keys = ["stop", "pause", "retry", "clear", ...(paused ? ["resume"] : [])];  // why Resume is off, while paused
@@ -1657,7 +1669,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "c-prompt") { draft = e.target.value; fail = null; saveDraft(); renderCompose(); }
 });
 
-document.addEventListener("change", (e) => { if (e.target.matches("[data-smodel], [data-skind]")) stepsChanged(); });
+document.addEventListener("change", (e) => { if (e.target.matches("#p-model, [data-smodel], [data-skind]")) stepsChanged(); });
 
 $("pfind").addEventListener("input", pickRows);
 $("pfind").addEventListener("keydown", (e) => {
