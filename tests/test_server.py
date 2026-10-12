@@ -258,6 +258,14 @@ class RunServerTest(unittest.TestCase):
         while time.time() < end and (self.session(sid) is None or self.session(sid)["run_live"]):
             time.sleep(0.1)
 
+    def test_fable_run_needs_the_confirm(self):
+        body = {"project_dir": str(self.project), "prompt": "hi", "model": "fable", "effort": "low"}
+        status, data = self.call("/api/run", body)
+        self.assertEqual((status, data["error"]), (409, "confirm Fable: it may bill usage credits on this plan"))
+        status, data = self.call("/api/run", dict(body, fable_ok=True))
+        self.assertEqual(status, 200, data)
+        self.wait_idle(data["session"])
+
     def test_run_and_continue_take_files(self):
         big = {"name": "shot.png", "data": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x01" * 1024 * 1024).decode()}
         status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "look", "files": [big]})

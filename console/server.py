@@ -954,6 +954,8 @@ class Handler(BaseHTTPRequestHandler):
         effort = body.get("effort") or cfg["default_effort"]
         if not claude_cli.known_model(cfg, model) or effort not in claude_cli.EFFORTS:
             return self._error(400, "unknown model or effort")
+        if claude_cli.tier_of(model) == "fable" and body.get("fable_ok") is not True:  # print mode bills credits
+            return self._error(409, "confirm Fable: it may bill usage credits on this plan")
         card = prep.load(self.hub.folder, body.get("prep")) if body.get("prep") else None
         if card:
             title = card["fields"].get("goal") or card["raw"]
