@@ -33,6 +33,7 @@
         <div class="lr"><textarea id="c-prompt" rows="1" spellcheck="false" aria-label="New task"
           title="Enter = Prep · Ctrl+Enter = Run raw · Shift+Enter = new line · paste or drop files to attach"></textarea></div>
         <ul id="files-compose" class="files" aria-label="Attached files"></ul>
+        <div id="effort" class="effort" role="radiogroup" aria-label="Effort"></div>
         <div id="c-say" class="say"></div>
       </div>
       <input id="filepick" type="file" multiple hidden>
@@ -60,6 +61,17 @@
       </div>
       <div id="pscroll" class="scroll stack"></div>
       <div id="pbar" class="levers"></div>
+    </section>
+
+    <section data-page="task" hidden>
+      <div class="top">
+        <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">&#8592;</button>
+        <span class="crumb m">Task</span>
+        <span class="sp pywebview-drag-region" title="Drag to move; double-click to fold"></span>
+        <span data-winbtns></span>
+      </div>
+      <div id="tscroll" class="scroll stack"></div>
+      <div id="tbar" class="levers"></div>
     </section>
 
     <section data-page="usage" hidden>

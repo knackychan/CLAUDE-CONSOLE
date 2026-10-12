@@ -211,6 +211,14 @@ textarea.in.m { font: 12px/1.45 var(--mono); }
 .doing span:last-child { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
 .card .q { font-size: 13px; overflow-wrap: anywhere; }
 .more-done { padding: 0 12px 12px; }
+/* a task (plan 17) is a card of the list: the chain is one cell per step where a session shows its context */
+.l1 .tag { flex: none; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; font: 400 10.5px var(--mono);
+  color: var(--mut); white-space: nowrap; }
+.card.task .ctx .cells { grid-template-columns: repeat(var(--n, 4), 6px); }
+.card.task .l2 { align-items: start; }
+.card.task .l2 .who { white-space: normal; overflow: visible; }
+.card.task .why { overflow-wrap: anywhere; }
+.card.task .lr { padding-top: 2px; }
 
 /* Prep jobs sit right above the composer that started them (like a failed Prep): running, then ready to run */
 .preps { flex: none; max-height: 40%; overflow-y: auto; padding-top: 6px; border-top: 1px solid var(--line); }
@@ -230,6 +238,15 @@ textarea.in.m { font: 12px/1.45 var(--mono); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tgt:hover { border-color: var(--ink); }
 .tgt .car { color: var(--mut); font-size: 9px; }
+/* effort slider (plan 17): Auto, then five cells (low .. max); the lit cells run up to the picked level */
+.effort { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.effort button { display: inline-flex; align-items: center; min-height: 24px; padding: 0 6px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--mut); cursor: pointer; }
+.effort button:hover { background: var(--raise); }
+.effort button[aria-checked="true"] { color: var(--ink); background: var(--raise); }
+.effort .cells { grid-template-columns: repeat(var(--n, 1), 10px); }
+.effort .eh { flex: 1; min-width: 0; margin-left: 8px; text-align: right; font: 11px var(--ui); color: var(--mut);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* project picker: a page-drawn popover under the header, never a native select */
 .scope { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 170px; height: 28px; padding: 0 8px;
@@ -396,6 +413,36 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 /* Prep page */
 .prep-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .prep-row select { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 4px; font: 12px var(--mono); }
+.prep-row select, .srow select { max-width: 100%; }
+/* the step list of Run as task: kind, model and remove on one line, the goal under them */
+.blk .hd .btn { flex: none; }
+.srow { display: grid; grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 28px; gap: 4px 6px; align-items: center;
+  padding: 6px 0; border-top: 1px solid var(--line); }
+.srow .n { color: var(--mut); }
+.srow select, .srow input { min-width: 0; background: var(--raise); border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 6px; font: 12px var(--mono); }
+.srow input { grid-column: 2 / -1; font: 13px var(--ui); }
+.srow .rb { width: 28px; height: 28px; border-radius: 6px; }
+.srow.fixed { grid-template-columns: 22px minmax(0, 1fr); }
+.srow.fixed .mut { font-size: 12px; }
+
+/* Task page (plan 17): the head, the chain of steps (one row each), the brief for the next step */
+.stack .askbox { margin: 0; }
+.tk .where { margin-top: 0; }
+.chain { display: grid; }
+.chain .row { display: grid; grid-template-columns: 41px minmax(0, 1fr) 38px 46px; gap: 2px 8px; align-items: center;
+  padding: 7px 0; border-top: 1px solid var(--line); }
+.chain .row .cells { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.chain .row .nm { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain .row.cur .nm { font-weight: 700; }
+.chain .row .mdl { color: var(--mut); font-weight: 400; }
+.chain .row .c { text-align: right; }
+.chain .row .sub { grid-column: 2 / -1; min-width: 0; color: var(--mut); font-size: 11px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.chain .row .sub .r { color: var(--bad); } .chain .row .sub .g { color: var(--ok); }
+pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; border-radius: 6px; background: var(--raise);
+  font: 12px/1.45 var(--mono); scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
+.tpath { color: var(--mut); font-size: 11px; overflow-wrap: anywhere; }
 
 /* window buttons only exist in the pywebview window */
 html:not(.native) .native-only { display: none; }
@@ -461,6 +508,8 @@ html:not(.native) .native-only { display: none; }
 .lim { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--you); pointer-events: none; }
 .lim span { position: absolute; left: 0; bottom: 2px; font: 10px var(--mono); color: var(--mut); background: var(--win); padding-right: 4px; }
 .ufoot { padding: 14px 12px 16px; font-size: 12px; color: var(--mut); margin: 0; text-wrap: pretty; }
+.ufoot.ustore { padding-bottom: 0; }
+.ufoot.ustore.y { color: var(--you); }
 .utip { position: absolute; z-index: 9; pointer-events: none; background: var(--raise); border: 1px solid var(--line); border-radius: 6px;
   padding: 5px 8px; font: 11px/1.4 var(--mono); color: var(--ink); white-space: nowrap; box-shadow: 0 8px 24px rgb(0 0 0 / 35%); }
 .utip small { display: block; color: var(--mut); font-size: 10.5px; }

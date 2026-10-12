@@ -110,13 +110,13 @@ buttons) at 400 and 340 px; read each PNG. No console error (`--enable-logging -
 
 ## Steps
 
-- [ ] 1. `index.html`: the slider div, the task section. `style.css`: the selectors of 5.1, 5.3 (`.card.task`,
+- [x] 1. `index.html`: the slider div, the task section. `style.css`: the selectors of 5.1, 5.3 (`.card.task`,
       `.tag`), 5.4 (`.chain`, `.chain .row`). Load the page: nothing broken, the slider drawn empty.
-- [ ] 2. `app.js` 5.1 (slider, draft, Alt keys, `doRun` / `rawRun` effort). Check: a pick survives a reload
+- [x] 2. `app.js` 5.1 (slider, draft, Alt keys, `doRun` / `rawRun` effort). Check: a pick survives a reload
       (window.json).
-- [ ] 3. `app.js` 5.2 (step list, Run as task). Check with a `CHAIN` Prep.
-- [ ] 4. `app.js` 5.3 and 5.4 (task card, Task page, levers, step tag). Check the pages at 400 and 340 px.
-- [ ] 5. `node --check web/app.js` (syntax) and the whole Python suite OK. Commit:
+- [x] 3. `app.js` 5.2 (step list, Run as task). Check with a `CHAIN` Prep.
+- [x] 4. `app.js` 5.3 and 5.4 (task card, Task page, levers, step tag). Check the pages at 400 and 340 px.
+- [x] 5. `node --check web/app.js` (syntax) and the whole Python suite OK. Commit:
       `feat: effort slider, Run as task, task card and Task page (plan 17 Task 5)`.
 
 ## Drift guards

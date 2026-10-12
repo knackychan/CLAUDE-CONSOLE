@@ -15,18 +15,26 @@ const SPEND_CELL = 0.5;   // 1 spend cell = $0.50
 const PILL_CHIPS = 9;
 const DONE_SHOWN = 2;     // done sessions listed before "Show N more"
 const TABS = [["chat", "Chat"], ["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"]];
+const EFF_LEVELS = ["auto", "low", "medium", "high", "xhigh", "max"];  // the slider's values, in order
+const TASK_WORD = { planned: ["▶", "Task", "n"], running: ["▶", "Task", "n"], waiting: ["?", "Waiting", "y"],
+  stuck: ["×", "Stuck", "r"], done: ["✓", "Done", "g"], stopped: ["‖", "Stopped", "q"] };  // [glyph, word, tone]
 
 let snap = null;
 let cfg = null;          // /api/config
 let live = false;
 let form = "open";       // open | pill
-let page = "list";       // list | session | prep | usage
+let page = "list";       // list | session | prep | task | usage
 let openId = null;
-let tab = "chat";        // chat | steps | agents | timeline
+let taskId = null;       // the Task page's task
+let taskData = null;     // GET /api/task for it: {task, levers, note, brief}
+let taskSig = "";
+let rawOpen = false;     // the Task page shows the raw note instead of the brief
+let tab = "chat";       // chat | steps | agents | timeline
 let tlMin = -1;          // the Timeline's selected minute (minutes since 1970; -1: the last busy one)
 let scope = "";          // the project folder the list shows ("" = all projects)
 let project = "";        // where a new task runs (window.json, through /api/draft)
-let card = null;         // the Prep card on screen
+let effortPick = "auto"; // the slider: auto (the rules pick per step) or one level for every step (window.json)
+let card = null;        // the Prep card on screen
 let busy = "";           // what the compose box waits for ("" = nothing)
 let fail = null;         // {title, msg, retry} shown above the compose box
 let draft = "";
@@ -98,7 +106,14 @@ function routeText(s) {
   if (s.route === "unrouted") return run ? "unrouted · " + run : "unrouted";
   return run ? s.route + " · " + run : s.route;
 }
-function modelText(model, effort) { return [alias(model), effort].filter(Boolean).join(" "); }
+function version(model) {  // claude-opus-4-8 -> "4.8", claude-haiku-4-5-20251001 -> "4.5"; an alias or an unversioned name -> ""
+  const m = String(model || "").match(/(?:fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?=-|$)/);
+  return m ? m[1] + (m[2] ? "." + m[2] : "") : "";
+}
+function modelText(model, effort) {
+  const fam = alias(model), v = version(model);
+  return [v && fam !== model ? fam + " " + v : fam, effort].filter(Boolean).join(" ");
+}
 function routeRows(s, rows) {  // the Route block: the Prep that wrote the prompt, then main and the agents
   const prep = s.prep
     ? { nm: "Prep", word: "done", model: s.prep_model, steps: s.prep_turns, unit: "t", cost: s.prep_cost }
@@ -124,7 +139,7 @@ async function api(path, body) {
 // the focused control and the scroll position of one inner scroller ({sel, end, reset}).
 function focusKey(el) {
   if (el.id) return `[id="${el.id}"]`;
-  for (const k of ["tab", "min", "open"]) if (el.dataset[k] !== undefined) return `[data-${k}="${el.dataset[k]}"]`;
+  for (const k of ["tab", "min", "open", "eff"]) if (el.dataset[k] !== undefined) return `[data-${k}="${el.dataset[k]}"]`;
   return "";
 }
 function setHtml(el, html, scroller) {
@@ -311,8 +326,10 @@ function showPage(name) {
   closePicker();
   document.querySelectorAll("[data-page]").forEach((p) => { p.hidden = p.dataset.page !== name; });
   leversSig = "";
+  taskSig = "";
   procShown = "";
   if (name === "session") $("sscroll").scrollTop = 0;
+  if (name === "task") $("tscroll").scrollTop = 0;
   clearInterval(usageTimer);
   usageTimer = null;
   if (name === "usage") { $("uscroll").scrollTop = 0; loadUsage(); usageTimer = setInterval(loadUsage, 60000); }
@@ -356,6 +373,7 @@ function render() {
   snap.sessions.filter((s) => PEEK.has(s.state)).forEach((s) => seen.add(peekId(s)));  // seen while open
   if (page === "list") renderListPage();
   else if (page === "session") renderSession();
+  else if (page === "task") renderTaskPage();
 }
 
 // -- list page ---------------------------------------------------------------------------
@@ -385,6 +403,35 @@ function renderTop() {
     <button class="btn sm go-usage" data-go="usage">Usage by day, week, month &#8250;</button>`);
 }
 
+// -- tasks (plan 17): a card in the list, the step tag on its sessions ---------------------------------
+function sameDir(a, b) { const n = (p) => String(p || "").replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase(); return n(a) === n(b); }
+function taskGroup(t) { return t.state === "waiting" || t.state === "stuck" ? "needs" : t.state === "running" || t.state === "planned" ? "work" : "done"; }
+function taskGroups() {  // the scope's tasks by group; a finished or stopped task leaves the list a day after its last change
+  const mine = (snap.tasks || []).filter((t) => !scope || sameDir(t.project_dir, scope));
+  const by = (g) => mine.filter((t) => taskGroup(t) === g && (g !== "done" || snap.now - t.updated < 86400));
+  return { needs: by("needs"), work: by("work"), done: by("done") };
+}
+function taskStep(t) { return t.steps.find((x) => x.n === t.current) || t.steps.find((x) => x.state !== "done") || t.steps[0]; }
+function taskTag(s) {  // "step 2/4" after the title of a session that runs a task's step
+  if (!s.task) return "";
+  const t = (snap.tasks || []).find((x) => x.id === s.task);
+  return `<span class="tag">step ${s.step}${t ? "/" + t.count : ""}</span>`;
+}
+
+function taskCard(t) {
+  const [glyph, word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = taskStep(t);
+  const cells = t.steps.map((x) => x.state === "running" ? "f live" : x.state === "failed" || x.verdict === "FAIL" ? "r" : x.state === "done" ? "g" : "");
+  const ask = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
+  const third = (t.why ? `<div class="why m mut">${esc(t.why)}</div>` : "")
+    + (t.briefing ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>Haiku is compacting the note</span></div>' : "")
+    + (ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "");
+  return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
+    <div class="l1"><span class="st ${tn}">${glyph} ${word}</span><span class="t">${esc(t.title)}</span>
+    <span class="age m" title="since the last change">${ago(snap.now - t.updated)}</span></div>
+    <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(cur.model, cur.effort))}</span>` : ""}</span>
+    <span class="cost">${money(t.cost)}</span><span class="ctx"><span class="cells" style="--n:${cells.length}">${cellsHtml(cells)}</span></span></div>${third}</div>`;
+}
+
 function cardHtml(s) {
   const t = tone(s), key = s.id + "|" + s.stop_question;
   let third = "";
@@ -407,7 +454,7 @@ function cardHtml(s) {
   const hand = s.handoff_hint ? ` <span class="st ${s.ctx_tone === "red" ? "r" : "q"}">· HAND OFF</span>` : "";
   return `<div class="card${t === "y" || t === "r" ? " " + t : ""}" data-open="${esc(s.id)}" tabindex="0" role="button"
     aria-label="${esc(label(s) + ": " + s.title)}">
-    <div class="l1"><span class="st ${t}">${s.symbol} ${esc(label(s))}${hand}</span><span class="t">${esc(s.title)}</span>
+    <div class="l1"><span class="st ${t}">${s.symbol} ${esc(label(s))}${hand}</span><span class="t">${esc(s.title)}</span>${taskTag(s)}
     <span class="age m" title="since the last event">${ago(snap.now - s.last_ts)}</span></div>
     <div class="l2 m"><span class="who">${esc(s.project)}${s.two_writers ? " · 2 writers" : ""}<span class="route"> · ${esc(routeText(s))}</span></span>
     <span class="cost">${spentText(s)}</span>${ctxMini(s)}</div>${third}</div>`;
@@ -418,23 +465,25 @@ function quietHtml(s, showProject) {
   const hand = s.handoff_hint ? ' <span class="st q">· HAND OFF</span>' : "";
   const reply = (s.state === "idle" || s.state === "replied") && s.reply ? `<div class="reply mut" title="${esc(s.reply)}">${esc(s.reply)}</div>` : "";
   return `<div class="card quiet${s.state === "idle" || s.state === "replied" ? " " + s.state : ""}" data-open="${esc(s.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + s.title)}">
-    <div class="l1"><span class="st ${t}">${glyph} ${esc(word)}${hand}</span><span class="t">${esc(s.title)}${showProject ? ` <span class="m mut">· ${esc(s.project)}</span>` : ""}</span>
+    <div class="l1"><span class="st ${t}">${glyph} ${esc(word)}${hand}</span><span class="t">${esc(s.title)}${showProject ? ` <span class="m mut">· ${esc(s.project)}</span>` : ""}</span>${taskTag(s)}
     <span class="age m">${s.state === "replied" ? ago(snap.now - s.last_ts) : spentText(s)}</span></div>${reply}</div>`;
 }
 
 function renderListPage() {
   renderTop();
-  const g = groups(), shown = doneOpen ? g.done : g.done.slice(0, DONE_SHOWN);
+  const g = groups(), tk = taskGroups();  // a group's tasks come first, then its sessions
+  const doneRows = [...tk.done.map(taskCard), ...g.done.map((s) => quietHtml(s, !scope))], shown = doneOpen ? doneRows : doneRows.slice(0, DONE_SHOWN);
   const sec = (cls, text, list, id = "") => list.length ? `<div class="sec"${id ? ` id="${id}"` : ""}><span class="lbl ${cls}">${text} · ${list.length}</span></div>` : "";
-  let html = sec("y", "Needs you", g.needs, "needsec") + g.needs.map(cardHtml).join("")
+  let html = sec("y", "Needs you", [...tk.needs, ...g.needs], "needsec") + tk.needs.map(taskCard).join("") + g.needs.map(cardHtml).join("")
     + sec("", "Replied", g.replied) + g.replied.map((s) => quietHtml(s, !scope)).join("")
-    + sec("", "Working", g.work) + g.work.map(cardHtml).join("")
+    + sec("", "Working", [...tk.work, ...g.work]) + tk.work.map(taskCard).join("") + g.work.map(cardHtml).join("")
     + sec("", "Idle", g.idle) + g.idle.map((s) => quietHtml(s, !scope)).join("")
-    + sec("", "Done today", g.done) + shown.map((s) => quietHtml(s, !scope)).join("")
-    + (g.done.length > DONE_SHOWN && !doneOpen ? `<div class="more-done"><button class="btn sm" data-go="moredone">Show ${g.done.length - DONE_SHOWN} more</button></div>` : "")
+    + sec("", "Done today", doneRows) + shown.join("")
+    + (doneRows.length > DONE_SHOWN && !doneOpen ? `<div class="more-done"><button class="btn sm" data-go="moredone">Show ${doneRows.length - DONE_SHOWN} more</button></div>` : "")
     + (g.empty.length ? `<div class="more-done"><button class="btn sm" data-go="empties" title="Chats that loaded their rules and never got a prompt">${emptyOpen ? "Hide" : "Show"} ${g.empty.length} empty ${g.empty.length === 1 ? "chat" : "chats"}</button></div>`
       + (emptyOpen ? g.empty.map((s) => quietHtml(s, !scope)).join("") : "") : "");
-  if (!g.needs.length && !g.replied.length && !g.work.length && !g.idle.length && !g.done.length && !g.empty.length) {
+  if (!g.needs.length && !g.replied.length && !g.work.length && !g.idle.length && !g.done.length && !g.empty.length
+      && !tk.needs.length && !tk.work.length && !tk.done.length) {
     html = scope
       ? `<div class="sec"><span class="lbl">${esc(projectName(scope))}</span></div><div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
          <p>No session in ${esc(projectName(scope))} today. Type a task below, or pick All projects.</p></div>`
@@ -465,11 +514,37 @@ function renderCompose() {
     <span class="hint"><span class="kbd">Enter</span>Prep</span>`;
   setHtml($("c-say"), html);
   setHtml($("files-compose"), filesHtml("compose"));
+  renderEffort();
   setHtml($("preps"), preps().map(prepJobHtml).join(""));
   spin();
   setHtml($("prepfail"), fail ? `<div class="card r" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">${esc(fail.title)}</span></div>
     <div class="m mut">${esc(fail.msg)}</div>${fail.retry ? '<div class="lr"><button class="btn go sm" data-go="retry">Try again</button></div>' : ""}</div>` : "");
 }
+
+// -- effort slider (plan 17): Auto, or one level for every step of a task and for a run --------------
+function effortText() { return effortPick === "auto" ? "effort: auto (the rules pick per step)" : `effort: ${effortPick} on every step`; }
+
+function renderEffort() {
+  const at = EFF_LEVELS.indexOf(effortPick);
+  const level = (lvl, k) => `<button role="radio" aria-checked="${at === k}" data-eff="${lvl}" tabindex="${at === k ? 0 : -1}"
+    aria-label="${lvl}" title="${lvl}"><span class="cells"><i${at >= k ? ' class="f"' : ""}></i></span></button>`;
+  setHtml($("effort"), `<button role="radio" aria-checked="${at === 0}" data-eff="auto" tabindex="${at === 0 ? 0 : -1}"
+    title="Auto: the rules pick the effort per step (Alt+Up / Alt+Down change it)"><span class="m">Auto</span></button>
+    ${EFF_LEVELS.slice(1).map((lvl, k) => level(lvl, k + 1)).join("")}
+    <span class="eh">${effortPick === "auto" ? "Auto: the rules pick per step" : esc(effortPick) + " on every step"}</span>`);
+}
+
+function setEffort(value) {
+  if (!EFF_LEVELS.includes(value) || value === effortPick) return;
+  effortPick = value;
+  saveDraft();
+  renderEffort();
+}
+
+function stepEffort(d) { setEffort(EFF_LEVELS[Math.min(EFF_LEVELS.length - 1, Math.max(0, EFF_LEVELS.indexOf(effortPick) + d))]); }
+
+// the effort a run without a Prep card uses: the slider's level, else the config default
+function rawEffort() { return effortPick !== "auto" ? effortPick : cfg.default_effort; }
 
 // -- Prep jobs: the strip above the composer; each runs in the service, then waits for Run ---------
 function preps() { return (snap && snap.preps) || []; }
@@ -609,7 +684,7 @@ function setBusy(text) {
 
 function saveDraft() {
   clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => api("/api/draft", { text: draft, project, brief: briefOpen }).catch(() => {}), 600);
+  draftTimer = setTimeout(() => api("/api/draft", { text: draft, project, brief: briefOpen, effort: effortPick }).catch(() => {}), 600);
 }
 
 function doPrep() {  // the box empties at once; the Prep runs in the service and shows on the strip
@@ -738,8 +813,37 @@ function pick(dir) {  // a project scopes the list and becomes the task target; 
 // -- Prep page ---------------------------------------------------------------------------
 function options(list, value) { return list.map((v) => `<option${v === value ? " selected" : ""}>${esc(v)}</option>`).join(""); }
 
+// every tier with its rungs from config.json "ladder", newest first, so a rung can be picked by hand;
+// `auto` is a step's "let the rules pick"
+function modelOptions(value, withAuto) {
+  const opt = (v, text) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(text)}</option>`;
+  const rungs = (tier) => (cfg.ladder && cfg.ladder[tier] && cfg.ladder[tier].length ? cfg.ladder[tier] : [tier]);
+  return (withAuto ? opt("", "auto") : "") + cfg.models.map((tier) => rungs(tier).map((r) => opt(r, modelText(r))).join("")).join("");
+}
+
+// Run as task: one row per step. A verify row is fixed text (the service adds it after the last editing step).
+function stepRowHtml(st) {
+  if (st.kind === "verify") {
+    return `<div class="srow fixed"><span class="n m"></span><span><b class="m">verify</b> <span class="mut">added by the Console after the last editing step</span></span></div>`;
+  }
+  return `<div class="srow" data-row><span class="n m"></span>
+    <select data-skind aria-label="Kind">${options(cfg.kinds, st.kind)}</select>
+    <select data-smodel aria-label="Model">${modelOptions(st.pick || "", true)}</select>
+    <button class="rb" data-pact="rmstep" aria-label="Remove step" title="Remove step">&#10005;</button>
+    <input data-sgoal aria-label="Goal" value="${esc(st.goal)}" spellcheck="false" placeholder="Goal of this step"></div>`;
+}
+
+function stepsChanged() {  // numbers, the Fable note and Run as task (two rows or more) follow the rows
+  const rows = [...document.querySelectorAll("#p-steps .srow")];
+  rows.forEach((r, k) => { r.querySelector(".n").textContent = k + 1; });
+  const fable = [...document.querySelectorAll("#p-steps [data-smodel]")].some((s) => s.value.includes("fable"));
+  const note = $("p-fable"), run = document.querySelector('#pbar [data-pact="task"]');
+  if (note) note.hidden = !fable;
+  if (run) run.hidden = rows.length < 2;
+}
+
 function showPrep() {
-  const f = card.fields;
+  const f = card.fields, steps = card.steps || [];
   $("crumb").textContent = "Prep / " + projectName(card.project_dir);
   $("pscroll").innerHTML = `
     <div class="blk"><span class="lbl">You typed</span><div class="text">${esc(card.raw)}</div></div>
@@ -749,23 +853,61 @@ function showPrep() {
       <textarea id="p-prompt" class="in m" rows="9" spellcheck="false">${esc(card.prompt)}</textarea></div>
     ${f.question ? `<div class="askbox" style="margin:0"><span class="st y">? Question</span><div class="q">${esc(f.question)}</div></div>` : ""}
     <div class="blk"><span class="lbl">Route</span><div class="prep-row">
-      <select id="p-model" aria-label="Model">${options(cfg.models, card.route.model)}</select>
-      <select id="p-effort" aria-label="Effort">${options(cfg.efforts, card.route.effort)}</select>
+      <select id="p-model" aria-label="Model">${modelOptions(card.route.model, false)}</select>
+      <select id="p-effort" aria-label="Effort">${options(cfg.efforts, effortPick !== "auto" ? effortPick : card.route.effort)}</select>
       <span class="m mut">${esc(card.route.type)}</span></div>
       ${card.reason ? `<div class="mut">${esc(card.reason)}</div>` : ""}</div>
+    ${steps.length >= 2 ? `<div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
+      <div id="p-steps">${steps.map(stepRowHtml).join("")}</div>
+      <div id="p-fable" class="say" hidden>Fable may bill usage credits on this plan; the task will ask once</div>
+      <div class="m mut">${esc(effortText())}</div></div>` : ""}
     <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns</div>`;
-  $("pbar").innerHTML = `<div class="lr"><button class="btn go" data-pact="run">Run</button>
+  $("pbar").innerHTML = `<div class="lr">${steps.length >= 2 ? '<button class="btn go" data-pact="task">Run as task</button>' : ""}
+    <button class="btn go" data-pact="run">Run</button>
     <button class="btn" data-pact="raw">Run raw</button><button class="btn" data-pact="edit">Edit</button>
     <button class="btn" data-pact="cancel">Cancel</button></div><div id="p-msg" class="say"></div>`;
+  stepsChanged();
   showPage("prep");
   $("p-prompt").focus();
 }
 
-async function prepAct(name) {  // Run drops the card's job in the service; Run raw, Edit and Cancel drop it here
+function stepList() {  // the rows as the page shows them (the order is the chain's); empty goals drop out
+  return [...document.querySelectorAll("#p-steps [data-row]")].map((r) => {
+    const step = { kind: r.querySelector("[data-skind]").value, goal: r.querySelector("[data-sgoal]").value.trim() };
+    const model = r.querySelector("[data-smodel]").value;
+    return model ? Object.assign(step, { model }) : step;
+  }).filter((s) => s.goal);
+}
+
+async function runAsTask(c, button) {
+  const steps = stepList(), msg = $("p-msg");
+  if (!steps.length) { msg.innerHTML = '<span class="r">Give at least one step a goal</span>'; return; }
+  button.disabled = true;
+  try {
+    const r = await api("/api/task", { prep: c.id, prompt: $("p-prompt").value.trim(), steps, effort: effortPick });
+    card = null;
+    openTask(r.task);
+  } catch (e) {
+    button.disabled = false;
+    msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
+  }
+}
+
+async function prepAct(name, button) {  // Run drops the card's job in the service; Run raw, Edit and Cancel drop it here
   if (busy || !card) return;
   const c = card;
+  if (name === "addstep") {
+    const last = $("p-steps").lastElementChild;  // the verify row stays last
+    if (last && last.matches(".fixed")) last.insertAdjacentHTML("beforebegin", stepRowHtml({ kind: "code", goal: "" }));
+    else $("p-steps").insertAdjacentHTML("beforeend", stepRowHtml({ kind: "code", goal: "" }));
+    stepsChanged();
+    const goals = document.querySelectorAll("#p-steps [data-sgoal]");
+    goals[goals.length - 1].focus();
+  }
+  if (name === "rmstep") { button.closest(".srow").remove(); stepsChanged(); }
+  if (name === "task") runAsTask(c, button);
   if (name === "run") doRun(c.project_dir, $("p-prompt").value.trim(), $("p-model").value, $("p-effort").value, c.id);
-  if (name === "raw" && await doRun(c.project_dir, c.raw, cfg.default_model, cfg.default_effort, "", c.id)) dropPrep(c.id);
+  if (name === "raw" && await doRun(c.project_dir, c.raw, cfg.default_model, rawEffort(), "", c.id)) dropPrep(c.id);
   if (name === "back") { card = null; showPage("list"); }
   if (name === "edit") { card = null; const had = jobFiles(c.id); await dropPrep(c.id); putBack(c.raw); if (had) filesNotKept(); }
   if (name === "cancel") { card = null; dropPrep(c.id); showPage("list"); }
@@ -872,6 +1014,12 @@ function renderBrief(s) {
     </div></div>`;
 }
 
+function taskLink(s) {  // "task · step 2/4" under the title of a step's session, a link to the Task page
+  if (!s.task) return "";
+  const t = (snap.tasks || []).find((x) => x.id === s.task), text = `task · step ${s.step}${t ? "/" + t.count : ""}`;
+  return t ? `<div class="m"><span class="link" data-task="${esc(t.id)}">${text}</span></div>` : `<div class="m mut">${text}</div>`;
+}
+
 function renderSession() {
   const s = current(), nav = navList(), k = nav.findIndex((x) => x.id === openId);
   $("pos").textContent = k >= 0 ? `${k + 1} of ${nav.length}` : "";
@@ -887,7 +1035,7 @@ function renderSession() {
   const t = tone(s);
   const when = BUSY.has(s.state) ? "turn " + ago(snap.now - s.turn_ts) : (s.state === "stop" ? "waiting " : "") + ago(snap.now - s.last_ts);
   const src = s.source === "?" ? "" : s.source + " / ";
-  setHtml($("sbody"), `<div class="head"><span class="st ${t}">${s.symbol} ${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>
+  setHtml($("sbody"), `<div class="head"><span class="st ${t}">${s.symbol} ${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>${taskLink(s)}
     <div class="where"><span class="m" title="${esc(s.route_reason || "")}">${esc(s.project)} / ${esc(src)}${esc(s.route)}</span>
     ${s.model ? `<span class="mdl" title="${esc(s.model)}">${esc(modelText(s.model, s.effort))}</span>` : ""}
     ${s.project_dir ? `<button class="btn sm" data-here="${esc(s.project_dir)}">New task here</button>` : ""}</div></div>
@@ -1088,6 +1236,113 @@ function step(d) {  // ‹ › and Up / Down: the neighbouring session in the li
   if (k >= 0 && to) { openSession(to.id, tab); }
 }
 
+// -- task page (plan 17): the chain, the brief for the next step, the levers ----------------------------------
+function taskDir(id) {  // the task's folder in the data folder (config_path is <data folder>\config.json)
+  const home = String((cfg && cfg.config_path) || "").replace(/[\\/]config\.json$/, "");
+  return home ? home + "\\tasks\\" + id : "";
+}
+
+function chainRow(t, s) {
+  const tn = s.state === "failed" || s.verdict === "FAIL" ? "r" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
+  const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
+  const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
+  const sub = [verdict, s.retries ? "retry " + s.retries : "", esc(s.goal)].filter(Boolean).join(" · ");
+  return `<div class="row${s.n === t.current ? " cur" : ""}"><span class="cells">${cells}</span>
+    <span class="nm m">${two(s.n)} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(modelText(s.model, s.effort))}</span>` : ""}</span>
+    <span class="m c">${s.cost ? money(s.cost) : ""}</span>
+    ${s.session && !t.cleared ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
+    ${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+}
+
+function drawTask() {
+  const d = taskData;
+  if (!d) {
+    setHtml($("tscroll"), d === false ? '<p class="mut">This task is gone: it was cleared or its folder was removed.</p>'
+      : `<span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Reading the task</span>`);
+    setHtml($("tbar"), "");
+    return;
+  }
+  const t = d.task, lv = d.levers || {}, [glyph, word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = t.steps.find((s) => s.n === t.current);
+  const paused = t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? " · paused" : "";
+  const dir = taskDir(t.id);
+  const head = `<div class="head tk"><span class="st ${tn}">${glyph} ${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
+    <h2>${esc(t.title)}</h2>
+    <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)}</span></div>
+    ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>`;
+  const asked = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
+  const why = (t.state === "waiting" || t.state === "stuck") && t.why
+    ? `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${glyph} ${word}</span><div class="q">${esc(t.why)}</div>
+       ${asked ? `<div class="lr"><button class="btn you" data-open="${esc(cur.session)}">Answer on the session page</button></div>` : ""}</div>`
+    : t.why ? `<p class="note m">${esc(t.why)}</p>` : "";
+  const chain = `<div class="blk"><span class="lbl">Steps · ${t.steps.length}</span><div class="chain">${t.steps.map((s) => chainRow(t, s)).join("")}</div>
+    ${t.cleared ? '<p class="m mut" style="margin:0">cleared: notes and streams removed</p>' : ""}</div>`;
+  const text = rawOpen ? d.note : d.brief;
+  const body = t.briefing ? `<span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Haiku is compacting the note</span>`
+    : text ? `<pre class="text">${esc(text)}</pre>` : `<p class="m mut" style="margin:0">${rawOpen ? "No raw note" : "No brief"} yet.</p>`;
+  const brief = `<div class="blk"><div class="hd"><span class="lbl">${rawOpen ? "Raw note of step " + t.last_good : t.state === "done" ? "Last brief" : "Brief for the next step"}</span>
+    ${d.note && !t.briefing ? `<button class="btn sm" data-tact="raw">${rawOpen ? "Show brief" : "Show raw note"}</button>` : ""}</div>${body}</div>`;
+  setHtml($("tscroll"), head + why + chain + brief);
+  const b = (name, cls, label) => `<button class="btn${cls}" data-tact="${name}">${label}</button>`;
+  let buttons = "";
+  if (lv.stop === "") buttons += b("stop", " stop", "Stop");
+  if (lv.pause === "") buttons += b("pause", "", "Pause");
+  if (lv.resume === "") buttons += b("resume", " go", "Resume");
+  if (lv.retry === "") buttons += b("retry", " go", "Retry");
+  if (lv.confirm === "") buttons += b("confirm", " you", "Confirm Fable");
+  if (lv.clear === "") buttons += b("clear", "", "Clear");
+  const off = new Map();  // the reasons, one line each: "Retry, Clear off: task is running"
+  for (const k of ["stop", "pause", "retry", "clear"]) if (lv[k]) off.set(lv[k], [...(off.get(lv[k]) || []), k[0].toUpperCase() + k.slice(1)]);
+  const reasons = [...off].map(([why, names]) => `${names.join(", ")} off: ${why}`).join(" · ");
+  setHtml($("tbar"), `${buttons ? `<div class="lr">${buttons}</div>` : ""}<div class="say">${esc(reasons)}</div><div id="t-msg" class="say"></div>`);
+}
+
+async function renderTaskPage() {  // GET /api/task when the task's row changed; the drawing follows every snapshot
+  const row = (snap.tasks || []).find((x) => x.id === taskId), at = row && row.steps.find((x) => x.n === row.current);
+  const run = at && snap.sessions.find((x) => x.id === at.session);
+  const sig = row ? [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, run ? run.state + run.run_live : ""].join("|") : "gone";
+  if (sig !== taskSig) {
+    taskSig = sig;
+    const id = taskId, data = await api("/api/task?id=" + encodeURIComponent(id)).catch(() => false);
+    if (taskId !== id || taskSig !== sig || page !== "task") return;
+    taskData = data;
+  }
+  drawTask();
+}
+
+async function openTask(id) {
+  if (form === "pill") await setForm("open");
+  taskId = id;
+  taskData = null;
+  rawOpen = false;
+  showPage("task");
+}
+
+let tArmTimer = null;
+async function taskAct(name, button) {
+  if (name === "raw") { rawOpen = !rawOpen; drawTask(); return; }  // page only: the brief or the raw note
+  if (!taskId) return;
+  const arm = { stop: "Stop the task? Click again", clear: "Delete its notes and streams? Click again" }[name];
+  if (arm && !button.dataset.armed) {  // two clicks: a stop loses the running step, a clear deletes the notes
+    button.dataset.armed = "1";
+    button.dataset.label = button.textContent;
+    button.textContent = arm;
+    clearTimeout(tArmTimer);
+    tArmTimer = setTimeout(() => { delete button.dataset.armed; button.textContent = button.dataset.label; }, 3000);
+    return;
+  }
+  button.disabled = true;
+  try {
+    await api("/api/task/" + name, { task: taskId });
+    if (name === "clear") { taskId = null; showPage("list"); return; }
+    taskSig = "";  // redraw now, not at the next snapshot
+    renderTaskPage();
+  } catch (e) {
+    button.disabled = false;
+    const msg = $("t-msg");
+    if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
+  }
+}
+
 // -- usage page (BRAINSTORM D13): cost and tokens per day, week and month from every transcript ------------
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MON_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
@@ -1228,6 +1483,13 @@ function usageChart() {
       <span class="m mut">${top.v ? `top ${tok ? tokText(top.v) : usd(top.v)}, ${uRange === "days" ? top.label : top.short}` : ""}</span></div></div>`;
 }
 
+function storageLine() {  // the data folder's size by subfolder; orange over storage_warn_mb
+  const st = usage.storage;
+  if (!st || !st.total) return "";
+  const mb = (n) => (n >= 10 * 1048576 ? Math.round(n / 1048576) : (n / 1048576).toFixed(1)), over = st.total > usage.storage_warn_mb * 1048576;
+  return `<p class="ufoot ustore m${over ? " y" : ""}">data folder ${mb(st.total)} MB: runs ${mb(st.runs)}, events ${mb(st.events)}, tasks ${mb(st.tasks)}, preps ${mb(st.preps)}, other ${mb(st.other)}</p>`;
+}
+
 function renderUsage() {
   if (page !== "usage") return;
   $("utip").hidden = true;
@@ -1238,7 +1500,7 @@ function renderUsage() {
     return;
   }
   const since = usage.first ? dayName(usage.first) : "today";
-  setHtml($("uscroll"), usageHead() + usageCalendar() + usageDay() + usageChart()
+  setHtml($("uscroll"), usageHead() + usageCalendar() + usageDay() + usageChart() + storageLine()
     + `<p class="ufoot">Estimated from the transcripts at the list prices in config.json, fast mode 2x. Kept from ${esc(since)}:
        Claude Code deletes transcripts after 30 days, so the service keeps each closed day in usage-days.json.</p>`);
 }
@@ -1299,7 +1561,7 @@ async function go(name, button) {
 
 async function rawRun() {
   const text = $("c-prompt").value.trim();
-  if (!text || !runnable() || !await doRun(project, text, cfg.default_model, cfg.default_effort, "")) return;
+  if (!text || !runnable() || !await doRun(project, text, cfg.default_model, rawEffort(), "")) return;
   draft = "";
   $("c-prompt").value = "";
   saveDraft();
@@ -1308,10 +1570,13 @@ async function rawRun() {
 document.addEventListener("click", (e) => {
   if (!$("pop").hidden && !e.target.closest("#pop") && !e.target.closest("[data-pick]")) closePicker();
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-step],[data-attach],[data-unattach],#brief,#today");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
-  if (t.dataset.attach) { pickFor = t.dataset.attach; $("filepick").value = ""; $("filepick").click(); }
+  if (t.dataset.eff) setEffort(t.dataset.eff);
+  else if (t.dataset.task) openTask(t.dataset.task);
+  else if (t.dataset.tact) taskAct(t.dataset.tact, t);
+  else if (t.dataset.attach) { pickFor = t.dataset.attach; $("filepick").value = ""; $("filepick").click(); }
   else if (t.dataset.unattach) { att[t.dataset.unattach].splice(Number(t.dataset.k), 1); paintFiles(t.dataset.unattach); }
   else if (t.dataset.prep) prepJob(t.dataset.prep, t.dataset.pdo);
   else if (t.dataset.go) go(t.dataset.go, t);
@@ -1320,7 +1585,7 @@ document.addEventListener("click", (e) => {
   else if (t.dataset.tab) { tab = t.dataset.tab; const s = current(); if (s) renderProc(s).catch(() => {}); }
   else if (t.dataset.min !== undefined) { tlMin = tlBase() + Number(t.dataset.min); const s = current(); if (s) renderProc(s).catch(() => {}); }
   else if (t.dataset.act) act(t.dataset.act, t);
-  else if (t.dataset.pact) prepAct(t.dataset.pact);
+  else if (t.dataset.pact) prepAct(t.dataset.pact, t);
   else if (t.dataset.here !== undefined) { pick(t.dataset.here); showPage("list"); $("c-prompt").focus(); }
   else if (t.dataset.proj !== undefined) pick(t.dataset.proj);
   else if (t.dataset.step) step(Number(t.dataset.step));
@@ -1361,6 +1626,8 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "c-prompt") { draft = e.target.value; fail = null; saveDraft(); renderCompose(); }
 });
 
+document.addEventListener("change", (e) => { if (e.target.matches("[data-smodel]")) stepsChanged(); });
+
 $("pfind").addEventListener("input", pickRows);
 $("pfind").addEventListener("keydown", (e) => {
   const rows = document.querySelectorAll("#prows .prow");
@@ -1372,6 +1639,11 @@ $("pfind").addEventListener("keydown", (e) => {
 
 document.addEventListener("keydown", (e) => {
   const id = e.target.id || "";
+  if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && (id === "c-prompt" || e.target.closest("#effort"))) {
+    e.preventDefault();  // the slider: Up = more effort
+    stepEffort(e.key === "ArrowUp" ? 1 : -1);
+    return;
+  }
   if (id === "c-prompt" && e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     if (e.ctrlKey) rawRun();
@@ -1385,7 +1657,7 @@ document.addEventListener("keydown", (e) => {
   if (id === "fu" && e.key === "Enter") return act("continue", document.querySelector('[data-act="continue"]'));
   if (id === "pk" && e.key === "Enter") return unblock(document.querySelector('[data-do="send"][data-where="peek"]'));
   if (id.startsWith("ca-") && e.key === "Enter") return unblock(e.target.closest("[data-stay]").querySelector('[data-do="send"]'));
-  if (e.key === "Enter" && e.target.matches(".card[data-open],.card[data-prep]")) { e.target.click(); return; }
+  if (e.key === "Enter" && e.target.matches(".card[data-open],.card[data-prep],.card[data-task]")) { e.target.click(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); go("new"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
@@ -1393,7 +1665,7 @@ document.addEventListener("keydown", (e) => {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();
     else if (page === "prep") prepAct("back");
-    else if (page === "session" || page === "usage") showPage("list");
+    else if (page === "session" || page === "usage" || page === "task") showPage("list");
     return;
   }
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -1401,6 +1673,11 @@ document.addEventListener("keydown", (e) => {
     if (e.target.matches("[data-tab]") && s) {
       tab = TABS[(TABS.findIndex(([k]) => k === tab) + d + TABS.length) % TABS.length][0];
       renderProc(s).then(() => { const f = $("tab-" + tab); if (f) f.focus(); }).catch(() => {});
+      e.preventDefault();
+    } else if (e.target.matches("[data-eff]")) {  // the slider is a radio group: the arrows move the pick
+      stepEffort(d);
+      const f = document.querySelector(`[data-eff="${effortPick}"]`);
+      if (f) f.focus();
       e.preventDefault();
     } else if (e.target.matches("[data-min]") && s) {
       tlMin = Math.min(tlBase() + 29, Math.max(tlBase(), tlMin + d));
@@ -1441,5 +1718,6 @@ function connect() {
   $("c-prompt").value = draft;
   project = (cfg && cfg.project) || "";
   briefOpen = !!(cfg && cfg.brief);
+  effortPick = cfg && EFF_LEVELS.includes(cfg.effort) ? cfg.effort : "auto";
   connect();
 })();
