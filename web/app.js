@@ -833,7 +833,11 @@ function stepRowHtml(st) {
     <input data-sgoal aria-label="Goal" value="${esc(st.goal)}" spellcheck="false" placeholder="Goal of this step"></div>`;
 }
 
-function stepsChanged() {  // numbers, the Fable note and Run as task (two rows or more) follow the rows
+function stepsChanged() {  // the verify row, numbers, the Fable note and Run as task (two rows or more) follow the rows
+  const list = $("p-steps"), fixed = list && list.querySelector(".srow.fixed");
+  const edits = !!list && [...list.querySelectorAll("[data-row] [data-skind]")].some((s) => (cfg.edit_kinds || []).includes(s.value));
+  if (edits && !fixed) list.insertAdjacentHTML("beforeend", stepRowHtml({ kind: "verify" }));  // the service adds it after the last edit
+  if (!edits && fixed) fixed.remove();
   const rows = [...document.querySelectorAll("#p-steps .srow")];
   rows.forEach((r, k) => { r.querySelector(".n").textContent = k + 1; });
   const fable = [...document.querySelectorAll("#p-steps [data-smodel]")].some((s) => s.value.includes("fable"));
@@ -857,12 +861,12 @@ function showPrep() {
       <select id="p-effort" aria-label="Effort">${options(cfg.efforts, effortPick !== "auto" ? effortPick : card.route.effort)}</select>
       <span class="m mut">${esc(card.route.type)}</span></div>
       ${card.reason ? `<div class="mut">${esc(card.reason)}</div>` : ""}</div>
-    ${steps.length >= 2 ? `<div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
-      <div id="p-steps">${steps.map(stepRowHtml).join("")}</div>
+    <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
+      <div id="p-steps">${steps.map(stepRowHtml).join("") || '<p class="m mut" data-nosteps>Prep proposed no steps. Add steps to run this as a task.</p>'}</div>
       <div id="p-fable" class="say" hidden>Fable may bill usage credits on this plan; the task will ask once</div>
-      <div class="m mut">${esc(effortText())}</div></div>` : ""}
+      <div class="m mut">${esc(effortText())}</div></div>
     <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns</div>`;
-  $("pbar").innerHTML = `<div class="lr">${steps.length >= 2 ? '<button class="btn go" data-pact="task">Run as task</button>' : ""}
+  $("pbar").innerHTML = `<div class="lr"><button class="btn go" data-pact="task" hidden>Run as task</button>
     <button class="btn go" data-pact="run">Run</button>
     <button class="btn" data-pact="raw">Run raw</button><button class="btn" data-pact="edit">Edit</button>
     <button class="btn" data-pact="cancel">Cancel</button></div><div id="p-msg" class="say"></div>`;
@@ -897,6 +901,8 @@ async function prepAct(name, button) {  // Run drops the card's job in the servi
   if (busy || !card) return;
   const c = card;
   if (name === "addstep") {
+    const hint = $("p-steps").querySelector("[data-nosteps]");
+    if (hint) hint.remove();
     const last = $("p-steps").lastElementChild;  // the verify row stays last
     if (last && last.matches(".fixed")) last.insertAdjacentHTML("beforebegin", stepRowHtml({ kind: "code", goal: "" }));
     else $("p-steps").insertAdjacentHTML("beforeend", stepRowHtml({ kind: "code", goal: "" }));
@@ -1651,7 +1657,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "c-prompt") { draft = e.target.value; fail = null; saveDraft(); renderCompose(); }
 });
 
-document.addEventListener("change", (e) => { if (e.target.matches("[data-smodel]")) stepsChanged(); });
+document.addEventListener("change", (e) => { if (e.target.matches("[data-smodel], [data-skind]")) stepsChanged(); });
 
 $("pfind").addEventListener("input", pickRows);
 $("pfind").addEventListener("keydown", (e) => {
