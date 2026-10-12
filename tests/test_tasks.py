@@ -562,6 +562,41 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(tasks.prune(home, 90, now=NOW), [])
             self.assertEqual(tasks.prune(Path(home) / "nothing", 90, now=NOW), [])
 
+    def test_start_step_records_each_attempt(self):
+        task = make(("code",))
+        run(task, 1)
+        end(task, ok=True, block_error="no HANDOFF block")  # retry
+        tasks.start_step(task, 1, "s-two", {"model": "sonnet", "effort": "medium", "notes": []}, "", NOW + 5)
+        a = tasks.step(task, 1)["attempts"]
+        self.assertEqual([x["session"] for x in a], ["s1", "s-two"])
+        self.assertEqual((a[0]["why"], a[0]["ended"], a[1]["ended"]), ("no HANDOFF block", NOW + 100, None))
+        self.assertEqual((a[0]["final"], a[0]["cost"]), (False, 0))
+
+    def test_old_step_without_attempts_reads_as_one(self):
+        old = {"session": "s1", "cost": 0.2, "started": 1.0, "ended": 2.0}
+        self.assertEqual(tasks.attempts(old), [{"session": "s1", "cost": 0.2, "started": 1.0, "ended": 2.0,
+                                                "why": "", "final": True}])
+        self.assertEqual(tasks.attempts({"session": ""}), [])
+        task = make(("code",))
+        for s in task["steps"]:
+            del s["attempts"]
+        self.assertTrue(tasks.whole(task))
+        run(task, 1)  # an old step that starts again keeps its earlier session
+        tasks.step(task, 1)["attempts"] = []
+        tasks.step(task, 1).update(session="s0", cost=0.5)
+        tasks.start_step(task, 1, "s-new", {"model": "sonnet", "effort": "medium", "notes": []}, "", NOW + 5)
+        self.assertEqual([a["session"] for a in tasks.attempts(tasks.step(task, 1))], ["s0", "s-new"])
+        self.assertEqual(tasks.step_cost(tasks.step(task, 1)), 0.5)
+
+    def test_clear_returns_every_attempt_session(self):
+        task = make(("code",))
+        run(task, 1)
+        end(task, ok=True, block_error="no HANDOFF block")
+        tasks.start_step(task, 1, "s-two", {"model": "sonnet", "effort": "medium", "notes": []}, "", NOW + 5)
+        with tempfile.TemporaryDirectory() as home:
+            tasks.save(home, task)
+            self.assertEqual(tasks.clear(home, task, keep_last=False), ["s1", "s-two"])
+
     def test_clear_keeps_the_last_note(self):
         with tempfile.TemporaryDirectory() as home:
             task = make(("scout", "explain", "search"))

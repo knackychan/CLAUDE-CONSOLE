@@ -217,12 +217,12 @@ def note_text(task: dict, step: dict, block: str) -> str:
 def _blank(n: int, kind: str, goal: str, pick: str = "", checked: int = 0) -> dict:
     return {"n": n, "kind": kind, "goal": goal, "model": "", "effort": "", "pick": pick, "session": "",
             "state": "planned", "handoff": "", "verdict": "", "verdict_detail": "", "retries": 0, "cost": 0,
-            "start_commit": "", "started": None, "ended": None, "notes": [], "checked": checked}
+            "start_commit": "", "started": None, "ended": None, "notes": [], "checked": checked, "attempts": []}
 
 
 TASK_KEYS = ("id", "project_dir", "project", "title", "type", "demand", "effort", "state", "owner", "current",
              "last_good", "escalated", "fable_ok", "prep", "why", "created", "updated", "steps")
-STEP_KEYS = tuple(_blank(0, "", ""))
+STEP_KEYS = tuple(k for k in _blank(0, "", "") if k != "attempts")  # a task.json from before plan 19 loads
 
 
 def whole(task) -> bool:
@@ -275,6 +275,21 @@ def step(task: dict, n: int) -> dict:
     raise KeyError(n)
 
 
+def attempts(step: dict) -> list:
+    """Every session the step ran in, oldest first. A step from before plan 19 has no list: its one session."""
+    if step.get("attempts"):
+        return step["attempts"]
+    if not step.get("session"):
+        return []
+    return [{"session": step["session"], "cost": step.get("cost") or 0, "started": step.get("started"),
+             "ended": step.get("ended"), "why": "", "final": True}]
+
+
+def step_cost(step: dict) -> float:
+    """What the step cost over all its attempts."""
+    return round(sum(a["cost"] or 0 for a in attempts(step)), 6)
+
+
 def current_step(task: dict):
     return step(task, task["current"]) if task["current"] else None
 
@@ -303,11 +318,15 @@ def _task_to(task: dict, state: str, why: str, now: float, s, lines: list) -> No
 def _finish(task: dict, s: dict, state: str, now: float, lines: list, why: str = "") -> None:
     lines.append(_line(now, s, s["state"], state, why))
     s["state"], s["ended"] = state, now
+    if s.get("attempts"):
+        s["attempts"][-1].update(ended=now, why=why)
 
 
 def start_step(task: dict, n: int, session: str, route: dict, start_commit: str, now: float) -> list:
     s = step(task, n)
     lines = [_line(now, dict(s, session=session), s["state"], "running", " · ".join(route["notes"]))]
+    s["attempts"] = list(attempts(s)) + [{"session": session, "cost": 0, "started": now, "ended": None, "why": "",
+                                          "final": False}]
     s.update(state="running", model=route["model"], effort=route["effort"], notes=list(route["notes"]),
              session=session, start_commit=start_commit, started=now, ended=None)
     task["current"] = n
@@ -540,7 +559,7 @@ def clear(home, task: dict, keep_last: bool = True) -> list:
     """Remove what is only history. `keep_last`: every note but the last good one and its brief (task.json,
     chain.jsonl and prompt.md stay); else the whole folder. Returns the step session ids so the caller can
     forget their runs."""
-    sessions = [s["session"] for s in task["steps"] if s["session"]]
+    sessions = list(dict.fromkeys(a["session"] for s in task["steps"] for a in attempts(s) if a["session"]))
     root = folder(home, task["id"])
     if keep_last:
         last = step(task, task["last_good"]) if task["last_good"] else None
