@@ -365,6 +365,18 @@ class RunServerTest(unittest.TestCase):
                          ("transcript", [("you", "hello"), ("claude", "Hi.")]))
         self.assertEqual(self.call("/api/chat?session=nope")[1]["items"], [])
 
+    def test_chat_of_an_unknown_session_reads_its_transcript(self):
+        sid = "0b1c2d3e-aaaa-bbbb-cccc-111122223333"  # no event, no run: an older step after Clear
+        path = self.hub.user_home / ".claude" / "projects" / "X" / f"{sid}.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text("".join(json.dumps(rec) + "\n" for rec in (
+            {"type": "user", "timestamp": "2026-10-10T10:00:00Z", "message": {"role": "user", "content": "hello"}},
+            {"type": "assistant", "timestamp": "2026-10-10T10:00:05Z", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "Hi."}]}})), encoding="utf-8")
+        chat = self.call(f"/api/chat?session={sid}")[1]
+        self.assertEqual((chat["source"], [(i["role"], i["text"]) for i in chat["items"]]),
+                         ("transcript", [("you", "hello"), ("claude", "Hi.")]))
+
     def idle_chat(self, sid, hours, tokens, transcript=None):
         """A VS Code chat whose last event was `hours` ago, holding `tokens` of context."""
         ts = time.time() - hours * 3600

@@ -25,6 +25,15 @@ class TranscriptTest(unittest.TestCase):
     def write(self, *recs, raw=""):
         self.path.write_text("".join(json.dumps(r) + "\n" for r in recs) + raw, encoding="utf-8")
 
+    def test_find_by_id(self):
+        root = Path(self.tmp.name)
+        p = root / "D--WORK-APP" / "0b1c2d3e-aaaa-bbbb-cccc-111122223333.jsonl"
+        p.parent.mkdir()
+        p.write_text("", encoding="utf-8")
+        self.assertEqual(transcript.find(root, "0b1c2d3e-aaaa-bbbb-cccc-111122223333"), p)
+        self.assertIsNone(transcript.find(root, "../x"))
+        self.assertIsNone(transcript.find(root, "0b1c2d3e-0000-0000-0000-000000000000"))
+
     def test_a_long_reply_is_whole_up_to_the_limit_then_marked_cut(self):
         self.write(claude([{"type": "text", "text": "a" * 5000}]),
                    claude([{"type": "text", "text": "b" * (transcript.TURN_MAX + 10)}]))

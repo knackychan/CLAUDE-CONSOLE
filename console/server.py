@@ -1091,7 +1091,9 @@ class Handler(BaseHTTPRequestHandler):
         meta = self.hub.runs.meta(sid) if sid and all(c.isalnum() or c == "-" for c in sid) else None
         if not meta:
             info = self.hub.session(sid)
-            items = transcript.turns(info["transcript_path"]) if info else []
+            path = info["transcript_path"] if info else transcript.find(
+                self.hub.user_home / ".claude" / "projects", sid)  # an older step: no row, no stream
+            items = transcript.turns(path) if path else []
             return self._json({"items": items, "source": "transcript", "changed": None, "live": False})
         items = runs.chat(self.hub.runs.stream_path(sid), meta.get("cwd", ""))
         changed = claude_cli.git_changed(meta["cwd"], meta.get("start_commit", ""))

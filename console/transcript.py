@@ -5,7 +5,7 @@ import base64
 import json
 import re
 from datetime import datetime
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 from . import attach, redact
 
@@ -179,3 +179,11 @@ def first_prompt(path) -> str:
         if text and not text.startswith("[Request interrupted"):
             return redact.mask(text[:TEXT_MAX])
     return ""
+
+
+def find(root, session_id: str):
+    """The transcript of a session by its id under ~/.claude/projects (any project folder); None when not found."""
+    if not re.fullmatch(r"[0-9a-f-]{8,64}", str(session_id or "")):
+        return None
+    hits = sorted(Path(root).glob(f"*/{session_id}.jsonl"))
+    return hits[0] if hits else None
