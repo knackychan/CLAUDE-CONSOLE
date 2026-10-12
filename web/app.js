@@ -1242,15 +1242,19 @@ function taskDir(id) {  // the task's folder in the data folder (config_path is 
   return home ? home + "\\tasks\\" + id : "";
 }
 
+function stepTries(s) {  // the earlier attempts of a step, each a link to its chat: "try 1 no HANDOFF block"
+  const all = s.attempts && s.attempts.length ? s.attempts : (s.session ? [{ session: s.session, why: "" }] : []);
+  return all.slice(0, -1).map((a, k) => `<span class="link" data-open="${esc(a.session)}">try ${k + 1}</span>${a.why ? " " + esc(a.why) : ""}`).join(" · ");
+}
 function chainRow(t, s) {
   const tn = s.state === "failed" || s.verdict === "FAIL" ? "r" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
   const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
-  const sub = [verdict, s.retries ? "retry " + s.retries : "", esc(s.goal)].filter(Boolean).join(" · ");
+  const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), esc(s.goal)].filter(Boolean).join(" · ");
   return `<div class="row${s.n === t.current ? " cur" : ""}"><span class="cells">${cells}</span>
     <span class="nm m">${two(s.n)} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(modelText(s.model, s.effort))}</span>` : ""}</span>
     <span class="m c">${s.cost ? money(s.cost) : ""}</span>
-    ${s.session && !t.cleared ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
+    ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
     ${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
 }
 
@@ -1264,11 +1268,12 @@ function drawTask() {
   }
   const t = d.task, lv = d.levers || {}, [glyph, word, tn] = TASK_WORD[t.state] || TASK_WORD.running, cur = t.steps.find((s) => s.n === t.current);
   const paused = t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? " · paused" : "";
-  const dir = taskDir(t.id);
+  const dir = taskDir(t.id), row = (snap.tasks || []).find((x) => x.id === t.id) || {};
   const head = `<div class="head tk"><span class="st ${tn}">${glyph} ${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
     <h2>${esc(t.title)}</h2>
-    <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)}</span></div>
-    ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>`;
+    <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)} · $${money(row.cost)}</span></div>
+    ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>${row.paused_after
+    ? `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>` : ""}`;
   const asked = t.state === "waiting" && t.why.startsWith("asks:") && cur && cur.session;
   const why = (t.state === "waiting" || t.state === "stuck") && t.why
     ? `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${glyph} ${word}</span><div class="q">${esc(t.why)}</div>
@@ -1288,10 +1293,11 @@ function drawTask() {
   if (lv.pause === "") buttons += b("pause", "", "Pause");
   if (lv.resume === "") buttons += b("resume", " go", "Resume");
   if (lv.retry === "") buttons += b("retry", " go", "Retry");
-  if (lv.confirm === "") buttons += b("confirm", " you", "Confirm Fable");
+  if (lv.confirm === "") buttons += b("confirm", " you", row.hold ? "Run anyway" : "Confirm Fable");
   if (lv.clear === "") buttons += b("clear", "", "Clear");
   const off = new Map();  // the reasons, one line each: "Retry, Clear off: task is running"
-  for (const k of ["stop", "pause", "retry", "clear"]) if (lv[k]) off.set(lv[k], [...(off.get(lv[k]) || []), k[0].toUpperCase() + k.slice(1)]);
+  const keys = ["stop", "pause", "retry", "clear", ...(paused ? ["resume"] : [])];  // why Resume is off, while paused
+  for (const k of keys) if (lv[k]) off.set(lv[k], [...(off.get(lv[k]) || []), k[0].toUpperCase() + k.slice(1)]);
   const reasons = [...off].map(([why, names]) => `${names.join(", ")} off: ${why}`).join(" · ");
   setHtml($("tbar"), `${buttons ? `<div class="lr">${buttons}</div>` : ""}<div class="say">${esc(reasons)}</div><div id="t-msg" class="say"></div>`);
 }
