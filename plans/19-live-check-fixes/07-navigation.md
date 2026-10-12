@@ -15,6 +15,17 @@
 | N3 | The pager `N of M` on a step session | with step sessions folded out of the list (Task 5), `navList()` falls back to every session: `17 of 52` through unrelated chats | on a step session the pager steps through the task's steps (`step 2 of 3`, each step's last attempt) |
 | N4 | Header `N need you` | counted step sessions, not tasks | done in Task 4 (counts) |
 | N5 | Task page of a task that is gone (`taskData === false`) | text only, `←` is the only way | add `<span class="link" data-go="list">Back to the list</span>` to the message |
+| N6 | Pill form (path 7) | the rail's chips and the peek card still list step sessions (`liveSessions()` has no task filter); a chip opens the step session, whose `task · step N/M` link reaches the task | kept: a chip is a live run and the folded list is the open form's; no change |
+| N7 | Session page of a plain run (path 5) | the pager steps through the folded list (`2 of 2`), `New task here` scopes the list and focuses the box | none: works |
+| N8 | Prep card (path 1) | Back and Esc keep the card on the strip, Open again shows it, Cancel drops it | none: works |
+| N9 | Usage page from the today strip (path 8) | `←` returns to the list at its scroll | none: works |
+
+Walked 2026-10-12 at 400 px on the scratch home (fake claude, CDP script in the scratchpad). Confirmed by the walk:
+N1 (Task page `Open` and `try 1`, the task card's `Open` on a question: `←` and Esc land on the list), N2 (the
+session's `task` link, then `←`: the list), N3 (a step session's pager read `19 of 21`, `6 of 21`, through every
+session), N5 (the gone message has no link). N4 holds after Task 4: the header said `4 need you` with three stuck
+tasks and one waiting task, the Needs you section listed the same four. Path 2's `Run as task` was not walked
+(a waiting task held the scratch project); the Task page it opens is the one walked from the list.
 
 ## 7.2 The walk (Claude, headless Edge on the scratch home of Task 5)
 
