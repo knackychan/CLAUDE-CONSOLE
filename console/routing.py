@@ -8,6 +8,7 @@ from .claude_cli import EFFORTS, MODELS
 
 LEVELS = ["low", "medium", "high"]
 _START = re.compile(r" - ([a-z]+): .*next time start at (\w+)/(\w+)\.$")
+_DATE = re.compile(r"^- (\d{4}-\d{2}-\d{2}) ")
 
 
 def parse(text: str):
@@ -39,6 +40,17 @@ def floor(misses, task_type: str):
         if m and m.group(1) == task_type and m.group(2) in MODELS and m.group(3) in EFFORTS:
             return m.group(2), m.group(3)
     return None
+
+
+def floors(misses) -> dict:
+    """Every floor in the miss lines, the newest per type: {type: {"route": "opus/high", "date": "2026-10-12"}}.
+    The Prep card shows them, so a step that starts above its rule is not a surprise."""
+    out = {}
+    for line in misses:
+        m, d = _START.search(line), _DATE.match(line)
+        if m and m.group(2) in MODELS and m.group(3) in EFFORTS:
+            out[m.group(1)] = {"route": f"{m.group(2)}/{m.group(3)}", "date": d.group(1) if d else ""}
+    return out
 
 
 def pick(route: dict, misses=()) -> tuple:

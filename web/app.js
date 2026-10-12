@@ -822,12 +822,20 @@ function markHi() {
   if (rows[hi]) rows[hi].scrollIntoView({ block: "nearest" });
 }
 
-function openPicker() {
+function placePicker(from) {  // beside the control that opened it: below when there is room, else above
+  const r = from.getBoundingClientRect(), o = $("open").getBoundingClientRect(), pop = $("pop");
+  const below = o.bottom - r.bottom, above = r.top - o.top, up = above > below;
+  pop.style.top = up ? "auto" : (r.bottom - o.top + 4) + "px";  // under the header, banner or not
+  pop.style.bottom = up ? (o.bottom - r.top + 4) + "px" : "auto";
+  pop.style.maxHeight = Math.max(160, (up ? above : below) - 12) + "px";
+}
+
+function openPicker(from) {
   if (!snap || !cfg) return;
   if (form === "pill") return;
   if (page !== "list") showPage("list");
   $("pop").hidden = false;
-  $("pop").style.top = ($("scope").getBoundingClientRect().bottom - $("open").getBoundingClientRect().top + 4) + "px";  // under the header, banner or not
+  placePicker(from || $("scope"));
   $("scope").setAttribute("aria-expanded", "true");
   $("pfind").value = "";
   pickRows();
@@ -880,9 +888,16 @@ function stepsChanged() {  // the verify row, numbers, the Fable note and Run as
   const rows = [...document.querySelectorAll("#p-steps .srow")];
   rows.forEach((r, k) => { r.querySelector(".n").textContent = k + 1; });
   const fable = [...document.querySelectorAll("#p-model, #p-steps [data-smodel]")].some((s) => s.value.includes("fable"));
+  const kinds = [...new Set([...rows].map((r) => (r.querySelector("[data-skind]") || { value: "verify" }).value))];
+  if ($("p-floors")) $("p-floors").innerHTML = kinds.map((k) => floorText(k, "steps")).filter(Boolean).map(esc).join("<br>");
   const note = $("p-fable"), run = document.querySelector('#pbar [data-pact="task"]');
   if (note) note.hidden = !fable;
   if (run) run.hidden = rows.length < 2;
+}
+
+function floorText(kind, noun) {  // a routing miss of this kind (Escalate wrote it) lifts its start above the rule
+  const f = ((card && card.floors) || {})[kind];
+  return f ? `Floor from Escalate${f.date ? " (" + f.date + ")" : ""}: ${kind} ${noun} start at ${f.route}, above their rule.` : "";
 }
 
 function showPrep() {
@@ -896,13 +911,16 @@ function showPrep() {
     <div class="blk"><span class="lbl">Enhanced prompt (edit freely)</span>
       <textarea id="p-prompt" class="in m" rows="9" spellcheck="false">${esc(card.prompt)}</textarea></div>
     ${f.question ? `<div class="askbox" style="margin:0"><span class="st y">? Question</span><div class="q">${esc(f.question)}</div></div>` : ""}
-    <div class="blk"><span class="lbl">Route</span><div class="prep-row">
+    <div class="blk"><span class="lbl">Run route (one session)</span><div class="prep-row">
       <select id="p-model" aria-label="Model">${modelOptions(card.route.model, false)}</select>
       <select id="p-effort" aria-label="Effort">${options(cfg.efforts, effortPick !== "auto" ? effortPick : card.route.effort)}</select>
       <span class="m mut">${esc(card.route.type)}</span></div>
-      ${card.reason ? `<div class="mut">${esc(card.reason)}</div>` : ""}</div>
+      ${card.reason ? `<div class="mut">${esc(card.reason)}</div>` : ""}
+      ${floorText(card.route.type, "runs") ? `<div class="m mut">${esc(floorText(card.route.type, "runs"))}</div>` : ""}</div>
     <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
       <div id="p-steps">${steps.map(stepRowHtml).join("") || '<p class="m mut" data-nosteps>Prep proposed no steps. Add steps to run this as a task.</p>'}</div>
+      <div class="m mut">Run as task: each step's model comes from its kind (auto) or the model you pick on its row, not from the Run route above. A verify step runs one model above the step it checks.</div>
+      <div id="p-floors" class="m mut"></div>
       <div id="p-fable" class="say" hidden>${esc(fableName())} may bill usage credits on this plan; it asks you to confirm before it runs</div>
       <div class="m mut">${esc(effortText())}</div></div>
     <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns</div>`;
@@ -1686,7 +1704,7 @@ document.addEventListener("click", (e) => {
   else if (t.dataset.here !== undefined) { pick(t.dataset.here); showPage("list"); $("c-prompt").focus(); }
   else if (t.dataset.proj !== undefined) pick(t.dataset.proj);
   else if (t.dataset.step) step(Number(t.dataset.step));
-  else if (t.hasAttribute("data-pick")) { if ($("pop").hidden) openPicker(); else closePicker(); }
+  else if (t.hasAttribute("data-pick")) { if ($("pop").hidden) openPicker(t); else closePicker(); }
   else if (t.id === "brief") {
     briefOpen = !briefOpen;
     t.setAttribute("aria-expanded", String(briefOpen));

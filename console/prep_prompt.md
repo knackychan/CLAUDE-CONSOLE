@@ -48,7 +48,8 @@ Do not add a verify step: the Console adds one after the last step that edits.
 
 Fields: goal (one sentence), where (files and functions, short), keep (what must not break),
 done_when (a check that can be run), last_decisions (from PLAN.md History, one line each, or ""),
-question, route {type, reasoning, volume, model, effort}, reason (one sentence: why this route),
+question, route {type, reasoning, volume, model, effort}, reason (one sentence: why this route for one
+run of the whole request; when you split it into steps, never say the task needs a model or an effort: each step's model comes from its kind),
 steps (a list of {kind, goal}, or []).
 
 Output rules: the JSON object has exactly these 9 keys and all 9 are always present: goal, where,

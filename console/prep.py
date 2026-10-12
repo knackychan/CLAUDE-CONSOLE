@@ -109,7 +109,7 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, pre
         "fields": fields, "prompt": format_prompt(fields), "route": fields["route"],
         "steps": steps, "demand": {"reasoning": route["reasoning"], "volume": route["volume"]},
         "reason": fields.get("reason", ""), "cost": result["cost"], "turns": result["turns"],
-        "model": cfg["prep_model"],
+        "model": cfg["prep_model"], "floors": routing.floors(misses),
     }
     preps = Path(folder) / "preps"
     preps.mkdir(parents=True, exist_ok=True)

@@ -37,6 +37,16 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(routing.floor([old, new, junk], "normal"), ("opus", "high"))
         self.assertIsNone(routing.floor([junk], "normal"))
 
+    def test_floors_list_the_newest_miss_of_each_type_with_its_date(self):
+        old = "- 2026-10-10 - APP - code: sonnet/medium failed (x); next time start at sonnet/high."
+        new = "- 2026-10-12 - APP - code: sonnet/high failed (y); next time start at opus/high."
+        other = "- 2026-10-11 - APP - debug: sonnet/medium failed (z); next time start at sonnet/high."
+        junk = "- 2026-10-12 - APP - code: x failed; next time start at gpt/high."
+        self.assertEqual(routing.floors([old, other, new, junk]),
+                         {"code": {"route": "opus/high", "date": "2026-10-12"},
+                          "debug": {"route": "sonnet/high", "date": "2026-10-11"}})
+        self.assertEqual(routing.floors([]), {})
+
     def test_parse(self):
         self.assertEqual(routing.parse("sonnet/medium"), ("sonnet", "medium"))
         for bad in ("", None, "sonnet", "gpt/high", "sonnet/turbo"):
