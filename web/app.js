@@ -633,8 +633,8 @@ function rawEffort() { return effortPick !== "auto" ? effortPick : cfg.default_e
 // -- Prep jobs: the strip above the composer; each runs in the service, then waits for Run ---------
 function preps() { return (snap && snap.preps) || []; }
 
-function prepJobHtml(j) {
 const prepSeen = new Set();  // a Prep row grows in once, the first time it is painted
+function prepJobHtml(j) {
   const where = esc(projectName(j.project_dir)), id = esc(j.id), grow = prepSeen.has(j.id) ? "" : " grow";
   prepSeen.add(j.id);
   if (j.state === "running") {
