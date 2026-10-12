@@ -204,6 +204,8 @@ function setHtml(el, html, scroller) {
   const top = old ? old.scrollTop : 0, atEnd = old ? old.scrollTop + old.clientHeight >= old.scrollHeight - 4 : false;
   el.innerHTML = html;
   el._html = html;
+  for (const a of el.getAnimations({ subtree: true }))  // loops (sprites, live cells) run on the page clock: a repaint does not restart them at frame 0
+    if (a.effect.getTiming().iterations === Infinity) a.startTime = 0;
   for (const [id, value, a, b] of fields) {
     const f = $(id);
     if (f && f.value !== value) { f.value = value; try { f.setSelectionRange(a, b); } catch (e) { /* not a text field */ } }
