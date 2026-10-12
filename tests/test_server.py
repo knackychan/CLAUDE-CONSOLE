@@ -742,6 +742,37 @@ class TaskServerTest(RunServerTest):
         task = self.until(tid, lambda t: t["state"] == "stuck", "stuck after the retry")
         self.assertEqual(task["why"], "it hit the turn cap (? turns) (after one retry)")
 
+    def test_retry_sums_the_cost_of_both_attempts(self):
+        tid = self.make_task(words="", steps=[{"kind": "scout", "goal": "look"}])  # no HANDOFF: retry, then stuck
+        self.until(tid, lambda t: t["state"] == "stuck", "stuck after the retry")
+        self.until(tid, lambda t: all(a["final"] for a in t["steps"][0]["attempts"]), "both costs in")
+        step = self.hub.tasks[tid]["steps"][0]
+        self.assertEqual(len(step["attempts"]), 2)
+        self.assertAlmostEqual(step["cost"], 0.02)
+        row = next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)
+        self.assertEqual([a["session"] for a in row["steps"][0]["attempts"]], [a["session"] for a in step["attempts"]])
+        self.assertAlmostEqual(row["cost"], 0.02)
+
+    def test_stopped_step_gets_its_cost(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.call("/api/task/stop", {"task": tid})
+        self.wait_idle(sid)
+        task = self.until(tid, lambda t: t["steps"][0]["attempts"][0]["final"], "the stopped run's cost")
+        self.assertAlmostEqual(task["steps"][0]["cost"], 0.01)
+        self.assertEqual(task["state"], "stopped")
+
+    def test_clear_removes_every_attempt_stream(self):
+        tid = self.make_task(words="", steps=[{"kind": "scout", "goal": "look"}])
+        task = self.until(tid, lambda t: t["state"] == "stuck", "stuck after the retry")
+        sids = [a["session"] for a in task["steps"][0]["attempts"]]
+        self.assertEqual(len(sids), 2)
+        for sid in sids:
+            self.wait_idle(sid)
+        self.assertEqual(self.call("/api/task/clear", {"task": tid})[0], 200)
+        for sid in sids:
+            self.assertFalse(self.hub.runs.stream_path(sid).exists(), sid)
+
     def test_stop_interrupts_the_step_never_kills(self):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
         old = self.hub.tasks[tid]["steps"][0]["session"]
@@ -928,7 +959,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([(s["n"], s["kind"], s["state"]) for s in row["steps"]],
                          [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
         self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
-                                                          "verdict", "retries", "cost"]))
+                                                          "verdict", "retries", "cost", "attempts"]))
         self.until(tid, self.at(2), "step 2 starts")
         status, data = self.task(tid)
         self.assertEqual(status, 200)

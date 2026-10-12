@@ -555,7 +555,25 @@ class Hub:
                     acted.append((task.get("id", ""), action))
         return acted
 
+    def sync_costs(self, task: dict) -> bool:
+        """Each attempt's cost from its session row once its run has ended (a stopped run's cost lands with its
+        run_ended, after the Stop); a step's cost is the sum of its attempts. True when anything changed."""
+        changed = False
+        for st in task["steps"]:
+            for a in st.get("attempts") or []:
+                if a.get("final") or not a.get("session") or (st["state"] == "running" and a is st["attempts"][-1]):
+                    continue  # a running step's session may take more turns (an answered question)
+                row, meta = self.session(a["session"]), self.runs.meta(a["session"])
+                if row is None or row["run_live"] or (meta and not meta.get("ended")):
+                    continue
+                a.update(cost=row["cost"], final=True)
+                st["cost"] = tasks.step_cost(st)
+                changed = True
+        return changed
+
     def _advance_one(self, task: dict) -> str:
+        if self.sync_costs(task):
+            self._commit(task)
         if task["state"] == "done" and task.get("briefing") and task["id"] not in self.briefing:
             self.start_brief(task, task["briefing"])  # the service restarted while the last brief ran
             return ""
@@ -619,7 +637,7 @@ class Hub:
         action, lines = tasks.on_step_ended(task, ok=ok, block_error=block_error, verdict=verdict,
                                             verdict_detail=detail if verdict else "", question="", now=now,
                                             cap=tasks.cap_reason(subtype, meta.get("limits")))
-        cs["cost"] = s["cost"]
+        self.sync_costs(task)
         if action in ("next", "fix", "done"):
             tasks.write_note(self.folder, task, cs, block)
         if action == "fix":
@@ -779,11 +797,13 @@ def task_row(t: dict) -> dict:
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
             "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
             "why": t["why"], "updated": t["updated"], "effort": t["effort"],
-            "cost": round(sum(s["cost"] or 0 for s in t["steps"]), 4),
+            "cost": round(sum(tasks.step_cost(s) for s in t["steps"]), 4),
             "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
             "briefing": t.get("briefing") or 0, "cleared": bool(t.get("cleared")),
-            "steps": [{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
-                                         "cost")} for s in t["steps"]]}
+            "steps": [{**{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
+                                            "cost")},
+                       "attempts": [{"session": a["session"], "cost": a["cost"], "why": a["why"]}
+                                    for a in tasks.attempts(s)]} for s in t["steps"]]}
 
 
 def project_list(cfg: dict) -> list:
