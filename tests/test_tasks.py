@@ -630,8 +630,11 @@ class ChainTest(unittest.TestCase):
         self.assertNotIn("STOP:", code)
         self.assertNotIn("$", code)
         verify = tasks.step_prompt(task, tasks.step(task, 3), "note")
-        self.assertIn("\nCheck the work of this session.", verify)
-        self.assertNotIn("Check the work of this session.", code)
+        self.assertIn("\nCheck the work of step 2 as the handoff note above describes it", verify)
+        self.assertIn("just before the HANDOFF block", verify)
+        self.assertNotIn("this session", verify)
+        self.assertNotIn("with the Agent tool", verify)
+        self.assertNotIn("Check the work of step", code)
         retry = tasks.step_prompt(task, tasks.step(task, 2), "note", "no HANDOFF block")
         self.assertIn("Your earlier attempt at this step ended without a handoff: no HANDOFF block. "
                       "Start again from the note above.", retry)

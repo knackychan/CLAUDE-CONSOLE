@@ -48,6 +48,10 @@ EFFORT_CAP = {m: claude_cli.EFFORTS[-1] for m in claude_cli.MODELS}  # every ali
 _TOP = ("opus", "high")  # the most a step runs on unless Fred picks fable
 _HINT = re.compile(r"Next model:\s*([a-z]+)/([a-z]+)")
 PROMPT_FILE = Path(__file__).resolve().parent / "step_prompt.md"
+VERIFY_STEP = ("Check the work of step $checked as the handoff note above describes it: read the files it "
+               "touched and run the project's tests or checks once. Do not edit any file. Put one line "
+               "`VERDICT: PASS` or `VERDICT: FAIL <shortest failing line>` in your final message, just before "
+               "the HANDOFF block.")  # a step's own text: levers.VERIFY_TEXT is the session lever's
 
 
 def safe_id(text) -> str:
@@ -558,7 +562,8 @@ def _fix_text(task: dict, s: dict) -> str:
 
 def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "") -> str:
     kind = step["kind"]
-    special = levers.VERIFY_TEXT if kind == "verify" else _fix_text(task, step) if kind == "fix" else ""
+    special = (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1) if kind == "verify"
+               else _fix_text(task, step) if kind == "fix" else "")
     retry = (f"Your earlier attempt at this step ended without a handoff: {retry_reason}. "
              "Start again from the note above.") if retry_reason else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
