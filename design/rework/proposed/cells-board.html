@@ -455,12 +455,12 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .hsec .lbl .m { text-transform: none; letter-spacing: 0; }
 .hsec p, .hsec li { margin: 0; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .hsec ul { margin: 0; padding-left: 16px; }
-.hsec .cut { color: var(--mut); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--mut) 60%, transparent); }
+.hsec li.cut { color: var(--mut); }
+.hsec li.cut s { text-decoration-color: color-mix(in srgb, var(--mut) 55%, transparent); }
+.hsec li.cut .tag { display: inline-block; font: 500 9.5px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; vertical-align: 1px; }
 .hsec .mono { font: 11.5px/1.45 var(--mono); }
 .hsec.keep { box-shadow: inset 2px 0 0 var(--ok); }
 .hsec.facts { background: transparent; border: 1px dashed var(--line); }
-.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.two > div { display: grid; gap: 8px; align-content: start; }
 .checks { display: grid; gap: 3px; font: 11.5px var(--mono); color: var(--mut); }
 .checks .g { color: var(--ok); } .checks .r { color: var(--bad); } .checks .y { color: var(--you); }
 .oq { display: grid; gap: 4px; }
@@ -497,14 +497,14 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
   <header>
     <h1>Cells Board</h1>
     <p>The interface for the harness plan and the brainstorm around it (plans 5, 18, 23, 24 and 25). The compact window keeps what Cells Drawer locked and gains the harness switch, rungs on any CLI, the per-step context view, the usage fills and the replan wait. The Board is the one new page: the window widened to 900 px, the chain of a task on the left as connected cells, one picked thing on the right. Same tokens, same type, same cell motif.</p>
-    <p>Figures are sample data. Orange still means "needs you" and nothing else; a cut brief or an estimate is shown by shape (hatched, dashed, a tone) and a word, never by orange.</p>
+    <p>Figures are sample data. Orange still means "needs you" and nothing else; a cut handoff or an estimate is shown by shape (hatched, dashed, a tone) and a word, never by orange.</p>
   </header>
 
   <div class="views" role="group" aria-label="Mock view">
     <span class="grp">Board</span>
     <button data-v="step" aria-pressed="true">Step picked</button>
     <button data-v="live" aria-pressed="false">Step running</button>
-    <button data-v="conn" aria-pressed="false">Brief picked</button>
+    <button data-v="conn" aria-pressed="false">Handoff picked</button>
     <button data-v="task" aria-pressed="false">Task picked</button>
     <button data-v="replan" aria-pressed="false">Replan waits</button>
     <button data-v="measure" aria-pressed="false">Measure</button>
@@ -531,7 +531,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       <ul>
         <li><b>Two new tokens, for the chat only.</b> Orange is "needs you" (a replan to confirm, a question, a model over its pace that the router will leave). Red and green are state (FAIL, done). Blue stays the note being written. A harness has no colour: the rung is words, <code>codex · gpt-5.6-codex · medium</code>. The chat adds <code>--me</code> (violet, Fred's turns) and <code>--ai</code> (the writing blue, the agent's turns), used nowhere else (ID-8).</li>
         <li><b>One Doto figure per screen:</b> the task's cost on the Board head, today's spend on the list, the month on Usage.</li>
-        <li><b>Every quantity is cells:</b> context in 10K cells, briefs and notes in cells of 50 words, fills in 5 % cells against an allowance, FAIL rate in four tones. Unknown is unknown: no cells and the word, never a zero.</li>
+        <li><b>Every quantity is cells:</b> context in 10K cells, handoffs in cells of 50 words, fills in 5 % cells against an allowance, FAIL rate in four tones. Unknown is unknown: no cells and the word, never a zero.</li>
         <li><b>Motion:</b> the one blinking cell on the live step; the running puzzle and the waiting <code>?</code> as plan 21 made them. Nothing on the Board moves by itself except the live step.</li>
       </ul>
     </section>
@@ -550,7 +550,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       <ul>
         <li><b>Task head:</b> state and age, title, project · effort · cost. Picked: the inspector shows prompt.md, the running list of open questions and the chain log.</li>
         <li><b>Step block (eight facts, Square's fleet row):</b> state sprite and word, number and kind, the rung as <code>harness · model · effort</code>, cost (<code>~</code> estimated, <code>?</code> unknown), then the context row (30 cells of 10K and the figure, or "context unknown"), then brief in and note out as cells of 50 words, and the attempts as small squares (red a failed try, green the one that passed).</li>
-        <li><b>Connector = the brief:</b> a short line and a chip with the brief's word cells and count. Dashed: the brief fell back to code. A tone step on the cells with "cut 120 w": Findings were cut. Blue dashed: being written. Dotted line: not written yet. Picked: raw note and brief side by side with what was cut.</li>
+        <li><b>Connector = the handoff:</b> a short line and a chip with the handoff's word cells and count, as the next step received it (after the brief pass). Dashed: the brief pass fell back to code. A tone step on the cells with "cut 120 w": Findings were cut. Blue dashed: being written. Dotted line: not written yet. Picked: what the next step received, one column, the cut lines struck in place.</li>
         <li><b>Fix insert:</b> a bracket under the failed verify holding fix and the second verify, rejoining after. The failed verify keeps its red; the fix shows its escalated rung.</li>
         <li><b>Replan:</b> a step of its own kind (Haiku, no tools), orange while it waits for Fred; the inspector shows the plan before and after and Confirm / Keep plan / Stop.</li>
         <li><b>Several tasks:</b> the scope's tasks stack, newest first, every one folded to a quiet row except the picked one. Left / Right moves between them.</li>
@@ -559,12 +559,12 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>The inspector: one picked thing</h3>
       <ul>
-        <li><b>A step:</b> head (number, kind, rung, cost, time, context, in / out; Open chat, Stop while live), then four tabs with <b>Chat</b> first (Fred, 2026-10-13): the step session's last turns as bubbles, the agent on the left with the blue edge, Fred on the right with the violet edge; consecutive tool events fold into one quiet row between them (click opens the list, a failed exit shows in red); the HANDOFF block folds to a chip with its word count and its Next line, the six headings being the Note tab; a running step streams with the writing mark in the agent's label. <b>Note</b>: what it wrote, the HANDOFF block as six blocks (Goal and Troubleshooting carry a green edge: never cut), then the facts the service added (git diff --stat between the start and end commits, the failing lines of the last test command). <b>Brief</b>: what it read, six headings. <b>Route</b>: the goal, the route notes as chips in the order <code>step_route</code> applied them (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback), the attempts with their reason. The tab holds while Up / Down move along the chain.</li>
-        <li><b>A brief:</b> two columns, raw note and brief, the cut lines struck through on the left, the checks under them in words (length, questions kept, Goal and Troubleshooting whole, continuity with the previous Files touched, no invented path, the Haiku cost).</li>
+        <li><b>A step:</b> head (number, kind, rung, cost, time, context, in / out; Open chat, Stop while live), then four tabs with <b>Chat</b> first (Fred, 2026-10-13): the step session's last turns as bubbles, the agent on the left with the blue edge, Fred on the right with the violet edge; consecutive tool events fold into one quiet row between them (click opens the list, a failed exit shows in red); the HANDOFF block folds to a chip with its word count and its Next line, the six headings being the Handoff tab; a running step streams with the writing mark in the agent's label. <b>Received</b>: the handoff it got from the step before, after the brief pass, six headings. <b>Handoff</b>: the one it wrote for the next step, the HANDOFF block as six blocks (Goal and Troubleshooting carry a green edge: never cut), then the facts the service added (git diff --stat between the start and end commits, the failing lines of the last test command). The words: a step <i>receives</i> a handoff and <i>writes</i> one; "note" and "brief" stay names in the code (Fred, 2026-10-13: Note / Brief took minutes to read). <b>Route</b>: the goal, the route notes as chips in the order <code>step_route</code> applied them (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback), the attempts with their reason. The tab holds while Up / Down move along the chain.</li>
+        <li><b>A handoff (connector):</b> one column, what the next step received, six headings, with the lines the brief pass cut left in place under their heading, struck and tagged "cut", the heading's label counting "2 kept · 2 cut" (Fred, 2026-10-13: two columns of the same text were unreadable). The head counts what was written, received and cut and names the brief pass's rung, cost and turns. Under the column, the checks in words (length, Goal and Troubleshooting whole, questions kept, continuity with the previous Files touched, no invented path). The step's own Handoff tab marks the same cut lines, so "cut" reads the same everywhere.</li>
         <li><b>A task:</b> prompt.md, Open questions with the step that opened and the step that closed each one, the chain log.</li>
-        <li><b>Nothing picked</b> (keyboard Esc inside the Board, or a folded task): the inspector shows the measure table of the picked task's project, brief in against context reached per kind.</li>
+        <li><b>Nothing picked</b> (keyboard Esc inside the Board, or a folded task): the inspector shows the measure table of the picked task's project, handoff received against context reached per kind.</li>
       </ul>
-      <p>Keyboard: Up / Down along the chain (steps and briefs), Left / Right between tasks, Enter opens the step's session page, Esc clears the pick then leaves the Board. The pick is an ink outline, as a focused control is.</p>
+      <p>Keyboard: Up / Down along the chain (steps and handoffs), Left / Right between tasks, Enter opens the step's session page, Esc clears the pick then leaves the Board. The pick is an ink outline, as a focused control is.</p>
     </section>
     <section>
       <h3>Harnesses in the compact window</h3>
@@ -592,7 +592,8 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
         <tr><td>ID-2</td><td>Where the auto hand off (D-5, off by default) is switched</td><td>A Window runs group in the settings popover, next to Harnesses, same Turn on / Turn off; config stays the source of truth</td></tr>
         <tr><td>ID-3</td><td>Context of a non-Claude step: an estimate (characters / 4, hatched) or unknown</td><td>Unknown, as plan 5 decided (3.6); the hatched estimate is a plan 25 option if the live runs show the adapters' tokens are usable</td></tr>
         <tr><td>ID-4</td><td>How the Board opens</td><td>A button that widens the window and opens the page, size kept in window.json; never by dragging alone</td></tr>
-        <tr><td>ID-5</td><td>Cells of a brief</td><td>1 cell = 50 words, 10 cells = brief_max_words 500; a note over 500 words shows 10 cells plus the figure</td></tr>
+        <tr><td>ID-5</td><td>Cells of a handoff</td><td>1 cell = 50 words, 10 cells = brief_max_words 500; a handoff over 500 words shows 10 cells plus the figure</td></tr>
+        <tr><td>ID-9</td><td>Words for what passes between steps</td><td>"Handoff" everywhere the window shows it: a step <i>receives</i> one and <i>writes</i> one; "sent" or "after the brief pass" for the compacted version; "note" and "brief" stay code names. The Task page's "note ready" chip becomes "handoff ready"</td></tr>
         <tr><td>ID-6</td><td>Fills: cells of what</td><td>20 cells = the allowance of the window (day, week or month); 1 cell = 5 %; the orange outline cell marks the pace</td></tr>
         <tr><td>ID-7</td><td>The replan wait</td><td>Waits on the Task page and the Board as a task "waiting" (orange), with the before / after plan; Confirm plan, Keep plan (runs the old steps), Stop</td></tr>
         <tr><td>ID-8</td><td>Chat roles (Fred asked for an accent per side)</td><td>Two tokens for the chat only: <code>--me</code> violet for Fred's turns on the right, <code>--ai</code> the writing blue for the agent's turns on the left; tinted bubbles with a 2 px edge; nowhere else in the window</td></tr>
@@ -641,7 +642,7 @@ const NOTE3 = {
   next: "04 test: run tests/test_harness.py on the real codex exe with --skip-git-repo-check in a scratch folder. Next model: read",
 };
 const BRIEF3 = {
-  goal: NOTE3.goal, findings: [NOTE3.findings[0], NOTE3.findings[1], "summary(): cost from usage x prices, tokens None (a turn's spend is not a context size)."],
+  goal: NOTE3.goal, findings: [NOTE3.findings[0], NOTE3.findings[1]],
   files: NOTE3.files, trouble: NOTE3.trouble, questions: NOTE3.questions, next: NOTE3.next, words: 290, raw: 412, cut: 122,
 };
 const T = [
@@ -652,7 +653,7 @@ const T = [
     steps: [
       { n: 1, kind: "scout", harness: "claude", model: "haiku", effort: "low", state: "done", cost: 0.04, exact: true, ctx: 38, in: 0, pack: "pack 1.9 KB", out: 210, time: "1m 50s", goal: "Read plans/05-harnesses/02-codex.md and console/claude_cli.py; cite the functions the adapter mirrors.", notes: ["rule scout: read", "claude · haiku · low", "cap 15 turns (read_max_turns)", "tools Read, Grep, Glob", "no MCP (--strict-mcp-config)"], tries: ["g"] },
       { n: 2, kind: "design", harness: "claude", model: "opus", effort: "high", state: "done", cost: 1.92, exact: true, ctx: 92, in: 160, out: 480, time: "9m 26s", goal: "Decide the stream parsing and the resume command; write the test list.", notes: ["rule design: think", "claude · opus · high", "cap 12 turns (opus_max_turns)", "budget $3", "warm: same rung as Prep? no (haiku)"], tries: ["g"] },
-      { n: 3, kind: "code", harness: "codex", model: "gpt-5.6-codex", effort: "medium", state: "done", cost: 0.84, exact: true, ctx: null, in: 310, out: 412, time: "6m 13s", goal: "console/harness/codex.py with run_command, is_result, summary, chat and stop; tests first against tests/fake_codex.py.", notes: ["rule code: write", "pick codex:gpt-5.6-codex (card)", "balance: sonnet 84 % -> codex · gpt-5.6-codex 31 %", "effort medium (rule)", "cap 1800 s (no turn cap on codex)", "sandbox workspace-write"], tries: ["g"], brief: BRIEF3, note: NOTE3, facts: { diff: ["console/harness/__init__.py |   6 +", "console/harness/codex.py    | 164 +", "tests/fake_codex.py         |  58 +", "tests/test_harness.py       |  97 +", "4 files changed, 325 insertions(+)"], test: "py -m unittest tests.test_harness -q\nRan 23 tests in 0.412s\nOK" } },
+      { n: 3, kind: "code", harness: "codex", model: "gpt-5.6-codex", effort: "medium", state: "done", cost: 0.84, exact: true, ctx: null, in: 310, out: 412, time: "6m 13s", goal: "console/harness/codex.py with run_command, is_result, summary, chat and stop; tests first against tests/fake_codex.py.", notes: ["rule code: write", "pick codex:gpt-5.6-codex (card)", "balance: sonnet 84 % -> codex · gpt-5.6-codex 31 %", "effort medium (rule)", "cap 1800 s (no turn cap on codex)", "sandbox workspace-write"], tries: ["g"], brief: BRIEF3, note: NOTE3, cuts: { findings: [2, 3] }, facts: { diff: ["console/harness/__init__.py |   6 +", "console/harness/codex.py    | 164 +", "tests/fake_codex.py         |  58 +", "tests/test_harness.py       |  97 +", "4 files changed, 325 insertions(+)"], test: "py -m unittest tests.test_harness -q\nRan 23 tests in 0.412s\nOK" } },
       { n: 4, kind: "test", harness: "opencode", model: "deepseek-v4-flash", effort: "", state: "done", cost: null, ctx: null, in: 290, out: 150, time: "2m 17s", goal: "Run the suite on the real codex exe in a scratch folder; report the failing lines.", notes: ["rule test: read", "opencode · deepseek-v4-flash (read tier)", "balance: haiku 71 % -> opencode · deepseek-v4-flash 12 %", "OPENCODE_PERMISSION: edit and bash denied? no: test runs bash", "cap 1800 s"], tries: ["g"] },
       { n: 5, kind: "verify", harness: "claude", model: "sonnet", effort: "medium", state: "failed", verdict: "FAIL", detail: "test_resume_command: options after resume", cost: 0.31, exact: true, ctx: 61, in: 240, out: 190, time: "3m 26s", goal: "Check steps 3 and 4 against the goal; VERDICT PASS or FAIL with the detail.", notes: ["verify: one tier above read -> write", "claude · sonnet · medium", "diff: 3 start commit c41e2a7 -> end 9b02f11"], tries: ["r"], fix: [
         { n: "5b", kind: "fix", harness: "claude", model: "sonnet", effort: "high", state: "done", cost: 0.77, exact: true, ctx: 118, in: 230, out: 260, time: "7m 16s", goal: "Fix what verify 05 found: the resume command puts its options before the subcommand.", notes: ["fix: escalate sonnet/medium -> sonnet/high (once per task)", "retry 1: no HANDOFF block (try 1)"], tries: ["r", "g"], hint: "scout first: 230 w in, 118K reached" },
@@ -660,7 +661,7 @@ const T = [
       ] },
       { n: 6, kind: "document", harness: "claude", model: "haiku", effort: "low", state: "planned", cost: null, ctx: null, in: null, out: null, time: "", goal: "PLAN.md History line and plans/05-harnesses/README.md state.", notes: [], tries: [] },
     ],
-    conns: { "1": { w: 160 }, "2": { w: 310 }, "3": { w: 290, cut: 122 }, "4": { w: 240 }, "5": { w: 0, fallback: true, why: "verify FAIL: the raw note goes to the fix step as it is" }, "5b": { w: 230 }, "5c": { writing: true }, "6": { pending: true } } },
+    conns: { "1": { w: 160 }, "2": { w: 310 }, "3": { w: 290, cut: 122 }, "4": { w: 240 }, "5": { w: 0, fallback: true, why: "verify FAIL: the handoff goes to the fix step as written" }, "5b": { w: 230 }, "5c": { writing: true }, "6": { pending: true } } },
   { id: "b", title: "Usage fills per model (plan 18)", project: "CLAUDE-CONSOLE", effort: "auto", cost: 0.11, state: "waiting", why: "replanned: 2 steps added", age: "1m", current: 2,
     prompt: "Goal: plan 18 Task 1, the fills per model in usage-days.json and Hub.budget().\nWhere: console/usage.py, console/server.py (Hub.budget), tests/test_usage.py.",
     questions: [{ q: "Is a week Monday to Sunday or the last 7 days?", by: 1, closed: 0 }],
@@ -683,8 +684,8 @@ function stepBlock(t, s, pick, picked) {
   const live = s.state === "running";
   const ctx = s.ctx == null && s.state !== "planned" ? `<span class="cx"><span>ctx</span><span class="unk">${s.harness === "claude" ? "no transcript yet" : "unknown: " + s.harness + " reports spend"}</span><span></span></span>`
     : `<span class="cx"><span>ctx</span><span class="cells">${cellsHtml(ctxCells(s.ctx, live))}</span><b class="${ctxTone(s.ctx)}">${s.ctx == null ? "" : s.ctx + "K"}</b></span>`;
-  const io = s.state === "planned" ? "" : `<span class="io"><span title="the brief this step read">in <span class="cells">${cellsHtml(s.in ? wCells(s.in) : Array(10).fill(""))}</span><b>${s.in ? s.in + " w" : s.pack || "–"}</b></span>
-    <span title="the HANDOFF note it wrote">out <span class="cells">${cellsHtml(s.out ? wCells(s.out) : Array(10).fill(live ? "" : ""))}</span><b>${s.out ? s.out + " w" : live ? "…" : "–"}</b></span>
+  const io = s.state === "planned" ? "" : `<span class="io"><span title="received: the handoff of the step before, after the brief pass">in <span class="cells">${cellsHtml(s.in ? wCells(s.in) : Array(10).fill(""))}</span><b>${s.in ? s.in + " w" : s.pack || "–"}</b></span>
+    <span title="handoff: the HANDOFF block this step wrote for the next one">out <span class="cells">${cellsHtml(s.out ? wCells(s.out) : Array(10).fill(live ? "" : ""))}</span><b>${s.out ? s.out + " w" : live ? "…" : "–"}</b></span>
     <span class="tries" title="attempts">${s.tries.map((c) => `<i class="${c}"></i>`).join("")}</span></span>`;
   const sub = [s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${s.verdict} ${esc(s.detail || "")}</span>` : "", s.hint ? `<span class="y">${esc(s.hint)}</span>` : "", t.state === "waiting" && s.state === "waiting" ? `<span class="y">${esc(t.why)}</span>` : ""].filter(Boolean).join(" · ");
   return `<div class="sb${s.state === "waiting" ? " y" : ""}${t.current === s.n ? " cur" : ""}${picked === pick ? " picked" : ""}" data-pick="${pick}" tabindex="0" role="button">
@@ -696,9 +697,9 @@ function connBlock(t, key, picked) {
   const c = t.conns[key];
   if (!c) return "";
   const cls = c.pending ? "pending" : c.writing ? "writing" : c.fallback ? "fallback" : c.cut ? "cut" : "";
-  const chip = c.pending ? `<span class="chip">no brief yet</span>` : c.writing ? `<span class="chip">brief: writing</span>`
-    : c.fallback ? `<span class="chip" title="${esc(c.why)}">raw note, no brief · ${esc(c.why.split(":")[0])}</span>`
-    : `<span class="chip" title="the brief step ${key} left: ${c.w} words${c.cut ? ", Findings cut " + c.cut + " w" : ""}"><span class="cells">${cellsHtml(wCells(c.w + (c.cut || 0), c.cut || 0))}</span>brief <b>${c.w} w</b>${c.cut ? ` · cut ${c.cut} w` : ""}</span>`;
+  const chip = c.pending ? `<span class="chip">no handoff yet</span>` : c.writing ? `<span class="chip">handoff: writing</span>`
+    : c.fallback ? `<span class="chip" title="${esc(c.why)}">handoff as written, not compacted · ${esc(c.why.split(":")[0])}</span>`
+    : `<span class="chip" title="the handoff step ${key} left for the next step, after the brief pass: ${c.w} words${c.cut ? ", Findings cut " + c.cut + " w" : ""}"><span class="cells">${cellsHtml(wCells(c.w + (c.cut || 0), c.cut || 0))}</span>handoff <b>${c.w} w</b>${c.cut ? ` · cut ${c.cut} w` : ""}</span>`;
   return `<div class="conn ${cls}${picked === "c" + key ? " picked" : ""}" data-pick="c${key}" tabindex="0" role="button"><span class="ln"></span>${chip}</div>`;
 }
 function chainHtml(t, picked, folded) {
@@ -717,14 +718,16 @@ function chainHtml(t, picked, folded) {
   }
   return `<div class="tk">${html}</div>`;
 }
-function headingBlock(h, lbl, keep = false, cut = []) {
-  const li = (x, k) => `<li${cut.includes(k) ? ' class="cut"' : ""}>${esc(x)}</li>`;
+function headingBlock(h, lbl, keep = false, cuts = {}) {
+  // cuts: per heading, the indexes of the lines the brief pass dropped; they stay in place, struck and tagged, so the eye skips them and still sees what the next step did not get
+  const li = (key) => (x, k) => (cuts[key] || []).includes(k) ? `<li class="cut"><span class="tag">cut</span> <s>${esc(x)}</s></li>` : `<li>${esc(x)}</li>`;
+  const count = (key, items) => { const c = (cuts[key] || []).length; return `<span class="m">${c ? `${items.length - c} kept · ${c} cut` : `${items.length} ${items.length === 1 ? "line" : "lines"}`}</span>`; };
   return `<div class="hb">
     <div class="hsec${keep ? " keep" : ""}"><span class="lbl">Goal${keep ? '<span class="m">never cut</span>' : ""}</span><p>${esc(h.goal)}</p></div>
-    <div class="hsec"><span class="lbl">Findings<span class="m">${h.findings.length} lines</span></span><ul>${h.findings.map(li).join("")}</ul></div>
-    <div class="hsec"><span class="lbl">Files touched</span><ul class="mono">${h.files.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
-    <div class="hsec${keep ? " keep" : ""}"><span class="lbl">Troubleshooting${keep ? '<span class="m">never cut</span>' : ""}</span><ul>${h.trouble.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
-    <div class="hsec"><span class="lbl">Open questions</span><ul>${h.questions.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+    <div class="hsec"><span class="lbl">Findings${count("findings", h.findings)}</span><ul>${h.findings.map(li("findings")).join("")}</ul></div>
+    <div class="hsec"><span class="lbl">Files touched</span><ul class="mono">${h.files.map(li("files")).join("")}</ul></div>
+    <div class="hsec${keep ? " keep" : ""}"><span class="lbl">Troubleshooting${keep ? '<span class="m">never cut</span>' : ""}</span><ul>${h.trouble.map(li("trouble")).join("")}</ul></div>
+    <div class="hsec"><span class="lbl">Open questions${count("questions", h.questions)}</span><ul>${h.questions.map(li("questions")).join("")}</ul></div>
     <div class="hsec"><span class="lbl">Next</span><p>${esc(h.next)}</p></div></div>`;
 }
 function findStep(t, key) {
@@ -749,7 +752,10 @@ const CHAT = {  // the step session's chat, as the session page's Chat tab shows
     ["note", "Grep · \"resume\" in tests/test_harness.py · 4 matches"],
     ["claude", "test_resume_command asserts the options before the subcommand and the trailing \"-\". The fix covers the FAIL detail. Checking that the fake's fixture still ends with a result line before I write the verdict …"]] },
 };
-let itab = "chat";  // the step inspector's tab: chat | note | brief | route
+let itab = "chat";  // the step inspector's tab: chat | brief (received) | note (handoff) | route
+const prevOf = (s) => s.n === "5b" ? "05" : s.n === "5c" ? "5b" : two(Number(s.n) - 1);
+const nextOf = (s) => s.n === "5b" ? "5c" : s.n === "5c" ? "06" : two(Number(s.n) + 1);
+const sentOf = (t, s) => { const c = t.conns[String(s.n)]; return c && c.w ? c.w + " w" : c && c.fallback ? "is (not compacted)" : "…"; };
 function toolsRow(list) {  // consecutive tool events fold into one row; click opens them
   const kinds = [...new Set(list.map((t) => t.split(" · ")[0]))].join(", ");
   const bad = list.some((t) => /exit [1-9]/.test(t));
@@ -767,9 +773,9 @@ function chatHtml(c, s) {
     flush();
     const last = k === c.turns.length - 1;
     const lbl = `<span class="lbl">${role === "you" ? "You" : who}${c.live && last ? ' · writing<span class="cells"><i class="f live"></i></span>' : ""}</span>`;
-    if (text.startsWith("HANDOFF")) {  // the block folds to a chip and its Next line: the Note tab has the six headings
+    if (text.startsWith("HANDOFF")) {  // the block folds to a chip and its Next line: the Handoff tab has the six headings
       const next = (text.match(/## Next\n([^\n]*)/) || [, ""])[1];
-      out.push(`<div class="turn ${role}">${lbl}<span class="hchip">HANDOFF block · <b>${s.out} w</b> · six headings in the Note tab</span><p>Next: ${esc(next)}</p></div>`);
+      out.push(`<div class="turn ${role}">${lbl}<span class="hchip">HANDOFF block · <b>${s.out} w</b> · six headings in the Handoff tab</span><p>Next: ${esc(next)}</p></div>`);
       return;
     }
     out.push(`<div class="turn ${role}">${lbl}<p>${esc(text)}</p></div>`);
@@ -780,16 +786,16 @@ function chatHtml(c, s) {
 function inspStep(t, s) {
   const [word, tn] = WORD[s.state] || WORD.running;
   const notes = s.notes.map((n) => `<span${/balance|every .* over pace/.test(n) ? ' class="y"' : ""}>${esc(n)}</span>`).join("");
-  const read = s.brief ? headingBlock(s.brief, "", true) : s.in === 0 ? `<p class="note m">Step 1 reads no brief: the task goal and Prep's context pack (${esc(s.pack || "")}, path:lines citations stamped with the commit).</p>` : `<p class="note m">The brief of step ${s.n === "5b" ? "05" : two(Number(s.n) - 1)} (${s.in} words, six headings). The mock shows its full text on step 03.</p>`;
-  const wrote = s.note ? headingBlock(s.note, "", true) : s.state === "running" ? `<p class="note m">Writing. The note shows here when the run ends, checked by code before the brief pass.</p>` : s.state === "planned" ? `<p class="note m">Not started.</p>` : `<p class="note m">${s.out ? s.out + " words, six headings; opened on step 03 in this mock." : "No note: the step ended without a HANDOFF block."}</p>`;
+  const read = s.brief ? headingBlock(s.brief, "", true) : s.in === 0 ? `<p class="note m">Step 1 receives no handoff: the task goal and Prep's context pack (${esc(s.pack || "")}, path:lines citations stamped with the commit).</p>` : `<p class="note m">The handoff of step ${prevOf(s)} after the brief pass (${s.in} words, six headings). The mock shows its full text on step 03.</p>`;
+  const wrote = s.note ? headingBlock(s.note, "", true, s.cuts || {}) : s.state === "running" ? `<p class="note m">Writing. The handoff shows here when the run ends, checked by code before the brief pass compacts it for the next step.</p>` : s.state === "planned" ? `<p class="note m">Not started.</p>` : `<p class="note m">${s.out ? s.out + " words, six headings; opened on step 03 in this mock." : "No handoff: the step ended without a HANDOFF block."}</p>`;
   const facts = s.facts ? `<div class="hsec facts"><span class="lbl">Facts the service added<span class="m">zero tokens, never compacted</span></span>
     <p class="mono">git diff --stat c41e2a7..9b02f11<br>${s.facts.diff.map(esc).join("<br>")}</p><p class="mono">${esc(s.facts.test).replace(/\n/g, "<br>")}</p></div>` : "";
   const tries = s.tries.length > 1 ? `<div class="hsec"><span class="lbl">Attempts</span><p class="m"><span class="link">try 1</span> no HANDOFF block · try 2 passed</p></div>` : "";
   const c = CHAT["s" + s.n];
-  const tabs = [["chat", `Chat${c ? ` <span class="n">${c.turns.length}</span>` : ""}`], ["note", `Note${s.out ? ` <span class="n">${s.out} w</span>` : ""}`], ["brief", `Brief${s.in ? ` <span class="n">${s.in} w</span>` : ""}`], ["route", "Route"]];
+  const tabs = [["chat", `Chat${c ? ` <span class="n">${c.turns.length}</span>` : ""}`], ["brief", `Received${s.in ? ` <span class="n">${s.in} w</span>` : ""}`], ["note", `Handoff${s.out ? ` <span class="n">${s.out} w</span>` : ""}`], ["route", "Route"]];
   const pane = itab === "chat" ? chatHtml(c, s)
-    : itab === "note" ? `<div class="blk"><div class="hd"><span class="lbl">What it wrote</span><span class="m">${s.out ? `note ${s.out} w · checked by code, then the brief pass` : ""}</span></div>${wrote}${facts}</div>`
-    : itab === "brief" ? `<div class="blk"><div class="hd"><span class="lbl">What it read</span><span class="m">${s.in ? `brief ${s.in} w · the only thing it got from the earlier steps` : ""}</span></div>${read}</div>`
+    : itab === "note" ? `<div class="blk"><div class="hd"><span class="lbl">Handoff it wrote for step ${esc(nextOf(s))}</span><span class="m">${s.out ? `raw ${s.out} w · sent as ${sentOf(t, s)} after the brief pass` : ""}</span></div>${wrote}${facts}</div>`
+    : itab === "brief" ? `<div class="blk"><div class="hd"><span class="lbl">Handoff it received from step ${esc(prevOf(s))}</span><span class="m">${s.in ? `${s.in} w · compacted by the brief pass · the only thing it got from the earlier steps` : ""}</span></div>${read}</div>`
     : `<div class="blk"><span class="lbl">Goal</span><p class="note" style="color:var(--ink)">${esc(s.goal)}</p></div>
        <div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${notes || '<span>none yet</span>'}</div></div>${tries}`;
   return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(s.state)}${word}</span><h2>${esc(two(s.n))} ${esc(s.kind)}</h2></div>
@@ -801,26 +807,17 @@ function inspStep(t, s) {
 }
 function inspConn(t, key) {
   const c = t.conns[key], b = BRIEF3;
-  if (!c || !c.w || key !== "3") return `<div class="ihead"><h2>Brief after step ${esc(key)}</h2></div><p class="note m">${c && c.fallback ? esc(c.why) : c && c.writing ? "Haiku is compacting the note." : c && c.pending ? "Not written yet." : "The mock opens the brief after step 03."}</p>`;
-  const li = (x, cut) => `<li${cut ? ' class="cut"' : ""}>${esc(x)}</li>`;
-  return `<div class="ihead"><div class="ln1"><h2>Brief after 03 code</h2></div>
-    <div class="meta"><span>raw note <b>${b.raw} w</b></span><span>brief <b>${b.words} w</b></span><span>cut <b>${b.cut} w</b> (Findings)</span><span>haiku · $0.004 · 2 turns</span></div></div>
-    <div class="two">
-      <div><span class="lbl">Raw note of 03 · what 05 did not read</span>
-        <div class="hsec keep"><span class="lbl">Goal</span><p>${esc(NOTE3.goal)}</p></div>
-        <div class="hsec"><span class="lbl">Findings</span><ul>${NOTE3.findings.map((x, k) => li(x, k === 2 || k === 3)).join("")}</ul></div>
-        <div class="hsec"><span class="lbl">Files touched</span><ul class="mono">${NOTE3.files.map((x) => li(x)).join("")}</ul></div>
-        <div class="hsec keep"><span class="lbl">Troubleshooting</span><ul>${NOTE3.trouble.map((x) => li(x)).join("")}</ul></div>
-        <div class="hsec"><span class="lbl">Open questions</span><ul>${NOTE3.questions.map((x) => li(x)).join("")}</ul></div>
-        <div class="hsec"><span class="lbl">Next</span><p>${esc(NOTE3.next)}</p></div></div>
-      <div><span class="lbl">Brief for 04 · what 04 read</span>${headingBlock(b, "", true)}</div></div>
-    <div class="blk"><span class="lbl">Checks · code, no model</span><div class="checks">
+  if (!c || !c.w || key !== "3") return `<div class="ihead"><h2>Handoff after step ${esc(key)}</h2></div><p class="note m">${c && c.fallback ? esc(c.why) : c && c.writing ? "Haiku is compacting the handoff for the next step." : c && c.pending ? "Not written yet." : "The mock opens the handoff after step 03."}</p>`;
+  return `<div class="ihead"><div class="ln1"><h2>Handoff from 03 code to 04 test</h2></div>
+    <div class="meta"><span>03 wrote <b>${b.raw} w</b></span><span>04 received <b>${b.words} w</b></span><span>cut <b>${b.cut} w</b>, 2 Findings lines</span><span>brief pass: haiku · $0.004 · 2 turns</span></div></div>
+    <div class="blk"><div class="hd"><span class="lbl">What 04 received</span><span class="m">the cut lines stay in place, struck</span></div>
+      ${headingBlock(NOTE3, "", true, { findings: [2, 3] })}</div>
+    <div class="blk"><div class="hd"><span class="lbl">Checks</span><span class="m">code, no model</span></div><div class="checks">
       <span><span class="g">✓</span> shorter than what it compacts: 290 &lt; 412 + 310</span>
       <span><span class="g">✓</span> Goal and Troubleshooting carried whole</span>
-      <span><span class="g">✓</span> open questions kept (1 of 1)</span>
+      <span><span class="g">✓</span> open questions kept, 1 of 1</span>
       <span><span class="g">✓</span> continuity: names console/harness/codex.py from 02's Files touched</span>
-      <span><span class="g">✓</span> no path the steps never touched</span>
-      <span><span class="y">·</span> Findings cut first: 2 lines, 122 w (the raw note stays on disk, Open shows it)</span></div></div>`;
+      <span><span class="g">✓</span> no path the steps never touched</span></div></div>`;
 }
 function inspTask(t) {
   const [word, tn] = WORD[t.state] || WORD.running;
@@ -847,11 +844,11 @@ function inspReplan(t, s) {
 function inspMeasure() {
   const rows = [["scout", 0, 34, 190], ["design", 170, 96, 420], ["code", 300, 88, 380], ["test", 280, 41, 160], ["verify", 250, 58, 180], ["fix", 240, 112, 250], ["document", 210, 22, 140]];
   const bar = (v, max, tone = "f") => `<span class="cells">${cellsHtml(Array.from({ length: 20 }, (_, k) => (k < Math.round(20 * v / max) ? tone : "")))}</span>`;
-  return `<div class="ihead"><h2>Measure · CLAUDE-CONSOLE · last 12 tasks</h2><div class="meta"><span>median per kind</span><span>brief in, context reached, note out</span></div></div>
-    <div class="measure"><span class="hd2">kind</span><span class="hd2">brief in · 25 w</span><span class="hd2">context · 10K</span><span class="hd2">note out · 25 w</span>
+  return `<div class="ihead"><h2>Measure · CLAUDE-CONSOLE · last 12 tasks</h2><div class="meta"><span>median per kind</span><span>received, context reached, handoff written</span></div></div>
+    <div class="measure"><span class="hd2">kind</span><span class="hd2">received · 25 w</span><span class="hd2">context · 10K</span><span class="hd2">handoff · 25 w</span>
       ${rows.map(([k, i, c, o]) => `<span class="k">${k}</span>${bar(i, 500)}${bar(c, 200, c >= 150 ? "y" : "f")}${bar(o, 500)}`).join("")}</div>
     <div class="legend"><span><i class="f"></i>median</span><span><i class="y"></i>context past 150K</span></div>
-    <p class="note m">A kind that reads a small brief and reaches a large context reads too much on its own: fix at 112K from 240 words in is the one to tune (scout first, or a turn cap). This table is brainstorm 5.1 item 6: after ten tasks it decides the next tuning, not a guess.</p>`;
+    <p class="note m">A kind that receives a small handoff and reaches a large context reads too much on its own: fix at 112K from 240 words in is the one to tune (scout first, or a turn cap). This table is brainstorm 5.1 item 6: after ten tasks it decides the next tuning, not a guess.</p>`;
 }
 function boardHtml(v) {
   const picked = { step: "s3", live: "s5c", conn: "c3", task: "ta", replan: "s2", measure: "", bempty: "" }[v];
@@ -865,7 +862,7 @@ function boardHtml(v) {
     <div class="top"><button class="rb" title="Back (Esc)" aria-label="Back">&#8592;</button><span class="crumb m">Board / CLAUDE-CONSOLE · ${v === "bempty" ? "0" : "3"} tasks</span><span class="sp"></span>
       <button class="rb" title="Pin on top">&#9650;</button><button class="rb" title="Fold">&#8211;</button><button class="rb x" title="Close">&#10005;</button></div>
     <div class="board"><div class="bchain">${chain}</div><div class="binsp">${insp}</div></div>
-    <div class="bfoot"><span><span class="kbd">↑</span><span class="kbd">↓</span> step or brief</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> open the chat</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
+    <div class="bfoot"><span><span class="kbd">↑</span><span class="kbd">↓</span> step or handoff</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> open the chat</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
       <span>1 ctx cell = 10K · 1 word cell = 50 w</span></div><span class="rsz"></span></div>`;
 }
 
@@ -904,8 +901,8 @@ function listHtml() {
       <div class="card y" tabindex="0" role="button">
         <div class="l1"><span class="st y">${sprite("handed")}Handed off</span><span class="t">Tray icon: pywebview menu on Windows 11</span><span class="age m">4m</span></div>
         <div class="l2 m"><span class="who">CLAUDE-CONSOLE · window<span class="route"> · sonnet · medium</span></span><span class="cost">3.80</span><span class="ctx"><span class="cells">${cellsHtml(Array.from({ length: 30 }, (_, k) => (k < 15 ? "f" : k < 30 ? (k < 16 ? "r" : "r") : "")))}</span><b class="r">312K</b></span></div>
-        <div class="why m y">↻ handed off by itself at 312K (auto hand off): the note is ready, one task = one chat</div>
-        <span class="hn ready">✓ note ready · Start next chat seeds the task box</span>
+        <div class="why m y">↻ handed off by itself at 312K (auto hand off): the handoff is ready, one task = one chat</div>
+        <span class="hn ready">✓ handoff ready · Start next chat seeds the task box</span>
         <div class="lr"><button class="btn you sm">Start next chat</button><span class="link m">handoff note</span></div></div>
       <div class="sec"><span class="lbl">Working · 1</span></div>
       <div class="card task" tabindex="0" role="button">
@@ -939,10 +936,10 @@ function taskPageHtml() {
     ${topBar(back, "Task")}
     <div class="scroll stack">
       <div class="head"><span class="st n">${sprite("running")}Task <span class="lc">· 3m</span></span><h2>${esc(t.title)}</h2>
-        <div class="where"><span class="m">CLAUDE-CONSOLE / effort: auto · $4.62</span><button class="btn sm" title="The chain as connected cells, with the briefs and notes: the window widens to 900 px (Esc returns)">⇔ Board</button></div>
+        <div class="where"><span class="m">CLAUDE-CONSOLE / effort: auto · $4.62</span><button class="btn sm" title="The chain as connected cells, with the handoffs between the steps: the window widens to 900 px (Esc returns)">⇔ Board</button></div>
         <div class="m tpath">C:\\Users\\fred\\.claude\\console\\tasks\\a7f3e</div></div>
       <div class="blk"><div class="hd"><span class="lbl">Steps · 8</span><span class="m">in · ctx · out, 1 cell = 50 w / 10K</span></div><div class="chain">${flat.map(row).join("")}</div></div>
-      <div class="blk"><div class="hd"><span class="lbl">Brief for step 5c</span><button class="btn sm">Show raw note</button></div>
+      <div class="blk"><div class="hd"><span class="lbl">Handoff for step 5c · after the brief pass</span><button class="btn sm">Show it as 5b wrote it</button></div>
         <pre class="text">HANDOFF
 ## Goal
 Harness adapters: Codex exec and the Steps tab. This step: fix what verify 05 found.
@@ -1076,15 +1073,15 @@ function usageHtml() {
 }
 
 const CAP = {
-  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: head, then each step as a block with its state, kind, rung, cost, context cells, brief-in and note-out cells and attempts; the briefs are the connectors; the fix insert is the bracket under the failed verify. Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost is exact from the usage Codex reports. Right, the inspector opens on the step's <b>Chat</b>: the agent's turns on the left (blue edge), Fred's on the right (violet edge), the tool events folded into one row each (click to open), the HANDOFF block as a chip with its Next line. Note (what it wrote, six headings with Goal and Troubleshooting edged green, then the facts the service added), Brief (what it read) and Route (the goal, the route notes as chips, the attempts) are the tabs behind it. Tasks B and C are folded rows above and below.",
-  live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the writing mark with the one blinking cell in the agent's label. Note says the note is being written; Stop sits in the head. Up / Down along the chain switches the inspector and keeps the tab.",
-  conn: "<b>Board, the brief after step 03 picked.</b> Raw note on the left with the two Findings lines Haiku cut struck through, the brief on the right as step 04 read it, and the code checks under them: length, questions kept, Goal and Troubleshooting whole, continuity with the previous Files touched, no invented path. The cut shows as a tone step on the chip's cells and the words \"cut 122 w\", not as orange (ID-1).",
+  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: head, then each step as a block with its state, kind, rung, cost, context cells, brief-in and note-out cells and attempts; the handoffs are the connectors; the fix insert is the bracket under the failed verify. Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost is exact from the usage Codex reports. Right, the inspector opens on the step's <b>Chat</b>: the agent's turns on the left (blue edge), Fred's on the right (violet edge), the tool events folded into one row each (click to open), the HANDOFF block as a chip with its Next line. Received (the handoff it got from 02, after the brief pass), Handoff (the one it wrote for 04, six headings with Goal and Troubleshooting edged green, then the facts the service added) and Route (the goal, the route notes as chips, the attempts) are the tabs behind it. Tasks B and C are folded rows above and below.",
+  live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the writing mark with the one blinking cell in the agent's label. Handoff says it is being written; Stop sits in the head. Up / Down along the chain switches the inspector and keeps the tab.",
+  conn: "<b>Board, the handoff after step 03 picked.</b> One column: what 04 received, six headings, with the two Findings lines Haiku cut left in place, struck and tagged, so the eye reads what went through and skips what did not. The head counts written, received and cut words and the brief pass's cost. Under the column, the code checks: length, Goal and Troubleshooting whole, questions kept, continuity with the previous Files touched, no invented path. The cut shows as a tone step on the chip's cells and the words \"cut 122 w\", not as orange (ID-1).",
   task: "<b>Board, the task head picked.</b> The inspector shows prompt.md, the running list of open questions (which step opened each, which closed it; the open ones carry the orange ?) and the chain log, one line per move with the route notes. Stop and Pause sit in the head.",
   replan: "<b>Board, a replan waiting.</b> Task B is the picked one now: its scout asked for a replan, the Haiku pass added two steps, and the task waits (orange, as every wait for Fred). The inspector carries the plan before and after, the added steps marked, and Confirm plan / Keep old plan / Stop. The same box appears on the compact Task page and the list card carries the same two buttons.",
-  measure: "<b>Board, nothing picked.</b> The measure table of the project: per step kind, median brief in, context reached and note out over the last tasks. The kind that reads little and grows large is the one to tune (brainstorm 5.1 item 6).",
+  measure: "<b>Board, nothing picked.</b> The measure table of the project: per step kind, median handoff received, context reached and handoff written over the last tasks. The kind that reads little and grows large is the one to tune (brainstorm 5.1 item 6).",
   bempty: "<b>Board, no task in the scope.</b> The empty cells and one line; the inspector is empty too. Esc or Back returns to the list at the compact size.",
   list: "<b>Compact list.</b> The today breakdown is open and carries the fills per model in miniature (day / week / month, 10 cells, the orange outline is the pace; an over-pace figure is orange). Needs you: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working task card shows the current step's rung; a Codex step would read codex · gpt-5.6-codex there. The ⇔ Board button in the header opens the Board on this project.",
-  tpage: "<b>Compact Task page.</b> Each step row gains one line under its name: brief in, context reached (15 cells, the hand-off zone past 150K in orange) and note out as cells with their figures; \"scout first\" on a step that read little and reached much; \"unknown\" where the harness reports no context. The Board button sits in the head. The brief block ends with the facts the service appended (diff stat, test lines).",
+  tpage: "<b>Compact Task page.</b> Each step row gains one line under its name: in (the handoff received), context reached (15 cells, the hand-off zone past 150K in orange) and out (the handoff written) as cells with their figures; \"scout first\" on a step that read little and reached much; \"unknown\" where the harness reports no context. The Board button sits in the head. The brief block ends with the facts the service appended (diff stat, test lines).",
   settings: "<b>Settings popover.</b> Under the project groups, Harnesses: one row per CLI with glyph and state word, the probed version, and Turn on / Turn off, pending until the service answers; claude is always on; cmd is on but not found and says where to set its exe. Then Window runs with the auto hand off switch (ID-2).",
   prep: "<b>Prep page.</b> Every model select lists tiers as groups (think / write / read) with rungs on any harness that is on; opencode and cmd rungs only under read, and only on rows whose kind is a read kind. Row 5 shows a refused pick: the note in red and the select back to auto. The route line says what balancing did and that Codex has no cap but the step timeout.",
   session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the note line names the Codex thread and that Steps come from the stream; the brief says context unknown in words with no cells; tabs Chat and Steps only, the Chat with the same bubbles and folded tool rows as the Board; Continue resumes the thread, the other levers are off with \"claude only\".",

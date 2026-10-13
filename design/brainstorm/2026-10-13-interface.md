@@ -31,6 +31,9 @@ colour: orange stays "needs you", unknown stays unknown.
   colour alone: glyph or sprite plus word. Two tokens exist for the chat alone (ID-8): `--me` (violet,
   Fred's turns) and `--ai` (the writing blue, the agent's turns); they colour nothing else.
 - One Doto figure per screen. Every quantity in cells. An unknown is a word, never a zero (D-3).
+- Words: a step **receives** a handoff and **writes** one. Received is what it got from the step before, after
+  the brief pass; Handoff is what it wrote for the step after. "Note" and "brief" stay names in the code
+  (ID-9: Fred, 2026-10-13, Note / Brief took minutes to read at first sight).
 - Motion: the running puzzle and the waiting `?` (plan 21), the one blinking cell on the live step; nothing
   else moves by itself. All off under reduced motion.
 - The window is a CSS container; nothing scrolls sideways at 340, 400 or 900 px.
@@ -138,7 +141,7 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
   becomes one centred quiet row, `3 tool events · file_change, command_execution · exit 1`, a failed exit in
   red; click or Space opens the list in place, muted mono, and the choice holds for that chat.
 - **The HANDOFF block folds**: the last turn shows a chip `HANDOFF block · 412 w · six headings` and the
-  Next line; the six headings live in the Note tab (Board) or the Task page's brief block.
+  Next line; the six headings live in the Handoff tab (Board) or the Task page's handoff block.
 - **Writing**: a live turn carries `· writing` and the one blinking cell in its label; no extra line.
 - **Source line** on top, unchanged: harness, thread or session id, events, ended or running.
 - Nothing else in the window uses `--me` or `--ai`.
@@ -155,7 +158,8 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
 - **Replan wait** (plan 24): the askbox of the Task page carries `Replanned · after step 01`, the question,
   the plan before and after as two lists with the added steps marked, Confirm plan (orange), Keep old plan,
   Stop, and the line `replan_auto is off: a changed plan waits for you`.
-- **Brief block**: the six headings (Goal, Findings, Files touched, Troubleshooting, Open questions, Next)
+- **Handoff block** (`Handoff for step NN · after the brief pass`, a Show it as NN-1 wrote it button): the six
+  headings (Goal, Findings, Files touched, Troubleshooting, Open questions, Next)
   and, under `END HANDOFF`, the facts the service appended (`git diff --stat` from the start to the end
   commit, the failing lines of the last test command), never compacted.
 - **Auto hand off**: a handed-off task reads as today (plan 13); a window run handed off by the service
@@ -182,10 +186,10 @@ word cell = 50 w`).
   1.9 KB` on step 1, `…` on a running step's out), and the attempts as 7 px squares (red failed, green
   passed, ink live); line 5 the verdict with its detail, or the hint `scout first: 230 w in, 118K reached`,
   or the task's wait. The current step has an ink edge on the left; the picked block an ink outline.
-- **Connector**: the brief between two steps, a 2 px line and a chip: `[cells] brief 290 w`. Variants:
-  `· cut 122 w` with the cut part of the cells in the `l2` tone (ID-1, no orange); dashed border for a code
-  fallback (`raw note, no brief · verify FAIL`); blue dashed `brief: writing`; `no brief yet` on a dotted
-  line before a planned step.
+- **Connector**: the handoff between two steps after the brief pass, a 2 px line and a chip: `[cells] handoff
+  290 w`. Variants: `· cut 122 w` with the cut part of the cells in the `l2` tone (ID-1, no orange); dashed
+  border for a code fallback (`handoff as written, not compacted · verify FAIL`); blue dashed
+  `handoff: writing`; `no handoff yet` on a dotted line before a planned step.
 - **Fix insert**: a bracket (a 2 px line with two ticks) under the failed verify holding the fix and the
   second verify, rejoining the chain after them; the fix block shows its escalated rung.
 - **Replan**: a step block of kind `replan` (Haiku, no tools, 1 turn), orange while the task waits on it.
@@ -202,21 +206,26 @@ word cell = 50 w`).
     right, the tool events folded into one row per run of them, the HANDOFF block as a chip with its Next
     line; a running step streams, newest at the end, with the writing mark in the agent's label, and the pane
     follows the end until Fred scrolls up.
-  - **Note**: what it wrote, the HANDOFF block as six blocks (Goal and Troubleshooting with a green edge and
-    `never cut`), then **Facts the service added** (dashed box: `git diff --stat <start>..<end>`, the test
-    command's result lines). A running step says `Writing. The note shows here when the run ends`; a
-    planned one `Not started`.
-  - **Brief**: what it read, the brief as six blocks; step 1 says it read the task goal and the context pack.
+  - **Received**: the handoff it got from the step before, after the brief pass (`Handoff it received from
+    step NN · 310 w`), six blocks; step 1 says it received no handoff, only the task goal and the context
+    pack.
+  - **Handoff**: the one it wrote for the step after (`Handoff it wrote for step NN · raw 412 w · sent as
+    290 w after the brief pass`), the HANDOFF block as six blocks (Goal and Troubleshooting with a green edge
+    and `never cut`; the lines the brief pass cut stay in place, struck and tagged `cut`), then **Facts the
+    service added** (dashed box: `git diff --stat <start>..<end>`, the test command's result lines). A
+    running step says `Writing. The handoff shows here when the run ends`; a planned one `Not started`.
   - **Route**: Goal; **Route · in the order the rules applied**, one chip per note (rule, pick, demand,
     floor, hint, cap, budget, balance, harness fallback, tools / MCP, sandbox), the balance note and `every
     <tier> rung over pace` in orange; **Attempts** with each try's reason.
   The picked tab holds while Up / Down move along the chain, and for the window (window.json), as the
   session page's brief fold does. Open chat still goes to the session page for the levers.
-- **A brief**: head (`Brief after NN kind`; raw note words, brief words, cut words and heading, the brief
-  pass's rung, cost and turns); two columns, the raw note (`what NN+1 did not read`, cut lines struck
-  through) and the brief (`what NN+1 read`); **Checks · code, no model**: shorter than what it compacts,
-  Goal and Troubleshooting whole, open questions kept (n of n), continuity (names a file from the previous
-  Files touched), no invented path, and the cut as a muted line.
+- **A handoff** (a connector picked): head (`Handoff from NN kind to NN+1 kind`; `NN wrote 412 w · NN+1
+  received 290 w · cut 122 w, 2 Findings lines · brief pass: haiku · $0.004 · 2 turns`); **one column**,
+  what NN+1 received as six blocks, with the lines the brief pass cut left in place under their heading,
+  struck and tagged `cut`, the heading's label counting `2 kept · 2 cut` (Fred, 2026-10-13: two columns of
+  the same text were unreadable); **Checks · code, no model** under it: shorter than what it compacts, Goal
+  and Troubleshooting whole, open questions kept (n of n), continuity (names a file from the previous Files
+  touched), no invented path.
 - **The task head**: prompt.md; **Open questions · n open** from the briefs, each with the step that opened
   it and the one that closed it (orange `?` open, green `✓` closed); **Chain log**, one line per move with
   the route notes; Stop and Pause (running), Clear (done).
@@ -226,7 +235,7 @@ word cell = 50 w`).
 
 ### 8.4 Keyboard
 
-Up / Down walk the chain (steps and briefs, into and out of a fix bracket in order); Left / Right the
+Up / Down walk the chain (steps and handoffs, into and out of a fix bracket in order); Left / Right the
 tasks; Enter opens the picked step's session page (Back returns to the Board); Esc clears the pick, then
 leaves the Board to the page it came from. The pick is an ink outline, like a focused control.
 
@@ -254,7 +263,8 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | Rung | Claude, other harness | `sonnet · medium` / `codex · gpt-5.6-codex · medium` |
 | Step cost | exact, estimated, unknown | `0.84` / `~0.84` / `? cost` |
 | Step context | known, hand-off zone, unknown | cells and `92K` / `164K` in orange / `unknown: codex reports spend` |
-| Brief connector | ok, cut, fallback, writing, pending | `brief 290 w` / `· cut 122 w` (tone) / dashed / blue dashed / dotted line |
+| Handoff connector | ok, cut, fallback, writing, pending | `handoff 290 w` / `· cut 122 w` (tone) / dashed / blue dashed / dotted line |
+| Handoff line | kept, cut | plain / struck, muted, tagged `cut`, in place under its heading |
 | Task | planned, running, waiting (replan, question, Fable), stuck, done, stopped, handed | plan 17 words and plan 21 sprites; a replan wait says `replanned: n steps added` |
 | Fill | under pace, over pace, no allowance | `31 %` / `84 %` orange / `no allowance` dotted |
 | FAIL heat | none, 1 to 4 tones, no data | off cell / red tones / dotted outline |
@@ -279,10 +289,11 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | ID-2 | Where the auto hand off (D-5, off by default) is switched | A Window runs group in the settings popover, next to Harnesses, Turn on / Turn off; config.json stays the source of truth |
 | ID-3 | Context of a non-Claude step: an estimate (characters / 4, hatched) or unknown | Unknown, as plan 5 3.6 decided; the hatched estimate is a plan 25 option if the live runs show usable token counts |
 | ID-4 | How the Board opens | A button that widens the window and opens the page, size kept in window.json; never by dragging alone |
-| ID-5 | Cells of a brief and a note | 1 cell = 50 words, 10 cells = `brief_max_words` 500; a note over 500 words shows 10 cells plus the figure |
+| ID-5 | Cells of a handoff | 1 cell = 50 words, 10 cells = `brief_max_words` 500; a handoff over 500 words shows 10 cells plus the figure |
 | ID-6 | Cells of a fill | 20 cells = the window's allowance (day, week or month), 1 cell = 5 %; the orange outline cell marks the pace |
-| ID-8 | Chat roles: Fred asked for an accent per side | Two tokens for the chat only, `--me` violet (Fred, right) and `--ai` the writing blue (the agent, left), tinted bubbles with a 2 px edge; tool events and the HANDOFF block folded (6.1) |
 | ID-7 | The replan wait | A task `waiting` (orange) on the Task page, the Board and the list card, with the plan before and after; Confirm plan, Keep old plan (runs Prep's steps), Stop |
+| ID-8 | Chat roles: Fred asked for an accent per side | Two tokens for the chat only, `--me` violet (Fred, right) and `--ai` the writing blue (the agent, left), tinted bubbles with a 2 px edge; tool events and the HANDOFF block folded (6.1) |
+| ID-9 | Words for what passes between steps (Fred: Note / Brief took minutes to read) | "Handoff" everywhere the window shows it: a step receives one and writes one; the tabs are Received and Handoff; "sent" or "after the brief pass" for the compacted version; "note" and "brief" stay code names; the Task page's "note ready" chip becomes "handoff ready" |
 
 ## 13. History
 
@@ -292,3 +303,9 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
   right, `--me` and `--ai`, folded tool rows, the HANDOFF chip), ID-8.
 - 2026-10-13 - Fred: the chat has priority over what it read and what it wrote. The step inspector now opens
   on a Chat tab; Note, Brief and Route are the tabs behind it (8.3); a "Step running" view added to the mock.
+- 2026-10-13 - Fred: Note and Brief were hard to read at first sight. Renamed everywhere the window shows them:
+  Received (what the step got) and Handoff (what it wrote for the next step); tabs, chips, the Task page's
+  block and the measure headers; ID-9.
+- 2026-10-13 - Fred: the handoff picked view was two clashing blocks of text. Now one column, what the next
+  step received, with the cut lines struck in place under their heading and the checks under it (8.3); the
+  step's Handoff tab marks the same cut lines.
