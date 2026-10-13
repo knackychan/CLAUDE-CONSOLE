@@ -253,6 +253,24 @@ class RunServerTest(unittest.TestCase):
             server.prep.run_prep = real
         self.assertEqual((row["state"], row["error"]), ("failed", "disk full"))
 
+    def test_review_job_on_the_strip(self):
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "code", "profile first"))
+        levers.add_miss(self.folder, levers.miss_line("proj", "code", "sonnet/medium", "sonnet/high", "x"))
+        status, data = self.call("/api/review", {"project_dir": str(self.project)})
+        self.assertEqual(status, 200, data)
+        running = next(j for j in self.hub.snapshot()["preps"] if j["id"] == data["job"])
+        self.assertEqual((running["kind"], running["state"], running["raw"]), ("review", "running", "Review rules"))
+        row = self.prep_job(data["job"])
+        self.assertEqual(row["state"], "done", row.get("error"))
+        card = row["card"]
+        self.assertEqual((card["id"], card["project_dir"], card["model"]), (data["job"], str(self.project), "haiku"))
+        self.assertEqual((card["misses"], card["lessons"]), (1, 1))
+        self.assertEqual(card["proposals"][0]["kind"], "remove")
+        self.assertEqual(card["summary"], "CLAUDE.md is 12 lines, fine.")
+        self.assertTrue((self.folder / "reviews" / f"{card['id']}.json").is_file())
+        self.assertEqual(self.call("/api/prep/drop", {"job": data["job"]}), (200, {"job": data["job"]}))
+        self.assertEqual(self.call("/api/review", {"project_dir": self.tmp.name})[0], 403)
+
     def wait_idle(self, sid):
         end = time.time() + 15
         while time.time() < end and (self.session(sid) is None or self.session(sid)["run_live"]):

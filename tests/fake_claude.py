@@ -6,6 +6,7 @@ Prep (--json-schema): reads the prompt on stdin, prints one result object.
   "CHAIN" in the request: `steps` holds a scout and a code step (else `steps` is []).
   A request that starts with "Compact the handoff note" is the brief pass: it answers the brief schema
   (findings, files, questions, next); "LONG" in it gives 80 findings (over the word cap), "BROKEN"/"SLOW" as above.
+  A request that starts with "You review the rules" is the rules review: one remove proposal and a summary.
 Run (--input-format stream-json): per user message prints init / assistant / result.
   "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
   "DENY" in the message: the result carries one permission denial.
@@ -59,6 +60,11 @@ def prep():
                                   "past its word cap" for i in range(80)]
         if "HUGE" in raw:
             fields["findings"] = ["word " * 450]
+    if raw.startswith("You review the rules"):  # the rules review (console/review.py)
+        fields = {"proposals": [{"kind": "remove", "target": "Always write tests first", "text": "",
+                                 "why": "derivable: the Commands section names the test command",
+                                 "sources": ["Always write tests first"]}],
+                  "summary": "CLAUDE.md is 12 lines, fine."}
     if "BROKEN" in raw:
         print("not json")
         return 0

@@ -9,8 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import (attach, brief, claude_cli, compact, events, guard, levers, paths, prep, redact, routing, runs, tasks,
-               transcript, usage)
+from . import (attach, brief, claude_cli, compact, events, guard, levers, paths, prep, redact, review, routing, runs,
+               tasks, transcript, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -135,11 +135,32 @@ class Hub:
             end = {"state": "done", "card": dict(card, raw=raw)}
         except Exception as exc:  # whatever went wrong, the job ends: a pill never spins forever
             end = {"state": "failed", "error": str(exc) or type(exc).__name__}
+        self._end_job(job, end)
+
+    def _end_job(self, job: str, end: dict) -> None:
         with self.lock:
             if job in self.preps:  # dropped while it ran: nothing to show
                 self.preps[job].update(end)
                 self.version += 1
                 self.changed.notify_all()
+
+    def start_review(self, project_dir: str) -> str:
+        """The rules review (plan 22) rides the Prep strip: same dict, same drop route, `kind` "review"."""
+        job = review.new_id()
+        with self.lock:
+            self.preps[job] = {"id": job, "kind": "review", "project_dir": project_dir, "raw": "Review rules",
+                               "ts": time.time(), "state": "running", "files": []}
+            self.version += 1
+            self.changed.notify_all()
+        threading.Thread(target=self._review_job, args=(job, project_dir), name="cc-review", daemon=True).start()
+        return job
+
+    def _review_job(self, job: str, project_dir: str) -> None:
+        try:
+            end = {"state": "done", "card": review.run_review(self.cfg, self.folder, project_dir, self.runs.exe, job)}
+        except Exception as exc:
+            end = {"state": "failed", "error": str(exc) or type(exc).__name__}
+        self._end_job(job, end)
 
     def drop_prep(self, job: str) -> bool:
         """Off the strip: the card was run, edited or dismissed. Its preps/<id>.json stays."""
@@ -958,7 +979,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden", "text/plain")
         routes = {"/api/prep": self._prep, "/api/prep/drop": self._prep_drop, "/api/run": self._run, "/api/stop": self._stop,
                   "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
-                  "/api/done": self._done, "/api/task": self._task_new}
+                  "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
         for lever in ("stop", "pause", "resume", "retry", "confirm", "clear", "done"):
@@ -1011,6 +1032,14 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(job, str) or not self.hub.drop_prep(job):
             return self._error(404, "unknown Prep job")
         return self._json({"job": job})
+
+    def _review(self, body):
+        folder = self.hub.allowed(body.get("project_dir"))
+        if not folder:
+            return self._error(403, "not a project listed in config.json")
+        if not self.hub.runs.exe:
+            return self._error(409, "claude.exe not found; set \"claude_exe\" in config.json")
+        return self._json({"job": self.hub.start_review(folder)})
 
     def _run(self, body):
         folder, text = self.hub.allowed(body.get("project_dir")), self._text(body, "prompt")
