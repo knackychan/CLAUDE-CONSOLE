@@ -23,6 +23,10 @@ as connected cells (steps as blocks, briefs as the connectors, a fix insert as a
 thing on the right (a step, a brief, the task head, or the measure table). Same tokens, same cells, no new
 colour: orange stays "needs you", unknown stays unknown.
 
+Two zones (Opus 5.5 review, 2026-10-13, `2026-10-13-interface-review.md`): what Fred acts on stays in
+sight; how, why, history and exact counts sit behind one closed line each (a fold), and done things shrink
+to two lines. The review's P1 and P2 lists are applied in the mock and in this doc.
+
 ## 1. Rules this design keeps (BRAINSTORM 7.5, CLAUDE.md)
 
 - Tokens, type and the cell motif of Console Cells; all styling in `web/style.css`; no build step.
@@ -34,6 +38,15 @@ colour: orange stays "needs you", unknown stays unknown.
 - Words: a step **receives** a handoff and **writes** one. Received is what it got from the step before, after
   the brief pass; Handoff is what it wrote for the step after. "Note" and "brief" stay names in the code
   (ID-9: Fred, 2026-10-13, Note / Brief took minutes to read at first sight).
+- Two zones (Fred, 2026-10-13: "keep what matters in sight, second-zone information behind a tab or a
+  collapsable drawer"). Zone 1: state (word and sprite), what needs Fred, the one figure that matters on the
+  screen, the next action, the current step; a number only if it changes what he does now. Zone 2, behind a
+  fold: how and why, route notes, exact counts of finished things, provenance (thread ids, paths, diff
+  stats), the checks, logs, scales, config names; every sentence that explained the design becomes a title.
+  A fold is never silent: its closed line is `Label · the one fact worth seeing ▾` in `--mut` mono; a FAIL,
+  an open question, a not-found or an over-pace keeps its tone in that line, and a FAIL or a failing check
+  opens its fold by itself. Folds remember their state per window (window.json), as the session page's brief
+  fold does. One place per number: a figure shown one line away is not repeated.
 - Motion: the running puzzle and the waiting `?` (plan 21), the one blinking cell on the live step; nothing
   else moves by itself. All off under reduced motion.
 - The window is a CSS container; nothing scrolls sideways at 340, 400 or 900 px.
@@ -56,40 +69,46 @@ to a given size and back, which `resize(w, h, keep)` already does for the grip.
 - **Header**: the ⇔ Board button after the "N need you" chip, hidden in the pill and under 372 px, where the
   Task page's Board button remains the way in. It opens the Board on the scope (All projects: every task,
   newest first).
-- **Today strip breakdown** (`todaymore`): after the model mix legend, a **Fills** row: one small column per
-  model that has an allowance, three bars (d / w / m) of 10 cells each, the pace as an orange outline cell,
-  the figure as the share of pace, orange when over. Models through two CLIs are one column (Opus through
-  Claude Code and Codex). The legend gains `codex · gpt-5.6-codex 14 %` entries and `opencode ·
-  deepseek-v4-flash cost unknown · 2 runs` for runs with no usage (never a 0 %).
-- **Task card**: the current step's rung reads `codex · gpt-5.6-codex · medium` in the route slot (hidden
-  under 372 px as today). A task waiting on a replan shows `replanned: 2 steps added, confirm on the Task
-  page or the Board` in orange and the two buttons Confirm plan / Keep old plan in place; Stop stays on the
-  Task page.
+- **Today strip breakdown** (`todaymore`): closed by default, as locked ("one click away"). Under the strip
+  one line shows only while a model is over its pace: `3 models over pace · fills ▾` (the figure in orange),
+  and opens the breakdown: the spend legend, the model mix as one line (`opus 48 · sonnet 27 · codex 14 ·
+  haiku 9 %`), a second muted line for `opencode · deepseek-v4-flash: cost unknown, 2 runs` and `window
+  runs 9`, then one fills line, `fills · opus 84 · sonnet 84 · gpt-5.6-codex 91 % of pace today` with the
+  over-pace figures in orange and the Usage button. No cells in the breakdown: the Usage page carries the
+  fills. Needs you then starts on the first screen.
+- **Task card**: line 2 reads `step 5c of 8` (the fix steps counted, as the Task page does); the current
+  step's rung is on the doing line (`5c verify · opus · medium · reads the fix diff`). A task waiting on a
+  replan shows `replanned after 01: 2 steps added` in orange (one line, no "confirm on" clause: the buttons
+  are under it) and Confirm plan / Keep old plan in place; the replan pass's rung is not shown; Stop stays on
+  the Task page. Project names are hidden while the scope is one project; done rows carry no step tag.
 - **Session card, auto hand off** (D-5): a window run that ended its turn in the red zone and was handed off
-  by the service shows as HANDED OFF under Needs you: `↻ handed off by itself at 312K (auto hand off): the
-  note is ready, one task = one chat`, the green `note ready` chip, Start next chat and the note link. The
-  same card for a VS Code chat says `forked, then handed off` since a VS Code chat is never resumed in place.
+  by the service shows as HANDED OFF under Needs you: the why `↻ handed off by itself at 312K`, then one row
+  with the green `✓ handoff ready` chip, Start next chat (its title: seeds the task box, one task = one chat)
+  and the `handoff` link. The same card for a VS Code chat says `forked, then handed off` since a VS Code
+  chat is never resumed in place.
 - **Composer hint**: when `claude.exe` is missing but another harness is on and found: `claude.exe not
   found: Prep needs it; set "exe" under harnesses.claude`.
 
 ## 4. Settings: the picker popover
 
-Under Runs allowed / Runs off, two groups, in the popover's own row grammar (14 px glyph column, name,
-state, action):
+Under Runs allowed / Runs off, two folded rows, in the popover's own row grammar (14 px glyph column, name,
+state, action) once open:
 
-- **Harnesses · which CLIs may run a step**: one row per name in `cfg.harnesses` order. Glyph and state
-  word: `● on` (green glyph), `○ off`, `△ not found` (red glyph, red word). The probed version in `.m` after
-  the name (`codex-cli 0.162.1`; blank when not found). The button Turn on / Turn off, pending (`...`,
-  disabled) until `POST /api/harness` answers; on error the row's note line carries the message in red.
-  `claude` reads `always on` with the note `Prep and the brief pass run on it; it cannot be turned off`
-  (the service answers 400). A row that is on but not found carries the note `on, but no cmdc.exe on PATH:
-  set "exe" under harnesses.cmd in <config path> (not the .cmd shim)`. One muted line under the group:
-  `opencode and cmd rungs run read steps only (cheap tier). Rungs of a harness that is off never route; a
-  step picked on one falls back to Claude's rung of its tier.`
-- **Window runs**: `auto hand off · at 300K`, off / on, Turn on / Turn off, with the note `when a window
-  run ends its turn in the red zone, the service runs the hand off and seeds the next chat; a VS Code chat
-  is forked first, never resumed in place`. Writes `handoff_auto` through a `POST /api/setting`-style route
-  as Allow runs does (ID-2). The threshold is `gauge_red_tokens`, shown, not editable here.
+- **Harnesses**: closed line `Harnesses · claude, codex on · △ cmd not found ▾`, the not-found part red; it
+  opens by itself while a harness is on but not found. Open: one row per name in `cfg.harnesses` order.
+  Glyph and state word: `● on` (green glyph), `○ off`, `△ not found` (red glyph, red word). The probed
+  version in `.m` after the name (`codex-cli 0.162.1`; blank when not found). The button Turn on / Turn off,
+  pending (`...`, disabled) until `POST /api/harness` answers; on error the row's note line carries the
+  message in red. `claude` reads `always on`, its title `Prep and the brief pass run on it; it cannot be
+  turned off` (the service answers 400). A row that is on but not found carries one note line, `no cmdc.exe
+  on PATH · set "exe" in config.json`, the full path and `under harnesses.cmd (not the .cmd shim)` in its
+  title. The group's title holds `opencode and cmd rungs run read steps only (cheap tier); rungs of a
+  harness that is off never route; a step picked on one falls back to Claude's rung of its tier`.
+- **Window runs**: closed line `Window runs · auto hand off off ▾`. Open: `auto hand off · at 300K`, off /
+  on, Turn on / Turn off, and one line `hands off a window run that ends its turn in the red zone (300K) and
+  seeds the next chat; a VS Code chat is forked first`. Writes `handoff_auto` through a
+  `POST /api/setting`-style route as Allow runs does (ID-2). The threshold is `gauge_red_tokens`, shown, not
+  editable here.
 
 Keyboard and sorting of the project rows are unchanged; the new groups are not in the Up / Down ring (they
 are buttons, Tab reaches them).
@@ -105,29 +124,35 @@ are buttons, Tab reaches them).
 - **A refused pick** (decision 11): the row shows `opencode: read steps only (cheap tier) · back to auto` in
   the row's say line and the select returns to auto. Changing a kind redraws its select; a pick the new kind
   cannot hold falls back to auto the same way.
-- **Route line**: the rule, what balancing did (`balance: sonnet 84 % of pace -> codex · gpt-5.6-codex
-  31 %`), the effort source; and, for a rung with no cap, `codex has no turn or spend cap: this run ends at
-  step_timeout_s (1800 s) if it is still going`.
-- **Scouted**: `Scouted · context pack 1.9 KB` with the `path:lines` citations (brainstorm 5.1 item 3, the
-  small plan of its own) in `.m`.
-- **Verify row**: `added by the Console after the last editing step · one tier above the step it checks, on
-  any harness that is on`.
+- **Route reason**: folded under the selects, closed line `why codex · balance ▾`; open: the rule, what
+  balancing did (`balance: sonnet 84 % of pace -> codex · gpt-5.6-codex 31 %`), the effort source. A rung
+  with no cap keeps one muted line in sight, `△ no turn cap: stops at 1800 s`, the full sentence (`codex has
+  no turn or spend cap: this run ends at step_timeout_s (1800 s) if it is still going`) in its title.
+- **Scouted**: folded, closed line `Scouted · context pack 1.9 KB · 3 files ▾`; open: the `path:lines`
+  citations (brainstorm 5.1 item 3, the small plan of its own) in `.m`.
+- **Verify row**: `6 verify · added after the last edit`; the tier rule (`one tier above the step it checks,
+  on any harness that is on`) in its title. The paragraph that explained Run as task is the button's title;
+  the duplicate `effort: auto` line is gone (the composer says it). `Prep $0.031 · 4 turns · haiku` stays
+  the last muted line.
 
 ## 6. Session page of a non-Claude step (plan 5 decision 10)
 
 - **Head**: the model chip reads `codex · gpt-5.6-codex · medium` (`modelText` on a `harness:model` rung,
-  no version lookup). The note line: `context unknown: codex reports a turn's spend · thread 019a3f…:
-  Continue resumes it with codex exec resume · no hooks: Steps come from the stream`.
+  no version lookup); on a task step the project name leaves the where row (the `task · step 3 of 8` link
+  carries it) so the chip has the room. No note line: the brief already says `context unknown`; the thread
+  id and the resume mode sit in the chat's source line and in the Continue button's title (`resumes the
+  Codex thread 019a3f… with codex exec resume`).
 - **Brief**: spent exact when the adapter reports usage, `~` when estimated, `–` when unknown; `$ / min`
-  from the same; the context column reads `unknown` in words with no cells (ID-3); `session` time; the
-  steps column becomes `events` (the adapter's stream events) or `–`.
-- **Process tabs**: Chat and Steps only (Agents and Timeline come from Claude's hooks). Chat: the final
-  message and the tool events the adapter's `chat()` names (command_execution lines as notes). Steps: the
-  stream events with their time, kind and text.
+  from the same; the context column reads `unknown` in words with no cells (ID-3), its title saying why;
+  `session` time; no events column (the Steps tab counts them).
+- **Process tabs**: Chat and Steps only (Agents and Timeline come from Claude's hooks). Chat: the folded
+  Prompt row, the turns and the tool events the adapter's `chat()` names (command_execution lines as
+  notes), the source line at the end (`ended 14:19:48 · codex exec --json · thread 019a3f… · 31 events`).
+  Steps: the stream events with their time, kind and text.
 - **Levers**: Continue when the adapter resumes and the run is not live; Stop while live (a kill of the
   tree for Codex, OpenCode and Command Code, decision 8, said in the Stop title); Mark done, Brief a new
-  task. Verify, Hand off, Escalate and Terminal off with `claude only`. A task step keeps `a task step: use
-  the task's levers`.
+  task. Verify, Hand off, Escalate and Terminal off; the say line is one line, `claude only: Verify, Hand
+  off, Escalate`, the rest in the disabled buttons' titles.
 
 ### 6.1 Chat turns (Fred, 2026-10-13: less clutter, the two sides obvious, an accent each)
 
@@ -137,9 +162,14 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
   `--ai` edge on the left, a 9 % `--ai` tint over the raised surface, the label `Claude` or the harness's
   name in `--ai`); Fred's turns are bubbles on the right (`.turn.you`, a 2 px `--me` edge on the right, an
   11 % `--me` tint, the label `You` in `--me`, right-aligned). Text stays left-aligned inside both.
+- **The prompt folds**: the first turn is the prompt the service built (the goal and the handoff received),
+  not something Fred typed, so it is one right-side row with the violet edge, labelled `Prompt`, `goal and
+  the handoff of 02 · 53 w ▾`; click opens the text. `You` is kept for what Fred typed (a follow-up, an
+  answer).
 - **Tool events fold**: a run of consecutive tool events (file_change, command_execution, Read, Bash, Grep)
-  becomes one centred quiet row, `3 tool events · file_change, command_execution · exit 1`, a failed exit in
-  red; click or Space opens the list in place, muted mono, and the choice holds for that chat.
+  becomes one centred quiet row with a failed exit first, `3 tool events · exit 1 · file_change,
+  command_execution`, the exit in red, so an ellipsis at 340 px never hides it; click or Space opens the
+  list in place, muted mono, and the choice holds for that chat.
 - **The HANDOFF block folds**: the last turn shows a chip `HANDOFF block · 412 w · six headings` and the
   Next line; the six headings live in the Handoff tab (Board) or the Task page's handoff block.
 - **Writing**: a live turn carries `· writing` and the one blinking cell in its label; no extra line.
@@ -148,20 +178,28 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
 
 ## 7. Task page (compact)
 
-- **Head**: `Board` button in the `where` row (native only; hidden when the window cannot resize).
-- **Step rows**: the rung in the name (`codex · gpt-5.6-codex · medium`), then one new line under it:
-  `in` (the brief it read, cells of 50 words, 10 cells; step 1 shows `pack` for the context pack), `ctx`
-  (15 cells of the 30, past 150K in orange, the figure in the tone of the gauge; `unknown` in words for a
-  harness with no context), `out` (the note it wrote, cells of 50 words; hidden under 372 px), and the hint
-  `· scout first` in orange when a step read under 300 words and reached past `delegate` territory (the
-  `delegate_after_reads` logic per step). Attempts and the verdict stay on the sub line as today.
+- **Head**: `Board` button in the `where` row (native only; hidden when the window cannot resize). No path
+  line: the title's tooltip holds it. The Steps header reads `Steps · 8` and `step 5c of 8`; the page opens
+  with the current step scrolled into view.
+- **Step rows**: a finished step is two lines, `NN kind rung · cost · Open` and its goal (muted, one line).
+  The gauge line, `in` (the handoff it received, cells of 50 words, 10 cells; step 1 shows `pack` for the
+  context pack), `ctx` (15 cells of the 30, past 150K in orange, the figure in the tone of the gauge;
+  `unknown` in words for a harness with no context) and `out` (the handoff it wrote, cells of 50 words;
+  hidden under 372 px), stays open only on the current step, a failed step and a step past 150K; a click on
+  the row opens it on the others. The cell scale is each gauge's title. A failed row gives its sub line to
+  the verdict whole, `FAIL test_resume_command: options after resume`. Attempt squares show on a row only
+  when a try failed; the reason (`try 1 no HANDOFF block`) is in the opened row. The hint `· △ scout first`
+  is muted, not orange (it is tuning, not a wait), its figures in its title (`230 w in, 118K reached`; the
+  `delegate_after_reads` logic per step).
 - **Replan wait** (plan 24): the askbox of the Task page carries `Replanned · after step 01`, the question,
   the plan before and after as two lists with the added steps marked, Confirm plan (orange), Keep old plan,
   Stop, and the line `replan_auto is off: a changed plan waits for you`.
-- **Handoff block** (`Handoff for step NN · after the brief pass`, a Show it as NN-1 wrote it button): the six
-  headings (Goal, Findings, Files touched, Troubleshooting, Open questions, Next)
-  and, under `END HANDOFF`, the facts the service appended (`git diff --stat` from the start to the end
-  commit, the failing lines of the last test command), never compacted.
+- **Handoff block**: folded, closed line `Handoff for 5c · 230 w · Next: check the fix against the FAIL
+  detail ▾`. Open: `compacted from 260 w` and the `as 5b wrote it` link, then the six headings as the
+  Board's Received tab renders them (Goal, Findings, Open questions and Next open, Files touched and
+  Troubleshooting folded), then the facts the service appended folded to `Facts · 1 file +4 · 23 tests OK ▾`
+  (`git diff --stat` from the start to the end commit, the failing lines of the last test command, never
+  compacted; a failing test line puts FAIL in red in the closed line and opens it).
 - **Auto hand off**: a handed-off task reads as today (plan 13); a window run handed off by the service
   shows the handed box with `by itself at 312K`.
 
@@ -171,67 +209,92 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
 
 900 x 680 by default. Header: Back, crumb `Board / <scope> · N tasks`, window buttons. Body: two columns,
 the chain (300 px, scrolls) and the inspector (the rest, scrolls), a 1 px line between. Footer: the keys
-(`↑ ↓ step or brief · ← → task · Enter open the chat · Esc back`) and the scale (`1 ctx cell = 10K · 1
-word cell = 50 w`).
+(`↑ ↓ step · ← → task · Enter chat · Esc back`, hidden on the empty Board) and a `?` at the right whose
+title is the legend (`a step's context in cells of 10K; a handoff in cells of 50 words; the chip between
+two steps is the handoff the next one received`).
 
 ### 8.2 The chain
 
 - **Tasks** of the scope, newest first; every task folded to one quiet row (sprite, state word, title,
-  age; project, effort, steps, cost) except the picked one. Left / Right moves the pick between tasks.
-- **Task head** (the unfolded one): the same row raised, with the task's `why` in orange when waiting.
-- **Step block**: line 1 sprite + state word (RUNNING, DONE, FAIL, PLANNED, WAITING), `NN kind`, cost
-  (`0.84`, `~0.84`, `? cost`); line 2 the rung `harness · model · effort` and the time; line 3 `ctx` with
-  30 cells of 10K and the figure (yellow from 150K, red from 300K; the live cell blinks on a running step),
-  or `unknown: codex reports spend`; line 4 `in` and `out` as 10 cells of 50 words with the figure (`pack
-  1.9 KB` on step 1, `…` on a running step's out), and the attempts as 7 px squares (red failed, green
-  passed, ink live); line 5 the verdict with its detail, or the hint `scout first: 230 w in, 118K reached`,
-  or the task's wait. The current step has an ink edge on the left; the picked block an ink outline.
-- **Connector**: the handoff between two steps after the brief pass, a 2 px line and a chip: `[cells] handoff
-  290 w`. Variants: `· cut 122 w` with the cut part of the cells in the `l2` tone (ID-1, no orange); dashed
-  border for a code fallback (`handoff as written, not compacted · verify FAIL`); blue dashed
-  `handoff: writing`; `no handoff yet` on a dotted line before a planned step.
+  age; line 2 the orange `why` of a waiting task, else `N steps`; cost) except the picked one. Project and
+  effort are the row's title. Left / Right moves the pick between tasks.
+- **Task head** (the unfolded one): the same row raised, the title on two lines, line 2 `step 5c of 8` (the
+  fix steps counted) and the cost.
+- **Step block, finished**: two lines. Line 1 sprite + state word (DONE), `NN kind`, cost (`0.84`, `~0.84`,
+  `? cost`); line 2 the rung `harness · model · effort` and the time in `--mut` (`NN kind` is the one
+  semibold per block), and at the right a 15-cell context mini gauge with its figure (the list card's `.ctx`
+  grammar; yellow from 150K, red from 300K) or `ctx unknown`, the reason (`codex reports a turn's spend, not
+  a context size`) in its title. About 46 px: the running task with its eight steps fits the first screen,
+  the FAIL and the live step on it.
+- **Step block, current, failed, waiting or picked**: the full block. Lines 1 and 2 as above (the attempt
+  squares on line 2 only when a try failed: red failed, green passed, ink live); line 3 `ctx` with 30 cells
+  of 10K and the figure (the live cell blinks on a running step), or `unknown` with the reason in its
+  title; line 4 the verdict with its detail (whole, the title repeating it), or the muted hint `△ scout
+  first` (figures in its title), or the task's wait in orange. No in / out line: the connectors carry the
+  words. The current step has an ink edge on the left; the picked block an ink outline.
+- **Step block, planned**: one line, `PLANNED NN kind`; `rung at start (rule kind)` in its title.
+- **Connector**: the handoff between two steps as the next one received it, a 2 px line and a chip:
+  `[cells] 160 w`. Variants: after a cut, `412 → 290 w · cut 122` with the cut part of the cells in the `l2`
+  tone (ID-1, no orange); dashed border for a code fallback (`as written · not compacted`, the reason in
+  the title); blue dashed `writing`; before a planned step a dotted line with no chip. The footer's `?`
+  says what a connector is.
 - **Fix insert**: a bracket (a 2 px line with two ticks) under the failed verify holding the fix and the
   second verify, rejoining the chain after them; the fix block shows its escalated rung.
 - **Replan**: a step block of kind `replan` (Haiku, no tools, 1 turn), orange while the task waits on it.
 - **Empty**: 30 off cells and `No task in <scope>. Type a task in the list; its steps show here as they
-  run.`
+  run.`; the inspector and the key hints stay blank.
 
 ### 8.3 The inspector (one picked thing)
 
-- **A step**: head (sprite, `NN kind`, rung, cost, time, context, in / out; Open chat, Stop while live,
-  Open try 1 after a failed attempt), then four tabs, **Chat first** (Fred, 2026-10-13: the chat has
-  priority over what it read and what it wrote):
+- **A step**: head on one line (sprite, state word, `NN kind`; Open chat, Stop while live and Open try 1
+  after a failed attempt at the right) and one meta line, `rung · cost · time` (context and the words are
+  on the picked block, 300 px to the left, and in the tabs), then four tabs, **Chat first** (Fred,
+  2026-10-13: the chat has priority over what it read and what it wrote). The tabs read `Chat · Received
+  310 w · Handoff 412 → 290 w · Route`: the word counts help choose, the arrow says a cut happened.
   - **Chat**: the step session's chat as the session page's Chat tab shows it (`runs.chat`), in the
-    chat grammar of section 6.1: the source line, the agent's turns as bubbles on the left, Fred's on the
-    right, the tool events folded into one row per run of them, the HANDOFF block as a chip with its Next
-    line; a running step streams, newest at the end, with the writing mark in the agent's label, and the pane
-    follows the end until Fred scrolls up.
-  - **Received**: the handoff it got from the step before, after the brief pass (`Handoff it received from
-    step NN · 310 w`), six blocks; step 1 says it received no handoff, only the task goal and the context
-    pack.
-  - **Handoff**: the one it wrote for the step after (`Handoff it wrote for step NN · raw 412 w · sent as
-    290 w after the brief pass`), the HANDOFF block as six blocks (Goal and Troubleshooting with a green edge
-    and `never cut`; the lines the brief pass cut stay in place, struck and tagged `cut`), then **Facts the
-    service added** (dashed box: `git diff --stat <start>..<end>`, the test command's result lines). A
-    running step says `Writing. The handoff shows here when the run ends`; a planned one `Not started`.
+    chat grammar of section 6.1: the Prompt row folded, the agent's turns as bubbles on the left, Fred's on
+    the right, the tool events folded into one row per run of them with a failed exit first, the HANDOFF
+    block as a chip with its Next line, the source line at the end; a running step streams, newest at the
+    end, with the writing mark in the agent's label, and the pane follows the end until Fred scrolls up.
+  - **Received**: the handoff it got from the step before (`From 02 · 310 w · compacted`), six blocks with
+    Goal, Findings, Open questions (when any, the count in orange) and Next open, Files touched (`4 ·
+    codex.py, fake_codex.py +2`) and Troubleshooting (`3 lines`) folded; step 1 says it received no handoff,
+    only the task goal and the context pack. No green edges and no `never cut` labels: that is a rule, not
+    a state, and the handoff view's Checks say it.
+  - **Handoff**: the one it wrote for the step after (`For 04 · wrote 412 w · 04 received 290 w`), the
+    HANDOFF block as the same six blocks, the lines the brief pass cut left in place, struck and tagged
+    `cut`, then the facts the service added folded to `Facts · 4 files +325 · 23 tests OK ▾` (dashed box:
+    `git diff --stat <start>..<end>`, the test command's result lines; a failing line puts FAIL in red in
+    the closed line and opens it). A running step says `Writing. Shows here when the run ends`; a planned
+    one `Not started`.
   - **Route**: Goal; **Route · in the order the rules applied**, one chip per note (rule, pick, demand,
-    floor, hint, cap, budget, balance, harness fallback, tools / MCP, sandbox), the balance note and `every
-    <tier> rung over pace` in orange; **Attempts** with each try's reason.
+    floor, hint, cap, budget, balance, harness fallback, tools / MCP, sandbox); `every <tier> rung over
+    pace` in orange (nothing was left to leave), the `balance:` note muted (the router already acted);
+    **Attempts** with each try's reason.
   The picked tab holds while Up / Down move along the chain, and for the window (window.json), as the
   session page's brief fold does. Open chat still goes to the session page for the levers.
 - **A handoff** (a connector picked): head (`Handoff from NN kind to NN+1 kind`; `NN wrote 412 w · NN+1
-  received 290 w · cut 122 w, 2 Findings lines · brief pass: haiku · $0.004 · 2 turns`); **one column**,
-  what NN+1 received as six blocks, with the lines the brief pass cut left in place under their heading,
-  struck and tagged `cut`, the heading's label counting `2 kept · 2 cut` (Fred, 2026-10-13: two columns of
-  the same text were unreadable); **Checks · code, no model** under it: shorter than what it compacts, Goal
-  and Troubleshooting whole, open questions kept (n of n), continuity (names a file from the previous Files
-  touched), no invented path.
-- **The task head**: prompt.md; **Open questions · n open** from the briefs, each with the step that opened
-  it and the one that closed it (orange `?` open, green `✓` closed); **Chain log**, one line per move with
-  the route notes; Stop and Pause (running), Clear (done).
+  received 290 w · cut 122 w, 2 Findings lines`); **one column**, what NN+1 received as six blocks, the
+  headings that hold a cut, Open questions and Next open, the lines the brief pass cut left in place under
+  their heading, struck and tagged `cut`, the heading's label counting `2 kept · 2 cut` (Fred, 2026-10-13:
+  two columns of the same text were unreadable); Goal, Files touched and Troubleshooting folded with
+  `whole` in their closed line (the reader came for what was cut); **Checks** folded under the column,
+  closed line `Checks · 5 of 5 pass · compacted by haiku · $0.004 · 2 turns ▾`; open: shorter than what it
+  compacts, Goal and Troubleshooting whole, open questions kept (n of n), continuity (names a file from the
+  previous Files touched), no invented path. A failing check shows `1 FAIL: <name>` in red in the closed
+  line and opens the fold by itself.
+- **The task head**: head line (state, title; Stop and Pause while running, Clear when done) and the meta
+  `step 5c of 8 · cost 4.62 · effort auto`, the task folder in the title's tooltip; a **Now** line in sight:
+  the live cell, `Now 5c verify · opus · medium · 2m 40s`, `next 06 document`; **Open questions · n open**
+  from the handoffs, the open ones in sight with the step that opened each (orange `?`), the closed ones
+  folded (`2 closed ▾`, green `✓` with the step that closed each); **prompt.md** folded, its closed line the
+  Done when line; **Chain log** folded, closed line `Chain log · 23 moves · last 14:38 5c planned ->
+  running ▾`, open: one line per move with the route notes.
 - **Nothing picked** (Esc inside the Board, or a folded task picked): **Measure · <project> · last N
-  tasks**: per kind, the median brief in, context reached and note out as 20-cell bars (context past 150K
-  in orange) and the one-line reading (brainstorm 5.1 item 6).
+  tasks · median per kind**: columns `received · context · handoff`, per kind a 20-cell bar with its figure
+  after it (`240 w`, `112K`; context past 150K in orange, and the legend shows that item only when a bar
+  is orange), the row the reading names in ink and the others muted, the cell scale in the legend (`cell
+  25 w · 10K`), and the one-line reading (brainstorm 5.1 item 6) without its provenance sentence.
 
 ### 8.4 Keyboard
 
@@ -241,17 +304,22 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 
 ## 9. Usage page (plan 18)
 
-- **Models · fills** after the four figures: one row per model (the model, not the harness; the second
-  line says `claude`, `via codex`, `via opencode, cmd`), three bars day / week / month of 20 cells, the
-  pace as the orange outline cell, the figure as the share of pace (orange over pace). A model with no
-  allowance: dotted bars, `–`, `no allowance`. Legend: `used`, `linear pace (day 13 of 31 for the month)`,
-  and the orange sentence. One muted line: `balance_margin 0.2 · warn_at 0.8 · the Opus fill counts both
-  CLIs. Allowances in config.json "allowance"`.
-- **Verify FAIL rate by hour · last 30 days**: rows per rung that wrote the checked step, 24 columns, four
-  red tones (`l1` to `l4` over `--bad`), hover `14:00 opus: 3 of 7 FAIL`, a dotted row for a rung with no
-  verify yet. Under it the one-line reading and that it feeds `peak_hours` (off).
-- The calendar, the picked day and the Days / Weeks / Months columns stay as locked; the picked day's model
-  line lists harness rungs and `cost unknown · n runs`.
+- **Models · share of pace** after the four figures, sorted over pace first: one row per model (the model,
+  not the harness; the second line says `claude`, `via codex`, `via opencode, cmd`), one bar of 20 cells for
+  the window that binds (the highest share of pace: `day`, `week` or `month` as the bar's label), the pace
+  as the orange outline cell, the figure as the share of pace (orange over pace), then the other two windows
+  as text (`w 71 · m 52`); a click on the row opens the three bars. A model with no allowance: a dotted bar,
+  `–`, `no allowance`. Legend: `used`, `pace`, `20 cells = allowance`, `orange over pace`. The config names
+  fold: `config · balance_margin 0.2 · warn_at 0.8 ▾`, open: the router sentence, the Opus fill counting
+  both CLIs, `allowance` in config.json. (ID-6 unchanged: the cells stay 20 per window.)
+- **Days**: the calendar, the picked day and the Days / Weeks / Months columns stay as locked, above the
+  heatmap (the calendar is what the page was for); the picked day's model line lists harness rungs and
+  `cost unknown · n runs`.
+- **Verify FAIL by hour**: folded, closed line `Verify FAIL by hour · opus peaks 14:00 to 17:00 · last 30
+  days ▾`. Open: rows per model that wrote the checked step (the harness in the row's title, so nothing
+  truncates), 24 columns, four red tones (`l1` to `l4` over `--bad`), hover `14:00 opus: 3 of 7 FAIL`, a
+  dotted row for a rung with no verify yet; under it the one-line reading and that it feeds `peak_hours`
+  (off).
 - Footer: `Codex usage x its price row; OpenCode and Command Code runs without usage count as unknown,
   never as zero`.
 
@@ -265,6 +333,8 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | Step context | known, hand-off zone, unknown | cells and `92K` / `164K` in orange / `unknown: codex reports spend` |
 | Handoff connector | ok, cut, fallback, writing, pending | `handoff 290 w` / `· cut 122 w` (tone) / dashed / blue dashed / dotted line |
 | Handoff line | kept, cut | plain / struck, muted, tagged `cut`, in place under its heading |
+| Fold | closed, open, opened by itself | `Label · the one fact ▾` muted mono / the body in place / the red or orange word in the closed line and the body open (FAIL, failing check, not found) |
+| Finished step | done, done and picked | two lines (state, kind, cost; rung, time, ctx mini) / the full block |
 | Task | planned, running, waiting (replan, question, Fable), stuck, done, stopped, handed | plan 17 words and plan 21 sprites; a replan wait says `replanned: n steps added` |
 | Fill | under pace, over pace, no allowance | `31 %` / `84 %` orange / `no allowance` dotted |
 | FAIL heat | none, 1 to 4 tones, no data | off cell / red tones / dotted outline |
@@ -290,8 +360,8 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | ID-3 | Context of a non-Claude step: an estimate (characters / 4, hatched) or unknown | Unknown, as plan 5 3.6 decided; the hatched estimate is a plan 25 option if the live runs show usable token counts |
 | ID-4 | How the Board opens | A button that widens the window and opens the page, size kept in window.json; never by dragging alone |
 | ID-5 | Cells of a handoff | 1 cell = 50 words, 10 cells = `brief_max_words` 500; a handoff over 500 words shows 10 cells plus the figure |
-| ID-6 | Cells of a fill | 20 cells = the window's allowance (day, week or month), 1 cell = 5 %; the orange outline cell marks the pace |
-| ID-7 | The replan wait | A task `waiting` (orange) on the Task page, the Board and the list card, with the plan before and after; Confirm plan, Keep old plan (runs Prep's steps), Stop |
+| ID-6 | Cells of a fill | 20 cells = the window's allowance (day, week or month), 1 cell = 5 %; the orange outline cell marks the pace. Usage shows one bar per model, the window that binds, and opens the three on a click (review, P2) |
+| ID-7 | The replan wait | A task `waiting` (orange) on the Task page, the Board and the list card, with the new plan as one list, added steps tagged and dropped ones struck in place (the handoff rule applied here, review 3.11); Confirm plan (its title says `replan_auto` is off), Keep old plan (runs Prep's steps), Stop; why it ran and the route fold |
 | ID-8 | Chat roles: Fred asked for an accent per side | Two tokens for the chat only, `--me` violet (Fred, right) and `--ai` the writing blue (the agent, left), tinted bubbles with a 2 px edge; tool events and the HANDOFF block folded (6.1) |
 | ID-9 | Words for what passes between steps (Fred: Note / Brief took minutes to read) | "Handoff" everywhere the window shows it: a step receives one and writes one; the tabs are Received and Handoff; "sent" or "after the brief pass" for the compacted version; "note" and "brief" stay code names; the Task page's "note ready" chip becomes "handoff ready" |
 
@@ -309,3 +379,11 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 - 2026-10-13 - Fred: the handoff picked view was two clashing blocks of text. Now one column, what the next
   step received, with the cut lines struck in place under their heading and the checks under it (8.3); the
   step's Handoff tab marks the same cut lines.
+- 2026-10-13 - Fred: the details are data for nerds; keep what matters in sight, second-zone information
+  behind a tab or a drawer. Opus 5.5 (high) reviewed every view (`2026-10-13-interface-review.md`: verdict,
+  zoning rule, per-screen tables, P1 to P3, risks). Applied in the mock and here: folds with a closed line
+  everywhere (1, 4, 5, 7, 8.3, 9), two-line finished steps and one-line planned ones (7, 8.2), one place
+  per number (8.2 connectors, 8.3 head), the today breakdown closed with the over-pace line (3), the Prompt
+  row and the exit-first tool rows (6.1), orange back to "needs you" only, the duplicate connector before 06
+  fixed, one bar per model on Usage (9, ID-6), the replan as one list (ID-7), the balance note muted (8.3).
+  Not applied: nothing of P1 and P2; of P3, the counts and words are aligned and the light theme re-shot.

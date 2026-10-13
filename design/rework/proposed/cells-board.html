@@ -152,16 +152,12 @@ textarea.in { width: 100%; resize: none; }
 .today .big { font: 700 30px/.9 var(--dot); letter-spacing: .02em; grid-row: span 2; }
 .today .row30 { grid-template-columns: repeat(30, minmax(0, 1fr)); }
 .today .sub { display: flex; justify-content: space-between; gap: 8px; color: var(--mut); min-width: 0; }
-.todaymore { padding: 2px 12px 10px; display: grid; gap: 8px; border-bottom: 1px solid var(--line); }
-.fills { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 8px 12px; }
-.fill { display: grid; gap: 3px; min-width: 0; }
-.fill .nm { font: 500 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fill .nm.y { color: var(--you); }
-.fill .cells { grid-template-columns: repeat(10, minmax(0, 1fr)); }
-.fill .cells i { aspect-ratio: auto; height: 5px; }
-.fill .rw { display: grid; grid-template-columns: 10px minmax(0, 1fr) 30px; gap: 4px; align-items: center; font: 10px var(--mono); color: var(--mut); }
-.fill .rw b { font-weight: 400; text-align: right; }
-.fill .rw b.y { color: var(--you); }
+.overpace { display: flex; justify-content: space-between; gap: 8px; align-items: center; width: 100%; padding: 4px 12px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--mut); font: 11px var(--mono); cursor: pointer; text-align: left; }
+.overpace b { font-weight: 400; } .overpace b.y { color: var(--you); }
+.overpace .car { font-size: 9px; }
+.todaymore { padding: 8px 12px 10px; display: grid; gap: 8px; border-bottom: 1px solid var(--line); }
+.fline { display: flex; justify-content: space-between; gap: 8px; align-items: center; color: var(--mut); }
+.fline b { font-weight: 400; } .fline b.y { color: var(--you); }
 .sec { display: flex; justify-content: space-between; align-items: baseline; padding: 20px 12px 6px; }
 .sec:first-child { padding-top: 12px; }
 .card { margin: 0 8px 6px; padding: 8px 10px; border-radius: 8px; background: var(--raise); border: 1px solid transparent; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; cursor: pointer; text-align: left; }
@@ -302,7 +298,11 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .tools .car { font-size: 9px; }
 .tlist { display: grid; gap: 2px; padding: 0 6px; font: 11px/1.5 var(--mono); color: var(--mut); overflow-wrap: anywhere; }
 .tlist .r { color: var(--bad); }
-.chat .src { font: 11px var(--mono); color: var(--mut); margin: 0; }
+.chat .src { font: 11px var(--mono); color: var(--mut); margin: 0; text-align: center; }
+.turn.prompt { padding: 3px 8px 3px 10px; gap: 0; }
+.turn.prompt .fh { color: var(--mut); min-height: 22px; }
+.turn.prompt .fh .lbl { color: var(--me); letter-spacing: .06em; }
+.turn.prompt p { padding: 4px 2px 6px; }
 .log { display: grid; gap: 1px; }
 .log > div { display: grid; grid-template-columns: 19px 58px 80px minmax(0, 1fr); gap: 8px; align-items: center; font: 11.5px/19px var(--mono); color: var(--mut); font-variant-numeric: tabular-nums; }
 .log > div > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -310,7 +310,6 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .log .cells { grid-template-columns: 6px; }
 
 /* Task page (compact) */
-.tpath { color: var(--mut); font-size: 11px; overflow-wrap: anywhere; }
 .chain { display: grid; }
 .chain .row { display: grid; grid-template-columns: 41px minmax(0, 1fr) 38px 46px; gap: 2px 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); }
 .chain .row .cells { grid-template-columns: repeat(6, minmax(0, 1fr)); }
@@ -321,6 +320,8 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .chain .row .sub { grid-column: 2 / -1; min-width: 0; color: var(--mut); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chain .row .sub .r { color: var(--bad); } .chain .row .sub .g { color: var(--ok); } .chain .row .sub .y { color: var(--you); }
 .chain .row .hn { grid-column: 2 / -1; }
+.chain .row.short { padding: 5px 0; }
+.chain .row .tries { margin-left: 6px; }
 /* the per-step context line (plan 25): brief in, context reached, note out, each as cells plus a figure */
 .gg { grid-column: 2 / -1; display: flex; gap: 10px; align-items: center; min-width: 0; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; }
 .gg > span { display: inline-flex; gap: 4px; align-items: center; min-width: 0; }
@@ -328,7 +329,7 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .gg .cells.c30 { grid-template-columns: repeat(15, 3px); }
 .gg b { font-weight: 400; color: var(--ink); }
 .gg b.y { color: var(--you); } .gg b.r { color: var(--bad); }
-.gg .hint { color: var(--you); }
+.gg .cells.c30 i { aspect-ratio: auto; height: 6px; width: 3px; }
 .chain .row.n-ready { box-shadow: inset 2px 0 0 var(--ok); }
 pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; border-radius: 6px; background: var(--raise); font: 12px/1.45 var(--mono); scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
 
@@ -348,9 +349,11 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .ublk .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .ublk .hd .m { color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ublk .hd .lbl { white-space: nowrap; flex: none; }
-.mfill { display: grid; grid-template-columns: minmax(0, 118px) minmax(0, 1fr); gap: 2px 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+.mfill { display: grid; grid-template-columns: minmax(0, 112px) minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); cursor: pointer; }
 .mfill:first-of-type { border-top: 0; }
-.mfill .nm { font: 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; grid-row: span 3; align-self: start; padding-top: 1px; }
+.mfill.more { border-top: 0; padding-top: 0; cursor: default; grid-template-columns: minmax(0, 118px) minmax(0, 1fr); }
+.mfill .rest { font-size: 10.5px; color: var(--mut); text-align: right; white-space: nowrap; }
+.mfill .nm { font: 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: start; padding-top: 1px; }
 .mfill .nm small { display: block; color: var(--mut); font-size: 10.5px; white-space: normal; }
 .mfill .rw { display: grid; grid-template-columns: 32px minmax(0, 1fr) 44px; gap: 6px; align-items: center; font: 10.5px var(--mono); color: var(--mut); }
 .mfill .rw .cells { grid-template-columns: repeat(20, minmax(0, 1fr)); }
@@ -377,11 +380,15 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .bfoot { flex: none; border-top: 1px solid var(--line); padding: 5px 12px; display: flex; gap: 14px; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; }
 .bfoot .kbd { margin-right: 2px; }
 .bfoot .sp { flex: 1; }
+.bfoot .q { width: 18px; height: 18px; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--mut); font: 11px var(--mono); cursor: help; padding: 0; }
 /* a task on the chain: a head block, then its steps; folded tasks are one row */
 .tk { display: grid; gap: 0; }
 .thead { display: grid; gap: 3px; padding: 8px 8px 8px 10px; border-radius: 8px; background: var(--raise); border: 1px solid transparent; cursor: pointer; }
 .thead:hover { border-color: var(--line); }
 .thead .t { font-size: 13px; }
+.tk:not(.folded) .thead .t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+.tk:not(.folded) .thead .l1 { align-items: start; }
+.thead .l2 .who.y { color: var(--you); }
 .thead .l2 { grid-template-columns: minmax(0, 1fr) 38px; }
 .thead.picked, .sb.picked, .conn.picked .chip { outline: 2px solid var(--ink); outline-offset: -2px; }
 .tk.folded .thead { background: transparent; padding-block: 4px; }
@@ -397,21 +404,21 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .sb .nm .m { color: var(--mut); font-weight: 400; }
 .sb .cost { font: 11px var(--mono); color: var(--ink); white-space: nowrap; }
 .sb .cost.unk, .sb .cost.est { color: var(--mut); }
-.sb .rung { font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sb .rung b { color: var(--ink); font-weight: 400; }
+.sb .rung { display: flex; justify-content: space-between; gap: 8px; align-items: center; font: 11px var(--mono); color: var(--mut); min-width: 0; }
+.sb .rung .rt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb.short { gap: 3px; padding-block: 5px; }
+.sb.short .ctx { font: 10.5px var(--mono); color: var(--mut); flex: none; }
+.sb.one { padding-block: 5px; }
+.sb.one .nm { font-weight: 400; color: var(--mut); }
 .sb .cx { display: grid; grid-template-columns: 34px minmax(0, 1fr) 36px; gap: 6px; align-items: center; font: 10.5px var(--mono); color: var(--mut); }
 .sb .cx .cells { grid-template-columns: repeat(30, minmax(0, 1fr)); }
 .sb .cx .cells i { aspect-ratio: auto; height: 5px; }
 .sb .cx b { font-weight: 400; text-align: right; color: var(--ink); }
 .sb .cx b.y { color: var(--you); } .sb .cx b.r { color: var(--bad); }
 .sb .cx .unk { font: 10.5px var(--mono); color: var(--mut); }
-.sb .io { display: flex; gap: 10px; align-items: center; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; min-width: 0; }
-.sb .io > span { display: inline-flex; gap: 4px; align-items: center; }
-.sb .io .cells { grid-template-columns: repeat(10, 4px); }
-.sb .io b { font-weight: 400; color: var(--ink); }
-.sb .io .tries { margin-left: auto; display: inline-flex; gap: 3px; }
-.sb .io .tries i { display: inline-block; width: 7px; height: 7px; border-radius: 1px; background: var(--off); font-style: normal; }
-.sb .io .tries i.r { background: var(--bad); } .sb .io .tries i.g { background: var(--ok); } .sb .io .tries i.f { background: var(--ink); }
+.tries { display: inline-flex; gap: 3px; flex: none; margin-left: 6px; vertical-align: 1px; }
+.tries i { display: inline-block; width: 7px; height: 7px; border-radius: 1px; background: var(--off); font-style: normal; }
+.tries i.r { background: var(--bad); } .tries i.g { background: var(--ok); } .tries i.f { background: var(--ink); }
 .sb .sub { font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb .sub .r { color: var(--bad); } .sb .sub .g { color: var(--ok); } .sb .sub .y { color: var(--you); }
 /* the connector between two steps is the brief: a short line and a chip with its word cells */
@@ -423,7 +430,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .conn.cut .chip b { color: var(--ink); }
 .conn.fallback .chip { border-style: dashed; }
 .conn.writing .chip { border-color: var(--wip); color: var(--wip); border-style: dashed; }
-.conn.pending .chip { border-color: transparent; }
+.conn.pending { height: 16px; }
 .conn.pending .ln { background: repeating-linear-gradient(0deg, var(--line) 0 3px, transparent 3px 6px); }
 /* a fix insert: a branch under the failed verify, rejoining after; drawn as an indented pair with a bracket line */
 .branch { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 0 6px; padding-left: 10px; }
@@ -440,7 +447,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .ihead .meta { display: flex; gap: 12px; flex-wrap: wrap; font: 11.5px var(--mono); color: var(--mut); }
 .ihead .meta b { color: var(--ink); font-weight: 400; }
 .ihead .meta .y { color: var(--you); } .ihead .meta .r { color: var(--bad); }
-.ihead .lr { margin-top: 2px; }
+.ihead .ln1 .lr { margin-left: auto; }
 .binsp .tabs { padding: 0; margin-top: -4px; }
 .ipane { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .ipane .chat .turn p { font-size: 12.5px; }
@@ -459,8 +466,8 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .hsec li.cut s { text-decoration-color: color-mix(in srgb, var(--mut) 55%, transparent); }
 .hsec li.cut .tag { display: inline-block; font: 500 9.5px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; vertical-align: 1px; }
 .hsec .mono { font: 11.5px/1.45 var(--mono); }
-.hsec.keep { box-shadow: inset 2px 0 0 var(--ok); }
-.hsec.facts { background: transparent; border: 1px dashed var(--line); }
+.fold.facts { background: transparent; border: 1px dashed var(--line); border-radius: 6px; padding: 4px 10px 6px; }
+.fold.facts .mono { font: 11.5px/1.45 var(--mono); margin: 0; color: var(--mut); }
 .checks { display: grid; gap: 3px; font: 11.5px var(--mono); color: var(--mut); }
 .checks .g { color: var(--ok); } .checks .r { color: var(--bad); } .checks .y { color: var(--you); }
 .oq { display: grid; gap: 4px; }
@@ -472,17 +479,45 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .clog { display: grid; gap: 1px; }
 .clog > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; font: 11.5px/19px var(--mono); color: var(--mut); }
 .clog > div > span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.plan2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.plan2 ol { margin: 0; padding-left: 20px; font: 12.5px/1.5 var(--ui); }
-.plan2 li.add { color: var(--ink); font-weight: 600; }
-.plan2 li.add::after { content: " added"; font: 10.5px var(--mono); color: var(--you); }
-.plan2 li.old { color: var(--mut); }
-.plan2 .lbl { margin-bottom: 4px; }
+.plan1 { display: grid; gap: 4px; }
+.plan1 ol { margin: 0; padding-left: 20px; font: 12.5px/1.5 var(--ui); }
+.plan1 li.add { color: var(--ink); font-weight: 600; }
+.plan1 li.add::after { content: " added"; font: 10.5px var(--mono); color: var(--you); font-weight: 400; }
+.plan1 li.old { color: var(--mut); }
+.plan1 .lbl .m { text-transform: none; letter-spacing: 0; }
 .measure { display: grid; grid-template-columns: 64px repeat(3, minmax(0, 1fr)); gap: 3px 10px; align-items: center; font: 11px var(--mono); color: var(--mut); }
 .measure .cells { grid-template-columns: repeat(20, minmax(0, 1fr)); }
 .measure .cells i { aspect-ratio: auto; height: 6px; }
-.measure .k { color: var(--ink); }
+.measure .k { color: var(--mut); } .measure .k.hot { color: var(--ink); }
+.measure .bar { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.measure .bar .cells { flex: 1; min-width: 0; }
+.measure .bar b { font-weight: 400; width: 34px; text-align: right; color: var(--ink); flex: none; }
+.measure .bar b.y { color: var(--you); }
 .measure .hd2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+/* a fold: one closed line (label, the one fact worth seeing, a caret); the body opens in place */
+.fold { display: grid; gap: 6px; min-width: 0; }
+.fh { display: flex; gap: 8px; align-items: baseline; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--mut); font: 11px var(--mono); cursor: pointer; text-align: left; min-height: 24px; }
+.fh .lbl { flex: none; }
+.fh .fi { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fh .fi.r, .fh .fi .r { color: var(--bad); } .fh .fi.y, .fh .fi .y { color: var(--you); }
+.fh .fi b { color: var(--ink); font-weight: 400; }
+.fh .car { font-size: 9px; flex: none; }
+.fh[aria-expanded="true"] .car { display: inline-block; transform: rotate(180deg); }
+.fh:hover { color: var(--ink); }
+.fb { display: grid; gap: 8px; min-width: 0; }
+.hb .fold { background: var(--raise); border-radius: 6px; padding: 3px 10px 5px; gap: 2px; }
+.hb .fold .fh { min-height: 22px; }
+.hb .fold .fb { gap: 2px; }
+.blk .fold.qf { margin-top: 2px; }
+.pop .fold { gap: 0; }
+.pop .fold .fb { gap: 0; }
+.pop .fold .fh { padding: 10px 12px 3px; }
+.pop .fold .fh .fi { flex: none; }
+.now { display: flex; gap: 8px; align-items: center; font: 12.5px var(--ui); color: var(--ink); min-width: 0; }
+.now .cells { grid-template-columns: 6px; flex: none; }
+.now > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.now .m { color: var(--mut); margin-left: auto; white-space: nowrap; }
+.ublk .fold .fh { padding: 2px 0; }
 /* 340 px compact: nothing scrolls sideways */
 @container (max-width: 372px) {
   .top .grip { display: none; }
@@ -490,6 +525,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
   .l2 .route { display: none; }
   .gg { gap: 6px; }
   .gg .io2 { display: none; }
+  .mfill .rest { display: none; }
 }
 </style>
 <body>
@@ -497,7 +533,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
   <header>
     <h1>Cells Board</h1>
     <p>The interface for the harness plan and the brainstorm around it (plans 5, 18, 23, 24 and 25). The compact window keeps what Cells Drawer locked and gains the harness switch, rungs on any CLI, the per-step context view, the usage fills and the replan wait. The Board is the one new page: the window widened to 900 px, the chain of a task on the left as connected cells, one picked thing on the right. Same tokens, same type, same cell motif.</p>
-    <p>Figures are sample data. Orange still means "needs you" and nothing else; a cut handoff or an estimate is shown by shape (hatched, dashed, a tone) and a word, never by orange.</p>
+    <p>Figures are sample data. Orange still means "needs you" and nothing else; a cut handoff or an estimate is shown by shape (hatched, dashed, a tone) and a word, never by orange. Two zones (Opus review, 2026-10-13): what Fred acts on stays in sight; how, why, history and exact counts sit behind one closed line each.</p>
   </header>
 
   <div class="views" role="group" aria-label="Mock view">
@@ -536,6 +572,17 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       </ul>
     </section>
     <section>
+      <h3>Two zones (Opus 5.5 review, 2026-10-13)</h3>
+      <p>Fred: the details are good, but they are data for nerds; keep what matters in sight and put the second zone behind a tab or a drawer. The review (<code>design/brainstorm/2026-10-13-interface-review.md</code>) zoned every element; the mock applies its P1 and P2 lists and most of P3.</p>
+      <ul>
+        <li><b>Zone 1, in sight:</b> state (word and sprite), what needs Fred, the one figure that matters on the screen, the next action, the current step. A number stays in sight only if it changes what he does now.</li>
+        <li><b>Zone 2, one closed line each:</b> how and why. Route notes, exact counts of finished things, provenance (thread ids, paths, diff stats), the checks, logs, scales, config names, and every sentence that explained the design (those moved to titles). The closed line is <code>Label · the one fact worth seeing ▾</code>, muted mono; a FAIL, an open question, a not-found or an over-pace keeps its tone there, and a FAIL or a failing check opens its fold by itself. The app keeps each fold's state per window.</li>
+        <li><b>One place per number:</b> the handoff words live on the connector chip only (<code>412 → 290 w · cut 122</code>); the step block lost its in / out line; the inspector head is one line, rung · cost · time.</li>
+        <li><b>Done things shrink:</b> a finished step is two lines on the chain and on the Task page; a planned step is one; the running task fits the first screen with its FAIL and its live step.</li>
+        <li><b>Orange is Fred's only:</b> the <code>scout first</code> hint is muted with △, the balance route note is muted (the router already acted), the list's today breakdown is closed and says <code>3 models over pace · fills</code> only when true.</li>
+      </ul>
+    </section>
+    <section>
       <h3>Two forms, three widths</h3>
       <table>
         <tr><th>Width</th><th>What shows</th><th>How you get there</th></tr>
@@ -548,20 +595,20 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>The chain, read top down</h3>
       <ul>
-        <li><b>Task head:</b> state and age, title, project · effort · cost. Picked: the inspector shows prompt.md, the running list of open questions and the chain log.</li>
-        <li><b>Step block (eight facts, Square's fleet row):</b> state sprite and word, number and kind, the rung as <code>harness · model · effort</code>, cost (<code>~</code> estimated, <code>?</code> unknown), then the context row (30 cells of 10K and the figure, or "context unknown"), then brief in and note out as cells of 50 words, and the attempts as small squares (red a failed try, green the one that passed).</li>
-        <li><b>Connector = the handoff:</b> a short line and a chip with the handoff's word cells and count, as the next step received it (after the brief pass). Dashed: the brief pass fell back to code. A tone step on the cells with "cut 120 w": Findings were cut. Blue dashed: being written. Dotted line: not written yet. Picked: what the next step received, one column, the cut lines struck in place.</li>
+        <li><b>Task head:</b> state and age, the title on two lines, <code>step 5c of 8</code> and the cost; project and effort in its title. Folded tasks are one quiet row whose second line is the orange <code>why</code> of a waiting task, else the step count. Picked: the inspector shows the Now line, prompt.md folded to its Done when, the open questions, the closed ones and the chain log folded.</li>
+        <li><b>Step block:</b> a finished step is two lines: state sprite and word, number and kind, cost; then the rung as <code>harness · model · effort</code>, the time, and a 15-cell context mini gauge with its figure (or "ctx unknown"). The current, failed, waiting and picked steps keep the full block: the 30-cell context row and the sub line (the FAIL detail whole, the wait, the muted <code>△ scout first</code> hint). Attempt squares show only when a try failed. A planned step is one line.</li>
+        <li><b>Connector = the handoff:</b> a short line and a chip with the handoff's word cells and count as the next step received it: <code>160 w</code>; after a cut, <code>412 → 290 w · cut 122</code> with the cut part of the cells in a tone (ID-1, no orange); dashed <code>as written · not compacted</code> when the brief pass fell back to code; blue dashed <code>writing</code>; a dotted line with no chip before a planned step. Picked: what the next step received, one column, the cut lines struck in place.</li>
         <li><b>Fix insert:</b> a bracket under the failed verify holding fix and the second verify, rejoining after. The failed verify keeps its red; the fix shows its escalated rung.</li>
-        <li><b>Replan:</b> a step of its own kind (Haiku, no tools), orange while it waits for Fred; the inspector shows the plan before and after and Confirm / Keep plan / Stop.</li>
+        <li><b>Replan:</b> a step of its own kind (Haiku, no tools), orange while it waits for Fred; the inspector shows the new plan as one list with the added steps tagged (a dropped step would be struck in place) and Confirm / Keep old plan / Stop; why it ran and its route fold to one line each.</li>
         <li><b>Several tasks:</b> the scope's tasks stack, newest first, every one folded to a quiet row except the picked one. Left / Right moves between them.</li>
       </ul>
     </section>
     <section>
       <h3>The inspector: one picked thing</h3>
       <ul>
-        <li><b>A step:</b> head (number, kind, rung, cost, time, context, in / out; Open chat, Stop while live), then four tabs with <b>Chat</b> first (Fred, 2026-10-13): the step session's last turns as bubbles, the agent on the left with the blue edge, Fred on the right with the violet edge; consecutive tool events fold into one quiet row between them (click opens the list, a failed exit shows in red); the HANDOFF block folds to a chip with its word count and its Next line, the six headings being the Handoff tab; a running step streams with the writing mark in the agent's label. <b>Received</b>: the handoff it got from the step before, after the brief pass, six headings. <b>Handoff</b>: the one it wrote for the next step, the HANDOFF block as six blocks (Goal and Troubleshooting carry a green edge: never cut), then the facts the service added (git diff --stat between the start and end commits, the failing lines of the last test command). The words: a step <i>receives</i> a handoff and <i>writes</i> one; "note" and "brief" stay names in the code (Fred, 2026-10-13: Note / Brief took minutes to read). <b>Route</b>: the goal, the route notes as chips in the order <code>step_route</code> applied them (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback), the attempts with their reason. The tab holds while Up / Down move along the chain.</li>
-        <li><b>A handoff (connector):</b> one column, what the next step received, six headings, with the lines the brief pass cut left in place under their heading, struck and tagged "cut", the heading's label counting "2 kept · 2 cut" (Fred, 2026-10-13: two columns of the same text were unreadable). The head counts what was written, received and cut and names the brief pass's rung, cost and turns. Under the column, the checks in words (length, Goal and Troubleshooting whole, questions kept, continuity with the previous Files touched, no invented path). The step's own Handoff tab marks the same cut lines, so "cut" reads the same everywhere.</li>
-        <li><b>A task:</b> prompt.md, Open questions with the step that opened and the step that closed each one, the chain log.</li>
+        <li><b>A step:</b> head on one line (state, number and kind; Open chat and Stop at the right) and one meta line, rung · cost · time; context and the words are on the picked block and in the tabs. Four tabs with <b>Chat</b> first (Fred, 2026-10-13): the prompt the service built folds to one line labelled Prompt (not You: Fred did not type it), the agent's turns as bubbles on the left with the blue edge, Fred's own turns on the right with the violet edge, consecutive tool events folded into one row with a failed exit first, the HANDOFF block as a chip with its Next line, the source line at the end. <b>Received</b> (<code>From 02 · 310 w · compacted</code>) and <b>Handoff</b> (<code>For 04 · wrote 412 w · 04 received 290 w</code>; the tab reads <code>412 → 290 w</code>) show the six headings with Goal, Findings, Open questions and Next open and Files touched, Troubleshooting and the Facts the service added folded to one line each; the lines the brief pass cut stay in place, struck and tagged. <b>Route</b>: the goal, the route notes as chips in the order <code>step_route</code> applied them, the attempts. The tab holds while Up / Down move along the chain.</li>
+        <li><b>A handoff (connector):</b> one column, what the next step received. The headings with a cut, Open questions and Next are open, the cut lines left in place under their heading, struck and tagged "cut", the label counting "2 kept · 2 cut" (Fred, 2026-10-13: two columns of the same text were unreadable); Goal, Files touched and Troubleshooting fold to one line with "whole". The head counts written, received and cut words. The code checks fold to <code>Checks · 5 of 5 pass · compacted by haiku · $0.004</code>; a failing check shows red there and opens the fold by itself.</li>
+        <li><b>A task:</b> <code>step 5c of 8 · cost · effort</code>, a Now line (the running step, its rung and time, the next step), the open questions in sight; prompt.md (closed line: its Done when), the closed questions and the chain log (closed line: the last move) fold.</li>
         <li><b>Nothing picked</b> (keyboard Esc inside the Board, or a folded task): the inspector shows the measure table of the picked task's project, handoff received against context reached per kind.</li>
       </ul>
       <p>Keyboard: Up / Down along the chain (steps and handoffs), Left / Right between tasks, Enter opens the step's session page, Esc clears the pick then leaves the Board. The pick is an ink outline, as a focused control is.</p>
@@ -569,7 +616,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>Harnesses in the compact window</h3>
       <ul>
-        <li><b>Settings:</b> the project picker's popover gains a Harnesses group under Runs allowed / Runs off: one row per CLI with a glyph and state word (<code>● on</code>, <code>○ off</code>, <code>△ not found</code>), its probed version, and Turn on / Turn off, pending until the service answers. Claude reads "always on" (Prep and the brief run on it). A row that is on but not found says where to set <code>exe</code>. Below it, a Window runs group with the auto hand off switch (ID-2).</li>
+        <li><b>Settings:</b> the project picker's popover gains two folded rows under Runs off. <code>Harnesses · claude, codex on · △ cmd not found</code> opens to one row per CLI with a glyph and state word (<code>● on</code>, <code>○ off</code>, <code>△ not found</code>), its probed version, and Turn on / Turn off, pending until the service answers; it opens by itself while a harness is on but not found, and that row says <code>no cmdc.exe on PATH · set "exe" in config.json</code>. <code>Window runs · auto hand off off</code> holds the switch (ID-2). The explanations are the rows' titles.</li>
         <li><b>Rungs:</b> every model select lists tiers as groups, think / write / read, each holding rungs on any harness that is on and found. OpenCode and Command Code rungs appear under read only; a step row whose kind is a write or think kind does not list them, and a pick that a kind cannot hold shows "opencode: read steps only (cheap tier)" and falls back to Auto.</li>
         <li><b>Where the rung shows:</b> the task card and the Task page rows (<code>codex · gpt-5.6-codex</code> before the effort), the session head chip, the Board block. A Claude rung keeps today's <code>sonnet · medium</code>.</li>
         <li><b>A non-Claude session page:</b> the brief says "context unknown" with no cells and an estimated or unknown spend; tabs Chat and Steps (what the adapter's stream gives), no Agents or Timeline (those come from Claude's hooks); levers Continue and Stop, the rest off with "claude only". A pick whose harness went off at step start shows the route note <code>harness: codex off -> sonnet</code>.</li>
@@ -578,14 +625,14 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>Fills and balancing</h3>
       <ul>
-        <li><b>Usage page, Models block:</b> one row per model (the model, not the harness: Opus through two CLIs is one fill), three bars day / week / month of 20 cells each, the allowance as the full bar and the linear pace as an orange outline cell. The figure is the share of pace; over pace it is orange, because that model is the one the router leaves and the one Fred should rest. A model with no allowance shows hatched bars and "no allowance".</li>
-        <li><b>List header:</b> the today strip's breakdown gets the same fills in miniature, one column per model, so "which one am I overusing" is read without leaving the list.</li>
+        <li><b>Usage page, Models block:</b> one row per model (the model, not the harness: Opus through two CLIs is one fill), sorted over pace first, with one bar of 20 cells for the window that binds (day, week or month), the allowance as the full bar, the linear pace as an orange outline cell and the share of pace as the figure (orange over pace: that model is the one the router leaves and the one Fred should rest); the other two windows as text; a click opens the three bars. A model with no allowance says so. The config names fold under the legend.</li>
+        <li><b>List header:</b> the today strip's breakdown is closed, as locked; under the strip one line, <code>3 models over pace · fills</code>, shows only while a model is over its pace and opens the breakdown (spend legend, model mix, the over-pace figures and the Usage button). Needs you starts on the first screen.</li>
         <li><b>Route notes</b> say what balancing did: <code>balance: sonnet 84 % -> codex · gpt-5.6-codex 31 %</code>, <code>warm: same rung as step 2 (cache)</code>, <code>every write rung over pace: least full</code>.</li>
-        <li><b>Evidence:</b> a Verify FAIL rate by hour heatmap, rows per rung, 24 columns, four red tones, hover for the count. It is the data for the optional peak-hours table and the answer to "does the afternoon Opus fail more".</li>
+        <li><b>Evidence:</b> a Verify FAIL by hour heatmap, folded under Days with its reading as the closed line (<code>opus peaks 14:00 to 17:00</code>); rows per model, 24 columns, four red tones, hover for the count. It is the data for the optional peak-hours table.</li>
       </ul>
     </section>
     <section>
-      <h3>Decisions for Fred (ID-1 to ID-7)</h3>
+      <h3>Decisions for Fred (ID-1 to ID-9)</h3>
       <table>
         <tr><th>#</th><th>Question</th><th>Proposed</th></tr>
         <tr><td>ID-1</td><td>Brainstorm 7 said a connector turns orange when the brief cut findings</td><td>No: orange stays "needs you". A cut brief is a tone step on its word cells plus "cut 120 w"; a code fallback is dashed</td></tr>
@@ -594,8 +641,8 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
         <tr><td>ID-4</td><td>How the Board opens</td><td>A button that widens the window and opens the page, size kept in window.json; never by dragging alone</td></tr>
         <tr><td>ID-5</td><td>Cells of a handoff</td><td>1 cell = 50 words, 10 cells = brief_max_words 500; a handoff over 500 words shows 10 cells plus the figure</td></tr>
         <tr><td>ID-9</td><td>Words for what passes between steps</td><td>"Handoff" everywhere the window shows it: a step <i>receives</i> one and <i>writes</i> one; "sent" or "after the brief pass" for the compacted version; "note" and "brief" stay code names. The Task page's "note ready" chip becomes "handoff ready"</td></tr>
-        <tr><td>ID-6</td><td>Fills: cells of what</td><td>20 cells = the allowance of the window (day, week or month); 1 cell = 5 %; the orange outline cell marks the pace</td></tr>
-        <tr><td>ID-7</td><td>The replan wait</td><td>Waits on the Task page and the Board as a task "waiting" (orange), with the before / after plan; Confirm plan, Keep plan (runs the old steps), Stop</td></tr>
+        <tr><td>ID-6</td><td>Fills: cells of what</td><td>20 cells = the allowance of the window (day, week or month); 1 cell = 5 %; the orange outline cell marks the pace. Usage shows one bar per model, the window that binds, and opens the three on a click (review, P2)</td></tr>
+        <tr><td>ID-7</td><td>The replan wait</td><td>Waits on the Task page and the Board as a task "waiting" (orange), with the new plan as one list, added steps tagged and dropped ones struck in place (the handoff rule, applied here); Confirm plan, Keep old plan (runs the old steps), Stop</td></tr>
         <tr><td>ID-8</td><td>Chat roles (Fred asked for an accent per side)</td><td>Two tokens for the chat only: <code>--me</code> violet for Fred's turns on the right, <code>--ai</code> the writing blue for the agent's turns on the left; tinted bubbles with a 2 px edge; nowhere else in the window</td></tr>
       </table>
     </section>
@@ -646,14 +693,14 @@ const BRIEF3 = {
   files: NOTE3.files, trouble: NOTE3.trouble, questions: NOTE3.questions, next: NOTE3.next, words: 290, raw: 412, cut: 122,
 };
 const T = [
-  { id: "a", title: "Harness adapters: Codex exec and the Steps tab", project: "CLAUDE-CONSOLE", effort: "auto", cost: 4.62, state: "running", age: "3m", current: 7,
+  { id: "a", title: "Harness adapters: Codex exec and the Steps tab", project: "CLAUDE-CONSOLE", effort: "auto", cost: 4.62, state: "running", age: "3m", current: "5c",
     prompt: "Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events.\nWhere: console/harness/codex.py (new), console/harness/__init__.py REGISTRY, tests/fake_codex.py, tests/test_harness.py.\nKeep: argument lists, never shell strings; nothing written outside paths.home(); the prompt on stdin, never argv.\nDone when: 9 tests pass against the fake, one live codex exec in a scratch folder returns a HANDOFF block.",
     questions: [{ q: "Which exe is the real one: codex.cmd is the npm shim, the .exe sits under node_modules/@openai/codex/vendor", by: 1, closed: 3 }, { q: "Does -c model_reasoning_effort reach the model?", by: 3, closed: 0 }, { q: "Should turn.failed count as a retry or a stuck?", by: 5, closed: 6 }],
     log: [["14:02:10", "task:planned -> task:running"], ["14:02:11", "1 planned -> running (rule scout: read · claude:haiku/low)"], ["14:04:01", "1 running -> done (note 210 w)"], ["14:04:03", "briefed 1 (160 w)"], ["14:04:04", "2 planned -> running (rule design: think · claude:opus/high)"], ["14:13:30", "2 running -> done (note 480 w)"], ["14:13:34", "briefed 2 (310 w)"], ["14:13:35", "3 planned -> running (pick codex:gpt-5.6-codex · balance: sonnet 84 % -> codex 31 %)"], ["14:19:48", "3 running -> done (note 412 w)"], ["14:19:52", "briefed 3 (290 w, Findings cut 122 w)"], ["14:19:53", "4 planned -> running (rule test: read · opencode:deepseek-v4-flash)"], ["14:22:10", "4 running -> done (cost unknown)"], ["14:22:13", "briefed 4 (240 w)"], ["14:22:14", "5 planned -> running (verify: one tier above read -> write · claude:sonnet/medium)"], ["14:25:40", "5 running -> done (verdict FAIL)"], ["14:25:41", "fix inserted after 5 (escalate sonnet/medium -> sonnet/high), verify after it"], ["14:25:42", "5b planned -> running"], ["14:31:02", "5b running -> failed (no HANDOFF block)"], ["14:31:03", "5b failed -> planned (retry 1)"], ["14:31:04", "5b planned -> running"], ["14:38:20", "5b running -> done (note 260 w)"], ["14:38:24", "briefed 5b (230 w)"], ["14:38:25", "5c planned -> running (verify: one tier above write -> think · claude:opus/medium · every think rung over pace: least full)"]],
     steps: [
       { n: 1, kind: "scout", harness: "claude", model: "haiku", effort: "low", state: "done", cost: 0.04, exact: true, ctx: 38, in: 0, pack: "pack 1.9 KB", out: 210, time: "1m 50s", goal: "Read plans/05-harnesses/02-codex.md and console/claude_cli.py; cite the functions the adapter mirrors.", notes: ["rule scout: read", "claude · haiku · low", "cap 15 turns (read_max_turns)", "tools Read, Grep, Glob", "no MCP (--strict-mcp-config)"], tries: ["g"] },
       { n: 2, kind: "design", harness: "claude", model: "opus", effort: "high", state: "done", cost: 1.92, exact: true, ctx: 92, in: 160, out: 480, time: "9m 26s", goal: "Decide the stream parsing and the resume command; write the test list.", notes: ["rule design: think", "claude · opus · high", "cap 12 turns (opus_max_turns)", "budget $3", "warm: same rung as Prep? no (haiku)"], tries: ["g"] },
-      { n: 3, kind: "code", harness: "codex", model: "gpt-5.6-codex", effort: "medium", state: "done", cost: 0.84, exact: true, ctx: null, in: 310, out: 412, time: "6m 13s", goal: "console/harness/codex.py with run_command, is_result, summary, chat and stop; tests first against tests/fake_codex.py.", notes: ["rule code: write", "pick codex:gpt-5.6-codex (card)", "balance: sonnet 84 % -> codex · gpt-5.6-codex 31 %", "effort medium (rule)", "cap 1800 s (no turn cap on codex)", "sandbox workspace-write"], tries: ["g"], brief: BRIEF3, note: NOTE3, cuts: { findings: [2, 3] }, facts: { diff: ["console/harness/__init__.py |   6 +", "console/harness/codex.py    | 164 +", "tests/fake_codex.py         |  58 +", "tests/test_harness.py       |  97 +", "4 files changed, 325 insertions(+)"], test: "py -m unittest tests.test_harness -q\nRan 23 tests in 0.412s\nOK" } },
+      { n: 3, kind: "code", harness: "codex", model: "gpt-5.6-codex", effort: "medium", state: "done", cost: 0.84, exact: true, ctx: null, in: 310, out: 412, time: "6m 13s", goal: "console/harness/codex.py with run_command, is_result, summary, chat and stop; tests first against tests/fake_codex.py.", notes: ["rule code: write", "pick codex:gpt-5.6-codex (card)", "balance: sonnet 84 % -> codex · gpt-5.6-codex 31 %", "effort medium (rule)", "cap 1800 s (no turn cap on codex)", "sandbox workspace-write"], tries: ["g"], brief: BRIEF3, note: NOTE3, cuts: { findings: [2, 3] }, facts: { line: "4 files +325 · 23 tests OK", diff: ["console/harness/__init__.py |   6 +", "console/harness/codex.py    | 164 +", "tests/fake_codex.py         |  58 +", "tests/test_harness.py       |  97 +", "4 files changed, 325 insertions(+)"], test: "py -m unittest tests.test_harness -q\nRan 23 tests in 0.412s\nOK" } },
       { n: 4, kind: "test", harness: "opencode", model: "deepseek-v4-flash", effort: "", state: "done", cost: null, ctx: null, in: 290, out: 150, time: "2m 17s", goal: "Run the suite on the real codex exe in a scratch folder; report the failing lines.", notes: ["rule test: read", "opencode · deepseek-v4-flash (read tier)", "balance: haiku 71 % -> opencode · deepseek-v4-flash 12 %", "OPENCODE_PERMISSION: edit and bash denied? no: test runs bash", "cap 1800 s"], tries: ["g"] },
       { n: 5, kind: "verify", harness: "claude", model: "sonnet", effort: "medium", state: "failed", verdict: "FAIL", detail: "test_resume_command: options after resume", cost: 0.31, exact: true, ctx: 61, in: 240, out: 190, time: "3m 26s", goal: "Check steps 3 and 4 against the goal; VERDICT PASS or FAIL with the detail.", notes: ["verify: one tier above read -> write", "claude · sonnet · medium", "diff: 3 start commit c41e2a7 -> end 9b02f11"], tries: ["r"], fix: [
         { n: "5b", kind: "fix", harness: "claude", model: "sonnet", effort: "high", state: "done", cost: 0.77, exact: true, ctx: 118, in: 230, out: 260, time: "7m 16s", goal: "Fix what verify 05 found: the resume command puts its options before the subcommand.", notes: ["fix: escalate sonnet/medium -> sonnet/high (once per task)", "retry 1: no HANDOFF block (try 1)"], tries: ["r", "g"], hint: "scout first: 230 w in, 118K reached" },
@@ -675,68 +722,90 @@ const T = [
       { n: 5, kind: "test", harness: "claude", model: "", effort: "", state: "planned", goal: "tests/test_usage.py: three fills, pace on day 10 of 30.", notes: [], tries: [] },
       { n: 6, kind: "verify", harness: "claude", model: "", effort: "", state: "planned", goal: "", notes: [], tries: [] },
     ], conns: { "1": { w: 180 }, "2": { pending: true }, "3": { pending: true }, "4": { pending: true }, "5": { pending: true } } },
-  { id: "c", title: "Six-heading HANDOFF in the skill", project: "CLAUDE-CONSOLE", effort: "auto", cost: 1.08, state: "done", age: "2h", current: 4, steps: [], conns: {}, prompt: "", questions: [], log: [] },
+  { id: "c", title: "Six-heading HANDOFF in the skill", project: "CLAUDE-CONSOLE", effort: "auto", cost: 1.08, state: "done", age: "2h", current: 4, nsteps: 4, steps: [], conns: {}, prompt: "", questions: [], log: [] },
 ];
+
+// ---- two zones (Opus review, 2026-10-13): what Fred acts on stays in sight; how, why, history and exact counts sit behind a fold.
+// A fold is one closed line that says what is inside and the one figure worth seeing; click opens it in place. The app keeps each
+// fold's state per window (window.json); a FAIL, a failing check or a harness that is on but not found opens its fold by itself.
+function fold(label, info, body, o = {}) {
+  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold aria-expanded="${!!o.open}"><span class="lbl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span><span class="car">▾</span></button><div class="fb"${o.open ? "" : " hidden"}>${body}</div></div>`;
+}
+const flatSteps = (t) => { const f = []; for (const s of t.steps) { f.push(s); if (s.fix) f.push(...s.fix); } return f; };
+const nSteps = (t) => flatSteps(t).length || t.nsteps || 0;
+const triesHtml = (s) => s.tries.length > 1 || s.tries.includes("r") ? `<span class="tries" title="attempts: ${s.tries.map((c) => (c === "r" ? "failed" : c === "g" ? "passed" : "live")).join(", ")}">${s.tries.map((c) => `<i class="${c}"></i>`).join("")}</span>` : "";
 
 // ---- the Board -----------------------------------------------------------------------------------------------
 function stepBlock(t, s, pick, picked) {
   const [word, tn] = WORD[s.state] || WORD.running;
-  const live = s.state === "running";
-  const ctx = s.ctx == null && s.state !== "planned" ? `<span class="cx"><span>ctx</span><span class="unk">${s.harness === "claude" ? "no transcript yet" : "unknown: " + s.harness + " reports spend"}</span><span></span></span>`
-    : `<span class="cx"><span>ctx</span><span class="cells">${cellsHtml(ctxCells(s.ctx, live))}</span><b class="${ctxTone(s.ctx)}">${s.ctx == null ? "" : s.ctx + "K"}</b></span>`;
-  const io = s.state === "planned" ? "" : `<span class="io"><span title="received: the handoff of the step before, after the brief pass">in <span class="cells">${cellsHtml(s.in ? wCells(s.in) : Array(10).fill(""))}</span><b>${s.in ? s.in + " w" : s.pack || "–"}</b></span>
-    <span title="handoff: the HANDOFF block this step wrote for the next one">out <span class="cells">${cellsHtml(s.out ? wCells(s.out) : Array(10).fill(live ? "" : ""))}</span><b>${s.out ? s.out + " w" : live ? "…" : "–"}</b></span>
-    <span class="tries" title="attempts">${s.tries.map((c) => `<i class="${c}"></i>`).join("")}</span></span>`;
-  const sub = [s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${s.verdict} ${esc(s.detail || "")}</span>` : "", s.hint ? `<span class="y">${esc(s.hint)}</span>` : "", t.state === "waiting" && s.state === "waiting" ? `<span class="y">${esc(t.why)}</span>` : ""].filter(Boolean).join(" · ");
-  return `<div class="sb${s.state === "waiting" ? " y" : ""}${t.current === s.n ? " cur" : ""}${picked === pick ? " picked" : ""}" data-pick="${pick}" tabindex="0" role="button">
-    <div class="l1"><span class="st ${tn}">${sprite(s.state)}${word}</span><span class="nm">${esc(two(s.n))} ${esc(s.kind)}</span><span class="cost${s.cost == null && s.state !== "planned" ? " unk" : ""}">${s.state === "planned" ? "" : s.cost == null ? "? cost" : (s.exact ? "" : "~") + money(s.cost)}</span></div>
-    <div class="rung">${s.model ? `<b>${esc(rungText(s))}</b>` : "<span>rung at start (rule " + esc(s.kind) + ")</span>"}${s.time ? ` · ${esc(s.time)}` : ""}</div>
-    ${s.state === "planned" ? "" : ctx}${io}${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+  const live = s.state === "running", isPicked = picked === pick;
+  const l1 = `<div class="l1"><span class="st ${tn}">${sprite(s.state)}${word}</span><span class="nm">${esc(two(s.n))} ${esc(s.kind)}</span>${s.state === "planned" ? "" : `<span class="cost${s.cost == null ? " unk" : ""}">${s.cost == null ? "? cost" : (s.exact ? "" : "~") + money(s.cost)}</span>`}</div>`;
+  if (s.state === "planned") return `<div class="sb one${isPicked ? " picked" : ""}" data-pick="${pick}" tabindex="0" role="button" title="rung at start (rule ${esc(s.kind)})">${l1}</div>`;
+  const rung = `<span class="rt">${esc(rungText(s))}${s.time ? ` · ${esc(s.time)}` : ""}</span>`;
+  const unkTitle = `${esc(s.harness)} reports a turn's spend, not a context size`;
+  if (s.state === "done" && !isPicked) {  // a finished step that is not picked: two lines, the context as the list card's mini gauge
+    const mini = s.ctx == null ? `<span class="ctx" title="${unkTitle}">ctx unknown</span>`
+      : `<span class="ctx" title="context reached ${s.ctx}K"><span class="cells">${cellsHtml(ctxCells(s.ctx).filter((_, k) => k % 2 === 0))}</span><b class="${ctxTone(s.ctx)}">${s.ctx}K</b></span>`;
+    return `<div class="sb short" data-pick="${pick}" tabindex="0" role="button">${l1}<div class="rung">${rung}${mini}</div></div>`;
+  }
+  const ctx = s.ctx == null ? `<span class="cx"><span>ctx</span><span class="unk" title="${unkTitle}">unknown</span><span></span></span>`
+    : `<span class="cx"><span>ctx</span><span class="cells">${cellsHtml(ctxCells(s.ctx, live))}</span><b class="${ctxTone(s.ctx)}">${s.ctx}K</b></span>`;
+  const sub = [s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${s.verdict} ${esc(s.detail || "")}</span>` : "", s.hint ? `<span title="${esc(s.hint)}">△ scout first</span>` : "", t.state === "waiting" && s.state === "waiting" ? `<span class="y">${esc(t.why)}</span>` : ""].filter(Boolean).join(" · ");
+  return `<div class="sb${s.state === "waiting" ? " y" : ""}${live ? " cur" : ""}${isPicked ? " picked" : ""}" data-pick="${pick}" tabindex="0" role="button">${l1}<div class="rung">${rung}${triesHtml(s)}</div>${ctx}${sub ? `<div class="sub" title="${esc(s.verdict ? s.verdict + " " + (s.detail || "") : "")}">${sub}</div>` : ""}</div>`;
 }
 function connBlock(t, key, picked) {
   const c = t.conns[key];
   if (!c) return "";
   const cls = c.pending ? "pending" : c.writing ? "writing" : c.fallback ? "fallback" : c.cut ? "cut" : "";
-  const chip = c.pending ? `<span class="chip">no handoff yet</span>` : c.writing ? `<span class="chip">handoff: writing</span>`
-    : c.fallback ? `<span class="chip" title="${esc(c.why)}">handoff as written, not compacted · ${esc(c.why.split(":")[0])}</span>`
-    : `<span class="chip" title="the handoff step ${key} left for the next step, after the brief pass: ${c.w} words${c.cut ? ", Findings cut " + c.cut + " w" : ""}"><span class="cells">${cellsHtml(wCells(c.w + (c.cut || 0), c.cut || 0))}</span>handoff <b>${c.w} w</b>${c.cut ? ` · cut ${c.cut} w` : ""}</span>`;
+  const chip = c.pending ? "" : c.writing ? `<span class="chip">writing</span>`
+    : c.fallback ? `<span class="chip" title="${esc(c.why)}">as written · not compacted</span>`
+    : c.cut ? `<span class="chip" title="step ${key} wrote ${c.w + c.cut} words; the next step received ${c.w} once compacted, Findings cut ${c.cut} w"><span class="cells">${cellsHtml(wCells(c.w + c.cut, c.cut))}</span>${c.w + c.cut} → <b>${c.w} w</b> · cut ${c.cut}</span>`
+    : `<span class="chip" title="the handoff step ${key} left for the next step, compacted: ${c.w} words"><span class="cells">${cellsHtml(wCells(c.w))}</span><b>${c.w} w</b></span>`;
   return `<div class="conn ${cls}${picked === "c" + key ? " picked" : ""}" data-pick="c${key}" tabindex="0" role="button"><span class="ln"></span>${chip}</div>`;
 }
 function chainHtml(t, picked, folded) {
   const [word, tn] = WORD[t.state] || WORD.running;
-  const head = `<div class="thead${picked === "t" + t.id ? " picked" : ""}" data-pick="t${t.id}" tabindex="0" role="button">
+  const n = nSteps(t);
+  const l2 = folded ? (t.state === "waiting" ? `<span class="who y">${esc(t.why)}</span>` : `<span class="who">${n} steps</span>`) : `<span class="who">${t.state === "done" ? `${n} steps` : `step ${esc(t.current)} of ${n}`}</span>`;
+  const head = `<div class="thead${picked === "t" + t.id ? " picked" : ""}" data-pick="t${t.id}" tabindex="0" role="button" title="${esc(t.project)} · effort ${esc(t.effort)}">
     <div class="l1"><span class="st ${tn}">${sprite(t.state)}${word}</span><span class="t">${esc(t.title)}</span><span class="age m">${t.age}</span></div>
-    <div class="l2 m"><span class="who">${esc(t.project)} · effort ${t.effort} · ${t.steps.length || 4} steps${t.why ? ` · <span class="y">${esc(t.why)}</span>` : ""}</span><span class="cost">${money(t.cost)}</span></div></div>`;
+    <div class="l2 m">${l2}<span class="cost">${money(t.cost)}</span></div></div>`;
   if (folded) return `<div class="tk folded">${head}</div>`;
-  let html = head;
+  let html = head, prev = null;
   for (const s of t.steps) {
-    html += connBlock(t, String(s.n - 1), picked);
+    if (prev) html += connBlock(t, prev, picked);
     html += stepBlock(t, s, "s" + s.n, picked);
-    if (s.fix) {
-      html += `<div class="branch"><span class="ln"></span><div class="in">${connBlock(t, "5", picked)}${stepBlock(t, s.fix[0], "s5b", picked)}${connBlock(t, "5b", picked)}${stepBlock(t, s.fix[1], "s5c", picked)}${connBlock(t, "5c", picked)}</div></div>`;
+    prev = String(s.n);
+    if (s.fix) {  // the fix insert: a bracket holding the fix and the second verify; the chain rejoins after them
+      html += `<div class="branch"><span class="ln"></span><div class="in">${connBlock(t, prev, picked)}${s.fix.map((f, k) => (k ? connBlock(t, String(s.fix[k - 1].n), picked) : "") + stepBlock(t, f, "s" + f.n, picked)).join("")}</div></div>`;
+      prev = String(s.fix[s.fix.length - 1].n);
     }
   }
   return `<div class="tk">${html}</div>`;
 }
-function headingBlock(h, lbl, keep = false, cuts = {}) {
-  // cuts: per heading, the indexes of the lines the brief pass dropped; they stay in place, struck and tagged, so the eye skips them and still sees what the next step did not get
+// the six headings of a handoff. cuts: per heading, the indexes of the lines the brief pass dropped; they stay in place, struck and tagged,
+// so the eye skips them and still sees what the next step did not get. open: the headings shown open; the others fold to one line.
+function headingBlock(h, cuts = {}, open = ["goal", "findings", "questions", "next"], whole = false) {
   const li = (key) => (x, k) => (cuts[key] || []).includes(k) ? `<li class="cut"><span class="tag">cut</span> <s>${esc(x)}</s></li>` : `<li>${esc(x)}</li>`;
-  const count = (key, items) => { const c = (cuts[key] || []).length; return `<span class="m">${c ? `${items.length - c} kept · ${c} cut` : `${items.length} ${items.length === 1 ? "line" : "lines"}`}</span>`; };
+  const ul = (key, items, mono = false) => `<ul${mono ? ' class="mono"' : ""}>${items.map(li(key)).join("")}</ul>`;
+  const count = (key, items) => { const c = (cuts[key] || []).length; return c ? `${items.length - c} kept · ${c} cut` : `${items.length} ${items.length === 1 ? "line" : "lines"}${whole ? " · whole" : ""}`; };
+  const sec = (key, label, info, body) => open.includes(key) ? `<div class="hsec"><span class="lbl">${label}<span class="m">${info}</span></span>${body}</div>` : fold(label, info, body, { cls: "hf" });
+  const base = (p) => p.replace(/^.*\//, "").replace(/ \(.*$/, "");
   return `<div class="hb">
-    <div class="hsec${keep ? " keep" : ""}"><span class="lbl">Goal${keep ? '<span class="m">never cut</span>' : ""}</span><p>${esc(h.goal)}</p></div>
-    <div class="hsec"><span class="lbl">Findings${count("findings", h.findings)}</span><ul>${h.findings.map(li("findings")).join("")}</ul></div>
-    <div class="hsec"><span class="lbl">Files touched</span><ul class="mono">${h.files.map(li("files")).join("")}</ul></div>
-    <div class="hsec${keep ? " keep" : ""}"><span class="lbl">Troubleshooting${keep ? '<span class="m">never cut</span>' : ""}</span><ul>${h.trouble.map(li("trouble")).join("")}</ul></div>
-    <div class="hsec"><span class="lbl">Open questions${count("questions", h.questions)}</span><ul>${h.questions.map(li("questions")).join("")}</ul></div>
-    <div class="hsec"><span class="lbl">Next</span><p>${esc(h.next)}</p></div></div>`;
+    ${sec("goal", "Goal", open.includes("goal") ? "" : (whole ? "whole · " : "") + esc(h.goal), `<p>${esc(h.goal)}</p>`)}
+    ${sec("findings", "Findings", count("findings", h.findings), ul("findings", h.findings))}
+    ${sec("files", "Files touched", `${h.files.length} · ${h.files.slice(0, 2).map(base).map(esc).join(", ")}${h.files.length > 2 ? " +" + (h.files.length - 2) : ""}`, ul("files", h.files, true))}
+    ${sec("trouble", "Troubleshooting", count("trouble", h.trouble), ul("trouble", h.trouble))}
+    ${h.questions.length ? sec("questions", "Open questions", `<span class="y">${h.questions.length} open</span>`, ul("questions", h.questions)) : ""}
+    ${sec("next", "Next", "", `<p>${esc(h.next)}</p>`)}</div>`;
 }
 function findStep(t, key) {
   for (const s of t.steps) { if ("s" + s.n === key) return s; if (s.fix) for (const f of s.fix) if ("s" + f.n === key) return f; }
   return null;
 }
 const CHAT = {  // the step session's chat, as the session page's Chat tab shows it (runs.chat): the last turns in words
-  s3: { src: "codex exec --json · thread 019a3f… · 31 events · ended 14:19:48", turns: [
-    ["you", "Goal: Harness adapters: Codex exec and the Steps tab. This step: console/harness/codex.py with run_command, is_result, summary, chat and stop; tests first against tests/fake_codex.py.\n\nWhat the earlier steps left you (brief of 02, 310 words): Goal … Findings … Files touched … Troubleshooting … Open questions … Next …\n\nEnd with the HANDOFF block."],
+  s3: { src: "ended 14:19:48 · codex exec --json · thread 019a3f… · 31 events", turns: [
+    ["you", "Goal: Harness adapters: Codex exec and the Steps tab. This step: console/harness/codex.py with run_command, is_result, summary, chat and stop; tests first against tests/fake_codex.py.\n\nWhat the earlier steps left you (handoff of 02, 310 words): Goal … Findings … Files touched … Troubleshooting … Open questions … Next …\n\nEnd with the HANDOFF block."],
     ["note", "file_change · tests/fake_codex.py (new) · tests/test_harness.py (+9 tests)"],
     ["claude", "I mirrored claude_cli.run_command and runs._watch for the stream handling. A Codex turn ends with turn.completed, so is_result matches that event; the final text is the last item.completed whose item.type is agent_message."],
     ["note", "command_execution · py -m unittest tests.test_harness -q · exit 1 · 2 failures"],
@@ -744,7 +813,7 @@ const CHAT = {  // the step session's chat, as the session page's Chat tab shows
     ["note", "file_change · console/harness/codex.py (resume_command, fork_command)"],
     ["note", "command_execution · py -m unittest tests.test_harness -q · exit 0 · 23 tests"],
     ["claude", "HANDOFF\n## Goal\nHarness adapters: Codex exec and the Steps tab. This step: console/harness/codex.py …\n## Findings\n- codex exec - reads the prompt on stdin; options stand before the subcommand …\n- The final text is the last item.completed with item.type agent_message …\n## Files touched\n- console/harness/codex.py (new, 164 lines) …\n## Troubleshooting\n- `codex exec -o out.txt` writes the file after the process exits on Windows: read the stream, not the file …\n## Open questions\n- Does -c model_reasoning_effort=\"high\" reach the model? …\n## Next\n04 test: run tests/test_harness.py on the real codex exe … Next model: read\nEND HANDOFF"]] },
-  s5c: { src: "claude -p · stream-json · turn 1 · running 2m 40s", live: true, turns: [
+  s5c: { src: "running 2m 40s · claude -p · stream-json · turn 1", live: true, turns: [
     ["you", "Verify what the fix step (05b) did against the FAIL of 05: test_resume_command: options after resume. Check the diff 9b02f11..e7a4c02 against the task goal. End with the HANDOFF block and a VERDICT line."],
     ["note", "Read · console/harness/codex.py:30-58"],
     ["claude", "The resume command now builds [exe, \"exec\", *options, \"resume\", session_id, \"-\"]; the fork command the same with \"fork\". That matches the help text codex exec [OPTIONS] <COMMAND> [ARGS]."],
@@ -755,12 +824,15 @@ const CHAT = {  // the step session's chat, as the session page's Chat tab shows
 let itab = "chat";  // the step inspector's tab: chat | brief (received) | note (handoff) | route
 const prevOf = (s) => s.n === "5b" ? "05" : s.n === "5c" ? "5b" : two(Number(s.n) - 1);
 const nextOf = (s) => s.n === "5b" ? "5c" : s.n === "5c" ? "06" : two(Number(s.n) + 1);
-const sentOf = (t, s) => { const c = t.conns[String(s.n)]; return c && c.w ? c.w + " w" : c && c.fallback ? "is (not compacted)" : "…"; };
-function toolsRow(list) {  // consecutive tool events fold into one row; click opens them
+function toolsRow(list) {  // consecutive tool events fold into one row; a failed exit comes first, so an ellipsis never hides it
   const kinds = [...new Set(list.map((t) => t.split(" · ")[0]))].join(", ");
-  const bad = list.some((t) => /exit [1-9]/.test(t));
-  return `<button class="tools" data-tools aria-expanded="false"><span>${list.length} tool ${list.length === 1 ? "event" : "events"} · ${esc(kinds)}${bad ? ' · <span class="r">exit 1</span>' : ""}</span><span class="car">▾</span></button>
+  const bad = list.map((t) => (t.match(/exit [1-9]\d*/) || [])[0]).find(Boolean);
+  return `<button class="tools" data-fold aria-expanded="false"><span>${list.length} tool ${list.length === 1 ? "event" : "events"}${bad ? ` · <span class="r">${esc(bad)}</span>` : ""} · ${esc(kinds)}</span><span class="car">▾</span></button>
     <div class="tlist" hidden>${list.map((t) => `<span${/exit [1-9]/.test(t) ? ' class="r"' : ""}>${esc(t)}</span>`).join("")}</div>`;
+}
+function promptRow(text, s) {  // the first turn is the prompt the service built (goal plus the handoff received): folded, and not labelled You
+  const w = text.split(/\s+/).length;
+  return `<div class="turn you prompt"><button class="fh" data-fold aria-expanded="false"><span class="lbl">Prompt</span><span class="fi">goal${s.in ? ` and the handoff of ${esc(prevOf(s))}` : " and the context pack"} · ${w} w</span><span class="car">▾</span></button><p hidden>${esc(text)}</p></div>`;
 }
 function chatHtml(c, s) {
   if (!c) return `<p class="note m">${s.state === "planned" ? "Not started: the chat shows here as the step runs." : "The chat of this step; the mock has it on 03 code and 5c verify."}</p>`;
@@ -771,6 +843,7 @@ function chatHtml(c, s) {
   c.turns.forEach(([role, text], k) => {
     if (role === "note") { notes.push(text); return; }
     flush();
+    if (role === "you" && k === 0) { out.push(promptRow(text, s)); return; }
     const last = k === c.turns.length - 1;
     const lbl = `<span class="lbl">${role === "you" ? "You" : who}${c.live && last ? ' · writing<span class="cells"><i class="f live"></i></span>' : ""}</span>`;
     if (text.startsWith("HANDOFF")) {  // the block folds to a chip and its Next line: the Handoff tab has the six headings
@@ -781,27 +854,24 @@ function chatHtml(c, s) {
     out.push(`<div class="turn ${role}">${lbl}<p>${esc(text)}</p></div>`);
   });
   flush();
-  return `<div class="chat"><p class="src">${esc(c.src)}</p>${out.join("")}</div>`;
+  return `<div class="chat">${out.join("")}<p class="src">${esc(c.src)}</p></div>`;
 }
 function inspStep(t, s) {
   const [word, tn] = WORD[s.state] || WORD.running;
-  const notes = s.notes.map((n) => `<span${/balance|every .* over pace/.test(n) ? ' class="y"' : ""}>${esc(n)}</span>`).join("");
-  const read = s.brief ? headingBlock(s.brief, "", true) : s.in === 0 ? `<p class="note m">Step 1 receives no handoff: the task goal and Prep's context pack (${esc(s.pack || "")}, path:lines citations stamped with the commit).</p>` : `<p class="note m">The handoff of step ${prevOf(s)} after the brief pass (${s.in} words, six headings). The mock shows its full text on step 03.</p>`;
-  const wrote = s.note ? headingBlock(s.note, "", true, s.cuts || {}) : s.state === "running" ? `<p class="note m">Writing. The handoff shows here when the run ends, checked by code before the brief pass compacts it for the next step.</p>` : s.state === "planned" ? `<p class="note m">Not started.</p>` : `<p class="note m">${s.out ? s.out + " words, six headings; opened on step 03 in this mock." : "No handoff: the step ended without a HANDOFF block."}</p>`;
-  const facts = s.facts ? `<div class="hsec facts"><span class="lbl">Facts the service added<span class="m">zero tokens, never compacted</span></span>
-    <p class="mono">git diff --stat c41e2a7..9b02f11<br>${s.facts.diff.map(esc).join("<br>")}</p><p class="mono">${esc(s.facts.test).replace(/\n/g, "<br>")}</p></div>` : "";
-  const tries = s.tries.length > 1 ? `<div class="hsec"><span class="lbl">Attempts</span><p class="m"><span class="link">try 1</span> no HANDOFF block · try 2 passed</p></div>` : "";
-  const c = CHAT["s" + s.n];
-  const tabs = [["chat", `Chat${c ? ` <span class="n">${c.turns.length}</span>` : ""}`], ["brief", `Received${s.in ? ` <span class="n">${s.in} w</span>` : ""}`], ["note", `Handoff${s.out ? ` <span class="n">${s.out} w</span>` : ""}`], ["route", "Route"]];
+  const notes = s.notes.map((n) => `<span${/every .* over pace/.test(n) ? ' class="y"' : ""}>${esc(n)}</span>`).join("");
+  const c = CHAT["s" + s.n], conn = t.conns[String(s.n)], sent = conn && conn.w ? conn.w : null;
+  const read = s.brief ? headingBlock(s.brief) : s.in === 0 ? `<p class="note m">No handoff: step 1 gets the task goal and Prep's context pack (${esc(s.pack || "")}).</p>` : `<p class="note m">The handoff of step ${prevOf(s)}, ${s.in} words, six headings (the mock has the text on step 03).</p>`;
+  const wrote = s.note ? headingBlock(s.note, s.cuts || {}) : s.state === "running" ? `<p class="note m">Writing. Shows here when the run ends.</p>` : s.state === "planned" ? `<p class="note m">Not started.</p>` : `<p class="note m">${s.out ? s.out + " words, six headings (the mock has the text on step 03)." : "No handoff: the step ended without a HANDOFF block."}</p>`;
+  const facts = s.facts ? fold("Facts", esc(s.facts.line), `<p class="mono">git diff --stat c41e2a7..9b02f11<br>${s.facts.diff.map(esc).join("<br>")}</p><p class="mono">${esc(s.facts.test).replace(/\n/g, "<br>")}</p>`, { cls: "facts", tone: /FAIL/.test(s.facts.line) ? "r" : "", open: /FAIL/.test(s.facts.line) }) : "";
+  const tries = s.tries.length > 1 ? `<div class="blk"><span class="lbl">Attempts</span><p class="note m"><span class="link">try 1</span> no HANDOFF block · try 2 passed</p></div>` : "";
+  const tabs = [["chat", "Chat"], ["brief", `Received${s.in ? ` <span class="n">${s.in} w</span>` : ""}`], ["note", `Handoff${s.out ? ` <span class="n">${s.out}${sent && sent !== s.out ? " → " + sent : ""} w</span>` : ""}`], ["route", "Route"]];
   const pane = itab === "chat" ? chatHtml(c, s)
-    : itab === "note" ? `<div class="blk"><div class="hd"><span class="lbl">Handoff it wrote for step ${esc(nextOf(s))}</span><span class="m">${s.out ? `raw ${s.out} w · sent as ${sentOf(t, s)} after the brief pass` : ""}</span></div>${wrote}${facts}</div>`
-    : itab === "brief" ? `<div class="blk"><div class="hd"><span class="lbl">Handoff it received from step ${esc(prevOf(s))}</span><span class="m">${s.in ? `${s.in} w · compacted by the brief pass · the only thing it got from the earlier steps` : ""}</span></div>${read}</div>`
+    : itab === "note" ? `<div class="blk"><div class="hd"><span class="lbl">For ${esc(nextOf(s))}</span><span class="m">${s.out ? `wrote ${s.out} w${sent ? ` · ${esc(nextOf(s))} received ${sent} w` : conn && conn.fallback ? " · sent as written" : ""}` : ""}</span></div>${wrote}${facts}</div>`
+    : itab === "brief" ? `<div class="blk"><div class="hd"><span class="lbl">${s.in ? "From " + esc(prevOf(s)) : "Received"}</span><span class="m">${s.in ? `${s.in} w · compacted` : ""}</span></div>${read}</div>`
     : `<div class="blk"><span class="lbl">Goal</span><p class="note" style="color:var(--ink)">${esc(s.goal)}</p></div>
-       <div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${notes || '<span>none yet</span>'}</div></div>${tries}`;
-  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(s.state)}${word}</span><h2>${esc(two(s.n))} ${esc(s.kind)}</h2></div>
-    <div class="meta"><span>${esc(s.model ? rungText(s) : "rung at start")}</span><span>cost <b>${s.cost == null ? "unknown" : (s.exact ? "" : "~") + money(s.cost)}</b></span><span>${esc(s.time || "")}</span>
-      <span>context <b class="${ctxTone(s.ctx)}">${s.ctx == null ? "unknown" : s.ctx + "K"}</b></span><span>in <b>${s.in ? s.in + " w" : "–"}</b> · out <b>${s.out ? s.out + " w" : "–"}</b></span></div>
-    <div class="lr">${s.state !== "planned" ? '<button class="btn sm" title="The session page, with its levers">Open chat</button>' : ""}${s.state === "running" ? '<button class="btn sm stop">Stop</button>' : ""}${s.state === "failed" ? '<button class="btn sm">Open try 1</button>' : ""}</div></div>
+       <div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${notes || "<span>none yet</span>"}</div></div>${tries}`;
+  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(s.state)}${word}</span><h2>${esc(two(s.n))} ${esc(s.kind)}</h2><span class="lr">${s.state !== "planned" ? '<button class="btn sm" title="The session page, with its levers">Open chat</button>' : ""}${s.state === "running" ? '<button class="btn sm stop">Stop</button>' : ""}${s.state === "failed" ? '<button class="btn sm">Open try 1</button>' : ""}</span></div>
+    <div class="meta"><span>${esc(s.model ? rungText(s) : "rung at start")}</span><span>cost <b>${s.cost == null ? "unknown" : (s.exact ? "" : "~") + money(s.cost)}</b></span><span>${esc(s.time || "")}</span></div></div>
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-itab="${k}" aria-selected="${itab === k}">${l}</button>`).join("")}</div>
     <div class="ipane">${pane}</div>`;
 }
@@ -809,46 +879,49 @@ function inspConn(t, key) {
   const c = t.conns[key], b = BRIEF3;
   if (!c || !c.w || key !== "3") return `<div class="ihead"><h2>Handoff after step ${esc(key)}</h2></div><p class="note m">${c && c.fallback ? esc(c.why) : c && c.writing ? "Haiku is compacting the handoff for the next step." : c && c.pending ? "Not written yet." : "The mock opens the handoff after step 03."}</p>`;
   return `<div class="ihead"><div class="ln1"><h2>Handoff from 03 code to 04 test</h2></div>
-    <div class="meta"><span>03 wrote <b>${b.raw} w</b></span><span>04 received <b>${b.words} w</b></span><span>cut <b>${b.cut} w</b>, 2 Findings lines</span><span>brief pass: haiku · $0.004 · 2 turns</span></div></div>
-    <div class="blk"><div class="hd"><span class="lbl">What 04 received</span><span class="m">the cut lines stay in place, struck</span></div>
-      ${headingBlock(NOTE3, "", true, { findings: [2, 3] })}</div>
-    <div class="blk"><div class="hd"><span class="lbl">Checks</span><span class="m">code, no model</span></div><div class="checks">
+    <div class="meta"><span>03 wrote <b>${b.raw} w</b></span><span>04 received <b>${b.words} w</b></span><span>cut <b>${b.cut} w</b>, 2 Findings lines</span></div></div>
+    <div class="blk"><span class="lbl">What 04 received</span>${headingBlock(NOTE3, { findings: [2, 3] }, ["findings", "questions", "next"], true)}</div>
+    ${fold("Checks", "5 of 5 pass · compacted by haiku · $0.004 · 2 turns", `<div class="checks">
       <span><span class="g">✓</span> shorter than what it compacts: 290 &lt; 412 + 310</span>
       <span><span class="g">✓</span> Goal and Troubleshooting carried whole</span>
       <span><span class="g">✓</span> open questions kept, 1 of 1</span>
       <span><span class="g">✓</span> continuity: names console/harness/codex.py from 02's Files touched</span>
-      <span><span class="g">✓</span> no path the steps never touched</span></div></div>`;
+      <span><span class="g">✓</span> no path the steps never touched</span></div>`)}`;
 }
 function inspTask(t) {
   const [word, tn] = WORD[t.state] || WORD.running;
-  const oq = t.questions.map((q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.by)}${q.closed ? " · closed " + two(q.closed) : " · open"}</span></div>`).join("");
-  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(t.state)}${word}</span><h2>${esc(t.title)}</h2></div>
-    <div class="meta"><span>${esc(t.project)}</span><span>effort <b>${t.effort}</b></span><span>cost <b>${money(t.cost)}</b></span><span>${t.steps.length} steps</span><span class="mut">~\\.claude\\console\\tasks\\${t.id}7f3e</span></div>
-    <div class="lr">${t.state === "running" ? '<button class="btn sm stop">Stop</button><button class="btn sm">Pause</button>' : t.state === "done" ? '<button class="btn sm">Clear</button>' : ""}</div></div>
-    <div class="blk"><span class="lbl">prompt.md</span><pre class="text">${esc(t.prompt)}</pre></div>
-    <div class="blk"><div class="hd"><span class="lbl">Open questions · ${t.questions.filter((q) => !q.closed).length} open</span><span class="m">from the briefs, the step that opened and the one that closed each</span></div><div class="oq">${oq || '<p class="note m">none</p>'}</div></div>
-    <div class="blk"><div class="hd"><span class="lbl">Chain log</span><span class="m">chain.jsonl, one line per move</span></div><div class="clog">${t.log.map(([ts, x]) => `<div><span>${ts}</span><span title="${esc(x)}">${esc(x)}</span></div>`).join("")}</div></div>`;
+  const cur = findStep(t, "s" + t.current), n = nSteps(t);
+  const nxt = cur ? findStep(t, "s" + Number(nextOf(cur))) : null;
+  const qrow = (q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.by)}${q.closed ? " · closed " + two(q.closed) : ""}</span></div>`;
+  const open = t.questions.filter((q) => !q.closed), closed = t.questions.filter((q) => q.closed);
+  const doneWhen = (t.prompt.match(/Done when: ([^\n]*)/) || [, ""])[1];
+  const last = t.log[t.log.length - 1];
+  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(t.state)}${word}</span><h2 title="~\\.claude\\console\\tasks\\${t.id}7f3e">${esc(t.title)}</h2><span class="lr">${t.state === "running" ? '<button class="btn sm stop">Stop</button><button class="btn sm">Pause</button>' : t.state === "done" ? '<button class="btn sm">Clear</button>' : ""}</span></div>
+    <div class="meta"><span>step <b>${esc(t.current)}</b> of ${n}</span><span>cost <b>${money(t.cost)}</b></span><span>effort ${esc(t.effort)}</span></div></div>
+    ${cur ? `<div class="now"><span class="cells"><i class="f live"></i></span><span>Now <b>${esc(two(cur.n))} ${esc(cur.kind)}</b> · ${esc(rungText(cur))} · ${esc(cur.time)}</span><span class="m">${nxt ? `next ${esc(two(nxt.n))} ${esc(nxt.kind)}` : "last step"}</span></div>` : ""}
+    ${fold("prompt.md", `Done when: ${esc(doneWhen)}`, `<pre class="text">${esc(t.prompt)}</pre>`)}
+    <div class="blk"><span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("") || '<p class="note m">none</p>'}</div>${closed.length ? fold("", `${closed.length} closed`, `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf" }) : ""}</div>
+    ${fold("Chain log", `${t.log.length} moves · last ${last[0].slice(0, 5)} ${esc(last[1].replace(/ \(.*$/, ""))}`, `<div class="clog">${t.log.map(([ts, x]) => `<div><span>${ts}</span><span title="${esc(x)}">${esc(x)}</span></div>`).join("")}</div>`)}`;
 }
 function inspReplan(t, s) {
-  const list = (arr, added) => `<ol>${arr.map((x, k) => `<li class="${added && added.includes(k) ? "add" : "old"}">${esc(x)}</li>`).join("")}</ol>`;
-  return `<div class="ihead"><div class="ln1"><span class="st y">${sprite("waiting")}Waiting</span><h2>02 replan</h2></div>
-    <div class="meta"><span>claude · haiku · low · no tools · 1 turn</span><span>cost <b>$0.005</b></span><span>6s</span></div></div>
+  const plan = `<ol class="plan">${s.after.map((x, k) => `<li class="${s.added.includes(k) ? "add" : "old"}">${esc(x)}</li>`).join("")}</ol>`;
+  return `<div class="ihead"><div class="ln1"><span class="st y">${sprite("waiting")}Waiting</span><h2>02 replan</h2></div></div>
     <div class="askbox"><span class="st y">${sprite("waiting")}Replanned <span class="lc">· after step 01</span></span>
       <div class="q">The scout found that usage.py has no week bucket. Two steps added, the verify re-placed after the last edit. Run the new plan?</div>
-      <div class="plan2"><div><span class="lbl">Before · 4 steps</span>${list(s.before)}</div><div><span class="lbl">After · 6 steps</span>${list(s.after, s.added)}</div></div>
-      <div class="lr"><button class="btn you">Confirm plan</button><button class="btn" title="Runs the plan Prep made; the replan note stays in the chain log">Keep old plan</button><button class="btn stop">Stop</button></div>
-      <div class="say">replan_auto is off: a changed plan waits for you. Turn it on in config.json to run it at once.</div></div>
-    <div class="blk"><span class="lbl">Why it ran</span><p class="note">The note of step 01 ended with <span class="m">Next: Replan: usage.py has no week bucket yet</span>, so the service inserted this step (plan 24). Code checked the answer: known kinds, at most 6 steps, at most 2 added, verify after the last edit.</p></div>
-    <div class="blk"><span class="lbl">Route</span><div class="rn">${s.notes.map((n) => `<span>${esc(n)}</span>`).join("")}</div></div>`;
+      <div class="plan1"><span class="lbl">New plan · ${s.after.length} steps <span class="m">(was ${s.before.length})</span></span>${plan}</div>
+      <div class="lr"><button class="btn you" title="replan_auto is off: a changed plan waits for you. Turn it on in config.json to run it at once">Confirm plan</button><button class="btn" title="Runs the plan Prep made; the replan note stays in the chain log">Keep old plan</button><button class="btn stop">Stop</button></div></div>
+    ${fold("Why it ran", "01's Next asked for a replan", `<p class="note">The handoff of step 01 ended with <span class="m">Next: Replan: usage.py has no week bucket yet</span>, so the service inserted this step (plan 24). Code checked the answer: known kinds, at most 6 steps, at most 2 added, verify after the last edit.</p>`)}
+    ${fold("Route", "haiku · no tools · 1 turn · $0.005 · 6s", `<div class="rn">${s.notes.map((n) => `<span>${esc(n)}</span>`).join("")}</div>`)}`;
 }
 function inspMeasure() {
   const rows = [["scout", 0, 34, 190], ["design", 170, 96, 420], ["code", 300, 88, 380], ["test", 280, 41, 160], ["verify", 250, 58, 180], ["fix", 240, 112, 250], ["document", 210, 22, 140]];
-  const bar = (v, max, tone = "f") => `<span class="cells">${cellsHtml(Array.from({ length: 20 }, (_, k) => (k < Math.round(20 * v / max) ? tone : "")))}</span>`;
-  return `<div class="ihead"><h2>Measure · CLAUDE-CONSOLE · last 12 tasks</h2><div class="meta"><span>median per kind</span><span>received, context reached, handoff written</span></div></div>
-    <div class="measure"><span class="hd2">kind</span><span class="hd2">received · 25 w</span><span class="hd2">context · 10K</span><span class="hd2">handoff · 25 w</span>
-      ${rows.map(([k, i, c, o]) => `<span class="k">${k}</span>${bar(i, 500)}${bar(c, 200, c >= 150 ? "y" : "f")}${bar(o, 500)}`).join("")}</div>
-    <div class="legend"><span><i class="f"></i>median</span><span><i class="y"></i>context past 150K</span></div>
-    <p class="note m">A kind that receives a small handoff and reaches a large context reads too much on its own: fix at 112K from 240 words in is the one to tune (scout first, or a turn cap). This table is brainstorm 5.1 item 6: after ten tasks it decides the next tuning, not a guess.</p>`;
+  const bar = (v, max, unit, tone = "f") => `<span class="bar"><span class="cells">${cellsHtml(Array.from({ length: 20 }, (_, k) => (k < Math.round(20 * v / max) ? tone : "")))}</span><b class="${tone === "y" ? "y" : ""}">${v}${unit}</b></span>`;
+  const hot = rows.some(([, , c]) => c >= 150);
+  return `<div class="ihead"><h2>Measure · CLAUDE-CONSOLE · last 12 tasks</h2><div class="meta"><span>median per kind</span></div></div>
+    <div class="measure"><span class="hd2">kind</span><span class="hd2">received</span><span class="hd2">context</span><span class="hd2">handoff</span>
+      ${rows.map(([k, i, c, o]) => `<span class="k${k === "fix" ? " hot" : ""}">${k}</span>${bar(i, 500, " w")}${bar(c, 200, "K", c >= 150 ? "y" : "f")}${bar(o, 500, " w")}`).join("")}</div>
+    <div class="legend"><span><i class="f"></i>median</span>${hot ? '<span><i class="y"></i>context past 150K</span>' : ""}<span>cell 25 w · 10K</span></div>
+    <p class="note m">A kind that receives a small handoff and reaches a large context reads too much on its own: fix at 112K from 240 words in is the one to tune (scout first, or a turn cap).</p>`;
 }
 function boardHtml(v) {
   const picked = { step: "s3", live: "s5c", conn: "c3", task: "ta", replan: "s2", measure: "", bempty: "" }[v];
@@ -857,13 +930,13 @@ function boardHtml(v) {
   const chain = v === "bempty" ? `<div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div><p>No task in CLAUDE-CONSOLE. Type a task in the list; its steps show here as they run.</p></div>`
     : tasks.map((t) => chainHtml(t, picked, t.id !== openId)).join("");
   const t = T.find((x) => x.id === openId), s = picked && picked[0] === "s" ? findStep(t, picked) : null;
-  const insp = v === "bempty" ? `<p class="note m">Nothing to inspect.</p>` : v === "measure" ? inspMeasure() : v === "replan" ? inspReplan(t, s) : s ? inspStep(t, s) : picked && picked[0] === "c" ? inspConn(t, picked.slice(1)) : inspTask(t);
+  const insp = v === "bempty" ? "" : v === "measure" ? inspMeasure() : v === "replan" ? inspReplan(t, s) : s ? inspStep(t, s) : picked && picked[0] === "c" ? inspConn(t, picked.slice(1)) : inspTask(t);
+  const keys = v === "bempty" ? "" : `<span><span class="kbd">↑</span><span class="kbd">↓</span> step</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> chat</span><span><span class="kbd">Esc</span> back</span>`;
   return `<div class="win wide" data-view="board">
     <div class="top"><button class="rb" title="Back (Esc)" aria-label="Back">&#8592;</button><span class="crumb m">Board / CLAUDE-CONSOLE · ${v === "bempty" ? "0" : "3"} tasks</span><span class="sp"></span>
       <button class="rb" title="Pin on top">&#9650;</button><button class="rb" title="Fold">&#8211;</button><button class="rb x" title="Close">&#10005;</button></div>
     <div class="board"><div class="bchain">${chain}</div><div class="binsp">${insp}</div></div>
-    <div class="bfoot"><span><span class="kbd">↑</span><span class="kbd">↓</span> step or handoff</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> open the chat</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
-      <span>1 ctx cell = 10K · 1 word cell = 50 w</span></div><span class="rsz"></span></div>`;
+    <div class="bfoot">${keys}<span class="sp"></span><button class="q" title="A step's context in cells of 10K; a handoff in cells of 50 words; the chip between two steps is the handoff the next one received" aria-label="Legend">?</button></div><span class="rsz"></span></div>`;
 }
 
 // ---- compact views ------------------------------------------------------------------------------------------------
@@ -878,40 +951,42 @@ const FILLS = [
   { nm: "glm-5-flash", na: true, via: "opencode" },
 ];
 const fillCells = (v, pace, n = 20) => Array.from({ length: n }, (_, k) => [k < Math.round(n * v / 100) ? "f" : "", k === Math.round(n * pace / 100) - 1 ? "mk" : ""].filter(Boolean).join(" "));
+const NOTE5B = {  // the handoff of the fix step, as the Task page shows it
+  goal: "Harness adapters: Codex exec and the Steps tab. This step: fix what verify 05 found.", findings: ["resume: options before the subcommand (console/harness/codex.py:41); test_resume_command passes"],
+  files: ["console/harness/codex.py (resume_command)"], trouble: ["A prompt in argv through codex.cmd is cut at the first newline: stdin only."], questions: ["Does -c model_reasoning_effort reach the model? (step 03)"], next: "5c verify: check the fix against the FAIL detail.",
+};
 function listHtml() {
-  const miniFill = (f) => `<div class="fill"><span class="nm${f.over ? " y" : ""}">${esc(f.nm)}</span>${f.na ? '<span class="rw"><span></span><span class="m mut">no allowance</span><span></span></span>'
-    : ["day", "week", "month"].map((w) => `<span class="rw"><span>${w[0]}</span><span class="cells">${cellsHtml(fillCells(f[w][0], f[w][1], 10))}</span><b class="${f[w][0] > f[w][1] ? "y" : ""}">${f[w][0]} %</b></span>`).join("")}</div>`;
+  const over = FILLS.filter((f) => f.over);
   return `<div class="win" data-view="list">
     ${topBar('<span class="grip">⋮⋮</span><button class="scope" aria-expanded="false"><span class="nm">CLAUDE-CONSOLE</span><span class="car">▾</span></button><button class="needs">2 need you</button><button class="wide-btn" title="Open the Board: the window widens to 900 px">⇔ Board</button>', "")}
     <div class="scroll">
-      <button class="today" aria-expanded="true"><span class="big">7.41</span><span class="cells row30">${cellsHtml(Array.from({ length: 30 }, (_, k) => [k < 15 ? "h" : "", k === 23 ? "mk" : ""].filter(Boolean).join(" ")))}</span>
+      <button class="today" aria-expanded="false"><span class="big">7.41</span><span class="cells row30">${cellsHtml(Array.from({ length: 30 }, (_, k) => [k < 15 ? "h" : "", k === 23 ? "mk" : ""].filter(Boolean).join(" ")))}</span>
         <span class="sub m"><span>today, USD · $0.09 / min</span><span>limit $15</span></span></button>
-      <div class="todaymore">
+      <button class="overpace" data-fold aria-expanded="false" title="The today breakdown: where the spend went and which models are over their pace"><span><b class="y">${over.length} models over pace</b> · fills</span><span class="car">▾</span></button>
+      <div class="todaymore" hidden>
         <div class="legend"><span><i class="h"></i>estimated $7.41 (list prices)</span><span><i class="mk"></i>80 % of limit</span><span>1 cell = $0.50</span></div>
-        <div class="legend"><span>opus 48 %</span><span>sonnet 27 %</span><span>codex · gpt-5.6-codex 14 %</span><span>haiku 9 %</span><span>opencode · deepseek-v4-flash cost unknown · 2 runs</span><span>window runs 9</span></div>
-        <div class="lbl">Fills · share of pace · <span style="text-transform:none">1 cell = 10 %, outline = pace</span></div>
-        <div class="fills">${FILLS.slice(0, 5).map(miniFill).join("")}</div>
-        <div class="lr"><button class="btn sm">Usage by day, week, month ›</button></div></div>
+        <div class="legend"><span>opus 48 · sonnet 27 · codex 14 · haiku 9 %</span></div>
+        <div class="legend"><span>opencode · deepseek-v4-flash: cost unknown, 2 runs</span><span>window runs 9</span></div>
+        <div class="fline"><span class="m">fills · ${over.map((f) => `<b class="y">${esc(f.nm)} ${f.day[0]}</b>`).join(" · ")} % of pace today</span><button class="btn sm">Usage ›</button></div></div>
       <div class="sec"><span class="lbl y">Needs you · 2</span></div>
       <div class="card task y" tabindex="0" role="button">
         <div class="l1"><span class="st y">${sprite("waiting")}Waiting</span><span class="t">Usage fills per model (plan 18)</span><span class="age m">1m</span></div>
-        <div class="l2 m"><span class="who">CLAUDE-CONSOLE · step 2 / 6 · replan<span class="route"> · haiku · low</span></span><span class="cost">0.11</span><span class="ctx"><span class="cells" style="--n:6">${cellsHtml(["g", "y", "", "", "", ""])}</span></span></div>
-        <div class="why m y">replanned: 2 steps added, confirm on the Task page or the Board</div>
+        <div class="l2 m"><span class="who">step 2 of 6 · replan</span><span class="cost">0.11</span><span class="ctx"><span class="cells" style="--n:6">${cellsHtml(["g", "y", "", "", "", ""])}</span></span></div>
+        <div class="why m y">replanned after 01: 2 steps added</div>
         <div class="lr"><button class="btn you sm">Confirm plan</button><button class="btn sm">Keep old plan</button></div></div>
       <div class="card y" tabindex="0" role="button">
         <div class="l1"><span class="st y">${sprite("handed")}Handed off</span><span class="t">Tray icon: pywebview menu on Windows 11</span><span class="age m">4m</span></div>
-        <div class="l2 m"><span class="who">CLAUDE-CONSOLE · window<span class="route"> · sonnet · medium</span></span><span class="cost">3.80</span><span class="ctx"><span class="cells">${cellsHtml(Array.from({ length: 30 }, (_, k) => (k < 15 ? "f" : k < 30 ? (k < 16 ? "r" : "r") : "")))}</span><b class="r">312K</b></span></div>
-        <div class="why m y">↻ handed off by itself at 312K (auto hand off): the handoff is ready, one task = one chat</div>
-        <span class="hn ready">✓ handoff ready · Start next chat seeds the task box</span>
-        <div class="lr"><button class="btn you sm">Start next chat</button><span class="link m">handoff note</span></div></div>
+        <div class="l2 m"><span class="who">window<span class="route"> · sonnet · medium</span></span><span class="cost">3.80</span><span class="ctx"><span class="cells">${cellsHtml(Array.from({ length: 30 }, (_, k) => (k < 15 ? "f" : "r")))}</span><b class="r">312K</b></span></div>
+        <div class="why m y">↻ handed off by itself at 312K</div>
+        <div class="lr"><span class="hn ready">✓ handoff ready</span><button class="btn you sm" title="Starts the next chat with the handoff in the task box: one task = one chat (auto hand off, D-5)">Start next chat</button><span class="link m">handoff</span></div></div>
       <div class="sec"><span class="lbl">Working · 1</span></div>
       <div class="card task" tabindex="0" role="button">
         <div class="l1"><span class="st n">${sprite("running")}Task</span><span class="t">Harness adapters: Codex exec and the Steps tab</span><span class="age m">3m</span></div>
-        <div class="l2 m"><span class="who">CLAUDE-CONSOLE · step 5c / 6 · verify<span class="route"> · opus · medium</span></span><span class="cost">4.62</span><span class="ctx"><span class="cells" style="--n:8">${cellsHtml(["g", "g", "g", "g", "r", "g", "f live", ""])}</span></span></div>
+        <div class="l2 m"><span class="who">step 5c of 8</span><span class="cost">4.62</span><span class="ctx"><span class="cells" style="--n:8">${cellsHtml(["g", "g", "g", "g", "r", "g", "f live", ""])}</span></span></div>
         <div class="doing m"><span class="cells"><i class="f live"></i></span><span>5c verify</span><span>opus · medium · reads the fix diff</span></div></div>
       <div class="sec"><span class="lbl">Done today · 2</span></div>
       <div class="card quiet" tabindex="0" role="button"><div class="l1"><span class="st g">✓ Done</span><span class="t">Six-heading HANDOFF in the skill</span><span class="age m">1.08</span></div></div>
-      <div class="card quiet" tabindex="0" role="button"><div class="l1"><span class="st g">✓ Done</span><span class="t">Fake codex replays a fixture</span><span class="tag">step 4/4</span><span class="age m">0.22</span></div></div>
+      <div class="card quiet" tabindex="0" role="button"><div class="l1"><span class="st g">✓ Done</span><span class="t">Fake codex replays a fixture</span><span class="age m">0.22</span></div></div>
     </div>
     <div class="compose"><textarea rows="1" aria-label="New task" placeholder="New task in CLAUDE-CONSOLE"></textarea>
       <div class="effort"><button aria-checked="true">Auto</button>${["low", "medium", "high", "xhigh", "max"].map((e, k) => `<button aria-checked="false" title="${e}"><span class="cells"><i></i></span></button>`).join("")}<span class="eh">effort: auto (the rules pick per step)</span></div>
@@ -919,49 +994,37 @@ function listHtml() {
 }
 function taskPageHtml() {
   const t = T[0];
-  const flat = []; for (const s of t.steps) { flat.push(s); if (s.fix) flat.push(...s.fix); }
   const row = (s) => {
     const tn = s.state === "failed" ? "r" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
     const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
-    const gg = s.state === "planned" ? "" : `<span class="gg"><span>in <span class="cells" style="--n:10">${cellsHtml(s.in ? wCells(s.in) : Array(10).fill(""))}</span><b>${s.in ? s.in + "w" : s.pack ? "pack" : "–"}</b></span>
-      <span>ctx ${s.ctx == null ? `<b class="mut">unknown</b>` : `<span class="cells c30">${cellsHtml(ctxCells(s.ctx, s.state === "running").slice(0, 15).map((c, k) => (s.ctx / 10 > 15 + k ? "y" : c)))}</span><b class="${ctxTone(s.ctx)}">${s.ctx}K</b>`}</span>
-      <span class="io2">out <span class="cells" style="--n:10">${cellsHtml(s.out ? wCells(s.out) : Array(10).fill(""))}</span><b>${s.out ? s.out + "w" : "–"}</b></span>${s.hint ? `<span class="hint">· scout first</span>` : ""}</span>`;
-    const sub = [s.verdict ? `<span class="r">FAIL ${esc(s.detail)}</span>` : "", s.tries.length > 1 ? `<span class="link">try 1</span> no HANDOFF block` : "", esc(s.goal)].filter(Boolean).join(" · ");
-    return `<div class="row${t.current === s.n ? " cur" : ""}"><span class="cells">${cells}</span>
-      <span class="nm m">${esc(two(s.n))} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(rungText(s))}</span>` : ""}</span>
-      <span class="m c">${s.cost == null ? (s.state === "planned" ? "" : "?") : money(s.cost)}</span>${s.state === "planned" ? "<span></span>" : '<button class="btn sm">Open</button>'}
+    const cur = s.state === "running", planned = s.state === "planned";
+    const showG = cur || s.state === "failed" || (s.ctx != null && s.ctx >= 150);  // the gauges stay in sight where they decide something; a click opens them on the other rows
+    const gg = showG ? `<span class="gg"><span title="received: the handoff of the step before, 1 cell = 50 words">in <span class="cells" style="--n:10">${cellsHtml(s.in ? wCells(s.in) : Array(10).fill(""))}</span><b>${s.in ? s.in + "w" : s.pack ? "pack" : "–"}</b></span>
+      <span title="context reached, 1 cell = 10K">ctx ${s.ctx == null ? `<b class="mut">unknown</b>` : `<span class="cells c30">${cellsHtml(ctxCells(s.ctx, cur).filter((_, k) => k % 2 === 0))}</span><b class="${ctxTone(s.ctx)}">${s.ctx}K</b>`}</span>
+      <span class="io2" title="handoff written, 1 cell = 50 words">out <span class="cells" style="--n:10">${cellsHtml(s.out ? wCells(s.out) : Array(10).fill(""))}</span><b>${s.out ? s.out + "w" : "–"}</b></span>${s.hint ? `<span title="${esc(s.hint)}">· △ scout first</span>` : ""}</span>` : "";
+    const sub = s.verdict ? `<span class="r">FAIL ${esc(s.detail)}</span>` : esc(s.goal);
+    return `<div class="row${cur ? " cur" : ""}${showG || planned ? "" : " short"}" data-fold-row><span class="cells">${cells}</span>
+      <span class="nm m">${esc(two(s.n))} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(rungText(s))}</span>` : ""}${triesHtml(s)}</span>
+      <span class="m c">${s.cost == null ? (planned ? "" : "?") : money(s.cost)}</span>${planned ? "<span></span>" : '<button class="btn sm">Open</button>'}
       ${gg}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
   };
   return `<div class="win" data-view="tpage">
     ${topBar(back, "Task")}
     <div class="scroll stack">
-      <div class="head"><span class="st n">${sprite("running")}Task <span class="lc">· 3m</span></span><h2>${esc(t.title)}</h2>
-        <div class="where"><span class="m">CLAUDE-CONSOLE / effort: auto · $4.62</span><button class="btn sm" title="The chain as connected cells, with the handoffs between the steps: the window widens to 900 px (Esc returns)">⇔ Board</button></div>
-        <div class="m tpath">C:\\Users\\fred\\.claude\\console\\tasks\\a7f3e</div></div>
-      <div class="blk"><div class="hd"><span class="lbl">Steps · 8</span><span class="m">in · ctx · out, 1 cell = 50 w / 10K</span></div><div class="chain">${flat.map(row).join("")}</div></div>
-      <div class="blk"><div class="hd"><span class="lbl">Handoff for step 5c · after the brief pass</span><button class="btn sm">Show it as 5b wrote it</button></div>
-        <pre class="text">HANDOFF
-## Goal
-Harness adapters: Codex exec and the Steps tab. This step: fix what verify 05 found.
-## Findings
-- resume: options before the subcommand (console/harness/codex.py:41); test_resume_command passes
-## Files touched
-- console/harness/codex.py (resume_command)
-## Troubleshooting
-- A prompt in argv through codex.cmd is cut at the first newline: stdin only.
-## Open questions
-- Does -c model_reasoning_effort reach the model? (step 03)
-## Next
-05c verify: check the fix against the FAIL detail.
-END HANDOFF
----- facts (service) ----
-git diff --stat 9b02f11..e7a4c02: console/harness/codex.py | 4 +-
-py -m unittest tests.test_harness -q: OK (23 tests)</pre></div>
+      <div class="head"><span class="st n">${sprite("running")}Task <span class="lc">· 3m</span></span><h2 title="C:\\Users\\fred\\.claude\\console\\tasks\\a7f3e">${esc(t.title)}</h2>
+        <div class="where"><span class="m">CLAUDE-CONSOLE / effort: auto · $4.62</span><button class="btn sm" title="The chain as connected cells, with the handoffs between the steps: the window widens to 900 px (Esc returns)">⇔ Board</button></div></div>
+      <div class="blk"><div class="hd"><span class="lbl">Steps · ${nSteps(t)}</span><span class="m">step 5c of 8</span></div><div class="chain">${flatSteps(t).map(row).join("")}</div></div>
+      ${fold("Handoff for 5c", `230 w · Next: ${esc(NOTE5B.next.replace(/^5c verify: /, ""))}`, `<div class="blk"><div class="hd"><span class="m">compacted from 260 w</span><span class="link m">as 5b wrote it</span></div>${headingBlock(NOTE5B)}${fold("Facts", "1 file +4 · 23 tests OK", `<p class="mono">git diff --stat 9b02f11..e7a4c02<br>console/harness/codex.py | 4 +-<br>py -m unittest tests.test_harness -q<br>OK (23 tests)</p>`, { cls: "facts" })}</div>`)}
     </div>
     <div class="levers"><div class="lr"><button class="btn stop">Stop</button><button class="btn">Pause</button></div><div class="say">Retry, Clear off: task is running</div></div><span class="rsz"></span></div>`;
 }
 function settingsHtml() {
-  const hs = (gl, tn, nm, ver, stw, btn, note = "") => `<div class="hs"><span class="gl ${tn}">${gl}</span><span class="nm">${nm}<span class="m">${ver}</span></span><span class="stw${stw === "not found" ? " r" : ""}">${stw}</span>${btn}</div>${note ? `<div class="hsnote">${note}</div>` : ""}`;
+  const hs = (gl, tn, nm, ver, stw, btn, title = "", note = "") => `<div class="hs"${title ? ` title="${esc(title)}"` : ""}><span class="gl ${tn}">${gl}</span><span class="nm">${nm}<span class="m">${ver}</span></span><span class="stw${stw === "not found" ? " r" : ""}">${stw}</span>${btn}</div>${note ? `<div class="hsnote">${note}</div>` : ""}`;
+  const harness = hs("●", "g", "claude", "2.1.296", "always on", '<span style="min-width:68px"></span>', "Prep and the brief pass run on it; it cannot be turned off")
+    + hs("●", "g", "codex", "codex-cli 0.162.1", "on", '<button class="btn sm">Turn off</button>')
+    + hs("○", "", "opencode", "", "off", '<button class="btn sm">Turn on</button>')
+    + hs("△", "r", "cmd", "", "not found", '<button class="btn sm" disabled>...</button>', "", 'no cmdc.exe on PATH · set <span class="r">"exe"</span> in <span title="C:\\Users\\fred\\.claude\\console\\config.json, under harnesses.cmd (not the .cmd shim)">config.json</span>');
+  const windowRuns = hs("○", "", "auto hand off", "at 300K", "off", '<button class="btn sm">Turn on</button>', "", "hands off a window run that ends its turn in the red zone (300K) and seeds the next chat; a VS Code chat is forked first");
   return `<div class="win" data-view="settings">
     ${topBar('<span class="grip">⋮⋮</span><button class="scope" aria-expanded="true"><span class="nm">CLAUDE-CONSOLE</span><span class="car">▾</span></button><button class="needs">2 need you</button>', "")}
     <div class="scroll"><div class="sec"><span class="lbl y">Needs you · 2</span></div><div class="card task y" style="opacity:.4"><div class="l1"><span class="st y">Waiting</span><span class="t">Usage fills per model (plan 18)</span></div></div></div>
@@ -974,14 +1037,8 @@ function settingsHtml() {
         <button class="prow" role="option"><span class="ck"></span><span class="nm">content-manager</span><span class="meta">1 live</span><span class="c">0.51</span></button>
         <div class="grp lbl">Runs off · 1</div>
         <button class="prow off" role="option"><span class="ck"></span><span class="nm">fashion_packshots_ai</span><span class="meta">runs off</span><span class="c">-</span></button>
-        <div class="grp lbl">Harnesses · which CLIs may run a step</div>
-        ${hs("●", "g", "claude", "2.1.296", "always on", '<span style="min-width:68px"></span>', "Prep and the brief pass run on it; it cannot be turned off")}
-        ${hs("●", "g", "codex", "codex-cli 0.162.1", "on", '<button class="btn sm">Turn off</button>')}
-        ${hs("○", "", "opencode", "", "off", '<button class="btn sm">Turn on</button>')}
-        ${hs("△", "r", "cmd", "", "not found", '<button class="btn sm" disabled>...</button>', 'on, but no cmdc.exe on PATH: set <span class="r">"exe"</span> under harnesses.cmd in C:\\Users\\fred\\.claude\\console\\config.json (not the .cmd shim)')}
-        <div class="hsnote" style="padding-left:12px">opencode and cmd rungs run read steps only (cheap tier). Rungs of a harness that is off never route; a step picked on one falls back to Claude's rung of its tier.</div>
-        <div class="grp lbl">Window runs</div>
-        ${hs("○", "", "auto hand off", "at 300K", "off", '<button class="btn sm">Turn on</button>', 'when a window run ends its turn in the red zone, the service runs the hand off and seeds the next chat; a VS Code chat is forked first, never resumed in place')}
+        ${fold("Harnesses", 'claude, codex on · <span class="r">△ cmd not found</span>', harness, { open: true, cls: "grp-fold" })}
+        ${fold("Window runs", "auto hand off off", windowRuns, { cls: "grp-fold" })}
       </div>
       <div class="foot"><span>↑ ↓ move</span><span>Enter pick</span><span class="sort">sorted: needs you, live, recent</span></div></div>
     <div class="compose"><textarea rows="1" aria-label="New task"></textarea><div class="say"><span class="tgt">in CLAUDE-CONSOLE <span class="car">▾</span></span></div></div><span class="rsz"></span></div>`;
@@ -1002,90 +1059,94 @@ function prepHtml() {
     ${topBar(back, "Prep / CLAUDE-CONSOLE")}
     <div class="scroll stack">
       <div class="blk"><span class="lbl">You typed</span><div class="text">codex adapter for plan 5 task 2, tests first</div></div>
-      <div class="blk"><span class="lbl">Scouted · context pack 1.9 KB</span><div class="m mut">console/claude_cli.py:112-168 run_command · console/runs.py:204-251 _watch · plans/05-harnesses/02-codex.md:1-110</div></div>
+      ${fold("Scouted", "context pack 1.9 KB · 3 files", `<div class="m mut">console/claude_cli.py:112-168 run_command · console/runs.py:204-251 _watch · plans/05-harnesses/02-codex.md:1-110</div>`)}
       <div class="blk"><span class="lbl">Enhanced prompt (edit freely)</span><textarea class="in m" rows="5" spellcheck="false">Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events.
 Where: console/harness/codex.py (new), console/harness/__init__.py REGISTRY, tests/fake_codex.py.
 Keep: argument lists, never shell strings; the prompt on stdin, never argv.
 Done when: 9 tests pass against the fake; one live codex exec returns a HANDOFF block.</textarea></div>
       <div class="blk"><span class="lbl">Run route (one session)</span><div class="prep-row">${sel("codex:gpt-5.6-codex")}<select aria-label="Effort"><option>low</option><option selected>medium</option><option>high</option></select><span class="m mut">code</span></div>
-        <div class="mut">rule code: write · balance: sonnet 84 % of pace -> codex · gpt-5.6-codex 31 % · effort medium (rule)</div>
-        <div class="m mut">codex has no turn or spend cap: this run ends at step_timeout_s (1800 s) if it is still going.</div></div>
+        ${fold("why codex", "balance", `<div class="m mut">rule code: write · balance: sonnet 84 % of pace -> codex · gpt-5.6-codex 31 % · effort medium (rule)</div>`)}
+        <div class="m mut" title="codex has no turn or spend cap: this run ends at step_timeout_s (1800 s) if it is still going">△ no turn cap: stops at 1800 s</div></div>
       <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm">+ step</button></div>
         <div class="srow"><span class="n m">1</span>${ksel("scout")}${sel("", "scout")}<button class="rb" aria-label="Remove step">✕</button><input value="Read plan 5 Task 2 and claude_cli.py; cite the functions the adapter mirrors."></div>
         <div class="srow"><span class="n m">2</span>${ksel("design")}${sel("", "design")}<button class="rb" aria-label="Remove step">✕</button><input value="Decide the stream parsing and the resume command; write the test list."></div>
         <div class="srow"><span class="n m">3</span>${ksel("code")}${sel("codex:gpt-5.6-codex", "code")}<button class="rb" aria-label="Remove step">✕</button><input value="console/harness/codex.py with run_command, summary, chat, stop; tests first."></div>
         <div class="srow"><span class="n m">4</span>${ksel("test")}${sel("opencode:deepseek-v4-flash", "test")}<button class="rb" aria-label="Remove step">✕</button><input value="Run the suite on the real codex exe in a scratch folder."></div>
         <div class="srow"><span class="n m">5</span>${ksel("code")}${sel("", "code")}<button class="rb" aria-label="Remove step">✕</button><input value="Steps tab reads the Codex JSON events."><span class="say"><span class="r">opencode: read steps only (cheap tier)</span> · back to auto</span></div>
-        <div class="srow fixed"><span class="n m">6</span><span><b class="m">verify</b> <span class="mut">added by the Console after the last editing step · one tier above the step it checks, on any harness that is on</span></span></div>
-        <div class="m mut">Run as task: each step's rung comes from its kind's tier (auto) or the rung you pick on its row. Tiers: think / write / read. opencode and cmd rungs are offered on read kinds only.</div>
-        <div class="m mut">effort: auto (the rules pick per step)</div></div>
+        <div class="srow fixed" title="one tier above the step it checks, on any harness that is on"><span class="n m">6</span><span><b class="m">verify</b> <span class="mut">added after the last edit</span></span></div></div>
       <div class="m mut">Prep $0.031 · 4 turns · haiku</div>
     </div>
-    <div class="levers"><div class="m runs-in">Runs in <b>CLAUDE-CONSOLE</b></div><div class="lr"><button class="btn go">Run as task</button><button class="btn go">Run</button><button class="btn">Run raw</button><button class="btn">Edit</button><button class="btn">Cancel</button></div></div><span class="rsz"></span></div>`;
+    <div class="levers"><div class="m runs-in">Runs in <b>CLAUDE-CONSOLE</b></div><div class="lr"><button class="btn go" title="Each step's rung comes from its kind's tier (auto) or the rung you pick on its row. Tiers: think / write / read; opencode and cmd rungs on read kinds only">Run as task</button><button class="btn go">Run</button><button class="btn">Run raw</button><button class="btn">Edit</button><button class="btn">Cancel</button></div></div><span class="rsz"></span></div>`;
 }
 function sessionHtml() {
+  const s3 = T[0].steps[2];
   return `<div class="win" data-view="session">
     ${topBar(back, "step 3 of 8", '<button class="rb" title="Previous (Up)">‹</button><button class="rb" title="Next (Down)">›</button>')}
     <div class="scroll sess"><div class="body">
       <div class="head"><span class="st g">✓ Done <span class="lc">· 24m</span></span><h2>Harness adapters: Codex exec and the Steps tab</h2>
-        <div class="m"><span class="link">task · step 3/8</span></div>
-        <div class="where"><span class="m">CLAUDE-CONSOLE / window / code</span><span class="mdl" title="codex:gpt-5.6-codex">codex · gpt-5.6-codex · medium</span><button class="btn sm">New task here</button></div></div>
-      <p class="note m">context unknown: codex reports a turn's spend · thread 019a3f…: Continue resumes it with <span style="font-family:var(--mono)">codex exec resume</span> · no hooks: Steps come from the stream</p>
+        <div class="m"><span class="link">task · step 3 of 8</span></div>
+        <div class="where"><span class="m">code</span><span class="mdl" title="codex:gpt-5.6-codex">codex · gpt-5.6-codex · medium</span><button class="btn sm">New task here</button></div></div>
       <div class="bwrap"><button class="brief" aria-expanded="false">
         <span class="path"><span class="ok"><span class="cells">${cellsHtml(Array(6).fill("g"))}</span>✓ Prep</span><span class="ok"><span class="cells">${cellsHtml(Array(6).fill("g"))}</span>✓ Run</span><span><span class="cells">${cellsHtml(Array(6).fill(""))}</span>Verify</span><span><span class="cells">${cellsHtml(Array(6).fill(""))}</span>Hand off</span><span class="car">▾</span></span>
         <span class="stats"><span><small>spent</small><b class="usd">0.84</b></span><span><small>$ / min</small><b>0.14</b></span>
-          <span><small>context</small><span class="cx"><span class="unk">unknown</span></span></span>
-          <span><small>session</small><b>6m 13s</b></span><span><small>events</small><b>31</b></span></span></button></div>
+          <span><small>context</small><span class="cx"><span class="unk" title="codex reports a turn's spend, not a context size">unknown</span></span></span>
+          <span><small>session</small><b>6m 13s</b></span></span></button></div>
       <div class="proc"><div class="tabs"><button aria-selected="true">Chat</button><button aria-selected="false">Steps <span class="n">31</span></button></div>
-        <div class="pane"><div class="chat"><p class="src">codex exec --json · thread 019a3f… · 31 events · ended 14:19:48</p>
-          <div class="turn you"><span class="lbl">You</span><p>Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events. What the earlier steps left you (brief of 02, 310 words) …</p></div>
+        <div class="pane"><div class="chat">
+          ${promptRow("Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events. What the earlier steps left you (handoff of 02, 310 words): Goal … Findings … Files touched … Troubleshooting … Open questions … Next … End with the HANDOFF block.", s3)}
           <div class="turn claude"><span class="lbl">Codex</span><p>I mirrored claude_cli.run_command and runs._watch for the stream handling. A Codex turn ends with turn.completed, so is_result matches that event.</p></div>
-          <button class="tools" data-tools aria-expanded="false"><span>3 tool events · file_change, command_execution · <span class="r">exit 1</span></span><span class="car">▾</span></button>
-          <div class="tlist" hidden><span>file_change · tests/fake_codex.py (new)</span><span class="r">command_execution · py -m unittest tests.test_harness -q · exit 1 · 2 failures</span><span>file_change · console/harness/codex.py</span></div>
+          ${toolsRow(["file_change · tests/fake_codex.py (new)", "command_execution · py -m unittest tests.test_harness -q · exit 1 · 2 failures", "file_change · console/harness/codex.py"])}
           <div class="turn claude"><span class="lbl">Codex</span><p>Two failures in test_resume_command: the options go before the subcommand. Moved them; 23 tests pass.</p></div>
-          <div class="turn claude"><span class="lbl">Codex</span><span class="hchip">HANDOFF block · <b>412 w</b> · six headings</span><p>Next: 04 test: run tests/test_harness.py on the real codex exe … Next model: read</p></div></div></div></div></div>
-    <div class="levers"><div class="lr"><input aria-label="Follow-up" placeholder="Follow-up (codex exec resume, same thread)"><button class="btn">Attach</button><button class="btn go">Continue</button></div>
+          <div class="turn claude"><span class="lbl">Codex</span><span class="hchip">HANDOFF block · <b>412 w</b> · six headings</span><p>Next: 04 test: run tests/test_harness.py on the real codex exe … Next model: read</p></div>
+          <p class="src">ended 14:19:48 · codex exec --json · thread 019a3f… · 31 events</p></div></div></div></div>
+    <div class="levers"><div class="lr"><input aria-label="Follow-up" placeholder="Follow-up (codex exec resume, same thread)"><button class="btn">Attach</button><button class="btn go" title="Resumes the Codex thread 019a3f… with codex exec resume">Continue</button></div>
       <div class="lr"><button class="btn">Mark done</button><button class="btn">Brief a new task</button></div>
-      <div class="say">Verify, Hand off, Escalate, Terminal off: claude only · a task step: use the task's levers for Stop</div></div><span class="rsz"></span></div>`;
+      <div class="say">claude only: Verify, Hand off, Escalate</div></div><span class="rsz"></span></div>`;
 }
 function usageHtml() {
-  const fillRow = (f) => `<div class="mfill${f.na ? " na" : ""}"><span class="nm">${esc(f.nm)}<small>${f.via ? "via " + esc(f.via) : "claude"}${f.na ? " · no allowance" : ""}</small></span>
-    ${["day", "week", "month"].map((w) => f.na ? `<span class="rw"><span>${w}</span><span class="cells">${cellsHtml(Array(20).fill(""))}</span><b class="mut">–</b></span>`
-      : `<span class="rw"><span>${w}</span><span class="cells">${cellsHtml(fillCells(f[w][0], f[w][1]))}</span><b class="${f[w][0] > f[w][1] ? "y" : ""}">${f[w][0]} %</b></span>`).join("")}</div>`;
-  const rungs = [["opus", [0,0,0,0,0,0,0,0,1,1,2,1,1,3,4,4,3,2,1,1,0,0,0,0]], ["sonnet", [0,0,0,0,0,0,0,1,1,1,1,1,2,2,2,2,1,1,1,0,0,0,0,0]], ["codex · gpt-5.6-codex", [0,0,0,0,0,0,0,0,1,1,1,2,1,1,1,1,2,1,0,0,0,0,0,0]], ["haiku", [0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,1,0,0,0,0,0,0,0,0]], ["opencode · deepseek", "na"]];
-  const heat = rungs.map(([nm, v]) => `<span class="rn">${esc(nm)}</span>${v === "na" ? Array(24).fill('<span class="hc na" title="no verify on this rung yet"></span>').join("") : v.map((x, h) => `<span class="hc${x ? " l" + x : ""}" title="${two(h)}:00 ${esc(nm)}: ${x ? x + " of " + (x + 3) + " FAIL" : "no FAIL"}"></span>`).join("")}`).join("");
+  const share = (f, w) => f[w][0] / f[w][1];
+  const bind = (f) => ["day", "week", "month"].reduce((a, w) => (share(f, w) > share(f, a) ? w : a), "day");
+  const rw = (f, w) => `<span class="rw"><span>${w}</span><span class="cells">${cellsHtml(fillCells(f[w][0], f[w][1]))}</span><b class="${f[w][0] > f[w][1] ? "y" : ""}">${f[w][0]} %</b></span>`;
+  const fillRow = (f) => {
+    if (f.na) return `<div class="mfill na"><span class="nm">${esc(f.nm)}<small>via ${esc(f.via)}</small></span><span class="rw"><span></span><span class="cells">${cellsHtml(Array(20).fill(""))}</span><b class="mut">–</b></span><span class="rest m">no allowance</span></div>`;
+    const w = bind(f), rest = ["day", "week", "month"].filter((x) => x !== w).map((x) => `${x[0]} ${f[x][0]}`).join(" · ");  // the other two windows, as shares of pace
+    return `<div class="mfill" data-fold aria-expanded="false" role="button" tabindex="0" title="click for the three windows"><span class="nm">${esc(f.nm)}<small>${f.via ? "via " + esc(f.via) : "claude"}</small></span>${rw(f, w)}<span class="rest m" title="week and month, share of pace">${rest}</span></div>
+      <div class="mfill more" hidden><span></span>${["day", "week", "month"].filter((x) => x !== w).map((x) => rw(f, x)).join("")}</div>`;
+  };
+  const sorted = [...FILLS].sort((a, b) => (b.over ? 1 : 0) - (a.over ? 1 : 0));
+  const rungs = [["opus", "claude", [0,0,0,0,0,0,0,0,1,1,2,1,1,3,4,4,3,2,1,1,0,0,0,0]], ["sonnet", "claude", [0,0,0,0,0,0,0,1,1,1,1,1,2,2,2,2,1,1,1,0,0,0,0,0]], ["gpt-5.6-codex", "codex", [0,0,0,0,0,0,0,0,1,1,1,2,1,1,1,1,2,1,0,0,0,0,0,0]], ["haiku", "claude", [0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,1,0,0,0,0,0,0,0,0]], ["deepseek-v4-flash", "opencode", "na"]];
+  const heat = rungs.map(([nm, via, v]) => `<span class="rn" title="via ${esc(via)}">${esc(nm)}</span>${v === "na" ? Array(24).fill('<span class="hc na" title="no verify on this rung yet"></span>').join("") : v.map((x, h) => `<span class="hc${x ? " l" + x : ""}" title="${two(h)}:00 ${esc(nm)}: ${x ? x + " of " + (x + 3) + " FAIL" : "no FAIL"}"></span>`).join("")}`).join("");
   return `<div class="win" data-view="usage">
     ${topBar(back, "Usage")}
     <div class="scroll">
       <div class="uhead"><span class="big"><span class="est">~</span>142.60</span><span class="mon"><button class="rb">‹</button><b>October 2026</b><button class="rb" disabled>›</button></span><span class="sub m">est. USD · 31.4M tokens · 13 days used</span></div>
       <div class="ustats"><span><small>today</small><b>$7.41</b><i>1.9M tok</i></span><span><small>this week</small><b>$38.20</b><i>8.1M tok</i></span><span><small>avg / day</small><b>$10.97</b><i>days used</i></span><span><small>over $15</small><b>3 of 13</b><i>days used</i></span></div>
-      <div class="ublk"><div class="hd"><span class="lbl">Models · fills</span><span class="m">share of pace · 20 cells = allowance · outline = pace</span></div>
-        <div>${FILLS.map(fillRow).join("")}</div>
-        <div class="legend"><span><i class="f"></i>used</span><span><i class="mk"></i>linear pace (day 13 of 31 for the month)</span><span style="color:var(--you)">orange figure: over pace, the router leaves this model while another rung of its tier is under</span></div>
-        <p class="note m" style="margin:0">balance_margin 0.2 · warn_at 0.8 · the Opus fill counts both CLIs (one model, two harnesses). Allowances in config.json "allowance".</p></div>
-      <div class="ublk"><div class="hd"><span class="lbl">Verify FAIL rate by hour · last 30 days</span><span class="m">rows: the rung that wrote the checked step</span></div>
-        <div class="heat"><span></span>${Array.from({ length: 24 }, (_, h) => `<span class="hr">${h % 6 === 0 ? two(h) : ""}</span>`).join("")}${heat}</div>
-        <div class="legend"><span><i></i>no FAIL</span><span><i class="rr"></i>1 in 4</span><span><i class="r"></i>4 in 7</span><span>hover a cell for the count</span></div>
-        <p class="note m" style="margin:0">Evidence for peak_hours (off): opus fails more between 14:00 and 17:00 in this sample. The count is over the misses and verdicts the console already writes.</p></div>
-      <div class="ublk"><div class="hd"><span class="lbl">Days</span><span class="legend"><span><i class="l1"></i>&lt; $15</span><span><i class="l2"></i>&lt; 45</span><span><i class="l3"></i>&lt; 90</span><span><i class="l4"></i>90+</span></span></div><p class="note m" style="margin:0">the calendar, the picked day and the Days / Weeks / Months columns stay as locked (usage.html); the picked day's model line now lists harness rungs and "cost unknown · 2 runs"</p></div>
+      <div class="ublk"><div class="hd"><span class="lbl">Models · share of pace</span><span class="m">over pace first</span></div>
+        <div>${sorted.map(fillRow).join("")}</div>
+        <div class="legend"><span><i class="f"></i>used</span><span><i class="mk"></i>pace</span><span>20 cells = allowance</span><span><b class="y" style="font-weight:400">orange</b> over pace</span></div>
+        ${fold("config", "balance_margin 0.2 · warn_at 0.8", `<p class="note m" style="margin:0">The router leaves a model over its pace while another rung of its tier is under. The Opus fill counts both CLIs (one model, two harnesses). Allowances in config.json "allowance".</p>`)}</div>
+      <div class="ublk"><div class="hd"><span class="lbl">Days</span><span class="legend"><span><i class="l1"></i>&lt; $15</span><span><i class="l2"></i>&lt; 45</span><span><i class="l3"></i>&lt; 90</span><span><i class="l4"></i>90+</span></span></div><p class="note m" style="margin:0">the calendar, the picked day and the Days / Weeks / Months columns stay as locked (usage.html); the picked day's model line lists harness rungs and "cost unknown · 2 runs"</p></div>
+      <div class="ublk">${fold("Verify FAIL by hour", "opus peaks 14:00 to 17:00 · last 30 days", `<div class="heat"><span></span>${Array.from({ length: 24 }, (_, h) => `<span class="hr">${h % 6 === 0 ? two(h) : ""}</span>`).join("")}${heat}</div>
+        <div class="legend"><span><i></i>no FAIL</span><span><i class="rr"></i>1 in 4</span><span><i class="r"></i>4 in 7</span><span>rows: the rung that wrote the checked step · hover for the count</span></div>
+        <p class="note m" style="margin:0">Evidence for peak_hours (off): opus fails more between 14:00 and 17:00 in this sample. Counted over the misses and verdicts the console already writes.</p>`)}</div>
       <p class="ufoot">Estimated from the transcripts at the list prices in config.json; Codex usage x its price row; OpenCode and Command Code runs without usage count as unknown, never as zero.</p>
     </div><span class="rsz"></span></div>`;
 }
 
 const CAP = {
-  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: head, then each step as a block with its state, kind, rung, cost, context cells, brief-in and note-out cells and attempts; the handoffs are the connectors; the fix insert is the bracket under the failed verify. Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost is exact from the usage Codex reports. Right, the inspector opens on the step's <b>Chat</b>: the agent's turns on the left (blue edge), Fred's on the right (violet edge), the tool events folded into one row each (click to open), the HANDOFF block as a chip with its Next line. Received (the handoff it got from 02, after the brief pass), Handoff (the one it wrote for 04, six headings with Goal and Troubleshooting edged green, then the facts the service added) and Route (the goal, the route notes as chips, the attempts) are the tabs behind it. Tasks B and C are folded rows above and below.",
-  live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the writing mark with the one blinking cell in the agent's label. Handoff says it is being written; Stop sits in the head. Up / Down along the chain switches the inspector and keeps the tab.",
-  conn: "<b>Board, the handoff after step 03 picked.</b> One column: what 04 received, six headings, with the two Findings lines Haiku cut left in place, struck and tagged, so the eye reads what went through and skips what did not. The head counts written, received and cut words and the brief pass's cost. Under the column, the code checks: length, Goal and Troubleshooting whole, questions kept, continuity with the previous Files touched, no invented path. The cut shows as a tone step on the chip's cells and the words \"cut 122 w\", not as orange (ID-1).",
-  task: "<b>Board, the task head picked.</b> The inspector shows prompt.md, the running list of open questions (which step opened each, which closed it; the open ones carry the orange ?) and the chain log, one line per move with the route notes. Stop and Pause sit in the head.",
-  replan: "<b>Board, a replan waiting.</b> Task B is the picked one now: its scout asked for a replan, the Haiku pass added two steps, and the task waits (orange, as every wait for Fred). The inspector carries the plan before and after, the added steps marked, and Confirm plan / Keep old plan / Stop. The same box appears on the compact Task page and the list card carries the same two buttons.",
-  measure: "<b>Board, nothing picked.</b> The measure table of the project: per step kind, median handoff received, context reached and handoff written over the last tasks. The kind that reads little and grows large is the one to tune (brainstorm 5.1 item 6).",
-  bempty: "<b>Board, no task in the scope.</b> The empty cells and one line; the inspector is empty too. Esc or Back returns to the list at the compact size.",
-  list: "<b>Compact list.</b> The today breakdown is open and carries the fills per model in miniature (day / week / month, 10 cells, the orange outline is the pace; an over-pace figure is orange). Needs you: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working task card shows the current step's rung; a Codex step would read codex · gpt-5.6-codex there. The ⇔ Board button in the header opens the Board on this project.",
-  tpage: "<b>Compact Task page.</b> Each step row gains one line under its name: in (the handoff received), context reached (15 cells, the hand-off zone past 150K in orange) and out (the handoff written) as cells with their figures; \"scout first\" on a step that read little and reached much; \"unknown\" where the harness reports no context. The Board button sits in the head. The brief block ends with the facts the service appended (diff stat, test lines).",
-  settings: "<b>Settings popover.</b> Under the project groups, Harnesses: one row per CLI with glyph and state word, the probed version, and Turn on / Turn off, pending until the service answers; claude is always on; cmd is on but not found and says where to set its exe. Then Window runs with the auto hand off switch (ID-2).",
-  prep: "<b>Prep page.</b> Every model select lists tiers as groups (think / write / read) with rungs on any harness that is on; opencode and cmd rungs only under read, and only on rows whose kind is a read kind. Row 5 shows a refused pick: the note in red and the select back to auto. The route line says what balancing did and that Codex has no cap but the step timeout.",
-  session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the note line names the Codex thread and that Steps come from the stream; the brief says context unknown in words with no cells; tabs Chat and Steps only, the Chat with the same bubbles and folded tool rows as the Board; Continue resumes the thread, the other levers are off with \"claude only\".",
-  usage: "<b>Usage page.</b> Two new blocks after the head: Models, one row per model with day / week / month bars of 20 cells, the pace as an orange outline cell and the share of pace as the figure (orange over pace; hatched bars with \"no allowance\"); and the Verify FAIL rate by hour heatmap, rows per rung, 24 columns, four red tones, hover for the count. The calendar and columns stay as locked.",
+  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: the head says which step it is on, then one block per step. A finished step is two lines (state, kind, cost; rung, time and a 15-cell context mini gauge); the picked, failed and running steps keep the full block with the 30-cell context row. The chips between the blocks are the handoffs, with their words once compacted (412 → 290 w · cut 122 after 03). Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost exact from the usage Codex reports. Right, the inspector head is one line, rung · cost · time, and opens on the <b>Chat</b>: the prompt the service built is folded to one line (it is not Fred's), the agent's turns on the left (blue edge), the tool events folded with a failed exit first, the HANDOFF block as a chip with its Next line, the source line at the end. Received, Handoff (412 → 290 w) and Route are the tabs behind it; inside them Files touched, Troubleshooting and Facts fold to one line each.",
+  live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the writing mark with the one blinking cell in the agent's label. The finished steps above it are two-line blocks, so the FAIL of 05 and the live step sit on the first screen. Stop sits on the head line. Up / Down along the chain switches the inspector and keeps the tab.",
+  conn: "<b>Board, the handoff after step 03 picked.</b> One column: what 04 received. The headings the brief pass cut are open, with the two Findings lines left in place, struck and tagged, so the eye reads what went through and skips what did not; Goal, Files touched and Troubleshooting fold to one line each with \"whole\". The head counts written, received and cut words. The code checks fold to one line, \"5 of 5 pass\", with the brief pass's cost; a failing check would show in red there and open the fold by itself. The cut shows as a tone step on the chip's cells and the words \"cut 122\", not as orange (ID-1).",
+  task: "<b>Board, the task head picked.</b> In sight: the step it is on, its cost and effort, one line for what runs now and what comes next, and the open questions (orange ?). Behind one line each: prompt.md (its Done when line stays visible), the closed questions, and the chain log with its last move. Stop and Pause sit on the head line.",
+  replan: "<b>Board, a replan waiting.</b> Task B is the picked one now: its scout asked for a replan, the Haiku pass added two steps, and the task waits (orange, as every wait for Fred). The inspector carries the new plan as one list with the added steps tagged, and Confirm plan / Keep old plan / Stop. Why it ran and the route fold to one line each. The planned steps on the chain are one-line blocks on a dotted line. The same box appears on the compact Task page and the list card carries the same two buttons.",
+  measure: "<b>Board, nothing picked.</b> The measure table of the project: per step kind, median handoff received, context reached and handoff written over the last tasks, each bar with its figure; the row the reading names is in ink. The footer's ? holds the cell scale.",
+  bempty: "<b>Board, no task in the scope.</b> The empty cells and one line; the inspector and the key hints stay blank. Esc or Back returns to the list at the compact size.",
+  list: "<b>Compact list.</b> The today strip as locked, its breakdown closed; under it one line only because models are over their pace: \"3 models over pace · fills\", which opens the breakdown (spend legend, model mix, the over-pace figures and the Usage button). Needs you then starts on the first screen: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working card says which step of how many; the rung is on its doing line. Project names are hidden while the scope is one project.",
+  tpage: "<b>Compact Task page.</b> The steps list is the page: a finished step is two lines (name, rung, cost, Open; its goal), the failed step gives its sub line to the FAIL verdict whole, and the gauge line (in · ctx · out as cells with their figures) stays open only on the current, failed and past-150K rows, a click opens it on the others. The page opens scrolled to the current step. The handoff for the next step folds to one line with its words and its Next; opened, it shows the six headings and the facts the service added, folded.",
+  settings: "<b>Settings popover.</b> Under the project groups, two folded rows: Harnesses, open here because cmd is on but not found (the closed line keeps \"△ cmd not found\" in red), one row per CLI with glyph, state word, version and Turn on / Turn off; and Window runs with the auto hand off switch (ID-2), closed. The explanations moved to the rows' titles.",
+  prep: "<b>Prep page.</b> The prompt and the step rows are the page. Scouted folds to its size and file count; the route reason folds under the selects (\"why codex · balance\"); the missing cap is one muted line with △. Every model select lists tiers as groups (think / write / read) with rungs on any harness that is on; opencode and cmd rungs only under read, and only on read kinds. Row 5 shows a refused pick: the note in red and the select back to auto.",
+  session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the brief says context unknown in words with no cells; tabs Chat and Steps only. The chat starts with the folded Prompt row, then the same bubbles and folded tool rows as the Board (a failed exit first), the source line at the end. Continue resumes the thread; the levers that are off say \"claude only\" in one line.",
+  usage: "<b>Usage page.</b> Models: one row per model, sorted over pace first, with one bar of 20 cells for the window that binds (day, week or month), the pace as an orange outline cell and the share of pace as the figure (orange over pace), the other two windows as text; a click opens the three bars. Days stays as locked. The Verify FAIL by hour heatmap folds to one line that carries its reading.",
 };
 function show(v) {
   document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
@@ -1093,6 +1154,8 @@ function show(v) {
     : v === "list" ? listHtml() : v === "tpage" ? taskPageHtml() : v === "settings" ? settingsHtml() : v === "prep" ? prepHtml() : v === "session" ? sessionHtml() : usageHtml();
   document.getElementById("stage").innerHTML = html;
   document.getElementById("cap").innerHTML = CAP[v] || "";
+  const sc = document.querySelector(".win .scroll"), cur = document.querySelector(".chain .row.cur");
+  if (sc && cur) cur.scrollIntoView({ block: "nearest" });  // the Task page opens with the current step in view
   location.hash = v;
   curView = v;
 }
@@ -1103,9 +1166,9 @@ document.addEventListener("click", (e) => {  // picking on the Board: step or br
   const k = p.dataset.pick;
   if (k === "s3") show("step"); else if (k === "s5c") show("live"); else if (k === "c3") show("conn"); else if (k === "ta") show("task"); else if (k === "s2") show("replan");
 });
-document.addEventListener("click", (e) => {  // a folded tool row opens in place
-  const t = e.target.closest("[data-tools]");
-  if (!t) return;
+document.addEventListener("click", (e) => {  // a fold opens in place: tool rows, the prompt row, drawers, the fills rows
+  const t = e.target.closest("[data-fold]");
+  if (!t || e.target.closest("[data-fold] button, [data-fold] a, select")) return;
   const open = t.getAttribute("aria-expanded") !== "true";
   t.setAttribute("aria-expanded", String(open));
   t.nextElementSibling.hidden = !open;
