@@ -315,3 +315,7 @@ in `design/references/`.
 - 2026-10-10 - Visual rework explored (A Pill and Drawer, B Triage Board, C Rail and Focus, C + A
   Rings and Pill, then Console Cells from Fred's references, refined with the anti-slop filter).
   Fred locked Console Cells (D11, section 7.5); brainstorm screens moved to `design/brainstorm/`.
+- 2026-10-13 - Orchestration brainstorm with Fred (`design/brainstorm/2026-10-13-orchestration.md`, D-1 to
+  D-8): the scripted chain stays, no orchestrator agent; harness adapters (Codex, OpenCode, Command Code) with a
+  per-harness switch; tiers think / write / read with rungs on any harness and usage fills per model; a six-heading
+  handoff block; a `replan` step kind; the Cells Board expanded view. Sub-plans 5, 18, 23, 24, 25.
