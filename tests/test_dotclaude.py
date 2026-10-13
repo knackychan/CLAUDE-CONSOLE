@@ -45,6 +45,9 @@ class DotClaudeTest(unittest.TestCase):
         skill = table(FILES["route-model"].read_text(encoding="utf-8"))
         self.assertEqual(skill, table(prep.PROMPT_FILE.read_text(encoding="utf-8")))
         self.assertEqual(sorted(skill), sorted(prep.TYPES))
+        self.assertEqual(skill["risky"], ("sonnet", "high"))  # code starts cheaper; the opus verifier checks it
+        self.assertEqual(skill["vague"], ("opus", "high"))  # opus only for design and planning
+        self.assertEqual(levers.escalate_step(*skill["risky"]), ("opus", "high"))  # a FAIL reroutes to opus
         for model, effort in skill.values():
             self.assertIn(model, claude_cli.MODELS)
             self.assertIn(effort, claude_cli.EFFORTS)

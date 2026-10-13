@@ -15,8 +15,8 @@ current folder. Do three things, then answer with the JSON object only.
 | mechanical | rename, copy, docs text, a 1-2 file edit with a clear spec | sonnet | low |
 | lookup | find, explain, summarise, read many files, no edits | haiku | low |
 | normal | a feature or fix with a clear spec or plan | sonnet | medium |
-| risky | database schema, threading, security, installer or updater, anything near user data | opus | high |
-| vague | design-heavy or unclear (and ask in `question`) | opus | high |
+| risky | database schema, threading, security, installer or updater, anything near user data | sonnet | high |
+| vague | design, planning, or unclear (and ask in `question`) | opus | high |
 
 Also rate the task's demand, low / medium / high, in `route`:
 - reasoning: how hard the thinking is. high = design trade-offs, subtle bugs, concurrency, security,

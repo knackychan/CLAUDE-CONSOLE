@@ -1,6 +1,6 @@
 ---
 name: route-model
-description: Use at the start of a coding task in Claude Code (or when the user asks which model or effort to use) to pick effort first, then the model tier, by task type and risk; then verify, escalate once on FAIL, and log the miss. Stops after the verify step reports PASS or after one escalation.
+description: Use at the start of a coding task in Claude Code (or when the user asks which model or effort to use) to pick effort first, then the model tier, by task type and risk; then verify on opus, escalate once on FAIL, and log the miss. Stops after the verify step reports PASS or after one escalation.
 ---
 
 # Route model
@@ -21,8 +21,8 @@ Picks the cheapest route that should solve the task: effort level first, model t
 | mechanical | rename, copy, docs text, a 1-2 file edit with a clear spec | sonnet | low | `cavecrew-builder` subagent with `model: sonnet` |
 | lookup | find, explain, summarise, read many files, no edits | haiku | low | `cavecrew-investigator` or Explore subagent; restate the rules that matter (they do not see CLAUDE.md) |
 | normal | a feature or fix with a clear spec or plan | sonnet | medium | main session |
-| risky | database schema, threading, security, installer or updater, anything near user data | opus | high | main session: tell the user `/model opus` before starting |
-| vague | design-heavy or unclear (and ask in `question`) | opus | high | ask questions or brainstorm first, then re-route; plan mode |
+| risky | database schema, threading, security, installer or updater, anything near user data | sonnet | high | main session; the opus verifier (step 6) checks it, and a FAIL escalates to opus/high (step 7) |
+| vague | design, planning, or unclear (and ask in `question`) | opus | high | ask questions or brainstorm first, then re-route; plan mode |
 
 ## Steps
 
@@ -31,7 +31,7 @@ Picks the cheapest route that should solve the task: effort level first, model t
 3. Pick the row. Tell the user the route on its own line, in this shape (Claude Console reads it): `Route: mechanical, low effort, cavecrew-builder on sonnet`.
 4. If the main session's level should change, tell the user the command (`/effort low|medium|high|xhigh|max`, or `/model haiku|sonnet|opus|fable`); Claude cannot run slash commands. Change routes at the start, not mid-task: a model switch rebuilds the prompt cache.
 5. For delegated parts, call the Agent tool with the row's agent and `model`; this skill counts as the explicit instruction for an `effort` value when the row names one.
-6. Verify with code: run the `verifier` agent; its report ends in `VERDICT: PASS` or `VERDICT: FAIL <line>`.
+6. Verify with code: run the `verifier` agent with the Agent tool and `model: opus` (a stronger model checks the cheaper one's work); its report ends in `VERDICT: PASS` or `VERDICT: FAIL <line>`.
 7. On FAIL: one repair at the same route. If it still fails, escalate one step, once: effort +1 while below high; at high or above, the next model (haiku, sonnet, opus, fable) at the same effort; on fable, effort +1. If that fails too, stop and report the failing lines.
 8. If step 7 escalated, append one line to `~/.claude/console/routing-misses.md` (create it with the line `# Routing misses` and a blank line first if it does not exist). Use exactly this shape, so Claude Console's Prep can read it:
 
@@ -45,11 +45,12 @@ Picks the cheapest route that should solve the task: effort level first, model t
 ## Done looks like
 
 - The route line was shown to the user before work started.
-- The verify step's output is quoted (PASS, or the shortest failing line).
+- The verify step ran on opus and its output is quoted (PASS, or the shortest failing line).
 - Every escalation has a matching line in `~/.claude/console/routing-misses.md`.
 
 ## Never
 
+- Never start implementation on opus: opus is for design, planning (the `vague` row) and the verify step; code reaches opus only by escalating on FAIL.
 - Never escalate more than once per task, or retry the same failing route more than once.
 - Never call the work done on a cheap route without a code check; a passing test can still hide a wrong patch, so say what the check did not cover.
 - Never switch the model mid-task to save money on the remaining steps.
