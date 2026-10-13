@@ -430,6 +430,10 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .ihead .meta b { color: var(--ink); font-weight: 400; }
 .ihead .meta .y { color: var(--you); } .ihead .meta .r { color: var(--bad); }
 .ihead .lr { margin-top: 2px; }
+.binsp .tabs { padding: 0; margin-top: -4px; }
+.ipane { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.ipane .chat .turn p { font-size: 12.5px; }
+.ipane .doing { margin-top: -4px; }
 .rn { display: flex; gap: 6px; flex-wrap: wrap; }
 .rn span { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
 .rn span b { color: var(--ink); font-weight: 400; }
@@ -488,6 +492,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
   <div class="views" role="group" aria-label="Mock view">
     <span class="grp">Board</span>
     <button data-v="step" aria-pressed="true">Step picked</button>
+    <button data-v="live" aria-pressed="false">Step running</button>
     <button data-v="conn" aria-pressed="false">Brief picked</button>
     <button data-v="task" aria-pressed="false">Task picked</button>
     <button data-v="replan" aria-pressed="false">Replan waits</button>
@@ -543,7 +548,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>The inspector: one picked thing</h3>
       <ul>
-        <li><b>A step:</b> head (number, kind, rung, cost, time, Open and Stop), Goal, Route notes as chips in the order <code>step_route</code> applied them (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback), <b>What it read</b> (the brief, six headings, folded to its Goal and Next), <b>What it wrote</b> (the HANDOFF block as six blocks; Goal and Troubleshooting carry a green edge: never cut), <b>Facts the service added</b> (git diff --stat between the start and end commits, the failing lines of the last test command), the attempts with their reason.</li>
+        <li><b>A step:</b> head (number, kind, rung, cost, time, context, in / out; Open chat, Stop while live), then four tabs with <b>Chat</b> first (Fred, 2026-10-13): the step session's last turns in words, the tool events as muted notes, the HANDOFF block as the last turn, streaming while the step runs with the one blinking cell. <b>Note</b>: what it wrote, the HANDOFF block as six blocks (Goal and Troubleshooting carry a green edge: never cut), then the facts the service added (git diff --stat between the start and end commits, the failing lines of the last test command). <b>Brief</b>: what it read, six headings. <b>Route</b>: the goal, the route notes as chips in the order <code>step_route</code> applied them (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback), the attempts with their reason. The tab holds while Up / Down move along the chain.</li>
         <li><b>A brief:</b> two columns, raw note and brief, the cut lines struck through on the left, the checks under them in words (length, questions kept, Goal and Troubleshooting whole, continuity with the previous Files touched, no invented path, the Haiku cost).</li>
         <li><b>A task:</b> prompt.md, Open questions with the step that opened and the step that closed each one, the chain log.</li>
         <li><b>Nothing picked</b> (keyboard Esc inside the Board, or a folded task): the inspector shows the measure table of the picked task's project, brief in against context reached per kind.</li>
@@ -714,6 +719,31 @@ function findStep(t, key) {
   for (const s of t.steps) { if ("s" + s.n === key) return s; if (s.fix) for (const f of s.fix) if ("s" + f.n === key) return f; }
   return null;
 }
+const CHAT = {  // the step session's chat, as the session page's Chat tab shows it (runs.chat): the last turns in words
+  s3: { src: "codex exec --json · thread 019a3f… · 31 events · ended 14:19:48", turns: [
+    ["you", "Goal: Harness adapters: Codex exec and the Steps tab. This step: console/harness/codex.py with run_command, is_result, summary, chat and stop; tests first against tests/fake_codex.py.\n\nWhat the earlier steps left you (brief of 02, 310 words): Goal … Findings … Files touched … Troubleshooting … Open questions … Next …\n\nEnd with the HANDOFF block."],
+    ["note", "file_change · tests/fake_codex.py (new) · tests/test_harness.py (+9 tests)"],
+    ["claude", "I mirrored claude_cli.run_command and runs._watch for the stream handling. A Codex turn ends with turn.completed, so is_result matches that event; the final text is the last item.completed whose item.type is agent_message."],
+    ["note", "command_execution · py -m unittest tests.test_harness -q · exit 1 · 2 failures"],
+    ["claude", "Two failures in test_resume_command: I had put --json after resume. The help shows codex exec [OPTIONS] <COMMAND>, so the options go before the subcommand. Moving them."],
+    ["note", "file_change · console/harness/codex.py (resume_command, fork_command)"],
+    ["note", "command_execution · py -m unittest tests.test_harness -q · exit 0 · 23 tests"],
+    ["claude", "HANDOFF\n## Goal\nHarness adapters: Codex exec and the Steps tab. This step: console/harness/codex.py …\n## Findings\n- codex exec - reads the prompt on stdin; options stand before the subcommand …\n- The final text is the last item.completed with item.type agent_message …\n## Files touched\n- console/harness/codex.py (new, 164 lines) …\n## Troubleshooting\n- `codex exec -o out.txt` writes the file after the process exits on Windows: read the stream, not the file …\n## Open questions\n- Does -c model_reasoning_effort=\"high\" reach the model? …\n## Next\n04 test: run tests/test_harness.py on the real codex exe … Next model: read\nEND HANDOFF"]] },
+  s5c: { src: "claude -p · stream-json · turn 1 · running 2m 40s", live: true, turns: [
+    ["you", "Verify what the fix step (05b) did against the FAIL of 05: test_resume_command: options after resume. Check the diff 9b02f11..e7a4c02 against the task goal. End with the HANDOFF block and a VERDICT line."],
+    ["note", "Read · console/harness/codex.py:30-58"],
+    ["claude", "The resume command now builds [exe, \"exec\", *options, \"resume\", session_id, \"-\"]; the fork command the same with \"fork\". That matches the help text codex exec [OPTIONS] <COMMAND> [ARGS]."],
+    ["note", "Bash · py -m unittest tests.test_harness -q · exit 0 · 23 tests"],
+    ["note", "Grep · \"resume\" in tests/test_harness.py · 4 matches"],
+    ["claude", "test_resume_command asserts the options before the subcommand and the trailing \"-\". The fix covers the FAIL detail. Checking that the fake's fixture still ends with a result line before I write the verdict …"]] },
+};
+let itab = "chat";  // the step inspector's tab: chat | note | brief | route
+function chatHtml(c, s) {
+  if (!c) return `<p class="note m">${s.state === "planned" ? "Not started: the chat shows here as the step runs." : "The chat of this step; the mock has it on 03 code and 5c verify."}</p>`;
+  const turn = ([role, text]) => role === "note" ? `<div class="turn note"><p>${esc(text)}</p></div>`
+    : `<div class="turn ${role}"><span class="lbl">${role === "you" ? "You" : s.harness === "claude" ? "Claude" : s.harness[0].toUpperCase() + s.harness.slice(1)}</span><p>${esc(text)}</p></div>`;
+  return `<div class="chat"><p class="src">${esc(c.src)}</p>${c.turns.map(turn).join("")}${c.live ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>writing</span></div>' : ""}</div>`;
+}
 function inspStep(t, s) {
   const [word, tn] = WORD[s.state] || WORD.running;
   const notes = s.notes.map((n) => `<span${/balance|every .* over pace/.test(n) ? ' class="y"' : ""}>${esc(n)}</span>`).join("");
@@ -722,14 +752,19 @@ function inspStep(t, s) {
   const facts = s.facts ? `<div class="hsec facts"><span class="lbl">Facts the service added<span class="m">zero tokens, never compacted</span></span>
     <p class="mono">git diff --stat c41e2a7..9b02f11<br>${s.facts.diff.map(esc).join("<br>")}</p><p class="mono">${esc(s.facts.test).replace(/\n/g, "<br>")}</p></div>` : "";
   const tries = s.tries.length > 1 ? `<div class="hsec"><span class="lbl">Attempts</span><p class="m"><span class="link">try 1</span> no HANDOFF block · try 2 passed</p></div>` : "";
+  const c = CHAT["s" + s.n];
+  const tabs = [["chat", `Chat${c ? ` <span class="n">${c.turns.length}</span>` : ""}`], ["note", `Note${s.out ? ` <span class="n">${s.out} w</span>` : ""}`], ["brief", `Brief${s.in ? ` <span class="n">${s.in} w</span>` : ""}`], ["route", "Route"]];
+  const pane = itab === "chat" ? chatHtml(c, s)
+    : itab === "note" ? `<div class="blk"><div class="hd"><span class="lbl">What it wrote</span><span class="m">${s.out ? `note ${s.out} w · checked by code, then the brief pass` : ""}</span></div>${wrote}${facts}</div>`
+    : itab === "brief" ? `<div class="blk"><div class="hd"><span class="lbl">What it read</span><span class="m">${s.in ? `brief ${s.in} w · the only thing it got from the earlier steps` : ""}</span></div>${read}</div>`
+    : `<div class="blk"><span class="lbl">Goal</span><p class="note" style="color:var(--ink)">${esc(s.goal)}</p></div>
+       <div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${notes || '<span>none yet</span>'}</div></div>${tries}`;
   return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(s.state)}${word}</span><h2>${esc(two(s.n))} ${esc(s.kind)}</h2></div>
     <div class="meta"><span>${esc(s.model ? rungText(s) : "rung at start")}</span><span>cost <b>${s.cost == null ? "unknown" : (s.exact ? "" : "~") + money(s.cost)}</b></span><span>${esc(s.time || "")}</span>
       <span>context <b class="${ctxTone(s.ctx)}">${s.ctx == null ? "unknown" : s.ctx + "K"}</b></span><span>in <b>${s.in ? s.in + " w" : "–"}</b> · out <b>${s.out ? s.out + " w" : "–"}</b></span></div>
-    <div class="lr">${s.state !== "planned" ? '<button class="btn sm">Open chat</button>' : ""}${s.state === "running" ? '<button class="btn sm stop">Stop</button>' : ""}${s.state === "failed" ? '<button class="btn sm">Open try 1</button>' : ""}</div></div>
-    <div class="blk"><span class="lbl">Goal</span><p class="note" style="color:var(--ink)">${esc(s.goal)}</p></div>
-    <div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${notes || '<span>none yet</span>'}</div></div>
-    <div class="blk"><div class="hd"><span class="lbl">What it read</span><span class="m">${s.in ? `brief ${s.in} w` : ""}</span></div>${read}</div>
-    <div class="blk"><div class="hd"><span class="lbl">What it wrote</span><span class="m">${s.out ? `note ${s.out} w` : ""}</span></div>${wrote}${facts}</div>${tries}`;
+    <div class="lr">${s.state !== "planned" ? '<button class="btn sm" title="The session page, with its levers">Open chat</button>' : ""}${s.state === "running" ? '<button class="btn sm stop">Stop</button>' : ""}${s.state === "failed" ? '<button class="btn sm">Open try 1</button>' : ""}</div></div>
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-itab="${k}" aria-selected="${itab === k}">${l}</button>`).join("")}</div>
+    <div class="ipane">${pane}</div>`;
 }
 function inspConn(t, key) {
   const c = t.conns[key], b = BRIEF3;
@@ -786,7 +821,7 @@ function inspMeasure() {
     <p class="note m">A kind that reads a small brief and reaches a large context reads too much on its own: fix at 112K from 240 words in is the one to tune (scout first, or a turn cap). This table is brainstorm 5.1 item 6: after ten tasks it decides the next tuning, not a guess.</p>`;
 }
 function boardHtml(v) {
-  const picked = { step: "s3", conn: "c3", task: "ta", replan: "s2", measure: "", bempty: "" }[v];
+  const picked = { step: "s3", live: "s5c", conn: "c3", task: "ta", replan: "s2", measure: "", bempty: "" }[v];
   const tasks = [T[1], T[0], T[2]];  // the scope's tasks, newest first; only the picked one is unfolded
   const openId = v === "replan" ? "b" : "a";
   const chain = v === "bempty" ? `<div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div><p>No task in CLAUDE-CONSOLE. Type a task in the list; its steps show here as they run.</p></div>`
@@ -1010,7 +1045,8 @@ function usageHtml() {
 }
 
 const CAP = {
-  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: head, then each step as a block with its state, kind, rung, cost, context cells, brief-in and note-out cells and attempts; the briefs are the connectors; the fix insert is the bracket under the failed verify. Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost is exact from the usage Codex reports. Right, the inspector: the goal, the route notes as the rules applied them (the balance note is orange because it says which model is over pace), what it read, what it wrote as six headings with Goal and Troubleshooting edged green (never cut), and the facts the service added for free. Tasks B and C are folded rows above and below.",
+  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: head, then each step as a block with its state, kind, rung, cost, context cells, brief-in and note-out cells and attempts; the briefs are the connectors; the fix insert is the bracket under the failed verify. Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost is exact from the usage Codex reports. Right, the inspector opens on the step's <b>Chat</b>: the last turns in words, the tool events as muted notes, the HANDOFF block as the last turn. Note (what it wrote, six headings with Goal and Troubleshooting edged green, then the facts the service added), Brief (what it read) and Route (the goal, the route notes as chips, the attempts) are the tabs behind it. Tasks B and C are folded rows above and below.",
+  live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the one blinking cell on the writing line. Note says the note is being written; Stop sits in the head. Up / Down along the chain switches the inspector and keeps the tab.",
   conn: "<b>Board, the brief after step 03 picked.</b> Raw note on the left with the two Findings lines Haiku cut struck through, the brief on the right as step 04 read it, and the code checks under them: length, questions kept, Goal and Troubleshooting whole, continuity with the previous Files touched, no invented path. The cut shows as a tone step on the chip's cells and the words \"cut 122 w\", not as orange (ID-1).",
   task: "<b>Board, the task head picked.</b> The inspector shows prompt.md, the running list of open questions (which step opened each, which closed it; the open ones carry the orange ?) and the chain log, one line per move with the route notes. Stop and Pause sit in the head.",
   replan: "<b>Board, a replan waiting.</b> Task B is the picked one now: its scout asked for a replan, the Haiku pass added two steps, and the task waits (orange, as every wait for Fred). The inspector carries the plan before and after, the added steps marked, and Confirm plan / Keep old plan / Stop. The same box appears on the compact Task page and the list card carries the same two buttons.",
@@ -1025,20 +1061,29 @@ const CAP = {
 };
 function show(v) {
   document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
-  const html = ["step", "conn", "task", "replan", "measure", "bempty"].includes(v) ? boardHtml(v)
+  const html = ["step", "live", "conn", "task", "replan", "measure", "bempty"].includes(v) ? boardHtml(v)
     : v === "list" ? listHtml() : v === "tpage" ? taskPageHtml() : v === "settings" ? settingsHtml() : v === "prep" ? prepHtml() : v === "session" ? sessionHtml() : usageHtml();
   document.getElementById("stage").innerHTML = html;
   document.getElementById("cap").innerHTML = CAP[v] || "";
   location.hash = v;
+  curView = v;
 }
 document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
 document.addEventListener("click", (e) => {  // picking on the Board: step or brief blocks switch the inspector in this mock
   const p = e.target.closest("[data-pick]");
   if (!p) return;
   const k = p.dataset.pick;
-  if (k === "s3") show("step"); else if (k === "c3") show("conn"); else if (k === "ta") show("task"); else if (k === "s2") show("replan");
+  if (k === "s3") show("step"); else if (k === "s5c") show("live"); else if (k === "c3") show("conn"); else if (k === "ta") show("task"); else if (k === "s2") show("replan");
+});
+let curView = "step";
+document.addEventListener("click", (e) => {  // the inspector's tabs
+  const b = e.target.closest("[data-itab]");
+  if (!b) return;
+  itab = b.dataset.itab;
+  show(curView);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") show("measure"); });
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => { itab = "chat"; }));
 show(CAP[location.hash.slice(1)] ? location.hash.slice(1) : "step");
 </script>
 </body>

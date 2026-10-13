@@ -177,13 +177,23 @@ word cell = 50 w`).
 ### 8.3 The inspector (one picked thing)
 
 - **A step**: head (sprite, `NN kind`, rung, cost, time, context, in / out; Open chat, Stop while live,
-  Open try 1 after a failed attempt); Goal; **Route · in the order the rules applied**, one chip per note
-  (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback, tools / MCP, sandbox); the
-  balance note and `every <tier> rung over pace` in orange; **What it read**: the brief as six blocks, Goal
-  and Troubleshooting with a green edge and `never cut`; **What it wrote**: the note as six blocks, then
-  **Facts the service added** (dashed box: `git diff --stat <start>..<end>`, the test command's result lines);
-  **Attempts** with each try's reason. A running step says `Writing. The note shows here when the run
-  ends`; a planned one `Not started`.
+  Open try 1 after a failed attempt), then four tabs, **Chat first** (Fred, 2026-10-13: the chat has
+  priority over what it read and what it wrote):
+  - **Chat**: the step session's chat as the session page's Chat tab shows it (`runs.chat`): the source
+    line (harness, thread or session, events, ended or running), the turns in words (You, Claude or the
+    harness's name), the tool events as muted notes (`command_execution · py -m unittest … · exit 0`), the
+    HANDOFF block as the last turn; a running step streams, newest at the end, with the one blinking cell on
+    the writing line, and the pane follows the end until Fred scrolls up.
+  - **Note**: what it wrote, the HANDOFF block as six blocks (Goal and Troubleshooting with a green edge and
+    `never cut`), then **Facts the service added** (dashed box: `git diff --stat <start>..<end>`, the test
+    command's result lines). A running step says `Writing. The note shows here when the run ends`; a
+    planned one `Not started`.
+  - **Brief**: what it read, the brief as six blocks; step 1 says it read the task goal and the context pack.
+  - **Route**: Goal; **Route · in the order the rules applied**, one chip per note (rule, pick, demand,
+    floor, hint, cap, budget, balance, harness fallback, tools / MCP, sandbox), the balance note and `every
+    <tier> rung over pace` in orange; **Attempts** with each try's reason.
+  The picked tab holds while Up / Down move along the chain, and for the window (window.json), as the
+  session page's brief fold does. Open chat still goes to the session page for the levers.
 - **A brief**: head (`Brief after NN kind`; raw note words, brief words, cut words and heading, the brief
   pass's rung, cost and turns); two columns, the raw note (`what NN+1 did not read`, cut lines struck
   through) and the brief (`what NN+1 read`); **Checks · code, no model**: shorter than what it compacts,
@@ -259,3 +269,5 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 
 - 2026-10-13 - Written from `web/app.js`, plan 5 (reviewed), plan 17 and the brainstorm; mockup rendered at
   400 and 900 px in headless Chromium, dark and light, no horizontal overflow, no script error.
+- 2026-10-13 - Fred: the chat has priority over what it read and what it wrote. The step inspector now opens
+  on a Chat tab; Note, Brief and Route are the tabs behind it (8.3); a "Step running" view added to the mock.
