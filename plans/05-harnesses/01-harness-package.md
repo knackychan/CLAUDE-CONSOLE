@@ -107,8 +107,8 @@ attachments) that only Claude has; `runs.start` passes them only to this adapter
 0. Edit `CLAUDE.md` Rules first, so no later task breaks a written rule: "Window runs: commands come only from
    console/claude_cli.py" becomes "Window runs: commands come only from the adapters in console/harness/
    (claude_cli.py for Claude Code)"; the Stop clause gains "; a harness with no interrupt (Codex, OpenCode,
-   Command Code) is stopped by killing its process tree (plan 05 decision 8)". Only after Fred confirmed decision
-   8 (README section 6, last item); until then Tasks 1 to 3 go ahead and Task 4 waits on it.
+   Command Code) is stopped by killing its process tree (plan 05 decision 8)". Fred confirmed decision 8 on
+   2026-10-13.
 1. Write `tests/test_harness.py` with the ten tests; run: ImportError.
 2. Create the package and the Claude adapter; add the `claude_cli` helpers and the `paths` changes; run until green.
 3. Run the whole suite: 328 + 10 = 338 (every earlier test unchanged; `test_claude_cli.test_tier_of_and_known_model` still passes with the new signature, `cfg=None` default).

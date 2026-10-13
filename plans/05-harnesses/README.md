@@ -40,7 +40,7 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 | 5 | On / off | `config.json` `harnesses.<name>.on` and `.exe`; a switch in the window; rungs of a harness that is off or not found never route and are not offered (D-8) |
 | 6 | Unknown facts | Cost, tokens and steps an adapter cannot report show as unknown, never as zero (D-3) |
 | 7 | Caps | Codex and OpenCode have no turn or spend flag: `step_timeout_s` (default 1800) ends such a run and the chain treats it as a step that hit its cap; Command Code uses `--max-turns` (exit code 8 on the cap) |
-| 8 | Stop | An adapter without an interrupt is stopped with `claude_cli.kill_tree` (the tree, so the model's child commands end too); the rule "Stop is the stream-json interrupt, never a kill of a run this service owns" holds for Claude runs, and this is the one documented exception for harnesses that have no interrupt |
+| 8 | Stop (Fred confirmed after the review, 2026-10-13) | An adapter without an interrupt is stopped with `claude_cli.kill_tree` (the tree, so the model's child commands end too); the rule "Stop is the stream-json interrupt, never a kill of a run this service owns" holds for Claude runs, and this is the one documented exception for harnesses that have no interrupt |
 | 9 | Self-updates | Command Code updated itself during a `--help` call: every `cmd` command gets `--no-auto-update`, and the probe records each harness's version at every service start |
 | 10 | What a non-Claude session shows | Chat from the adapter's stream (final text, tool events where the adapter knows them), no Steps from hooks (the hooks are Claude Code's), gauge from the adapter's usage or none, levers Continue (where the adapter resumes) and Stop only; Verify, Handoff, Escalate and Open in terminal are off with the reason `claude only` |
 | 11 | Cheap tier only (D-2) | An `opencode` or `cmd` rung is offered and accepted only where the step's rule tier is `haiku` (`tasks.RULES[kind][0] == "haiku"`: scout, search, draft, proofread, edit, test) and on a plain Run; never on `verify`, `fix` or a `sonnet` / `opus` kind. A refused pick says `opencode: read steps only (cheap tier)` |
@@ -273,4 +273,4 @@ What it changed, by where it was found:
   redone in each task.
 - **Moved out**: context pack lite and the Usage mix (section 5).
 - **Rule order**: the CLAUDE.md lines on window-run commands and Stop are changed in Task 1, before the code that
-  needs them, not at the close (Task 7); the Stop exception (decision 8) is Fred's to confirm.
+  needs them, not at the close (Task 7); Fred confirmed the Stop exception (decision 8) the same day.
