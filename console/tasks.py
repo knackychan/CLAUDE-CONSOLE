@@ -71,8 +71,8 @@ def verify_route(checked: tuple) -> tuple:
 def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(), prev: str = "",
                budget=None, warn_at: float = 0.8, effort: str = "auto") -> dict:
     """The route of one step: rule, pick, demand, floor, hint, cap, budget, fixed effort (README 3.5), in
-    that order, each one appending a note. A pick keeps its model against the hint; only the Escalate floor
-    and the budget may move it. `hold` non-empty means the task waits for Fred."""
+    that order, each one appending a note. A pick keeps its model against the floor and the hint (they may
+    still raise the effort); only the budget may move it. `hold` non-empty means the task waits for Fred."""
     models, efforts = claude_cli.MODELS, claude_cli.EFFORTS
     fixed = effort != "auto"
     notes, hold = [], ""
@@ -94,8 +94,12 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
         notes.append("demand: effort high")
     low = routing.floor(misses, kind)
     if low and routing.rank(low) > routing.rank((model, level)):
-        model, level = low
-        notes.append(f"floor {kind}: {model}/{level}")
+        if picked and low[0] != model:  # Fred's pick keeps its model (2026-10-13); the floor's effort still counts
+            level = max(level, low[1], key=efforts.index)
+            notes.append(f"floor {kind}: {low[0]}/{low[1]} -> pick {model}/{level} kept")
+        else:
+            model, level = low
+            notes.append(f"floor {kind}: {model}/{level}")
     hint = next_hint(prev)
     if hint and routing.rank(hint) > routing.rank((model, level)):
         up = levers.escalate_step(model, level) or (model, level)

@@ -953,7 +953,7 @@ function stepsChanged() {  // the verify row, numbers, the Fable note and Run as
 
 function floorText(kind, noun) {  // a routing miss of this kind (Escalate wrote it) lifts its start above the rule
   const f = ((card && card.floors) || {})[kind];
-  return f ? `Floor from Escalate${f.date ? " (" + f.date + ")" : ""}: ${kind} ${noun} start at ${f.route}, above their rule.` : "";
+  return f ? `Floor from Escalate${f.date ? " (" + f.date + ")" : ""}: ${kind} ${noun} start at ${f.route}, above their rule; a model you pick here holds.` : "";
 }
 
 function showPrep() {

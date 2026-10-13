@@ -708,6 +708,20 @@ class TaskServerTest(RunServerTest):
         self.assertIn("hint: opus/high -> pick sonnet kept", task["steps"][1]["notes"])
         self.assertEqual(self.hub.runs.meta(task["steps"][1]["session"])["model"], "sonnet")
 
+    def test_pinned_step_beats_the_miss_floor(self):
+        """Fred's live case of 2026-10-13: a code step pinned to sonnet under an Escalate floor of opus/high
+        runs on sonnet (at the floor's effort); the verify after it is the only step on opus."""
+        levers.add_miss(self.folder, levers.miss_line("proj", "code", "sonnet/high", "opus/high", "NameError"))
+        card = self.prep_card()
+        self.assertEqual(card["floors"]["code"]["route"], "opus/high")  # the card shows the floor
+        steps = [{"kind": "scout", "goal": "find add()"}, {"kind": "code", "goal": "fix add()", "model": "sonnet"}]
+        status, data = self.post_task(card, steps=steps)
+        self.assertEqual(status, 200, data)
+        task = self.until(data["task"], self.at(3), "the verify step starts")
+        self.assertEqual([(s["pick"], s["model"], s["effort"]) for s in task["steps"]],
+                         [("", "haiku", "low"), ("sonnet", "sonnet", "high"), ("", "opus", "high")])
+        self.assertIn("floor code: opus/high -> pick sonnet/high kept", task["steps"][1]["notes"])
+
     def test_missing_handoff_retries_once_then_stuck(self):
         tid = self.make_task(words="")
         first = self.hub.tasks[tid]["steps"][0]["session"]
