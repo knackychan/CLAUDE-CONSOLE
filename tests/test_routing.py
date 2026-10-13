@@ -52,6 +52,18 @@ class RoutingTest(unittest.TestCase):
         for bad in ("", None, "sonnet", "gpt/high", "sonnet/turbo"):
             self.assertIsNone(routing.parse(bad))
 
+    def test_fresh_drops_misses_older_than_the_window(self):
+        import time
+        now = time.mktime((2026, 10, 13, 12, 0, 0, 0, 0, -1))
+        old = "- 2026-09-20 - APP - code: sonnet/medium failed (x); next time start at opus/high."
+        edge = "- 2026-09-29 - APP - code: sonnet/medium failed (x); next time start at sonnet/high."
+        new = "- 2026-10-12 - APP - debug: sonnet/high failed (y); next time start at opus/high."
+        undated = "misc line"
+        self.assertEqual(routing.fresh([old, edge, new, undated], 14, now), [edge, new, undated])
+        self.assertEqual(routing.fresh([old, new], 0, now), [old, new])  # 0 = no decay
+        self.assertIsNone(routing.floor(routing.fresh([old], 14, now), "code"))
+        self.assertEqual(routing.floors(routing.fresh([old, new], 14, now)), {"debug": {"route": "opus/high", "date": "2026-10-12"}})
+
 
 if __name__ == "__main__":
     unittest.main()

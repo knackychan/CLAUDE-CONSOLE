@@ -52,6 +52,30 @@ class LeversTest(unittest.TestCase):
             (mine / "SKILL.md").write_text("x", encoding="utf-8")
             self.assertTrue(levers.handoff_ready("", home))
 
+    def test_lessons_file_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = time.mktime((2026, 10, 13, 12, 0, 0, 0, 0, -1))
+            line = levers.lesson_line("CALC", "code", "  profile before\noptimizing token=abc  ", now)
+            self.assertEqual(line, "- 2026-10-13 - CALC - code: profile before optimizing token=***")
+            levers.add_lesson(Path(tmp), line)
+            levers.add_lesson(Path(tmp), levers.lesson_line("OTHER", "", "x", now))
+            self.assertEqual(levers.read_lessons(Path(tmp), "CALC"), [line])
+            self.assertEqual(levers.read_lessons(Path(tmp), "OTHER"), ["- 2026-10-13 - OTHER - chat: x"])
+            text = (Path(tmp) / "lessons.md").read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("# Lessons"))
+            self.assertEqual(levers.read_lessons(Path(tmp) / "nope", "CALC"), [])
+            self.assertEqual(levers.read_misses(Path(tmp), "CALC"), [])  # the two files stay apart
+            self.assertLessEqual(len(levers.lesson_line("P", "code", "w" * 500, now)), 240)
+
+    def test_escalate_text_frames_the_fix(self):
+        text = levers.escalate_text("test_x - KeyError", "sonnet", "high")
+        self.assertTrue(text.startswith("The checks failed: test_x - KeyError. You now run on sonnet/high (escalated once). "))
+        self.assertIn(levers.FIX_FRAME, text)
+        self.assertIn("three plausible causes", levers.FIX_FRAME)
+        self.assertIn("smallest check", levers.FIX_FRAME)
+        self.assertTrue(text.endswith("`VERDICT: PASS` or `VERDICT: FAIL <shortest failing line>`."))
+        self.assertIn("see the last VERDICT line", levers.escalate_text("", "opus", "high"))
+
 
 if __name__ == "__main__":
     unittest.main()

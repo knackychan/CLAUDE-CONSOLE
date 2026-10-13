@@ -1,8 +1,10 @@
 """Demand routing: the route a task's demand calls for, decided in code from what Prep reports.
 Heavy reasoning goes to opus/high; heavy token volume with light reasoning goes to haiku (sonnet when the
 reasoning is medium); anything else keeps Prep's pick. The newest routing miss of the same task type is a
-floor the route never goes under (Escalate wrote it: that route failed last time)."""
+floor the route never goes under (Escalate wrote it: that route failed last time; a miss older than
+miss_floor_days is dropped by fresh())."""
 import re
+import time
 
 from .claude_cli import EFFORTS, MODELS
 
@@ -50,6 +52,20 @@ def floors(misses) -> dict:
         m, d = _START.search(line), _DATE.match(line)
         if m and m.group(2) in MODELS and m.group(3) in EFFORTS:
             out[m.group(1)] = {"route": f"{m.group(2)}/{m.group(3)}", "date": d.group(1) if d else ""}
+    return out
+
+
+def fresh(misses, days: float, now: float = None) -> list:
+    """The miss lines dated within `days` of `now`, plus undated ones; `days` 0 keeps every line. An older
+    miss is history for the rules review, not a floor (plan 22)."""
+    if not days:
+        return list(misses)
+    cutoff = time.strftime("%Y-%m-%d", time.localtime((now or time.time()) - days * 86400))
+    out = []
+    for line in misses:
+        d = _DATE.match(line)
+        if not d or d.group(1) >= cutoff:
+            out.append(line)
     return out
 
 

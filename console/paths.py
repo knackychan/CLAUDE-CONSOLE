@@ -25,6 +25,9 @@ DEFAULTS = {
     "rules_max_lines": 200,
     "rules_max_kb": 16,
     "delegate_after_reads": 10,
+    "miss_floor_days": 14,  # plan 22: an older routing miss is history, not a floor
+    "review_model": "haiku",  # plan 22: the rules review, read only
+    "review_timeout_s": 180,
     "daily_budget_usd": 15,
     "cold_after_s": 3600,  # idle this long: both prompt-cache lifetimes (5 min, 1 h) are gone
     # plan 17, task chain: see plans/17-tasks/README.md section 4

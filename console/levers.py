@@ -1,5 +1,6 @@
 """Phase 3 levers: the texts Verify, Handoff and Escalate send, the escalation step, the order after
-Verify, and the routing-misses file. When a lever is allowed is decided in one place: server.Hub.levers."""
+Verify, the routing-misses file and (plan 22) the lessons file. When a lever is allowed is decided in one
+place: server.Hub.levers."""
 import time
 from pathlib import Path
 
@@ -16,6 +17,12 @@ MISSES_FILE = "routing-misses.md"
 MISSES_HEAD = ("# Routing misses\n\nOne line per Escalate, written by Claude Console. "
                "Prep reads the lines of its project.\n\n")
 MISSES_SHOWN = 20
+LESSONS_FILE = "lessons.md"
+LESSONS_HEAD = ("# Lessons\n\nOne line per lesson: a step's `Lesson:` line (written by Claude Console) or a "
+                "chat's (written by session-handoff). The rules review reads the lines of its project.\n\n")
+LESSONS_SHOWN = 40
+FIX_FRAME = ("Before you edit: name up to three plausible causes, the evidence for and against each, and the "
+             "smallest check that tells them apart; run that check; fix only the cause it confirmed.")
 
 
 def escalate_step(model: str, effort: str):
@@ -36,8 +43,8 @@ def escalate_step(model: str, effort: str):
 
 def escalate_text(detail: str, model: str, effort: str) -> str:
     failed = detail or "see the last VERDICT line"
-    return (f"The checks failed: {failed}. You now run on {model}/{effort} (escalated once). Find and fix "
-            "the cause, run the checks again, then end your final message with one line: "
+    return (f"The checks failed: {failed}. You now run on {model}/{effort} (escalated once). {FIX_FRAME} "
+            "Then run the checks again and end your final message with one line: "
             "`VERDICT: PASS` or `VERDICT: FAIL <shortest failing line>`.")
 
 
@@ -57,27 +64,52 @@ def handoff_ready(project_dir: str, home: Path = None) -> bool:
     return any(p is not None and (p / HANDOFF_SKILL).is_file() for p in places)
 
 
+def _day(now: float = None) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(now or time.time()))
+
+
 def miss_line(project: str, task_type: str, route_from: str, route_to: str, detail: str,
               now: float = None) -> str:
-    day = time.strftime("%Y-%m-%d", time.localtime(now or time.time()))
     why = redact.clip(redact.mask(detail), 120) or "verifier FAIL"
-    return (f"- {day} - {project} - {task_type or 'unrouted'}: {route_from} failed ({why}); "
+    return (f"- {_day(now)} - {project} - {task_type or 'unrouted'}: {route_from} failed ({why}); "
             f"next time start at {route_to}.")
 
 
-def add_miss(folder: Path, line: str) -> None:
-    path = Path(folder) / MISSES_FILE
+def lesson_line(project: str, kind: str, text: str, now: float = None) -> str:
+    """One lesson: `- <day> - <project> - <step kind or chat>: <one sentence>` (masked, clipped at 200)."""
+    what = redact.clip(redact.mask(" ".join(str(text or "").split())), 200)
+    return f"- {_day(now)} - {project} - {kind or 'chat'}: {what}"
+
+
+def _append(folder: Path, name: str, head: str, line: str) -> None:
+    path = Path(folder) / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    head = "" if path.exists() else MISSES_HEAD
+    lead = "" if path.exists() and path.stat().st_size else head  # decided before the open creates the file
     with open(path, "a", encoding="utf-8") as fh:
-        fh.write(head + line + "\n")
+        fh.write(lead + line + "\n")
 
 
-def read_misses(folder: Path, project: str, limit: int = MISSES_SHOWN) -> list:
-    """The last `limit` miss lines of one project (matched by the project folder's name)."""
+def _read(folder: Path, name: str, project: str, limit: int) -> list:
+    """The last `limit` lines of one project (matched by the project folder's name)."""
     try:
-        lines = (Path(folder) / MISSES_FILE).read_text(encoding="utf-8").splitlines()
+        lines = (Path(folder) / name).read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
     tag = f" - {project} - "
     return [line for line in lines if line.startswith("- ") and tag in line][-limit:]
+
+
+def add_miss(folder: Path, line: str) -> None:
+    _append(folder, MISSES_FILE, MISSES_HEAD, line)
+
+
+def read_misses(folder: Path, project: str, limit: int = MISSES_SHOWN) -> list:
+    return _read(folder, MISSES_FILE, project, limit)
+
+
+def add_lesson(folder: Path, line: str) -> None:
+    _append(folder, LESSONS_FILE, LESSONS_HEAD, line)
+
+
+def read_lessons(folder: Path, project: str, limit: int = LESSONS_SHOWN) -> list:
+    return _read(folder, LESSONS_FILE, project, limit)
