@@ -229,6 +229,13 @@ class HandoffTest(unittest.TestCase):
         both = "Next model: gpt/high\nNext model: opus/low"  # the first one routing.parse accepts
         self.assertEqual(tasks.next_hint(both), ("opus", "low"))
 
+    def test_lesson_of(self):
+        self.assertEqual(tasks.lesson_of(GOOD + "\nLesson: profile before optimizing."), "profile before optimizing.")
+        self.assertEqual(tasks.lesson_of(GOOD + "\n**Lesson:** keep the first one\nLesson: the last one wins"), "the last one wins")
+        for none in ("", GOOD, GOOD + "\nLesson: none", GOOD + "\nLesson: -", GOOD + "\nLesson: N/A."):
+            self.assertEqual(tasks.lesson_of(none), "", none)
+        self.assertEqual(tasks.lesson_of("a lesson: not a line start"), "")
+
     def test_verdict_and_question_of_a_reply(self):
         # the Stop hook is async and may land after run_ended: the chain reads them in the reply too
         reply = f"HANDOFF\n{GOOD}\nEND HANDOFF\n**VERDICT: FAIL** test_add - 3 != 4"
@@ -442,6 +449,7 @@ class ChainTest(unittest.TestCase):
         self.assertTrue(lines)
         route = tasks.step_route("fix", checked=(code["model"], code["effort"]))
         before = tasks.step_prompt(task, fix, "PREV")  # the service builds the prompt before the step starts
+        self.assertIn(levers.FIX_FRAME, before)  # a fix step names its hypotheses before it edits
         self.assertIn("The checks failed: test_x - KeyError: 'a'. You now run on sonnet/high", before)
         run(task, 4, route["model"], route["effort"])
         self.assertEqual(tasks.step_prompt(task, fix, "PREV"), before)
@@ -746,6 +754,8 @@ class ChainTest(unittest.TestCase):
         self.assertIn("PREVIOUS NOTE TEXT\n## Findings\nkept", code)
         self.assertIn("HANDOFF\n## Findings", code)
         self.assertIn("END HANDOFF", code)
+        self.assertIn("`Lesson: <one sentence>`", code)
+        self.assertIn("most steps have none", code)
         self.assertIn("do not run /session-handoff", code)
         self.assertNotIn("STOP:", code)
         self.assertNotIn("$", code)

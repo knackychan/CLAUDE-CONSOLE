@@ -222,6 +222,16 @@ def reply_question(text: str) -> str:
     return "" if question.rstrip(".").lower() in _NO_QUESTION else redact.clip(redact.mask(question), 200)
 
 
+_LESSON = re.compile(r"^[\s`*>\-]*Lesson:\**\s*(.+?)[\s`*]*$", re.M)
+
+
+def lesson_of(block: str) -> str:
+    """The last `Lesson: <one sentence>` line of a handoff block (plan 22); "" for none or `Lesson: none`."""
+    found = _LESSON.findall(str(block or ""))
+    text = found[-1].strip() if found else ""
+    return "" if text.rstrip(".").lower() in _NO_QUESTION else text
+
+
 def note_file(task: dict, step: dict) -> str:
     return f"steps/{step['n']:02d}-{step['kind']}.md"
 

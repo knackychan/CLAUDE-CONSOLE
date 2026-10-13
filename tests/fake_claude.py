@@ -12,6 +12,7 @@ Run (--input-format stream-json): per user message prints init / assistant / res
   The echo quotes the step prompt's own HANDOFF template lines ("> HANDOFF"), so a step has no block by default.
   "HANDOFF-OK" in the message: the assistant text ends with a valid HANDOFF block.
   "HINT-OPUS" with it: the block's Next ends with `Next model: opus/high` (a hint for the step after).
+  "LESSON" with it: the block's Next carries a `Lesson:` line (plan 22).
   "VERDICT-PASS" / "VERDICT-FAIL" in the message: it ends with a `VERDICT: PASS` / `VERDICT: FAIL x` line;
   VERDICT-FAIL also waits 1 s before the result line (a test appends the verdict event meanwhile).
   "STOP-ASK" in the message: the assistant text ends with `STOP: which file?`.
@@ -83,6 +84,8 @@ def reply(text):
         block = HANDOFF_BLOCK
         if "HINT-OPUS" in text:  # the note asks the next step up: `Next model:` inside the block's Next
             block = block.replace("\nGo on\n", "\nGo on\nNext model: opus/high\n")
+        if "LESSON" in text:  # the step's Lesson line, inside the block's Next
+            block = block.replace("\nGo on\n", "\nGo on\nLesson: fake claude teaches one thing\n")
         body += "\n\n" + block
     if "VERDICT-PASS" in text:
         body += "\nVERDICT: PASS"

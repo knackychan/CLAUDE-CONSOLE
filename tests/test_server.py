@@ -798,6 +798,17 @@ class TaskServerTest(RunServerTest):
         """advance() until the task has `state` and its brief thread is over."""
         return self.until(tid, lambda t: t["state"] == state and not t.get("briefing"), f"the task is {state}")
 
+    def test_a_step_lesson_lands_in_lessons_md(self):
+        tid = self.make_task(words="HANDOFF-OK LESSON", steps=[{"kind": "scout", "goal": "look"}])  # no edit: no verify
+        self.settled(tid)
+        lines = levers.read_lessons(self.folder, "proj")
+        self.assertEqual(len(lines), 1, lines)
+        self.assertTrue(lines[0].endswith(" - proj - scout: fake claude teaches one thing"), lines[0])
+        self.assertEqual(levers.read_lessons(self.folder, "other"), [])
+        tid = self.make_task(words="HANDOFF-OK", steps=[{"kind": "scout", "goal": "look"}])
+        self.settled(tid)
+        self.assertEqual(len(levers.read_lessons(self.folder, "proj")), 1)  # no Lesson line: nothing added
+
     def over(self, tier):
         """A budget() with every rung of the tier over its pace."""
         return lambda: {rung: 0.9 for rung in self.hub.cfg["ladder"][tier]}

@@ -691,6 +691,9 @@ class Hub:
         self.sync_costs(task)
         if action in ("next", "fix", "done"):
             tasks.write_note(self.folder, task, cs, block)
+            lesson = tasks.lesson_of(block)
+            if lesson:  # plan 22: one line per step that taught something, read by the rules review
+                levers.add_lesson(self.folder, levers.lesson_line(task["project"], cs["kind"], lesson, now))
         if action == "fix":
             levers.add_miss(self.folder, task["miss"])
         if action in ("next", "fix", "done"):

@@ -25,5 +25,6 @@ What you learned or did, in a few lines, with the file paths and line numbers th
 - a question the next step or Fred must settle, or: - (none)
 ## Next
 One line for the next step. Add `Next model: <haiku|sonnet|opus>/<low|medium|high>` only when the next step
-needs more than planned.
+needs more than planned. Add `Lesson: <one sentence>` only when something transferable surprised you, what you
+would tell someone starting this kind of step tomorrow; most steps have none, so leave the line out rather than pad.
 END HANDOFF
