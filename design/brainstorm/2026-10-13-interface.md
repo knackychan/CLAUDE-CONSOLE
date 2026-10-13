@@ -28,7 +28,8 @@ colour: orange stays "needs you", unknown stays unknown.
 - Tokens, type and the cell motif of Console Cells; all styling in `web/style.css`; no build step.
 - Orange only for "needs you" (a question, a replan to confirm, a handed-off note to start, a model over its
   pace that the router leaves); red and green only for state; blue for a note being written. State is never
-  colour alone: glyph or sprite plus word.
+  colour alone: glyph or sprite plus word. Two tokens exist for the chat alone (ID-8): `--me` (violet,
+  Fred's turns) and `--ai` (the writing blue, the agent's turns); they colour nothing else.
 - One Doto figure per screen. Every quantity in cells. An unknown is a word, never a zero (D-3).
 - Motion: the running puzzle and the waiting `?` (plan 21), the one blinking cell on the live step; nothing
   else moves by itself. All off under reduced motion.
@@ -125,6 +126,23 @@ are buttons, Tab reaches them).
   task. Verify, Hand off, Escalate and Terminal off with `claude only`. A task step keeps `a task step: use
   the task's levers`.
 
+### 6.1 Chat turns (Fred, 2026-10-13: less clutter, the two sides obvious, an accent each)
+
+Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the peek card's reply):
+
+- **Two sides**: the agent's turns are bubbles on the left (`.turn.claude`, at most 82 % wide, a 2 px
+  `--ai` edge on the left, a 9 % `--ai` tint over the raised surface, the label `Claude` or the harness's
+  name in `--ai`); Fred's turns are bubbles on the right (`.turn.you`, a 2 px `--me` edge on the right, an
+  11 % `--me` tint, the label `You` in `--me`, right-aligned). Text stays left-aligned inside both.
+- **Tool events fold**: a run of consecutive tool events (file_change, command_execution, Read, Bash, Grep)
+  becomes one centred quiet row, `3 tool events · file_change, command_execution · exit 1`, a failed exit in
+  red; click or Space opens the list in place, muted mono, and the choice holds for that chat.
+- **The HANDOFF block folds**: the last turn shows a chip `HANDOFF block · 412 w · six headings` and the
+  Next line; the six headings live in the Note tab (Board) or the Task page's brief block.
+- **Writing**: a live turn carries `· writing` and the one blinking cell in its label; no extra line.
+- **Source line** on top, unchanged: harness, thread or session id, events, ended or running.
+- Nothing else in the window uses `--me` or `--ai`.
+
 ## 7. Task page (compact)
 
 - **Head**: `Board` button in the `where` row (native only; hidden when the window cannot resize).
@@ -179,11 +197,11 @@ word cell = 50 w`).
 - **A step**: head (sprite, `NN kind`, rung, cost, time, context, in / out; Open chat, Stop while live,
   Open try 1 after a failed attempt), then four tabs, **Chat first** (Fred, 2026-10-13: the chat has
   priority over what it read and what it wrote):
-  - **Chat**: the step session's chat as the session page's Chat tab shows it (`runs.chat`): the source
-    line (harness, thread or session, events, ended or running), the turns in words (You, Claude or the
-    harness's name), the tool events as muted notes (`command_execution · py -m unittest … · exit 0`), the
-    HANDOFF block as the last turn; a running step streams, newest at the end, with the one blinking cell on
-    the writing line, and the pane follows the end until Fred scrolls up.
+  - **Chat**: the step session's chat as the session page's Chat tab shows it (`runs.chat`), in the
+    chat grammar of section 6.1: the source line, the agent's turns as bubbles on the left, Fred's on the
+    right, the tool events folded into one row per run of them, the HANDOFF block as a chip with its Next
+    line; a running step streams, newest at the end, with the writing mark in the agent's label, and the pane
+    follows the end until Fred scrolls up.
   - **Note**: what it wrote, the HANDOFF block as six blocks (Goal and Troubleshooting with a green edge and
     `never cut`), then **Facts the service added** (dashed box: `git diff --stat <start>..<end>`, the test
     command's result lines). A running step says `Writing. The note shows here when the run ends`; a
@@ -263,11 +281,14 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | ID-4 | How the Board opens | A button that widens the window and opens the page, size kept in window.json; never by dragging alone |
 | ID-5 | Cells of a brief and a note | 1 cell = 50 words, 10 cells = `brief_max_words` 500; a note over 500 words shows 10 cells plus the figure |
 | ID-6 | Cells of a fill | 20 cells = the window's allowance (day, week or month), 1 cell = 5 %; the orange outline cell marks the pace |
+| ID-8 | Chat roles: Fred asked for an accent per side | Two tokens for the chat only, `--me` violet (Fred, right) and `--ai` the writing blue (the agent, left), tinted bubbles with a 2 px edge; tool events and the HANDOFF block folded (6.1) |
 | ID-7 | The replan wait | A task `waiting` (orange) on the Task page, the Board and the list card, with the plan before and after; Confirm plan, Keep old plan (runs Prep's steps), Stop |
 
 ## 13. History
 
 - 2026-10-13 - Written from `web/app.js`, plan 5 (reviewed), plan 17 and the brainstorm; mockup rendered at
   400 and 900 px in headless Chromium, dark and light, no horizontal overflow, no script error.
+- 2026-10-13 - Fred: less clutter in the chat, the two sides obvious, an accent each: section 6.1 (bubbles left and
+  right, `--me` and `--ai`, folded tool rows, the HANDOFF chip), ID-8.
 - 2026-10-13 - Fred: the chat has priority over what it read and what it wrote. The step inspector now opens
   on a Chat tab; Note, Brief and Route are the tabs behind it (8.3); a "Step running" view added to the mock.

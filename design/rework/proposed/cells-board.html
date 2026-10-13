@@ -11,7 +11,7 @@
    Tokens, type and cell motif are the locked Console Cells / Cells Drawer ones (web/style.css). */
 :root {
   --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
-  --edge: rgb(255 255 255 / 6%); --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a; --wip: #7aa7ff; --on-you: #1a0d00; --on-ok: #04180e;
+  --edge: rgb(255 255 255 / 6%); --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a; --wip: #7aa7ff; --me: #c4a7ff; --ai: #7aa7ff; --on-you: #1a0d00; --on-ok: #04180e;
   --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
   --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
@@ -20,11 +20,11 @@
 }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
   --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
-  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
+  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --me: #6a48c9; --ai: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
   --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
 :root[data-theme="light"] {
   --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
-  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
+  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --me: #6a48c9; --ai: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
   --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
 
 * { box-sizing: border-box; }
@@ -283,14 +283,25 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px var(--ink); }
 .tabs .n { font: 11px var(--mono); }
 .pane { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 12px 12px; scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
-.chat { display: grid; gap: 12px; }
-.turn { display: grid; gap: 3px; }
+/* chat turns (Fred, 2026-10-13): the agent on the left with the --ai edge, Fred on the right with the --me edge, both as
+   tinted bubbles; tool events fold into one quiet row between them; the HANDOFF block folds to a chip and its Next line */
+.chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.turn { display: grid; gap: 3px; max-width: 82%; min-width: 0; padding: 7px 10px 8px; border-radius: 8px; background: var(--raise); }
 .turn p { margin: 0; font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-.turn.you { padding-left: 9px; border-left: 2px solid var(--line); }
-.turn.you > .lbl, .turn.claude > .lbl { justify-self: start; padding: 1px 7px; border-radius: 4px; }
-.turn.you > .lbl { background: var(--ink); color: var(--win); }
-.turn.claude > .lbl { background: var(--off); color: var(--ink); }
-.turn.note p { color: var(--mut); font: 12px var(--mono); }
+.turn > .lbl { padding: 0; letter-spacing: .06em; }
+.turn.claude { justify-self: start; border-top-left-radius: 2px; background: color-mix(in srgb, var(--ai) 9%, var(--raise)); box-shadow: inset 2px 0 0 var(--ai); }
+.turn.claude > .lbl { color: var(--ai); }
+.turn.you { justify-self: end; border-top-right-radius: 2px; background: color-mix(in srgb, var(--me) 11%, var(--raise)); box-shadow: inset -2px 0 0 var(--me); }
+.turn.you > .lbl { color: var(--me); justify-self: end; }
+.turn > .lbl .cells { display: inline-grid; grid-template-columns: 6px; vertical-align: -1px; margin-left: 6px; }
+.turn .hchip { display: inline-flex; gap: 6px; align-items: center; justify-self: start; font: 500 10.5px/16px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; margin: 2px 0; }
+.turn .hchip b { color: var(--ink); font-weight: 400; }
+.tools { justify-self: center; display: inline-flex; gap: 6px; align-items: center; font: 10.5px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 10px; padding: 1px 9px; cursor: pointer; max-width: 100%; }
+.tools:hover { color: var(--ink); border-color: var(--ink); }
+.tools span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tools .car { font-size: 9px; }
+.tlist { display: grid; gap: 2px; padding: 0 6px; font: 11px/1.5 var(--mono); color: var(--mut); overflow-wrap: anywhere; }
+.tlist .r { color: var(--bad); }
 .chat .src { font: 11px var(--mono); color: var(--mut); margin: 0; }
 .log { display: grid; gap: 1px; }
 .log > div { display: grid; grid-template-columns: 19px 58px 80px minmax(0, 1fr); gap: 8px; align-items: center; font: 11.5px/19px var(--mono); color: var(--mut); font-variant-numeric: tabular-nums; }
@@ -518,7 +529,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       <h3>Design read</h3>
       <p>Reading this as: the same always-on-top companion, now watching a chain of steps that may run on four CLIs, for one developer who wants to see where the tokens go and which model he is wearing out. Dials unchanged: ENERGY 2 / RHYTHM 2 / MOTION 2.</p>
       <ul>
-        <li><b>Nothing new in colour.</b> Orange is "needs you" (a replan to confirm, a question, a model over its pace that the router will leave). Red and green are state (FAIL, done). Blue stays the note being written. A harness has no colour: the rung is words, <code>codex · gpt-5.6-codex · medium</code>.</li>
+        <li><b>Two new tokens, for the chat only.</b> Orange is "needs you" (a replan to confirm, a question, a model over its pace that the router will leave). Red and green are state (FAIL, done). Blue stays the note being written. A harness has no colour: the rung is words, <code>codex · gpt-5.6-codex · medium</code>. The chat adds <code>--me</code> (violet, Fred's turns) and <code>--ai</code> (the writing blue, the agent's turns), used nowhere else (ID-8).</li>
         <li><b>One Doto figure per screen:</b> the task's cost on the Board head, today's spend on the list, the month on Usage.</li>
         <li><b>Every quantity is cells:</b> context in 10K cells, briefs and notes in cells of 50 words, fills in 5 % cells against an allowance, FAIL rate in four tones. Unknown is unknown: no cells and the word, never a zero.</li>
         <li><b>Motion:</b> the one blinking cell on the live step; the running puzzle and the waiting <code>?</code> as plan 21 made them. Nothing on the Board moves by itself except the live step.</li>
@@ -548,7 +559,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>The inspector: one picked thing</h3>
       <ul>
-        <li><b>A step:</b> head (number, kind, rung, cost, time, context, in / out; Open chat, Stop while live), then four tabs with <b>Chat</b> first (Fred, 2026-10-13): the step session's last turns in words, the tool events as muted notes, the HANDOFF block as the last turn, streaming while the step runs with the one blinking cell. <b>Note</b>: what it wrote, the HANDOFF block as six blocks (Goal and Troubleshooting carry a green edge: never cut), then the facts the service added (git diff --stat between the start and end commits, the failing lines of the last test command). <b>Brief</b>: what it read, six headings. <b>Route</b>: the goal, the route notes as chips in the order <code>step_route</code> applied them (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback), the attempts with their reason. The tab holds while Up / Down move along the chain.</li>
+        <li><b>A step:</b> head (number, kind, rung, cost, time, context, in / out; Open chat, Stop while live), then four tabs with <b>Chat</b> first (Fred, 2026-10-13): the step session's last turns as bubbles, the agent on the left with the blue edge, Fred on the right with the violet edge; consecutive tool events fold into one quiet row between them (click opens the list, a failed exit shows in red); the HANDOFF block folds to a chip with its word count and its Next line, the six headings being the Note tab; a running step streams with the writing mark in the agent's label. <b>Note</b>: what it wrote, the HANDOFF block as six blocks (Goal and Troubleshooting carry a green edge: never cut), then the facts the service added (git diff --stat between the start and end commits, the failing lines of the last test command). <b>Brief</b>: what it read, six headings. <b>Route</b>: the goal, the route notes as chips in the order <code>step_route</code> applied them (rule, pick, demand, floor, hint, cap, budget, balance, harness fallback), the attempts with their reason. The tab holds while Up / Down move along the chain.</li>
         <li><b>A brief:</b> two columns, raw note and brief, the cut lines struck through on the left, the checks under them in words (length, questions kept, Goal and Troubleshooting whole, continuity with the previous Files touched, no invented path, the Haiku cost).</li>
         <li><b>A task:</b> prompt.md, Open questions with the step that opened and the step that closed each one, the chain log.</li>
         <li><b>Nothing picked</b> (keyboard Esc inside the Board, or a folded task): the inspector shows the measure table of the picked task's project, brief in against context reached per kind.</li>
@@ -584,6 +595,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
         <tr><td>ID-5</td><td>Cells of a brief</td><td>1 cell = 50 words, 10 cells = brief_max_words 500; a note over 500 words shows 10 cells plus the figure</td></tr>
         <tr><td>ID-6</td><td>Fills: cells of what</td><td>20 cells = the allowance of the window (day, week or month); 1 cell = 5 %; the orange outline cell marks the pace</td></tr>
         <tr><td>ID-7</td><td>The replan wait</td><td>Waits on the Task page and the Board as a task "waiting" (orange), with the before / after plan; Confirm plan, Keep plan (runs the old steps), Stop</td></tr>
+        <tr><td>ID-8</td><td>Chat roles (Fred asked for an accent per side)</td><td>Two tokens for the chat only: <code>--me</code> violet for Fred's turns on the right, <code>--ai</code> the writing blue for the agent's turns on the left; tinted bubbles with a 2 px edge; nowhere else in the window</td></tr>
       </table>
     </section>
     <section>
@@ -738,11 +750,32 @@ const CHAT = {  // the step session's chat, as the session page's Chat tab shows
     ["claude", "test_resume_command asserts the options before the subcommand and the trailing \"-\". The fix covers the FAIL detail. Checking that the fake's fixture still ends with a result line before I write the verdict …"]] },
 };
 let itab = "chat";  // the step inspector's tab: chat | note | brief | route
+function toolsRow(list) {  // consecutive tool events fold into one row; click opens them
+  const kinds = [...new Set(list.map((t) => t.split(" · ")[0]))].join(", ");
+  const bad = list.some((t) => /exit [1-9]/.test(t));
+  return `<button class="tools" data-tools aria-expanded="false"><span>${list.length} tool ${list.length === 1 ? "event" : "events"} · ${esc(kinds)}${bad ? ' · <span class="r">exit 1</span>' : ""}</span><span class="car">▾</span></button>
+    <div class="tlist" hidden>${list.map((t) => `<span${/exit [1-9]/.test(t) ? ' class="r"' : ""}>${esc(t)}</span>`).join("")}</div>`;
+}
 function chatHtml(c, s) {
   if (!c) return `<p class="note m">${s.state === "planned" ? "Not started: the chat shows here as the step runs." : "The chat of this step; the mock has it on 03 code and 5c verify."}</p>`;
-  const turn = ([role, text]) => role === "note" ? `<div class="turn note"><p>${esc(text)}</p></div>`
-    : `<div class="turn ${role}"><span class="lbl">${role === "you" ? "You" : s.harness === "claude" ? "Claude" : s.harness[0].toUpperCase() + s.harness.slice(1)}</span><p>${esc(text)}</p></div>`;
-  return `<div class="chat"><p class="src">${esc(c.src)}</p>${c.turns.map(turn).join("")}${c.live ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>writing</span></div>' : ""}</div>`;
+  const who = s.harness === "claude" ? "Claude" : s.harness[0].toUpperCase() + s.harness.slice(1);
+  const out = [];
+  let notes = [];
+  const flush = () => { if (notes.length) { out.push(toolsRow(notes)); notes = []; } };
+  c.turns.forEach(([role, text], k) => {
+    if (role === "note") { notes.push(text); return; }
+    flush();
+    const last = k === c.turns.length - 1;
+    const lbl = `<span class="lbl">${role === "you" ? "You" : who}${c.live && last ? ' · writing<span class="cells"><i class="f live"></i></span>' : ""}</span>`;
+    if (text.startsWith("HANDOFF")) {  // the block folds to a chip and its Next line: the Note tab has the six headings
+      const next = (text.match(/## Next\n([^\n]*)/) || [, ""])[1];
+      out.push(`<div class="turn ${role}">${lbl}<span class="hchip">HANDOFF block · <b>${s.out} w</b> · six headings in the Note tab</span><p>Next: ${esc(next)}</p></div>`);
+      return;
+    }
+    out.push(`<div class="turn ${role}">${lbl}<p>${esc(text)}</p></div>`);
+  });
+  flush();
+  return `<div class="chat"><p class="src">${esc(c.src)}</p>${out.join("")}</div>`;
 }
 function inspStep(t, s) {
   const [word, tn] = WORD[s.state] || WORD.running;
@@ -1007,15 +1040,13 @@ function sessionHtml() {
           <span><small>context</small><span class="cx"><span class="unk">unknown</span></span></span>
           <span><small>session</small><b>6m 13s</b></span><span><small>events</small><b>31</b></span></span></button></div>
       <div class="proc"><div class="tabs"><button aria-selected="true">Chat</button><button aria-selected="false">Steps <span class="n">31</span></button></div>
-        <div class="pane"><div class="chat"><p class="src">codex exec --json · the final agent_message, then the tool events the stream names</p>
-          <div class="turn you"><span class="lbl">You</span><p>Goal: the Codex adapter of plan 5 Task 2, test first …</p></div>
-          <div class="turn note"><p>command_execution · py -m unittest tests.test_harness -q · exit 0</p></div>
-          <div class="turn claude"><span class="lbl">Codex</span><p>HANDOFF
-## Goal
-Harness adapters: Codex exec and the Steps tab. This step: console/harness/codex.py …
-## Findings
-- codex exec - reads the prompt on stdin; options stand before the subcommand …
-END HANDOFF</p></div></div></div></div></div>
+        <div class="pane"><div class="chat"><p class="src">codex exec --json · thread 019a3f… · 31 events · ended 14:19:48</p>
+          <div class="turn you"><span class="lbl">You</span><p>Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events. What the earlier steps left you (brief of 02, 310 words) …</p></div>
+          <div class="turn claude"><span class="lbl">Codex</span><p>I mirrored claude_cli.run_command and runs._watch for the stream handling. A Codex turn ends with turn.completed, so is_result matches that event.</p></div>
+          <button class="tools" data-tools aria-expanded="false"><span>3 tool events · file_change, command_execution · <span class="r">exit 1</span></span><span class="car">▾</span></button>
+          <div class="tlist" hidden><span>file_change · tests/fake_codex.py (new)</span><span class="r">command_execution · py -m unittest tests.test_harness -q · exit 1 · 2 failures</span><span>file_change · console/harness/codex.py</span></div>
+          <div class="turn claude"><span class="lbl">Codex</span><p>Two failures in test_resume_command: the options go before the subcommand. Moved them; 23 tests pass.</p></div>
+          <div class="turn claude"><span class="lbl">Codex</span><span class="hchip">HANDOFF block · <b>412 w</b> · six headings</span><p>Next: 04 test: run tests/test_harness.py on the real codex exe … Next model: read</p></div></div></div></div></div>
     <div class="levers"><div class="lr"><input aria-label="Follow-up" placeholder="Follow-up (codex exec resume, same thread)"><button class="btn">Attach</button><button class="btn go">Continue</button></div>
       <div class="lr"><button class="btn">Mark done</button><button class="btn">Brief a new task</button></div>
       <div class="say">Verify, Hand off, Escalate, Terminal off: claude only · a task step: use the task's levers for Stop</div></div><span class="rsz"></span></div>`;
@@ -1045,8 +1076,8 @@ function usageHtml() {
 }
 
 const CAP = {
-  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: head, then each step as a block with its state, kind, rung, cost, context cells, brief-in and note-out cells and attempts; the briefs are the connectors; the fix insert is the bracket under the failed verify. Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost is exact from the usage Codex reports. Right, the inspector opens on the step's <b>Chat</b>: the last turns in words, the tool events as muted notes, the HANDOFF block as the last turn. Note (what it wrote, six headings with Goal and Troubleshooting edged green, then the facts the service added), Brief (what it read) and Route (the goal, the route notes as chips, the attempts) are the tabs behind it. Tasks B and C are folded rows above and below.",
-  live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the one blinking cell on the writing line. Note says the note is being written; Stop sits in the head. Up / Down along the chain switches the inspector and keeps the tab.",
+  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: head, then each step as a block with its state, kind, rung, cost, context cells, brief-in and note-out cells and attempts; the briefs are the connectors; the fix insert is the bracket under the failed verify. Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost is exact from the usage Codex reports. Right, the inspector opens on the step's <b>Chat</b>: the agent's turns on the left (blue edge), Fred's on the right (violet edge), the tool events folded into one row each (click to open), the HANDOFF block as a chip with its Next line. Note (what it wrote, six headings with Goal and Troubleshooting edged green, then the facts the service added), Brief (what it read) and Route (the goal, the route notes as chips, the attempts) are the tabs behind it. Tasks B and C are folded rows above and below.",
+  live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the writing mark with the one blinking cell in the agent's label. Note says the note is being written; Stop sits in the head. Up / Down along the chain switches the inspector and keeps the tab.",
   conn: "<b>Board, the brief after step 03 picked.</b> Raw note on the left with the two Findings lines Haiku cut struck through, the brief on the right as step 04 read it, and the code checks under them: length, questions kept, Goal and Troubleshooting whole, continuity with the previous Files touched, no invented path. The cut shows as a tone step on the chip's cells and the words \"cut 122 w\", not as orange (ID-1).",
   task: "<b>Board, the task head picked.</b> The inspector shows prompt.md, the running list of open questions (which step opened each, which closed it; the open ones carry the orange ?) and the chain log, one line per move with the route notes. Stop and Pause sit in the head.",
   replan: "<b>Board, a replan waiting.</b> Task B is the picked one now: its scout asked for a replan, the Haiku pass added two steps, and the task waits (orange, as every wait for Fred). The inspector carries the plan before and after, the added steps marked, and Confirm plan / Keep old plan / Stop. The same box appears on the compact Task page and the list card carries the same two buttons.",
@@ -1056,7 +1087,7 @@ const CAP = {
   tpage: "<b>Compact Task page.</b> Each step row gains one line under its name: brief in, context reached (15 cells, the hand-off zone past 150K in orange) and note out as cells with their figures; \"scout first\" on a step that read little and reached much; \"unknown\" where the harness reports no context. The Board button sits in the head. The brief block ends with the facts the service appended (diff stat, test lines).",
   settings: "<b>Settings popover.</b> Under the project groups, Harnesses: one row per CLI with glyph and state word, the probed version, and Turn on / Turn off, pending until the service answers; claude is always on; cmd is on but not found and says where to set its exe. Then Window runs with the auto hand off switch (ID-2).",
   prep: "<b>Prep page.</b> Every model select lists tiers as groups (think / write / read) with rungs on any harness that is on; opencode and cmd rungs only under read, and only on rows whose kind is a read kind. Row 5 shows a refused pick: the note in red and the select back to auto. The route line says what balancing did and that Codex has no cap but the step timeout.",
-  session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the note line names the Codex thread and that Steps come from the stream; the brief says context unknown in words with no cells; tabs Chat and Steps only; Continue resumes the thread, the other levers are off with \"claude only\".",
+  session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the note line names the Codex thread and that Steps come from the stream; the brief says context unknown in words with no cells; tabs Chat and Steps only, the Chat with the same bubbles and folded tool rows as the Board; Continue resumes the thread, the other levers are off with \"claude only\".",
   usage: "<b>Usage page.</b> Two new blocks after the head: Models, one row per model with day / week / month bars of 20 cells, the pace as an orange outline cell and the share of pace as the figure (orange over pace; hatched bars with \"no allowance\"); and the Verify FAIL rate by hour heatmap, rows per rung, 24 columns, four red tones, hover for the count. The calendar and columns stay as locked.",
 };
 function show(v) {
@@ -1074,6 +1105,13 @@ document.addEventListener("click", (e) => {  // picking on the Board: step or br
   if (!p) return;
   const k = p.dataset.pick;
   if (k === "s3") show("step"); else if (k === "s5c") show("live"); else if (k === "c3") show("conn"); else if (k === "ta") show("task"); else if (k === "s2") show("replan");
+});
+document.addEventListener("click", (e) => {  // a folded tool row opens in place
+  const t = e.target.closest("[data-tools]");
+  if (!t) return;
+  const open = t.getAttribute("aria-expanded") !== "true";
+  t.setAttribute("aria-expanded", String(open));
+  t.nextElementSibling.hidden = !open;
 });
 let curView = "step";
 document.addEventListener("click", (e) => {  // the inspector's tabs
