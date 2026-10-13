@@ -84,6 +84,7 @@ let scope = "";          // the project folder the list shows ("" = all projects
 let project = "";        // where a new task runs (window.json, through /api/draft)
 let effortPick = "auto"; // the slider: auto (the rules pick per step) or one level for every step (window.json)
 let card = null;        // the Prep card on screen
+let reviewCard = null;  // the rules review on screen (plan 22); it uses the Prep page section
 let busy = "";           // what the compose box waits for ("" = nothing)
 let fail = null;         // {title, msg, retry} shown above the compose box
 let draft = "";
@@ -644,17 +645,25 @@ const prepSeen = new Set();  // a Prep row grows in once, the first time it is p
 function prepJobHtml(j) {
   const where = esc(projectName(j.project_dir)), id = esc(j.id), grow = prepSeen.has(j.id) ? "" : " grow";
   prepSeen.add(j.id);
+  const isReview = j.kind === "review", name = isReview ? "Review rules" : "Prep";
   if (j.state === "running") {
-    return `<div class="card${grow}" style="cursor:default"><div class="l1"><span class="st n">&#9676; Prep</span><span class="t">${esc(j.raw)}</span>
+    return `<div class="card${grow}" style="cursor:default"><div class="l1"><span class="st n">&#9676; ${name}</span><span class="t">${esc(j.raw)}</span>
       <span class="age m">${ago(snap.now - j.ts)}</span></div>
-      <span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>Haiku is reading ${where}, 10 to 30 s</span></div>`;
+      <span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>Haiku is reading ${where}${isReview ? "'s rules" : ""}, 10 to 30 s</span></div>`;
   }
   if (j.state === "failed") {
-    return `<div class="card r${grow}" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">Prep: ${esc(j.raw)}</span></div>
+    return `<div class="card r${grow}" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">${name}: ${esc(j.raw)}</span></div>
       <div class="m mut">${esc(j.error)}</div><div class="lr"><button class="btn go sm" data-prep="${id}" data-pdo="retry">Try again</button>
-      <button class="btn sm" data-prep="${id}" data-pdo="edit">Edit</button><button class="btn sm" data-prep="${id}" data-pdo="drop">Dismiss</button></div></div>`;
+      ${isReview ? "" : `<button class="btn sm" data-prep="${id}" data-pdo="edit">Edit</button>`}<button class="btn sm" data-prep="${id}" data-pdo="drop">Dismiss</button></div></div>`;
   }
-  const c = j.card, goal = c.fields.goal || c.raw;
+  const c = j.card;
+  if (isReview) {
+    const n = c.proposals.length, what = n ? `${n} proposal${n === 1 ? "" : "s"}` : "nothing to change";
+    return `<div class="card${grow}" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Review ready: " + what)}">
+      <div class="l1"><span class="st g">&#9654; Review ready</span><span class="t">${esc(c.summary || what)}</span><span class="age m">${ago(snap.now - c.ts)}</span></div>
+      <div class="l2 m"><span class="who">${where} · ${what} · ${c.misses} misses, ${c.lessons} lessons read</span><span class="cost">${money(c.cost)}</span></div></div>`;
+  }
+  const goal = c.fields.goal || c.raw;
   return `<div class="card${grow}" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Prep ready: " + goal)}">
     <div class="l1"><span class="st g">&#9654; Ready to run</span><span class="t">${esc(goal)}</span><span class="age m">${ago(snap.now - c.ts)}</span></div>
     <div class="l2 m"><span class="who">${where}<span class="route"> · ${esc(modelText(c.route.model, c.route.effort))}</span>${j.attached.length ? ` · ${j.attached.length} file${j.attached.length === 1 ? "" : "s"}` : ""}</span>
@@ -664,10 +673,24 @@ function prepJobHtml(j) {
 async function prepJob(id, what) {
   const j = preps().find((x) => x.id === id);
   if (!j) return;
+  if (j.kind === "review") {
+    if (what === "open") { if (j.card) { card = null; reviewCard = j.card; showReview(); } return; }
+    if (what === "retry") await startReview(j.project_dir);
+    await dropPrep(id);
+    return;
+  }
   if (what === "open") { if (j.card) { card = j.card; showPrep(); } return; }
   if (what === "retry") await startPrep(j.project_dir, j.raw, [], id);  // the new job takes the old one's files first
   await dropPrep(id);
   if (what === "edit") { putBack(j.raw); if (j.attached.length) filesNotKept(); }
+}
+
+async function startReview(projectDir) {  // Haiku reads the project's rules, the misses and the lessons; nothing is written
+  try { await api("/api/review", { project_dir: projectDir }); }
+  catch (e) { fail = { title: "Review did not start", msg: e.message, retry: "" }; }
+  card = null;
+  reviewCard = null;
+  showPage("list");
 }
 
 function jobFiles(id) { const j = preps().find((x) => x.id === id); return j ? j.attached.length : 0; }
@@ -973,7 +996,8 @@ function showPrep() {
       <select id="p-effort" aria-label="Effort">${options(cfg.efforts, effortPick !== "auto" ? effortPick : card.route.effort)}</select>
       <span class="m mut">${esc(card.route.type)}</span></div>
       ${card.reason ? `<div class="mut">${esc(card.reason)}</div>` : ""}
-      ${floorText(card.route.type, "runs") ? `<div class="m mut">${esc(floorText(card.route.type, "runs"))}</div>` : ""}</div>
+      ${floorText(card.route.type, "runs") ? `<div class="m mut">${esc(floorText(card.route.type, "runs"))}</div>` : ""}
+      <div class="lr"><button class="btn sm" data-pact="review" title="Haiku reads this project's CLAUDE.md and rules files, the routing misses and the lessons, and proposes what to cut or add. Nothing is written.">Review rules</button></div></div>
     <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
       <div id="p-steps">${steps.map(stepRowHtml).join("") || '<p class="m mut" data-nosteps>Prep proposed no steps. Add steps to run this as a task.</p>'}</div>
       <div class="m mut">Run as task: each step's model comes from its kind (auto) or the model you pick on its row, not from the Run route above. A verify step runs one model above the step it checks.</div>
@@ -988,6 +1012,31 @@ function showPrep() {
   stepsChanged();
   showPage("prep");
   $("p-prompt").focus();
+}
+
+const REVIEW_KIND = { remove: "Remove", demote: "Demote to a procedure", rule: "New rule", procedure: "New procedure", keep: "Keep as is" };
+function showReview() {  // the Prep page section, with proposals instead of a card; Copy puts a line on the clipboard
+  const c = reviewCard, items = c.proposals;
+  $("crumb").textContent = "Review / " + projectName(c.project_dir);
+  const one = (p, k) => `<div class="blk"><div class="hd"><span class="lbl">${esc(REVIEW_KIND[p.kind] || p.kind)}${p.target ? " · " + esc(p.target) : ""}</span>
+      ${p.text ? `<button class="btn sm" data-pact="copy" data-k="${k}">Copy</button>` : ""}</div>
+    ${p.text ? `<div class="text m">${esc(p.text)}</div>` : ""}
+    ${p.why ? `<div class="mut">${esc(p.why)}</div>` : ""}
+    ${p.sources.length ? `<div class="m mut">from: ${p.sources.map(esc).join(" · ")}</div>` : ""}</div>`;
+  $("pscroll").innerHTML = `
+    <div class="blk"><span class="lbl">Project</span><div class="proj m"><b>${esc(projectName(c.project_dir))}</b> <span class="mut">${esc(c.project_dir)}</span></div></div>
+    <div class="blk"><span class="lbl">Summary</span><div class="text">${esc(c.summary || "(none)")}</div></div>
+    ${items.length ? items.map(one).join("") : '<p class="m mut">Nothing to change: the rules read fine against the misses and the lessons.</p>'}
+    <div class="m mut">Proposals only: nothing was written. Paste what you agree with into CLAUDE.md or a skill yourself.</div>
+    <div class="m mut">Review $${Number(c.cost).toFixed(3)} · ${c.turns} turns · ${c.misses} misses, ${c.lessons} lessons read</div>`;
+  $("pbar").innerHTML = `<div class="lr"><button class="btn" data-pact="rdrop">Dismiss</button><button class="btn" data-pact="back">Back</button></div><div id="p-msg" class="say"></div>`;
+  showPage("prep");
+}
+
+async function copyText(button) {
+  const p = reviewCard.proposals[Number(button.dataset.k)], msg = $("p-msg");
+  try { await navigator.clipboard.writeText(p.text); setHtml(msg, "copied"); }
+  catch (e) { setHtml(msg, '<span class="r">the clipboard is not reachable here: select the text and copy it</span>'); }
 }
 
 function stepList() {  // the rows as the page shows them (the order is the chain's); empty goals drop out
@@ -1013,6 +1062,12 @@ async function runAsTask(c, button) {
 }
 
 async function prepAct(name, button) {  // Run drops the card's job in the service; Run raw, Edit and Cancel drop it here
+  if (reviewCard && !card) {  // the Review page (plan 22) shares this section
+    if (name === "back") { reviewCard = null; showPage("list"); }
+    if (name === "rdrop") { dropPrep(reviewCard.id); reviewCard = null; showPage("list"); }
+    if (name === "copy") copyText(button);
+    return;
+  }
   if (busy || !card) return;
   const c = card;
   if (name === "addstep") {
@@ -1042,6 +1097,7 @@ async function prepAct(name, button) {  // Run drops the card's job in the servi
   if (name === "back") { card = null; showPage("list"); }
   if (name === "edit") { card = null; const had = jobFiles(c.id); await dropPrep(c.id); putBack(c.raw); if (had) filesNotKept(); }
   if (name === "cancel") { card = null; dropPrep(c.id); showPage("list"); }
+  if (name === "review") startReview(c.project_dir);
 }
 
 // -- session page ------------------------------------------------------------------------
@@ -1053,7 +1109,7 @@ function noteLine(s) {  // one muted line, only when there is something to say
     out.push(`△ ${s.denials.length} denied (${esc(d.tool)} ${esc(d.what)}${more}), the run still finished`);
   }
   if (s.handoff_hint) out.push(`<span class="${s.group === "needs" ? "y" : ""}">↻ hand off: ${s.ctx_tone === "red" ? "the context is large" : s.follow_ups + " follow-ups"}, one task = one chat</span>`);
-  if (s.rules_warn) out.push(`△ rules: ${esc(s.rules_warn)}`);
+  if (s.rules_warn) out.push(`△ rules: ${esc(s.rules_warn)}${s.project_dir ? ' · <span class="link" data-act="review" title="Haiku proposes what to cut; nothing is written">Review</span>' : ""}`);
   if (s.delegate_hint) out.push(`⇢ delegate? ${s.reads} reads in the main chat this turn`);
   if (s.two_writers) out.push("△ 2 writers: another session edits files in this repo");
   if (s.escalated) out.push(`↑ escalated ${esc(s.escalated)}`);
@@ -1327,6 +1383,7 @@ let stopTimer = null;
 async function act(name, button) {
   const s = current();
   if (!s) return;
+  if (name === "review") return startReview(s.project_dir);
   if (name === "stop" && !button.dataset.armed) {  // two clicks: a stopped turn is lost work
     button.dataset.armed = "1";
     button.textContent = "Stop run? Click again";
