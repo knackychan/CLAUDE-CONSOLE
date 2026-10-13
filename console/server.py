@@ -464,7 +464,7 @@ class Hub:
         """tasks.step_route for step `s`, with everything it reads: the checked step, the misses, the last note."""
         return tasks.step_route(
             s["kind"], pick=s["pick"], checked=tasks.checked_route(task, s), demand=task["demand"],
-            misses=levers.read_misses(self.folder, task["project"]),
+            misses=routing.fresh(levers.read_misses(self.folder, task["project"]), self.cfg["miss_floor_days"]),
             prev=tasks.read_note(self.folder, task, task["last_good"]),
             budget=self.tier_budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"])
 

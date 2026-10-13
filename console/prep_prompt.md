@@ -57,7 +57,7 @@ keep, done_when, last_decisions, question, route, reason, steps. A text field wi
 is never left out; with no open question write "question": "" and with nothing to split write "steps": []. `route` is always an object with
 type, reasoning, volume, model and effort; never put type, reasoning, volume, model or effort at the top level.
 
-Routing misses in this project (Escalate wrote them; newest last):
+Routing misses in this project $window(Escalate wrote them; newest last):
 $misses
 
 Request:

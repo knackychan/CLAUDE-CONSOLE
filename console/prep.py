@@ -38,10 +38,12 @@ class PrepError(Exception):
     pass
 
 
-def build_prompt(raw: str, misses=()) -> str:
-    """The Prep instructions with Fred's request and this project's routing misses filled in."""
+def build_prompt(raw: str, misses=(), days: float = 0) -> str:
+    """The Prep instructions with Fred's request and this project's routing misses filled in; `days` names
+    the window the misses were kept from (0: not named)."""
+    window = f"in the last {days:g} days " if days else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
-        raw=raw.strip(), misses="\n".join(misses) or "(none)")
+        raw=raw.strip(), misses="\n".join(misses) or "(none)", window=window)
 
 
 def format_prompt(fields: dict) -> str:
@@ -86,8 +88,9 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, pre
     """Blocking (about 10-30 s; the service runs it in a job thread). Saves preps/<id>.json and returns
     the card; `prep_id` is the job's id, so the card and its job share one name."""
     cmd = claude_cli.prep_command(exe, cfg["prep_model"], SCHEMA)
-    misses = levers.read_misses(folder, Path(project_dir).name)
-    prompt = build_prompt(raw, misses)
+    days = cfg.get("miss_floor_days", 0)
+    misses = routing.fresh(levers.read_misses(folder, Path(project_dir).name), days)
+    prompt = build_prompt(raw, misses, days)
     try:
         out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"),
                              capture_output=True, timeout=cfg["prep_timeout_s"], env=claude_cli.child_env(),

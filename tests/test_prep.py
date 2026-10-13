@@ -119,6 +119,26 @@ class PrepTest(unittest.TestCase):
         self.assertIn("never say the task needs a model", text)
         self.assertIn("each step's model comes from its kind", text)
 
+    def test_build_prompt_names_the_miss_window(self):
+        self.assertIn("Routing misses in this project in the last 14 days (Escalate wrote them; newest last):\n(none)",
+                      prep.build_prompt("x", days=14))
+        self.assertIn("Routing misses in this project (Escalate wrote them; newest last):", prep.build_prompt("x"))
+
+    def test_run_prep_reads_only_fresh_misses(self):
+        from console import levers, routing
+        with tempfile.TemporaryDirectory() as tmp:
+            folder, project = Path(tmp) / "home", Path(tmp) / "proj"
+            project.mkdir()
+            old = "- 2020-01-01 - proj - mechanical: sonnet/low failed (x); next time start at opus/high."
+            levers.add_miss(folder, old)
+            cfg = dict(copy.deepcopy(paths.DEFAULTS), miss_floor_days=14)
+            card = prep.run_prep(cfg, folder, str(project), "fix add", FAKE)
+            self.assertEqual((card["route"]["model"], card["route"]["effort"]), ("sonnet", "low"))  # no floor
+            self.assertEqual(card["floors"], {})
+            card = prep.run_prep(dict(cfg, miss_floor_days=0), folder, str(project), "fix add", FAKE)
+            self.assertEqual(card["floors"], {"mechanical": {"route": "opus/high", "date": "2020-01-01"}})
+            self.assertEqual((card["route"]["model"], card["route"]["effort"]), ("opus", "high"))
+
 
 if __name__ == "__main__":
     unittest.main()

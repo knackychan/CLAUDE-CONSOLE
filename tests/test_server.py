@@ -747,6 +747,15 @@ class TaskServerTest(RunServerTest):
                          [("", "haiku", "low"), ("sonnet", "sonnet", "high"), ("", "opus", "high")])
         self.assertIn("floor code: opus/high -> pick sonnet/high kept", task["steps"][1]["notes"])
 
+    def test_old_miss_is_no_floor_for_a_step(self):
+        old = "- 2020-01-01 - proj - code: sonnet/medium failed (x); next time start at opus/high."
+        levers.add_miss(self.folder, old)
+        card = self.prep_card()
+        self.assertEqual(card["floors"], {})
+        task = self.until(self.make_task(), self.at(2), "the code step starts")
+        self.assertEqual((task["steps"][1]["model"], task["steps"][1]["effort"]), ("sonnet", "medium"))
+        self.assertFalse(any(n.startswith("floor") for n in task["steps"][1]["notes"]))
+
     def test_missing_handoff_retries_once_then_stuck(self):
         tid = self.make_task(words="")
         first = self.hub.tasks[tid]["steps"][0]["session"]
