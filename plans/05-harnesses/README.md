@@ -10,7 +10,9 @@ signatures, the data shapes, the tests with what they assert, and the ordered st
 task is executed, test first, and placed one task at a time (test + commit). Anything that could drift from the
 design is pinned in section 3 (the contract) and in each task's "Drift guards".
 
-**State: written 2026-10-13 (this chat), Tasks 1 to 7 to execute. Start state: 328 tests OK on `master`.**
+**State: written 2026-10-13, reviewed the same day against the code, D-1 to D-8 and Fred's pasted `--help`
+outputs (section 6 lists what the review changed). Tasks 1 to 7 to execute. Start state: 328 tests OK on `master`
+(Windows; Linux discovers 326).**
 
 ## 1. Tasks, in order
 
@@ -41,6 +43,9 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 | 8 | Stop | An adapter without an interrupt is stopped with `claude_cli.kill_tree` (the tree, so the model's child commands end too); the rule "Stop is the stream-json interrupt, never a kill of a run this service owns" holds for Claude runs, and this is the one documented exception for harnesses that have no interrupt |
 | 9 | Self-updates | Command Code updated itself during a `--help` call: every `cmd` command gets `--no-auto-update`, and the probe records each harness's version at every service start |
 | 10 | What a non-Claude session shows | Chat from the adapter's stream (final text, tool events where the adapter knows them), no Steps from hooks (the hooks are Claude Code's), gauge from the adapter's usage or none, levers Continue (where the adapter resumes) and Stop only; Verify, Handoff, Escalate and Open in terminal are off with the reason `claude only` |
+| 11 | Cheap tier only (D-2) | An `opencode` or `cmd` rung is offered and accepted only where the step's rule tier is `haiku` (`tasks.RULES[kind][0] == "haiku"`: scout, search, draft, proofread, edit, test) and on a plain Run; never on `verify`, `fix` or a `sonnet` / `opus` kind. A refused pick says `opencode: read steps only (cheap tier)` |
+| 12 | A pick whose harness went off | A task step whose pick names a harness that is off or not found when the step starts runs on Claude's rung of the pick's tier, with the route note `harness: codex off -> sonnet` (brainstorm 3.1: off rungs never route, the tier falls back to Claude). A plain Run Fred points at such a rung is refused (409), never moved |
+| 13 | Which harness a later turn uses | The run meta's `harness`, always: Continue, a STOP answer, a retry and Stop read it from the meta; only a new run takes `harness` from its caller |
 
 ## 3. The contract (what every task must keep)
 
@@ -52,6 +57,13 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 - A **tier** is a Claude alias from `claude_cli.MODELS` (`haiku`, `sonnet`, `opus`, `fable`). `claude_cli.tier_of`
   gives a non-Claude rung's tier from config (3.2); `claude_cli.known_model` accepts a rung whose harness is on and
   found and whose model is listed.
+- `claude_cli.model_alias` (and `alias()` in `web/app.js`) returns `""` for any string with a harness prefix: an
+  OpenCode id such as `opencode:openrouter/anthropic/claude-sonnet-4-6` contains `sonnet`, and today's substring
+  match would read it as a Claude pick in `tasks.step_route`, the Fable checks and the composer. Every caller that
+  ranks a rung goes through `tier_of(rung, cfg)`.
+- A task step stores the whole rung in `s["model"]` (`codex:gpt-5.6-codex`), its tier in `s["tier"]` (as
+  `Hub.start_step` already does) and `s["harness"]`; `tasks.checked_route` reads `tier`, so Verify and Fix rank a
+  harness step by its tier with no change there.
 
 ### 3.2 config.json
 
@@ -89,7 +101,8 @@ INTERRUPT: bool                True when stop() interrupts over stdin (Claude); 
 RESUME: bool                   True when a session can be continued (all four)
 HOOKS: bool                    True when the Claude Code hooks log this harness's events (Claude only)
 
-find_exe(cfg: dict) -> str | None          the adapter's section of cfg["harnesses"] decides; the real exe, not a shim
+find_exe(cfg: dict) -> str | None          the adapter's section of cfg["harnesses"] decides; the real exe when it
+                                           can be found, else the shim (see "Shims" below)
 version_command(exe: list) -> list         prints the version and exits; no model call, no network beyond auth
 run_command(exe: list, model: str, effort: str, cwd: str, session_id: str, *, prompt: str, resume: bool = False,
             fork: str = "", read_only: bool = False, budget: float = 0.0, max_turns: int = 0,
@@ -102,7 +115,16 @@ summary(lines: list) -> dict               {"final": str, "subtype": str, "cost"
 chat(lines: list, cwd: str) -> list        runs.chat items (role you / claude / tool / result / note) from the stream
 stop(proc) -> str                          "interrupt" (wrote one on stdin) or "kill" (killed the tree)
 terminal_command(exe: list, session_id: str, model: str, effort: str) -> list | None
+env(read_only: bool) -> dict               variables added to claude_cli.child_env() for this run ({} for Claude)
 ```
+
+**Shims.** On Windows the npm installs of Codex, OpenCode and Command Code put a `.cmd` batch shim on PATH. A batch
+file re-parses its arguments through `cmd.exe` (the reason `claude_cli.find_exe` never runs `claude.cmd`): a prompt
+in argv with a newline, `&`, `|`, `%` or a quote is cut or reinterpreted, and the shim caps the line at 8191
+characters. So a prompt never goes in argv through a shim: Codex reads it on stdin, OpenCode reads it from a file
+(3.4), Command Code passes it to `-p` only when its exe is not a `.cmd` / `.bat` (else `RunError("cmd: only the
+npm .cmd shim was found; set \"exe\" under harnesses.cmd to the real executable")`; Task 7 item 4 records where
+the real one is). The fixed flags may pass through a shim.
 
 `effort` is a Claude effort word (`low` .. `max`); an adapter maps it to its own scale and drops what it has no
 flag for (OpenCode: `#variant` in the model string from `effort_variant`, 3.4). `read_only` replaces Claude's
@@ -120,13 +142,17 @@ it) and gains nothing but the rung helpers (`split_rung`, the config-aware `tier
 
 | | Codex CLI 0.162.1 | OpenCode (version: Task 7 adds it) | Command Code 1.81.0 (`cmdc`; help says `cmd`) |
 |---|---|---|---|
-| Command | `codex exec -` (prompt on stdin), `-C <cwd>`, `--skip-git-repo-check`, `--json`, `-o <file>` (the last message), `-m <model>`, `-c model_reasoning_effort="<low|medium|high>"` (the `-c key=value` form is checked; the key name is from the Codex config docs, confirmed at the live check), `-s read-only` or `-s workspace-write`, `--add-dir` not used, `--ephemeral` not used (a step may resume) | `opencode run --standalone --format json --auto -m <provider/model#variant> <message...>` (no stdin flag, no `--dir`: cwd is the process cwd); `--title <name>`; `--session <id>` `--fork` for a resume or a copy | `cmdc -p "<query>" --output-format json --no-auto-update --skip-onboarding --no-skills -m <model> --effort <low|medium|high> --max-turns <n>`; `--permission-mode plan` (read only) or `accept-edits`; `-n <name>`; `--session <id>` `--fork-session` for a resume or a copy |
+| Command | `codex exec -` (prompt on stdin), `-C <cwd>`, `--skip-git-repo-check`, `--json`, `-o <file>` (the last message), `-m <model>`, `-c model_reasoning_effort="<low|medium|high>"` (the `-c key=value` form is checked; the key name is from the Codex config docs, confirmed at the live check), `-s read-only` or `-s workspace-write`, `--add-dir` not used, `--ephemeral` not used (a step may resume). Options always stand before the subcommand, as the help's `codex exec [OPTIONS] <COMMAND> [ARGS]` says: `codex exec <options> resume <id> -` | `opencode run --standalone --format json --auto -m <provider/model#variant> --file <runs/<sid>.prompt.md> "Do the task in the attached file."` (no stdin flag, no `--dir`: cwd is the process cwd; the prompt file is written by `runs` under the data folder, never by the adapter); `--title <name>`; `--session <id>` `--fork` for a resume or a copy; env `OPENCODE_DISABLE_AUTOUPDATE=1` always, `OPENCODE_PERMISSION` denying `edit` and `bash` on read-only steps (both on the opencode.ai CLI docs' env list; the permission JSON is confirmed at the live check) | `cmdc -p "<query>" --output-format json --no-auto-update --skip-onboarding --no-skills -m <model> --effort <low|medium|high> --max-turns <n>`; `--permission-mode plan` (read only) or `accept-edits`; `-n <name>`; `--session <id>` `--fork-session` for a resume or a copy |
 | Effort | `low`, `medium`, `high`; `xhigh` and `max` become `high` | `effort_variant` in config per model (`{"deepseek/deepseek-v4-flash": {"low": "", "high": "thinking"}}`); no entry: no `#variant` | `low`, `medium`, `high`; `xhigh` and `max` become `high` ("depends on the model": a model that refuses it fails on the first request) |
-| Resume | `codex exec resume <SESSION_ID> -` | `--session <id>` | `--session <id>` or `-r <id>` |
-| Fork | `codex exec fork <SESSION_ID> -` | `--session <id> --fork` | `-r <id> --fork-session` |
+| Resume | `codex exec <options> resume <SESSION_ID> -` | `--session <id>` | `--session <id>` or `-r <id>` |
+| Fork | `codex exec <options> fork <SESSION_ID> -` | `--session <id> --fork` | `-r <id> --fork-session` |
 | Caps | none (`step_timeout_s`) | none (`step_timeout_s`) | `--max-turns`; exit code 8 = cap hit |
 | Stop | kill the tree | kill the tree | kill the tree |
-| Stream | JSONL: `thread.started` (thread id), `turn.started`, `item.completed` with `item.type == "agent_message"` (the final text), `turn.completed` with `usage` {input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens}, `turn.failed`, `error` (shapes from the docs; recorded at the live check) | `--format json`: raw events, shape unknown until the live check; the adapter keeps every line and takes the last text of an assistant part as the final message | NDJSON events then one final result line (shape unknown until the live check) |
+| Stream | JSONL: `thread.started` (thread id), `turn.started`, `item.completed` with `item.type == "agent_message"` (the final text), `turn.completed` with `usage` {input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens}, `turn.failed`, `error` (shapes from the docs; recorded at the live check). The usage is the turn's total over all its model calls, and `cached_input_tokens` is part of `input_tokens` (the docs' sample: 24763 input, 24448 cached): it is spend, not the context size, so it never feeds the gauge | `--format json`: raw events, shape unknown until the live check; the adapter keeps every line and takes the last text of an assistant part as the final message | NDJSON events then one final result line (shape unknown until the live check) |
+
+Command Code's `--permission-mode plan` is its read-only mode, but a plan mode may end the turn on a plan
+waiting for approval instead of the findings a scout owes: Task 7 item 4 checks it, and the fallback is
+`accept-edits` with the step prompt's no-edit rule, as OpenCode without the permission variable.
 
 Where a shape is unknown the adapter's first version is defensive: `summary()["final"]` is the longest text field
 of the last event that has one, `cost` and `tokens` are `None` (shown unknown), and Task 7 pins the real shape
@@ -136,12 +162,20 @@ from one recorded run in `tests/fixtures/<harness>-run.jsonl`.
 
 - `RunManager.start(...)` gains `harness: str = "claude"`. The run meta gains `harness` and `harness_session`
   (the adapter's own id from `summary()`, `""` for Claude where it is the same id). The `run_started` line gains
-  `harness`. A resume of a non-Claude run passes `harness_session` as the id to resume.
+  `harness`. A resume reads the harness from the old meta and ignores the argument (decision 13: `Hub.pull`'s
+  Continue and every STOP answer call `start` with no harness) and passes `harness_session` as the id to resume;
+  a fork likewise reads the forked run's meta.
+- stdin: an adapter with `INTERRUPT` false gets its stdin closed once the prompt bytes are written, or at once
+  when it has none (OpenCode, Command Code): a CLI that reads piped stdin when it is not a terminal would
+  otherwise wait for an EOF that never comes. Claude keeps stdin open for the interrupt, as today.
 - The stream file `runs/<sid>.jsonl` holds the adapter's stdout lines as they are, after the `cc_prompt` line the
   service writes (unchanged). Non-JSON lines come back as `{"raw": text}` (unchanged).
 - `_watch` ends the run when `is_result` matches a line or the process exits; with `CAPS` false and
   `step_timeout_s` passed, a run older than that is stopped with the adapter's `stop` and its `run_ended` carries
-  `subtype: "error_step_timeout"`, which `tasks.cap_reason` turns into `it hit the step timeout (1800 s)`.
+  `subtype: "error_step_timeout"`, which `tasks.cap_reason` turns into `it hit the step timeout (1800 s)`. The meta
+  records `timed_out: true`, because the chain reads the subtype from `Hub.final_message`, not from `run_ended`.
+- `summary()` and `chat()` read the lines of the current turn: from the meta's `offset` (after this turn's
+  `cc_prompt`), as `reconcile` does, never the whole file of a resumed session.
 - `run_ended` gains `tokens` when the adapter reported them. `cost` is left out (not `0`) when unknown (D-3).
 - `stop(sid)`: a live process goes through the adapter's `stop`; a run of an earlier service is killed as today.
 - `chat(path, cwd)` dispatches on the meta's harness through the adapter's `chat`.
@@ -153,7 +187,14 @@ from one recorded run in `tests/fixtures/<harness>-run.jsonl`.
   `source = window`. With no hook lines the row's state follows the run: `Running` while `run_live`, then `Idle` /
   `Done` from `run_ended` as an Interrupted or Failed run does today (`State` reads `run_ended` already).
 - The row carries `harness` (`"claude"` for every session the hooks report). The gauge uses `tokens.context` from
-  `run_ended` when a non-Claude run reports it, else the row has no gauge (`context_tokens` `None`).
+  `run_ended` only when an adapter reports a true context size (none of the three does yet: Codex's usage is a
+  turn's spend), else the row has no gauge (`ctx_tokens` `None`, the field `State` already has).
+- Cost: `Session.cost` is a float that `run_ended` adds to. A run_ended with no `cost` key sets
+  `Session.cost_unknown`; the row's `cost` and `spent` are `None` when it is set and nothing priced was added
+  (D-3). `tasks.step_cost` already reads `None` as 0 for the sum; the Task page shows a step whose attempts are
+  all unpriced as `cost unknown`.
+- An error subtype on `run_ended` of a non-Claude session sets `failed` (`{"error": subtype, "details": ""}`), so
+  the row is Failed; a Claude row keeps getting `failed` from its hook only, as today.
 - `Hub.levers(sid)` returns `claude only` for `verify`, `handoff`, `escalate`, `terminal` on a non-Claude session;
   `continue` is on when the adapter's `RESUME` is true and the run is not live; `stop` as today.
 
@@ -164,7 +205,8 @@ from one recorded run in `tests/fixtures/<harness>-run.jsonl`.
 - `POST /api/harness {"name", "on"}` flips one harness (`paths.set_harness`), re-probes it, and returns the new
   `harnesses` dict. `claude` cannot be turned off (400, `Prep and the brief pass run on Claude`).
 - Rung selects (`modelOptions` in `web/app.js`) list, after Claude's ladder, each harness that is on and found as a
-  group: `codex · gpt-5.6-codex`, value `codex:gpt-5.6-codex`. `modelText` shows a non-Claude rung as
+  group: `codex · gpt-5.6-codex`, value `codex:gpt-5.6-codex`; `opencode` and `cmd` rungs only on the Run route and
+  on step rows whose kind's rule tier is `haiku` (decision 11). `modelText` shows a non-Claude rung as
   `codex · gpt-5.6-codex` (no version lookup).
 - The settings popover (the project picker's popover, under the Runs allowed groups) gets a Harnesses block: one
   row per name with its state word (`on`, `off`, `not found`), the version, and a switch button (`Turn on` /
@@ -179,6 +221,9 @@ from one recorded run in `tests/fixtures/<harness>-run.jsonl`.
 - A harness that is off or not found never appears in a select, never routes, and `known_model` refuses its rungs.
 - `claude_cli.MODELS` and `EFFORTS` are unchanged; a tier is always one of them.
 - No emojis or em-dashes in any text the window shows or the plan writes.
+- No worktree flag on any harness (Codex `--worktree`, Command Code `-w` / `--worktree`): worktree management is a
+  BRAINSTORM non-goal. No `--cloud` (Command Code) and no `--oss` / `--local-provider` (Codex) either.
+- No prompt in argv through a `.cmd` / `.bat` shim (3.3, Shims).
 
 ## 4. Config keys added (`paths.DEFAULTS`)
 
@@ -187,3 +232,45 @@ from one recorded run in `tests/fixtures/<harness>-run.jsonl`.
 | `harnesses` | the 3.2 block with every harness but `claude` off | `harness.find_exe`, the probe, `known_model`, the window |
 | `step_timeout_s` | 1800 | `RunManager._watch` for adapters with `CAPS` false |
 | `effort_variant` | `{}` | the OpenCode adapter (`{model: {effort: variant}}`) |
+
+## 5. Not in this plan
+
+The brainstorm's section 9 put two more items in plan 5. They are moved, so this plan stays the adapters:
+
+- The context pack lite from Prep's citations (brainstorm 5.1 item 3): Prep's schema and step 1's prompt, no
+  harness involved. Its own small plan (the brainstorm allows "plan 5 or a small plan of its own").
+- The Usage mix with other harnesses: pricing adapter tokens needs a price row per non-Claude model and the fills
+  of plan 18; here a non-Claude run's tokens are kept on `run_ended` so plan 18 can count them from the first run.
+- The step prompt (`console/step_prompt.md`) still says "The Agent tool is not available here" and `Next model:
+  <haiku|sonnet|opus>`; both are harmless to another CLI (it has no Agent tool, and a hint names a tier). Plan 23
+  rewrites the prompt for the six-heading block and can make the wording neutral then.
+
+## 6. Review, 2026-10-13
+
+A second pass checked this plan against the code on `master`, D-1 to D-8 and Fred's pasted `--help` outputs.
+What it changed, by where it was found:
+
+- **Contradicted D-2**: Task 6 offered `opencode` and `cmd` rungs on every select; D-2 refuses them above the read
+  tier. Decision 11, Tasks 5 and 6.
+- **Would crash or misroute in the chain**: a harness pick reached `tasks.step_route` through `model_alias`, which
+  returns `""` for `codex:...` (the pick was silently dropped) and `sonnet` for an OpenCode id that contains it.
+  `_route_for` now passes the pick's tier, `start_step` checks `tier_of(pick, cfg)`. Section 3.1, Task 5.
+- **Resumed on the wrong CLI**: `Hub.pull` (Continue, STOP answers) calls `runs.start` with no harness, so the
+  default `claude` would have resumed a Codex thread id with `claude --resume`. Decision 13, 3.5, Task 4.
+- **Timeout never reached the retry reason**: `Hub._ended` takes the subtype from `final_message`, not from
+  `run_ended`. 3.5 (`timed_out` in the meta), Task 5.
+- **Wrong context figure**: `input + cached + output` of Codex's `turn.completed` counts the cache twice and is
+  a turn's spend over many calls, not the context. 3.4, 3.6, Task 2.
+- **Codex resume command**: options after `resume` are not what the help shows. 3.4, Task 2.
+- **Hung runs**: stdin stayed open for OpenCode and Command Code. 3.5, Task 4.
+- **Prompt through npm shims**: argv prompts through `opencode.cmd` / `cmdc.cmd` are re-parsed by `cmd.exe`. 3.3
+  Shims; OpenCode reads a prompt file, Command Code refuses a shim. Tasks 3 and 4.
+- **Self-update**: OpenCode updates itself too; `OPENCODE_DISABLE_AUTOUPDATE=1`. Read-only OpenCode steps get a
+  permission variable instead of an agent Fred must define. 3.3 `env`, 3.4, Task 3.
+- **State facts**: the row field is `ctx_tokens`, not `context_tokens`; `Session.cost` is a float that cannot be
+  `None`; nothing in `State` turns an error `run_ended` into Failed. 3.6, Task 4.
+- **Counts**: Task 1 listed nine tests and counted ten; Task 4 counted the existing suite as a test. Counts
+  redone in each task.
+- **Moved out**: context pack lite and the Usage mix (section 5).
+- **Rule order**: the CLAUDE.md lines on window-run commands and Stop are changed in Task 1, before the code that
+  needs them, not at the close (Task 7); the Stop exception (decision 8) is Fred's to confirm.

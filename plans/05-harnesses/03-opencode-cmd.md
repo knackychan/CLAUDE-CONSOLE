@@ -15,22 +15,28 @@ NAME = "opencode"; EXE_NAMES = ("opencode.exe", "opencode.cmd", "opencode"); TIE
 CAPS = False; INTERRUPT = False; RESUME = True; HOOKS = False
 
 run_command(exe, model, effort, cwd, session_id, *, prompt, resume=False, fork="", read_only=False, budget=0.0,
-            max_turns=0, name="", variants=None) -> (list, None)
+            max_turns=0, name="", variants=None, prompt_file="") -> (list, None)
     variant = (variants or {}).get(effort, "")          variants = cfg["effort_variant"].get(model) (runs passes it)
     m = model + ("#" + variant if variant else "")
-    cmd = exe + ["run", "--standalone", "--format", "json", "--auto", "-m", m]
+    cmd = exe + ["run", "--standalone", "--format", "json", "--auto", "-m", m, "--file", prompt_file]
     if name: cmd += ["--title", name]
     if fork: cmd += ["--session", fork, "--fork"]      elif resume: cmd += ["--session", session_id]
-    cmd += [prompt + claude_cli.STOP_FOOTER]
+    cmd += [MESSAGE]                                   MESSAGE = "Do the task in the attached file."
     return cmd, None
+env(read_only) -> dict
+    {"OPENCODE_DISABLE_AUTOUPDATE": "1"} plus, when read_only,
+    {"OPENCODE_PERMISSION": json.dumps({"edit": "deny", "bash": "deny", "webfetch": "deny"})}
 ```
 
-- The message is the last argument (no stdin flag on this version). A prompt is a few KB at most (the step prompt
-  plus a 500-word brief): under the Windows command-line limit of 32 K characters; `runs` refuses a longer prompt
-  for this adapter with `RunError("prompt too long for opencode (N chars)")` (Task 4) rather than cutting it.
-- `read_only` has no flag: the step prompt already forbids edits on read kinds, and the adapter adds
-  `--agent console-read` only when `harness.section(cfg, "opencode").get("read_agent")` names one Fred defined in
-  OpenCode's own config (a note on the settings row says how; nothing is written to OpenCode's config by the console).
+- The prompt (with the STOP footer) is in `prompt_file`, which `runs.start` writes as `runs/<sid>.prompt.md`
+  before the spawn (Task 4); argv carries one fixed sentence. No stdin flag in this version, and an argv prompt
+  through the npm `opencode.cmd` shim is re-parsed by `cmd.exe` (README 3.3, Shims). `prompt_file` empty raises
+  `ValueError` (a programming error, never a run).
+- `read_only` has no flag: `env` sets `OPENCODE_PERMISSION` (on the opencode.ai CLI docs' env list) so `--auto`,
+  which approves "permissions that are not explicitly denied", meets an explicit deny. Task 7 item 5 checks that
+  an edit is refused; if the variable's JSON shape differs, the step prompt's no-edit rule is the only guard and
+  the History says so. Nothing is written to OpenCode's own config.
+- `OPENCODE_DISABLE_AUTOUPDATE=1` on every run and on the probe: OpenCode updates itself as Command Code does.
 - `--standalone`: a private server per run, so a step never depends on OpenCode's background service.
 - cwd: the process cwd (no `--dir` on this version).
 
@@ -53,7 +59,7 @@ terminal_command(...) -> None
 ## `console/harness/cmd.py`
 
 ```text
-NAME = "cmd"; EXE_NAMES = ("cmdc.exe", "cmdc.cmd", "cmdc", "cmd.cmd")   never bare "cmd": that is Windows' shell
+NAME = "cmd"; EXE_NAMES = ("cmdc.exe", "cmdc", "cmdc.cmd")   never "cmd" or "cmd.cmd": `cmd` is Windows' shell
 TIERS = ("haiku",); CAPS = True; INTERRUPT = False; RESUME = True; HOOKS = False
 EFFORT = codex.EFFORT (same map)
 
@@ -66,13 +72,20 @@ run_command(exe, model, effort, cwd, session_id, *, prompt, resume=False, fork="
     if name: cmd += ["-n", name]
     if fork: cmd += ["-r", fork, "--fork-session"]      elif resume: cmd += ["--session", session_id]
     return cmd, None
+    a `.cmd` / `.bat` exe[0] raises ValueError with the README 3.3 message (Shims): the query is in argv;
+    `runs.start` turns it into RunError (adapters do not import `runs`)
 version_command(exe) -> list   exe + ["--no-auto-update", "-v"]
+env(read_only) -> dict         {}
 ```
 
 - `accept-edits` accepts file edits; whether shell commands still prompt in `-p` mode is for the live check (Task 7
   item 3): if they do, a `test` or `code` step on cmd cannot run its checks, and the rule becomes `--yolo` for
   those kinds only, with Fred's word first. The plan does not pick `--yolo` by default.
-- `-p` with the query as its argument (the same command-line limit and `RunError` as OpenCode).
+- `-p` with the query as its argument: never through a shim; `runs` refuses a prompt over 30 000 characters for
+  it (the Windows command line is 32 767). Whether `-p` with no query reads stdin is Task 7 item 4; if it does, the
+  adapter moves the prompt to stdin and both refusals go.
+- `--permission-mode plan` on read-only steps may end the turn on a plan instead of the findings (README 3.4);
+  Task 7 item 4 checks a scout on it.
 
 ```text
 is_result(line) -> bool      the final result line: a line with "type" == "result" or with a top-level "result"
@@ -88,7 +101,7 @@ chat / stop / terminal_command as OpenCode's (terminal: None)
 ## The fakes
 
 `tests/fake_opencode.py`: parses `run`, `--format json`, `-m`, `--session`, `--fork`, `--title`, takes the message
-as the last argument; prints `{"type": "session.created", "sessionID": "oc_fake"}`, one
+as the last argument and the prompt from the `--file` path (exit 2 when `--file` is missing); prints `{"type": "session.created", "sessionID": "oc_fake"}`, one
 `{"type": "tool", "tool": "read", "title": "calc.py"}`, one `{"type": "text", "part": {"text": "<echo> ..."}}`, then
 `{"type": "session.idle"}`. Words: `HANDOFF-OK`, `SLOW`, `STOP-ASK` as `fake_codex`; `FAIL` exits 1 after the text.
 `--version` prints `0.0.0-fake`.
@@ -103,8 +116,9 @@ refuse to run when `--no-auto-update` is missing (exit 2), which pins decision 9
 ## Tests
 
 `OpenCodeTest`: `test_command_shape` (`run --standalone --format json --auto -m deepseek/x#thinking` with
-`variants={"high": "thinking"}` and `effort="high"`; no `#` without a variant; the message last and ending with the
-STOP footer; `--session id` on resume; `--session id --fork` on fork; stdin None), `test_summary_defensive`
+`variants={"high": "thinking"}` and `effort="high"`; no `#` without a variant; `--file <prompt_file>`; the fixed
+message last; no prompt text in argv; `--session id` on resume; `--session id --fork` on fork; stdin None;
+`env(True)` has both variables, `env(False)` only the update one), `test_summary_defensive`
 (the fake's lines plus `cc_exit 0` give the echo as `final`, `subtype success`, `session_id oc_fake`, `tokens None`;
 `cc_exit 1` gives `error`), `test_chat_items` (`[tool, claude, result]`), `test_fake_end_to_end`,
 `test_tiers_and_flags` (`TIERS == ("haiku",)`, `CAPS False`).
@@ -112,7 +126,7 @@ STOP footer; `--session id` on resume; `--session id --fork` on fork; stdin None
 `CmdTest`: `test_command_shape` (`-p <query>` first, `--output-format json`, `--no-auto-update`,
 `--skip-onboarding`, `--no-skills`, `-m`, `--effort high` for `max`, `--permission-mode plan` when read only else
 `accept-edits`, `--max-turns 15` when given, `-n name`, `--session id`, `-r id --fork-session`),
-`test_exe_names_never_bare_cmd` (`"cmd" not in EXE_NAMES`, `"cmd.exe" not in EXE_NAMES`), `test_summary_and_cap`
+`test_exe_names_never_bare_cmd` (`"cmd"`, `"cmd.exe"`, `"cmd.cmd"` not in EXE_NAMES; `run_command(["x/cmdc.cmd"], ...)` raises ValueError), `test_summary_and_cap`
 (the fake's lines plus `cc_exit 0`: `final` is the result text, `tokens["input"] == 500`; `cc_exit 8` with no result
 line: `subtype == "error_max_turns"`, `exit_cap True`), `test_version_command_has_no_auto_update`,
 `test_fake_end_to_end` (including `MAXTURNS` -> returncode 8, and a run without `--no-auto-update` -> returncode 2),

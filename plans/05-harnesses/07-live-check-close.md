@@ -16,13 +16,22 @@
    prompt). Expected: a session row with `codex · <model> · medium`, Chat with the agent text and the tool events,
    `run_ended` with `tokens`, the levers bar with Verify / Hand off / Escalate / Open in terminal off (`claude only`).
    Copy `runs/<sid>.jsonl` to `tests/fixtures/codex-run.jsonl` (mask anything personal; the fixture is small).
+   Then Continue on the same row with `Now say what sub() does.`: the second turn runs as `codex exec <options>
+   resume <thread> -` and answers in the same thread (note whether `-m` / `-s` given before `resume` were kept).
+   Note which exe the probe found: `codex.exe` from the npm package's vendor folder, or the `codex.cmd` shim.
 4. The same on `cmd:<model>` with `--permission-mode accept-edits` as the adapter sends it, prompt
    `Run py -m unittest discover -s tests and report the summary line.` Expected: the result line in the stream;
    if the run shows a permission prompt or ends without running the command, note it: that is the open fact of
    Task 3 (shell commands under `accept-edits` in `-p` mode) and the rule becomes `--yolo` for `test` steps only,
-   with Fred's word. Copy the stream to `tests/fixtures/cmd-run.jsonl`.
-5. The same on `opencode:<model>` with a read-only prompt. Note the event shapes; copy to
-   `tests/fixtures/opencode-run.jsonl`.
+   with Fred's word. Copy the stream to `tests/fixtures/cmd-run.jsonl`. Also note: where the real `cmdc`
+   executable is (if only `cmdc.cmd` is on PATH the run is refused by design: set `exe`), whether `cmdc -p` with
+   no query reads a piped prompt (`echo hi | cmdc -p --output-format json --no-auto-update`), and what a scout
+   step on `--permission-mode plan` returns: findings, or a plan waiting for approval (then read-only steps on cmd
+   use `accept-edits` and the History says so).
+5. The same on `opencode:<model>` with a read-only prompt (it reads `--file`). Note the event shapes and
+   `opencode --version`; copy to `tests/fixtures/opencode-run.jsonl`. Then a scout step on it whose goal asks it to
+   create `probe.txt`: with `OPENCODE_PERMISSION` denying edits the file is not created; if it is, the History
+   records that read-only OpenCode steps rest on the prompt alone.
 6. A task from the Prep card with a scout step picked on `codex:<model>` and a code step on Claude: the chain
    runs through, the scout's HANDOFF block parses, the brief pass runs, the code step reads it. The Task page shows
    the harness on the scout row.
@@ -49,9 +58,7 @@
   (`opencode run`) and Command Code (`cmdc`) are later adapters; their flags and output formats are not checked yet"
   with the four adapters and a pointer to `plans/05-harnesses/README.md` 3.4; the Claude Code commands table keeps
   its place.
-- `CLAUDE.md` rules: the line "Window runs: commands come only from console/claude_cli.py" becomes "commands come
-  only from the adapters in console/harness/ (claude_cli.py for Claude Code)"; the Stop line gains "; a harness
-  with no interrupt is stopped by killing its process tree (plan 05 decision 8)".
+- `CLAUDE.md` rules: already changed in Task 1 step 0; check they still read as written there.
 - This README's state line: `done <date>`.
 - Commit: `docs: plan 05 closed (harness adapters live)`.
 

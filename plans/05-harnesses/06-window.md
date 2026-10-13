@@ -9,10 +9,15 @@
 
 - `alias(model)` / `modelText(model, effort)`: a rung with a colon splits into `(h, m)` and shows `${h} · ${m}` plus
   ` · ${effort}` as today, with no version lookup; `version()` returns `""` for it. `fableName` unchanged.
-- `modelOptions(withAuto)`: after Claude's ladder groups, one `<optgroup label="codex">` per harness in
-  `cfg.harnesses` that is `on && found` and has models, one option per model with value `h:m` and text `h · m`.
-  Every listed model is offered on every select, whatever the kind: Fred's pick holds (2026-10-13) and the route
-  notes say what tier it maps to. `#p-model` (the Run route) lists them all.
+- `modelOptions(value, withAuto, kind = "")` (today's signature plus `kind`): after Claude's ladder groups, one
+  `<optgroup label="codex">` per harness in `cfg.harnesses` that is `on && found` and has models, one option per
+  model with value `h:m` and text `h · m`. `opencode` and `cmd` groups only when `kind` is `""` (`#p-model`, the
+  Run route) or a kind whose rule tier is `haiku` (`cfg.kinds_tier`, a `{kind: tier}` map `/api/config` gains from
+  `tasks.RULES`); README decision 11, D-2. A step row's select is redrawn when its kind changes (the existing
+  `[data-skind]` change handler), and a pick the new kind cannot hold falls back to Auto.
+- `alias(model)`: returns `""` for a string whose prefix before the first colon is a harness name, as
+  `claude_cli.model_alias` does (README 3.1), so `alias(...) === "fable"` and the `includes("fable")` check on
+  `#p-model` never match a harness rung.
 - The settings popover (the project picker's popover, `pickerHtml`): under the Runs allowed / Runs off groups a
   `Harnesses` group: one row per name in the order of `cfg.harnesses` keys with the name, the state word (`on`,
   `off`, `not found`; glyph plus word, never colour alone), the version in `.m`, and a button `Turn on` / `Turn off`
@@ -22,7 +27,7 @@
   `not found` shows one muted line: `set "exe" under harnesses.<name> in config.json` with the config path.
 - Session head (`renderSession`): when `s.harness && s.harness !== "claude"`, the model chip reads
   `modelText(s.harness + ":" + s.model, s.effort)`; the brief line's context cell shows `context unknown` when the
-  row has no `context_tokens` and `harness !== "claude"` (a Claude row with none keeps today's empty gauge).
+  row has no `ctx_tokens` and `harness !== "claude"` (a Claude row with none keeps today's empty gauge).
 - Task card and Task page step rows: the step's `harness` (from the task row) prefixes the model the same way.
 - Levers bar: a lever whose reason is `claude only` renders as today's off lever with that reason (the existing
   off-note path); nothing new.
@@ -47,7 +52,7 @@
   `codex · gpt-5.6-codex`, a run on it with the session head chip `codex · gpt-5.6-codex · medium` and
   `context unknown`, the levers bar with Verify / Hand off / Escalate / Open in terminal off and their reason,
   a task card whose scout step shows `codex · ...`. No `Uncaught` in the console log. Screenshots read.
-- `node --check web/app.js` OK; `py -m unittest discover -s tests` 372 OK.
+- `node --check web/app.js` OK; `py -m unittest discover -s tests` 376 OK.
 
 ## Steps
 

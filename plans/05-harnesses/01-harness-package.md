@@ -5,7 +5,8 @@
 
 **Files**
 - Create: `console/harness/__init__.py`, `console/harness/claude.py`
-- Modify: `console/claude_cli.py` (`split_rung`, `tier_of(model, cfg=None)`, `known_model(cfg, model)`)
+- Modify: `console/claude_cli.py` (`split_rung`, `model_alias` refuses prefixed rungs, `tier_of(model, cfg=None)`, `known_model(cfg, model)`)
+- Modify: `CLAUDE.md` (the two Rules lines on window-run commands and Stop, step 0 below)
 - Modify: `console/paths.py` (`DEFAULTS["harnesses"]`, `["step_timeout_s"]`, `["effort_variant"]`, `set_harness`, the `claude_exe` fallback in `load_config`)
 - Create: `tests/test_harness.py`
 
@@ -56,6 +57,7 @@ summary(lines) -> dict                      final: the last top-level assistant 
 chat(lines, cwd) -> list                    the body of runs.chat today, unchanged (runs.chat calls it in Task 4)
 stop(proc) -> str                           writes claude_cli.interrupt_message(...) on proc.stdin; "interrupt"
 terminal_command(exe, session_id, model, effort) -> list   claude_cli.terminal_command(...)
+env(read_only) -> dict                      {}
 ```
 
 The Claude adapter's `run_command` keeps the two extra keyword arguments `tools`, `disallow` and `blocks` (the
@@ -64,6 +66,9 @@ attachments) that only Claude has; `runs.start` passes them only to this adapter
 
 ## `console/claude_cli.py` changes
 
+- `model_alias(model)`: `""` when `split_rung(model)[0] != "claude"` (a known harness name before the first colon),
+  else as today. Without this, `opencode:openrouter/anthropic/claude-sonnet-4-6` reads as `sonnet` everywhere
+  `model_alias` runs (`tasks.step_route`'s pick, `Hub.route_of`, the Fable checks).
 - `split_rung(rung) -> (harness, model)`: as `harness.split_rung` (defined here, re-exported by `harness`, so
   `claude_cli` does not import the package: `harness` imports `claude_cli`).
 - `tier_of(model, cfg=None) -> str`: a Claude rung as today (`model_alias`); a `harness:model` rung gives
@@ -93,11 +98,17 @@ attachments) that only Claude has; `runs.start` passes them only to this adapter
 - `test_models_of_filters_by_tier`: `models_of(cfg, "cmd")` drops a `sonnet` entry and keeps a `haiku` one (same stub).
 - `test_which_prefers_the_given_exe`: a temp file path as `exe` is returned as is; a missing path falls to `shutil.which` (patched to return a fixed string); nothing found gives `None`.
 - `test_claude_adapter_wraps_claude_cli`: `run_command([fake], "sonnet", "medium", cwd, sid, prompt="hi")` returns the same list as `claude_cli.run_command([fake], "sonnet", "medium", sid)` and stdin bytes equal to `claude_cli.user_message("hi" + STOP_FOOTER)`; a `/skill` prompt gets no footer; `is_result({"type": "result"})`; `summary` on three recorded lines (init, assistant with text, result) gives `final`, `cost`, `session_id`, `exit_cap False`; `exit_cap True` for `error_max_turns`.
+- `test_model_alias_ignores_harness_rungs`: `model_alias("opencode:openrouter/anthropic/claude-sonnet-4-6") == ""`, `model_alias("codex:gpt-5.6-codex") == ""`, `model_alias("claude-sonnet-4-6") == "sonnet"` (unchanged), and a Claude id with a colon in it, if any, is not split (`split_rung` splits only on a name in `NAMES`).
 - `test_set_harness_writes_one_key`: on a temp folder with a config.json holding `{"projects": ["x"]}`, `set_harness(folder, "codex", True)` leaves `projects` and gives `harnesses.codex.on == True`; an unknown name raises ValueError; an unreadable file raises ValueError.
 - `test_defaults_and_claude_exe_fallback`: `DEFAULTS["harnesses"]["claude"]["on"] is True`, the other three `False`; `load_config` with `claude_exe` set and the harness exe empty copies it; `paths.HARNESSES == harness.NAMES`.
 
 ## Steps
 
+0. Edit `CLAUDE.md` Rules first, so no later task breaks a written rule: "Window runs: commands come only from
+   console/claude_cli.py" becomes "Window runs: commands come only from the adapters in console/harness/
+   (claude_cli.py for Claude Code)"; the Stop clause gains "; a harness with no interrupt (Codex, OpenCode,
+   Command Code) is stopped by killing its process tree (plan 05 decision 8)". Only after Fred confirmed decision
+   8 (README section 6, last item); until then Tasks 1 to 3 go ahead and Task 4 waits on it.
 1. Write `tests/test_harness.py` with the ten tests; run: ImportError.
 2. Create the package and the Claude adapter; add the `claude_cli` helpers and the `paths` changes; run until green.
 3. Run the whole suite: 328 + 10 = 338 (every earlier test unchanged; `test_claude_cli.test_tier_of_and_known_model` still passes with the new signature, `cfg=None` default).

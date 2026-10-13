@@ -14,7 +14,7 @@
   `self.found = {}` (harness -> bool); `self.probe()` runs in a daemon thread at start (`threading.Thread(target=self.probe, name="probe")`), and again from `set_harness`.
 - `Hub.probe(names=None) -> dict`: for each harness that is `on` (`harness.is_on`): `exe = harness.find_exe(cfg, name)`
   (for `claude`: `self.runs.exe` already found by `make_server`); when found, run `adapter.version_command([exe])` with
-  `subprocess.run(..., capture_output=True, timeout=20, creationflags=NO_WINDOW, env=claude_cli.child_env())` and
+  `subprocess.run(..., capture_output=True, timeout=20, creationflags=NO_WINDOW, env=claude_cli.child_env() | adapter.env(False))` (OpenCode's no-update variable rides on the probe too) and
   keep the first line of stdout (stderr when stdout is empty) clipped at 60; `self.found[name]`, `self.versions_h[name]`,
   and `self.runs.exes[name] = [exe]` (dropped when not found). Never raises: a failure is `found False`, version `""`,
   one line in the service log. Returns `self.harnesses()`. With `self.lock` held for the dict writes; the version
@@ -24,20 +24,35 @@
 - `Hub.set_harness(name, on) -> dict`: `name == "claude" and not on` -> `ValueError("Prep and the brief pass run on Claude")`;
   `paths.set_harness(self.folder, name, on)`; `self.cfg = paths.load_config()`-style reload of that key only
   (`self.cfg["harnesses"][name]["on"] = on`; the file is the truth, the dict follows); `self.probe([name])`.
-- `Hub.rung_ok(rung) -> str`: `""` when `claude_cli.known_model(cfg, rung)` and (Claude rung, or `self.found[harness]`);
-  else the reason: `unknown model or effort`, `codex is off`, `codex: not found on PATH`.
+- `Hub.rung_ok(rung, kind="") -> str`: `""` when `claude_cli.known_model(cfg, rung)` and (Claude rung, or
+  `self.found[harness]`) and, for `opencode` / `cmd`, `kind` is `""` (a plain Run) or a kind whose
+  `tasks.RULES[kind][0] == "haiku"` (README decision 11, D-2); else the reason: `unknown model or effort`,
+  `codex is off`, `codex: not found on PATH`, `opencode: read steps only (cheap tier)`.
 - `Hub.levers(sid)`: for a session with `harness != "claude"`: `verify`, `handoff`, `escalate`, `terminal` carry
   `"claude only"`; `continue` is on when the adapter's `RESUME` and the run is not live (the cold-cache guard applies
   as today); `stop` as today; Brief a new task / Verify in a new task stay on (they start Claude sessions from facts).
-- `Hub.start_step(task, n)`: a step whose `pick` is a harness rung: `harness, model = split_rung(pick)`; the run
-  starts with `harness=harness`, `model=model`, `read_only = kind in read kinds` (`tasks.RULES[kind][2]` names
-  Read / Grep / Glob only), `max_turns = cfg["read_max_turns"] if the adapter has CAPS and the kind is read-only else 0`
-  (`read_max_turns` arrives with plan 23; until then 15 as a module constant, named in the step notes). Without a
-  pick nothing changes (Claude's rung of the tier). `s["harness"]` is kept on the step dict (the Task page shows it).
-  The route notes gain `harness: codex` when a pick names one.
+- `Hub._route_for(task, s)`: a harness pick goes to `tasks.step_route` as its tier (`pick=claude_cli.tier_of(pick,
+  cfg)`), so the rule, floor, hint, cap and budget rank it as they rank a Claude pick. Today `step_route` reads the
+  pick through `model_alias`, which gives `""` for `codex:...` (the pick would be dropped without a note) and, before
+  Task 1, `sonnet` for an OpenCode id containing it. `tasks.py` itself does not change.
+- `Hub.start_step(task, n)`: the existing line `model = pick if pick and pick not in MODELS and tier_of(pick) ==
+  tier else model_id(tier)` keeps its shape with `tier_of(pick, self.cfg)`, so a harness pick is used when the route
+  kept its tier and the budget did not move it. Then:
+  - `harness, model_id = split_rung(model)`; when the harness is not `claude` and `rung_ok(model, kind)` refuses it
+    (turned off or not found since Prep, or a cheap rung on a non-read kind), the step runs on `self.model_id(tier)`
+    with the note `harness: codex off -> sonnet` (README decision 12).
+  - The run starts with `harness=harness`, `model=model_id`, `read_only = kind in READ_ONLY_KINDS` (kinds whose
+    `tasks.RULES[kind][2]` is exactly `Read,Grep,Glob`: scout, explain; Bash or web tools make a kind not read only),
+    `max_turns = READ_MAX_TURNS (15) if adapter.CAPS and kind in ("scout", "search") else` today's Opus rule
+    (`read_max_turns` arrives with plan 23 and replaces the constant).
+  - `tasks.start_step` stores the whole rung in `s["model"]`, the tier in `s["tier"]` (already), and `s["harness"]`.
+    The route notes gain `harness: codex` when it is not Claude.
+  - `budget` and `disallow` / `tools` reach only the Claude adapter (Task 4); nothing else in the call changes.
 - `Hub.pull` / `_run` route: `rung_ok(model)` instead of `known_model` alone; a harness rung starts the run with
   `harness` and `model` split; Prep stays Claude.
-- `Hub.final_message(sid)`: through `self.runs.chat_of(sid)`'s adapter summary: `(summary["final"], summary["subtype"])`.
+- `Hub.final_message(sid)`: through the meta's adapter summary of the current turn: `(summary["final"],
+  "error_step_timeout" if meta["timed_out"] else summary["subtype"])`. `_ended` passes that subtype to
+  `tasks.cap_reason`, so without the meta flag a timeout would never reach the retry reason.
 - `Hub.last_reply`: `self.runs.chat_of(sid)` for window runs (any harness).
 
 ## `Handler`
@@ -47,7 +62,7 @@
   400 with the message for Claude off, 500 `cannot read config.json: fix it by hand` on ValueError; returns `{"harnesses": ...}`.
 - `POST /api/run`: `rung_ok` (400 unknown, 409 off or not found with the reason); `fable_ok` as today (a Fable
   rung is Claude's).
-- `POST /api/task`: each step `model` through `rung_ok` (400 with the step number and reason).
+- `POST /api/task`: each step `model` through `rung_ok(model, step kind)` (400 with the step number and reason).
 - `GET /api/chat`: `chat_of` for window runs.
 - `POST /api/terminal`: 409 `claude only` from the RunError.
 
@@ -59,13 +74,16 @@
 - `test_run_refuses_off_or_unknown_rung`: `cmd:deepseek-flash` with cmd off -> 409 with `cmd is off`; `codex:nope` -> 400.
 - `test_task_step_pick_on_codex`: `POST /api/task` with a scout step whose `model` is `codex:gpt-5.6-codex`: the step runs on codex (`run_started.harness`), `read_only` in the meta, the step dict has `harness == "codex"`, its notes contain `harness: codex`; a HANDOFF-OK echo from the fake completes the step and the chain goes on (the next step on Claude's fake).
 - `test_chat_and_final_message_for_codex`: `/api/chat?session=` gives the fake's items; `Hub.final_message` returns the agent text and `success`.
+- `test_cheap_rung_refused_on_a_code_step`: with `cmd` on and found (the fake) and `models {"deepseek-flash": "haiku"}`: `POST /api/task` with a `code` step on `cmd:deepseek-flash` is 400 `read steps only`; a `scout` step on it is accepted.
+- `test_step_pick_falls_back_when_harness_off`: a task whose scout step picked `codex:gpt-5.6-codex`, then `POST /api/harness` codex off before the step starts: the step runs on Claude's haiku rung, its tier stays the pick's (`sonnet` in the test cfg) and it runs on Claude's sonnet rung with the note `harness: codex off -> sonnet`.
+- `test_step_timeout_reaches_the_retry_reason`: `step_timeout_s` 1, a scout step on codex with `SLOW` in its goal: the task's `why` names the step timeout.
 - `test_probe_never_raises`: a harness `on` with an `exe` path that does not exist: `found False`, `version ""`, no exception, the service keeps serving.
 
 ## Steps
 
-1. Write the seven tests; run: KeyError on `harnesses`, 404 on `/api/harness`.
+1. Write the ten tests; run: KeyError on `harnesses`, 404 on `/api/harness`.
 2. `Hub` first (probe, harnesses, set_harness, rung_ok, levers, start_step, final_message), then the routes; run until green.
-3. Whole suite: 365 + 7 = 372.
+3. Whole suite: 366 + 10 = 376.
 4. Commit: `feat: harness probe, switch route, rung picks, levers (plan 05 Task 5)`.
 
 ## Drift guards
