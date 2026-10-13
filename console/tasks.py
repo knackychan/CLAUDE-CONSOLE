@@ -71,7 +71,8 @@ def verify_route(checked: tuple) -> tuple:
 def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(), prev: str = "",
                budget=None, warn_at: float = 0.8, effort: str = "auto") -> dict:
     """The route of one step: rule, pick, demand, floor, hint, cap, budget, fixed effort (README 3.5), in
-    that order, each one appending a note. `hold` non-empty means the task waits for Fred."""
+    that order, each one appending a note. A pick keeps its model against the hint; only the Escalate floor
+    and the budget may move it. `hold` non-empty means the task waits for Fred."""
     models, efforts = claude_cli.MODELS, claude_cli.EFFORTS
     fixed = effort != "auto"
     notes, hold = [], ""
@@ -97,8 +98,12 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
         notes.append(f"floor {kind}: {model}/{level}")
     hint = next_hint(prev)
     if hint and routing.rank(hint) > routing.rank((model, level)):
-        model, level = levers.escalate_step(model, level) or (model, level)
-        notes.append(f"hint: {hint[0]}/{hint[1]} -> one step up")
+        up = levers.escalate_step(model, level) or (model, level)
+        if picked and up[0] != model:  # a model's hint never moves a step off the model Fred picked
+            notes.append(f"hint: {hint[0]}/{hint[1]} -> pick {picked} kept")
+        else:
+            model, level = up
+            notes.append(f"hint: {hint[0]}/{hint[1]} -> one step up")
     chosen = (model, level)
     if model == "fable" and picked != "fable" and not (checked and checked[0] == "fable"):
         model = "opus"  # code never picks fable; a fix or verify of a step Fred put on fable may keep it

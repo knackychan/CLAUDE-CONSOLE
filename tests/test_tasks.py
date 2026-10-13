@@ -105,6 +105,23 @@ class RulesTest(unittest.TestCase):
             self.assertEqual((route["model"], route["effort"]), ("sonnet", "medium"), text)
             self.assertEqual(len(route["notes"]), 1, text)
 
+    def test_pick_keeps_its_model_against_a_hint(self):
+        hint = "Next model: opus/high"
+        route = tasks.step_route("debug", pick="sonnet", prev=hint)  # one step up would leave sonnet
+        self.assertEqual((route["model"], route["effort"]), ("sonnet", "high"))
+        self.assertIn("hint: opus/high -> pick sonnet kept", route["notes"])
+        route = tasks.step_route("code", pick="sonnet", prev=hint)  # the effort may still step up
+        self.assertEqual((route["model"], route["effort"]), ("sonnet", "high"))
+        self.assertIn("hint: opus/high -> one step up", route["notes"])
+        route = tasks.step_route("design", pick="haiku", prev=hint)
+        self.assertEqual((route["model"], route["effort"]), ("haiku", "high"))
+
+    def test_miss_floor_is_the_one_rule_over_a_pick(self):
+        miss = levers.miss_line("APP", "edit", "sonnet/low", "opus/high", "x")
+        route = tasks.step_route("edit", pick="sonnet", misses=[miss])
+        self.assertEqual((route["model"], route["effort"]), ("opus", "high"))
+        self.assertEqual(route["notes"], ["rule edit: haiku/low", "pick: sonnet", "floor edit: opus/high"])
+
     def test_step_after_opus_goes_back_to_its_rule(self):
         note = "# Step 01: design on opus/high, session s1\n\n## Findings\nUse a table.\n## Next\nWrite it."
         route = tasks.step_route("code", prev=note)

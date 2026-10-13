@@ -691,6 +691,23 @@ class TaskServerTest(RunServerTest):
                      (2, "running", "done"), (3, "planned", "running")):
             self.assertIn(move, moves)
 
+    def test_pinned_step_runs_on_its_model(self):
+        """A step Fred pinned to sonnet runs on sonnet even when the note before it asks for opus; the verify
+        after it is the only step one model up."""
+        card = self.prep_card()
+        steps = [{"kind": "scout", "goal": "find add()"}, {"kind": "debug", "goal": "fix add()", "model": "sonnet"}]
+        status, data = self.post_task(card, words="HANDOFF-OK HINT-OPUS", steps=steps)
+        self.assertEqual(status, 200, data)
+        tid = data["task"]
+        task = self.until(tid, self.at(3), "the verify step starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "debug", "verify"])
+        note = (self.folder / "tasks" / tid / "steps" / "01-scout.md").read_text(encoding="utf-8")
+        self.assertIn("Next model: opus/high", note)  # the hint was there to be read
+        self.assertEqual([(s["pick"], s["model"], s["effort"]) for s in task["steps"]],
+                         [("", "haiku", "low"), ("sonnet", "sonnet", "high"), ("", "opus", "high")])
+        self.assertIn("hint: opus/high -> pick sonnet kept", task["steps"][1]["notes"])
+        self.assertEqual(self.hub.runs.meta(task["steps"][1]["session"])["model"], "sonnet")
+
     def test_missing_handoff_retries_once_then_stuck(self):
         tid = self.make_task(words="")
         first = self.hub.tasks[tid]["steps"][0]["session"]
