@@ -12,6 +12,12 @@ through its views; each page has the window mock on the left and its reasoning o
 | [locked/console-cells.html](locked/console-cells.html) | https://claude.ai/artifact/9s2oCibRMRPYqdRC8ZAt5d | Console Cells: the tokens, type and cell motif that Cells Drawer keeps (plan 06 built its pill, peek and cells). Its rail, focus pane and Overview are replaced by Cells Drawer. Views: pill, peek, focus, asks you, overview, empty / offline / loading / error |
 | [locked/usage.html](locked/usage.html) | - | The Usage page of Cells Drawer (locked 2026-10-11, plan 10): the month total, a calendar of daily cost (tones in multiples of the daily limit), the picked day by project and model, Days / Weeks / Months as columns of cells in $ or tokens (tokens count cache reads). Opened from the spend breakdown. Figures are this machine's transcripts as read on 2026-10-11 |
 
+## Proposed (not locked yet)
+
+| File | What it is |
+|---|---|
+| [proposed/cells-board.html](proposed/cells-board.html) | Cells Board (2026-10-13): the window side of plans 5, 18, 23, 24 and 25. Six Board views (step, brief, task head, replan wait, measure, empty) at 900 px, and six compact views (list with fills, Task page with per-step gauges, settings with the Harnesses switch, Prep with tier selects, a Codex session, Usage with fills and the FAIL-rate heatmap). Design doc: [../brainstorm/2026-10-13-interface.md](../brainstorm/2026-10-13-interface.md). Waits for Fred's lock (D-6) |
+
 ## Explored (not targets)
 
 | File | Artifact | Outcome |
