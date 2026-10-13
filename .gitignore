@@ -1,3 +1,17 @@
 __pycache__/
 *.pyc
 .superpowers/
+
+# secrets and local data
+.env
+.env.*
+*.local
+config.json
+*.log
+.claude/settings.local.json
+
+# editor and OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
