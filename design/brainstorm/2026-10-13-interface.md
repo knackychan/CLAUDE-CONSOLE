@@ -94,27 +94,34 @@ to a given size and back, which `resize(w, h, keep)` already does for the grip.
 
 ## 4. Settings: the picker popover
 
-Under Runs allowed / Runs off, two folded rows, in the popover's own row grammar (14 px glyph column, name,
-state, action) once open:
+Under Runs allowed / Runs off, a **Settings** band (a hairline above, a faintly raised ground, the `SETTINGS`
+label) holds one card per group. A card's head is a fold line in ui type: the group name in ink at the left,
+its one fact in mono at the right, the caret. Open, the card lists one row per setting in one grammar:
+a 12 px glyph column, the name (13 px ink) over a quiet mono second line, and one control on the right.
+The control is a switch that is both the state word and the action: a pill reading `on` (green tint, knob
+right) or `off` (grey, knob left); it is a `role="switch"` button whose title is Turn on / Turn off, and it
+reads `...` (busy, disabled) until the service answers. Settings are not projects: rows do not highlight on
+hover, and only the card heads do.
 
-- **Harnesses**: closed line `Harnesses · claude, codex on · △ cmd not found ▾`, the not-found part red; it
-  opens by itself while a harness is on but not found. Open: one row per name in `cfg.harnesses` order.
-  Glyph and state word: `● on` (green glyph), `○ off`, `△ not found` (red glyph, red word). The probed
-  version in `.m` after the name (`codex-cli 0.162.1`; blank when not found). The button Turn on / Turn off,
-  pending (`...`, disabled) until `POST /api/harness` answers; on error the row's note line carries the
-  message in red. `claude` reads `always on`, its title `Prep and the brief pass run on it; it cannot be
-  turned off` (the service answers 400). A row that is on but not found carries one note line, `no cmdc.exe
-  on PATH · set "exe" in config.json`, the full path and `under harnesses.cmd (not the .cmd shim)` in its
-  title. The group's title holds `opencode and cmd rungs run read steps only (cheap tier); rungs of a
-  harness that is off never route; a step picked on one falls back to Claude's rung of its tier`.
-- **Window runs**: closed line `Window runs · auto hand off off ▾`. Open: `auto hand off · at 300K`, off /
-  on, Turn on / Turn off, and one line `hands off a window run that ends its turn in the red zone (300K) and
-  seeds the next chat; a VS Code chat is forked first`. Writes `handoff_auto` through a
+- **Harnesses**: closed line `Harnesses · 2 on · △ cmd not found ▾`, the not-found part red; it opens by
+  itself while a harness is on but not found. Open: one row per name in `cfg.harnesses` order. Glyph `●`
+  (green) on and found, `○` off, `△` (red) on but not found. The second line is the probed version
+  (`codex-cli 0.162.1`), `read steps only` for opencode and cmd while off, or, red, `not found · no cmdc.exe
+  on PATH`. `claude` shows `always on` in place of a switch, its title `Prep and the brief pass run on it; it
+  cannot be turned off` (the service answers 400). A harness on but not found keeps its switch on, drawn red,
+  and adds one line under the name: `Set "exe" in config.json, or turn it off.`, the full path and
+  `under harnesses.cmd (not the .cmd shim)` in the title of `"exe"`. On a `POST /api/harness` error that
+  line carries the message in red. The card head's title holds `opencode and cmd rungs run read steps only
+  (cheap tier); rungs of a harness that is off never route; a step picked on one falls back to Claude's rung
+  of its tier`.
+- **Window runs**: closed line `Window runs · auto hand off: off ▾`. Open: `Auto hand off` over
+  `at 300K · red zone`, its switch, and one line `Hands off a window run that ends its turn in the red zone
+  and seeds the next chat; a VS Code chat is forked first.` Writes `handoff_auto` through a
   `POST /api/setting`-style route as Allow runs does (ID-2). The threshold is `gauge_red_tokens`, shown, not
   editable here.
 
-Keyboard and sorting of the project rows are unchanged; the new groups are not in the Up / Down ring (they
-are buttons, Tab reaches them).
+Keyboard and sorting of the project rows are unchanged; the cards are not in the Up / Down ring (heads and
+switches are buttons, Tab reaches them, Space flips a switch).
 
 ## 5. Prep page and the Run route
 
@@ -359,7 +366,7 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | # | Question | Decision |
 |---|---|---|
 | ID-1 | Brainstorm 7 said a connector turns orange when the brief cut findings | No: orange stays "needs you". A cut is the words `cut 122 w` in ink on the chip; a code fallback is dashed |
-| ID-2 | Where the auto hand off (D-5, off by default) is switched | A Window runs group in the settings popover, next to Harnesses, Turn on / Turn off; config.json stays the source of truth |
+| ID-2 | Where the auto hand off (D-5, off by default) is switched | A Window runs group in the settings popover, next to Harnesses, the same on / off switch; config.json stays the source of truth |
 | ID-3 | Context of a non-Claude step: an estimate (characters / 4, hatched) or unknown | Unknown, as plan 5 3.6 decided; the hatched estimate is a plan 25 option if the live runs show usable token counts |
 | ID-4 | How the Board opens | A button that widens the window and opens the page, size kept in window.json; never by dragging alone |
 | ID-5 | Cells of a handoff | **No** (Fred): a handoff has no cells, a visual for its word count was confusing and cluttered the UI. The count stays a figure in the inspector (the Received and Handoff tabs, the handoff head, the Task page's handoff fold, the measure table) and in the connector chip's title. `brief_max_words` stays 500 in config.json; the measure table and the `cut` word on the chips show after ten tasks whether it bites |

@@ -212,17 +212,37 @@ textarea.in { width: 100%; resize: none; }
 .prow .meta.y { color: var(--you); }
 .prow .c { font: 11px var(--mono); text-align: right; color: var(--mut); }
 .prow.off .nm { color: var(--mut); }
-.hs { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 12px; font: 13px var(--ui); }
-.hs .gl { font: 11px var(--mono); color: var(--mut); }
-.hs .gl.g { color: var(--ok); } .hs .gl.r { color: var(--bad); }
-.hs .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hs .nm .m { color: var(--mut); margin-left: 6px; }
-.hs .stw { font: 500 11px var(--mono); color: var(--mut); white-space: nowrap; }
-.hs .stw.r { color: var(--bad); }
-.hs .btn { min-width: 68px; }
-.hs .btn:disabled { opacity: .5; cursor: progress; }
-.hsnote { padding: 0 12px 6px 34px; font: 11px var(--mono); color: var(--mut); overflow-wrap: anywhere; }
-.hsnote .r { color: var(--bad); }
+/* settings in the popover (reworked 2026-10-13): one raised band under the projects, a card per group, a row per setting
+   (glyph, name over its quiet second line, one switch that is both the state word and the action) */
+.pset { margin-top: 6px; padding: 8px 8px 2px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--raise) 45%, var(--win)); display: grid; gap: 8px; }
+.pset > .lbl { padding: 0 4px; }
+.pop .pset .fold { gap: 0; background: var(--win); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.pop .pset .fold .fh { align-items: center; min-height: 34px; padding: 0 10px 0 12px; gap: 10px; }
+.pop .pset .fold .fh .lbl { font: 600 12.5px var(--ui); letter-spacing: 0; text-transform: none; color: var(--ink); }
+.pop .pset .fold .fh .fi { flex: 1; text-align: right; }
+.pop .pset .fold .fh:hover { background: var(--raise); }
+.pop .pset .fold .fh[aria-expanded="true"] { border-bottom: 1px solid var(--line); }
+.sr { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; padding: 7px 10px 7px 12px; }
+.sr + .sr { border-top: 1px solid var(--line); }
+.sr .gl { grid-row: 1 / span 2; align-self: start; padding-top: 2px; font: 10px var(--mono); color: var(--mut); }
+.sr .gl.g { color: var(--ok); } .sr .gl.r { color: var(--bad); }
+.sr .nm { font: 500 13px var(--ui); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr.off .nm { color: var(--mut); }
+.sr .sub { grid-column: 2; font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr .sub.r { color: var(--bad); }
+.sr .ctl { grid-column: 3; grid-row: 1 / span 2; }
+.sr .fixed { font: 11px var(--mono); color: var(--mut); }
+.sr .why { grid-column: 2 / -1; margin-top: 4px; font: 11.5px/1.45 var(--ui); color: var(--mut); }
+.sw { position: relative; display: inline-flex; align-items: center; justify-content: flex-end; width: 50px; height: 22px; padding: 0 8px 0 0; border: 1px solid var(--line); border-radius: 11px; background: var(--off); color: var(--mut); font: 500 10.5px var(--mono); cursor: pointer; transition: background .15s, border-color .15s; }
+.sw::before { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--mut); transition: left .15s, background .15s; }
+.sw[aria-checked="true"] { justify-content: flex-start; padding: 0 0 0 8px; background: color-mix(in srgb, var(--ok) 16%, var(--win)); border-color: color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok); }
+.sw[aria-checked="true"]::before { left: 31px; background: var(--ok); }
+.sw.bad[aria-checked="true"] { background: color-mix(in srgb, var(--bad) 12%, var(--win)); border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
+.sw.bad[aria-checked="true"]::before { background: var(--bad); }
+.sw[aria-busy="true"] { cursor: progress; opacity: .6; }
+.sw:hover { border-color: var(--ink); }
+.sw:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sr .why code { font: 11px var(--mono); color: var(--ink); }
 .pop .foot { flex: none; border-top: 1px solid var(--line); padding: 6px 12px; display: flex; gap: 12px; font: 10.5px var(--mono); color: var(--mut); }
 .pop .foot .sort { margin-left: auto; }
 
@@ -616,7 +636,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>Harnesses in the compact window</h3>
       <ul>
-        <li><b>Settings:</b> the project picker's popover gains two folded rows under Runs off. <code>Harnesses · claude, codex on · △ cmd not found</code> opens to one row per CLI with a glyph and state word (<code>● on</code>, <code>○ off</code>, <code>△ not found</code>), its probed version, and Turn on / Turn off, pending until the service answers; it opens by itself while a harness is on but not found, and that row says <code>no cmdc.exe on PATH · set "exe" in config.json</code>. <code>Window runs · auto hand off off</code> holds the switch (ID-2). The explanations are the rows' titles.</li>
+        <li><b>Settings:</b> the project picker's popover gains a Settings band under Runs off: a card per group, its head a fold line. <code>Harnesses · 2 on · △ cmd not found</code> opens to one row per CLI: a glyph (<code>●</code>, <code>○</code>, <code>△</code>), the name over its probed version (or <code>read steps only</code>, or the red reason), and one on / off switch that is the state word and the action at once, <code>...</code> until the service answers; <code>claude</code> reads <code>always on</code>. It opens by itself while a harness is on but not found: that switch turns red and the row says <code>not found · no cmdc.exe on PATH</code> and <code>Set "exe" in config.json, or turn it off.</code> <code>Window runs · auto hand off: off</code> holds the auto hand off switch (ID-2) with its one-line why.</li>
         <li><b>Rungs:</b> every model select lists tiers as groups, think / write / read, each holding rungs on any harness that is on and found. OpenCode and Command Code rungs appear under read only; a step row whose kind is a write or think kind does not list them, and a pick that a kind cannot hold shows "opencode: read steps only (cheap tier)" and falls back to Auto.</li>
         <li><b>Where the rung shows:</b> the task card and the Task page rows (<code>codex · gpt-5.6-codex</code> before the effort), the session head chip, the Board block. A Claude rung keeps today's <code>sonnet · medium</code>.</li>
         <li><b>A non-Claude session page:</b> the brief says "context unknown" with no cells and an estimated or unknown spend; tabs Chat and Steps (what the adapter's stream gives), no Agents or Timeline (those come from Claude's hooks); levers Continue and Stop, the rest off with "claude only". A pick whose harness went off at step start shows the route note <code>harness: codex off -> sonnet</code>.</li>
@@ -636,7 +656,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       <table>
         <tr><th>#</th><th>Question</th><th>Decision</th></tr>
         <tr><td>ID-1</td><td>Brainstorm 7 said a connector turns orange when the brief cut findings</td><td>No: orange stays "needs you". A cut is the words "cut 122 w" in ink on the chip; a code fallback is dashed</td></tr>
-        <tr><td>ID-2</td><td>Where the auto hand off (D-5, off by default) is switched</td><td>A Window runs group in the settings popover, next to Harnesses, same Turn on / Turn off; config stays the source of truth</td></tr>
+        <tr><td>ID-2</td><td>Where the auto hand off (D-5, off by default) is switched</td><td>A Window runs group in the settings popover, next to Harnesses, the same on / off switch; config stays the source of truth</td></tr>
         <tr><td>ID-3</td><td>Context of a non-Claude step: an estimate (characters / 4, hatched) or unknown</td><td>Unknown, as plan 5 decided (3.6); the hatched estimate is a plan 25 option if the live runs show the adapters' tokens are usable</td></tr>
         <tr><td>ID-4</td><td>How the Board opens</td><td>A button that widens the window and opens the page, size kept in window.json; never by dragging alone</td></tr>
         <tr><td>ID-5</td><td>Cells of a handoff</td><td><b>No</b> (Fred): a handoff has no cells. A visual for its words was confusing and cluttered the UI. The word count stays a figure in the inspector (Received, Handoff, the handoff head, the Task page's handoff fold) and in the chip's title; brief_max_words stays 500 in config.json</td></tr>
@@ -728,7 +748,7 @@ const T = [
 // A fold is one closed line that says what is inside and the one figure worth seeing; click opens it in place. The app keeps each
 // fold's state per window (window.json); a FAIL, a failing check or a harness that is on but not found opens its fold by itself.
 function fold(label, info, body, o = {}) {
-  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold aria-expanded="${!!o.open}"><span class="lbl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span><span class="car">▾</span></button><div class="fb"${o.open ? "" : " hidden"}>${body}</div></div>`;
+  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold aria-expanded="${!!o.open}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="lbl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span><span class="car">▾</span></button><div class="fb"${o.open ? "" : " hidden"}>${body}</div></div>`;
 }
 const flatSteps = (t) => { const f = []; for (const s of t.steps) { f.push(s); if (s.fix) f.push(...s.fix); } return f; };
 const nSteps = (t) => flatSteps(t).length || t.nsteps || 0;
@@ -1016,12 +1036,14 @@ function taskPageHtml() {
     <div class="levers"><div class="lr"><button class="btn stop">Stop</button><button class="btn">Pause</button></div><div class="say">Retry, Clear off: task is running</div></div><span class="rsz"></span></div>`;
 }
 function settingsHtml() {
-  const hs = (gl, tn, nm, ver, stw, btn, title = "", note = "") => `<div class="hs"${title ? ` title="${esc(title)}"` : ""}><span class="gl ${tn}">${gl}</span><span class="nm">${nm}<span class="m">${ver}</span></span><span class="stw${stw === "not found" ? " r" : ""}">${stw}</span>${btn}</div>${note ? `<div class="hsnote">${note}</div>` : ""}`;
-  const harness = hs("●", "g", "claude", "2.1.296", "always on", '<span style="min-width:68px"></span>', "Prep and the brief pass run on it; it cannot be turned off")
-    + hs("●", "g", "codex", "codex-cli 0.162.1", "on", '<button class="btn sm">Turn off</button>')
-    + hs("○", "", "opencode", "", "off", '<button class="btn sm">Turn on</button>')
-    + hs("△", "r", "cmd", "", "not found", '<button class="btn sm" disabled>...</button>', "", 'no cmdc.exe on PATH · set <span class="r">"exe"</span> in <span title="C:\\Users\\fred\\.claude\\console\\config.json, under harnesses.cmd (not the .cmd shim)">config.json</span>');
-  const windowRuns = hs("○", "", "auto hand off", "at 300K", "off", '<button class="btn sm">Turn on</button>', "", "hands off a window run that ends its turn in the red zone (300K) and seeds the next chat; a VS Code chat is forked first");
+  // a setting row: glyph, name over its second line, one control (a switch reading on / off, or a fixed word)
+  const sw = (on, label, o = {}) => `<button class="sw${o.bad ? " bad" : ""}" role="switch" aria-checked="${on}" aria-label="${esc(label)}" title="${on ? "Turn off" : "Turn on"}${o.busy ? " (waiting for the service)" : ""}"${o.busy ? ' aria-busy="true"' : ""}>${o.busy ? "..." : on ? "on" : "off"}</button>`;
+  const sr = (gl, tn, nm, sub, ctl, o = {}) => `<div class="sr${o.off ? " off" : ""}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="gl ${tn}">${gl}</span><span class="nm">${nm}</span><span class="ctl">${ctl}</span><span class="sub${o.subR ? " r" : ""}">${sub}</span>${o.why ? `<span class="why">${o.why}</span>` : ""}</div>`;
+  const harness = sr("●", "g", "claude", "2.1.296", '<span class="fixed">always on</span>', { title: "Prep and the brief pass run on it; it cannot be turned off" })
+    + sr("●", "g", "codex", "codex-cli 0.162.1", sw(true, "codex"))
+    + sr("○", "", "opencode", "read steps only", sw(false, "opencode"), { off: true })
+    + sr("△", "r", "cmd", "not found · no cmdc.exe on PATH", sw(true, "cmd", { bad: true }), { subR: true, why: `Set <code title="C:\\Users\\fred\\.claude\\console\\config.json, under harnesses.cmd (not the .cmd shim)">"exe"</code> in config.json, or turn it off.` });
+  const windowRuns = sr("○", "", "Auto hand off", "at 300K · red zone", sw(false, "auto hand off"), { why: "Hands off a window run that ends its turn in the red zone and seeds the next chat; a VS Code chat is forked first." });
   return `<div class="win" data-view="settings">
     ${topBar('<span class="grip">⋮⋮</span><button class="scope" aria-expanded="true"><span class="nm">CLAUDE-CONSOLE</span><span class="car">▾</span></button><button class="needs">2 need you</button>', "")}
     <div class="scroll"><div class="sec"><span class="lbl y">Needs you · 2</span></div><div class="card task y" style="opacity:.4"><div class="l1"><span class="st y">Waiting</span><span class="t">Usage fills per model (plan 18)</span></div></div></div>
@@ -1034,8 +1056,10 @@ function settingsHtml() {
         <button class="prow" role="option"><span class="ck"></span><span class="nm">content-manager</span><span class="meta">1 live</span><span class="c">0.51</span></button>
         <div class="grp lbl">Runs off · 1</div>
         <button class="prow off" role="option"><span class="ck"></span><span class="nm">fashion_packshots_ai</span><span class="meta">runs off</span><span class="c">-</span></button>
-        ${fold("Harnesses", 'claude, codex on · <span class="r">△ cmd not found</span>', harness, { open: true, cls: "grp-fold" })}
-        ${fold("Window runs", "auto hand off off", windowRuns, { cls: "grp-fold" })}
+        <div class="pset"><span class="lbl">Settings</span>
+          ${fold("Harnesses", '2 on · <span class="r">△ cmd not found</span>', harness, { open: true, title: "opencode and cmd rungs run read steps only (cheap tier); rungs of a harness that is off never route; a step picked on one falls back to Claude's rung of its tier" })}
+          ${fold("Window runs", "auto hand off: off", windowRuns)}
+        </div>
       </div>
       <div class="foot"><span>↑ ↓ move</span><span>Enter pick</span><span class="sort">sorted: needs you, live, recent</span></div></div>
     <div class="compose"><textarea rows="1" aria-label="New task"></textarea><div class="say"><span class="tgt">in CLAUDE-CONSOLE <span class="car">▾</span></span></div></div><span class="rsz"></span></div>`;
@@ -1140,7 +1164,7 @@ const CAP = {
   bempty: "<b>Board, no task in the scope.</b> The empty cells and one line; the inspector and the key hints stay blank. Esc or Back returns to the list at the compact size.",
   list: "<b>Compact list.</b> The today strip as locked, its breakdown closed; under it one line only because models are over their pace: \"3 models over pace · fills\", which opens the breakdown (spend legend, model mix, the over-pace figures and the Usage button). Needs you then starts on the first screen: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working card says which step of how many; the rung is on its doing line. Project names are hidden while the scope is one project.",
   tpage: "<b>Compact Task page.</b> The steps list is the page: a finished step is two lines (name, rung, cost, Open; its goal), the failed step gives its sub line to the FAIL verdict whole, and the context gauge (15 cells and the figure; no in / out words, ID-5) stays open only on the current, failed and past-150K rows, a click opens it on the others. The page opens scrolled to the current step. The handoff for the next step folds to one line with its words and its Next; opened, it shows the six headings and the facts the service added, folded.",
-  settings: "<b>Settings popover.</b> Under the project groups, two folded rows: Harnesses, open here because cmd is on but not found (the closed line keeps \"△ cmd not found\" in red), one row per CLI with glyph, state word, version and Turn on / Turn off; and Window runs with the auto hand off switch (ID-2), closed. The explanations moved to the rows' titles.",
+  settings: "<b>Settings popover.</b> Under the project groups, one raised Settings band with a card per group. Harnesses is open here because cmd is on but not found (its closed line keeps \"△ cmd not found\" in red). One row per CLI: glyph, the name over its version (or what limits it), and one switch that is both the state word and the action; cmd's switch is red and the row says what to fix. Window runs (closed) holds the auto hand off switch (ID-2) with its one-line why. Click a switch or a card's head to try it.",
   prep: "<b>Prep page.</b> The prompt and the step rows are the page. Scouted folds to its size and file count; the route reason folds under the selects (\"why codex · balance\"); the missing cap is one muted line with △. Every model select lists tiers as groups (think / write / read) with rungs on any harness that is on; opencode and cmd rungs only under read, and only on read kinds. Row 5 shows a refused pick: the note in red and the select back to auto.",
   session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the brief says context unknown in words with no cells; tabs Chat and Steps only. The chat starts with the folded Prompt row, then the same bubbles and folded tool rows as the Board (a failed exit first), the source line at the end. Continue resumes the thread; the levers that are off say \"claude only\" in one line.",
   usage: "<b>Usage page.</b> Models: one row per model, sorted over pace first, with one bar of 20 cells for the window that binds (day, week or month), the pace as an orange outline cell and the share of pace as the figure (orange over pace), the other two windows as text; a click opens the three bars. Days stays as locked. The Verify FAIL by hour heatmap folds to one line that carries its reading.",
@@ -1169,6 +1193,14 @@ document.addEventListener("click", (e) => {  // a fold opens in place: tool rows
   const open = t.getAttribute("aria-expanded") !== "true";
   t.setAttribute("aria-expanded", String(open));
   t.nextElementSibling.hidden = !open;
+});
+document.addEventListener("click", (e) => {  // a settings switch flips in this mock (the app waits for the service: "..." until it answers)
+  const b = e.target.closest(".sw");
+  if (!b || b.getAttribute("aria-busy") === "true") return;
+  const on = b.getAttribute("aria-checked") !== "true";
+  b.setAttribute("aria-checked", String(on));
+  b.textContent = on ? "on" : "off";
+  b.title = on ? "Turn off" : "Turn on";
 });
 let curView = "step";
 document.addEventListener("click", (e) => {  // the inspector's tabs
