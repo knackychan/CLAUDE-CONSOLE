@@ -11,12 +11,7 @@ through its views; each page has the window mock on the left and its reasoning o
 | [locked/cells-drawer.html](locked/cells-drawer.html) | https://claude.ai/artifact/SqX2KpJqpnV6Q7FA7zhVzn | **The target** (locked 2026-10-10, plan 07). Cells Drawer: Console Cells without the rail. The open window is one list (needs you / working / done today) with answer and unblock in place, a searchable project picker in the header, and a full-width session page (head, brief, Steps / Agents / Timeline / Chat). Views: pill, peek, list, session, asks you, empty / offline |
 | [locked/console-cells.html](locked/console-cells.html) | https://claude.ai/artifact/9s2oCibRMRPYqdRC8ZAt5d | Console Cells: the tokens, type and cell motif that Cells Drawer keeps (plan 06 built its pill, peek and cells). Its rail, focus pane and Overview are replaced by Cells Drawer. Views: pill, peek, focus, asks you, overview, empty / offline / loading / error |
 | [locked/usage.html](locked/usage.html) | - | The Usage page of Cells Drawer (locked 2026-10-11, plan 10): the month total, a calendar of daily cost (tones in multiples of the daily limit), the picked day by project and model, Days / Weeks / Months as columns of cells in $ or tokens (tokens count cache reads). Opened from the spend breakdown. Figures are this machine's transcripts as read on 2026-10-11 |
-
-## Proposed (not locked yet)
-
-| File | What it is |
-|---|---|
-| [proposed/cells-board.html](proposed/cells-board.html) | Cells Board (2026-10-13): the window side of plans 5, 18, 23, 24 and 25. Six Board views (step, brief, task head, replan wait, measure, empty) at 900 px, and six compact views (list with fills, Task page with per-step gauges, settings with the Harnesses switch, Prep with tier selects, a Codex session, Usage with fills and the FAIL-rate heatmap). Design doc: [../brainstorm/2026-10-13-interface.md](../brainstorm/2026-10-13-interface.md). Waits for Fred's lock (D-6) |
+| [locked/cells-board.html](locked/cells-board.html) | https://claude.ai/artifact/T5VyJFHhHxhvKn1YTzi7Vx | Cells Board (locked 2026-10-13, plan 25): the window side of plans 5, 18, 23, 24 and 25. Seven Board views (step, running step, handoff, task head, replan wait, measure, empty) at 900 px and six compact views (list with fills, Task page with the per-step context gauge and the handoff fold, settings with the Harnesses switch, Prep with tier selects, a Codex session, Usage with fills and the FAIL-rate heatmap), in two zones: what Fred acts on in sight, the rest behind one closed line each. Design doc: [../brainstorm/2026-10-13-interface.md](../brainstorm/2026-10-13-interface.md) (decisions ID-1 to ID-9 in its section 12; ID-5 refused: no cells for a handoff's words) |
 
 ## Explored (not targets)
 

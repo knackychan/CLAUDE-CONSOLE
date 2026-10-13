@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-/* Proposal page: a view bar, the window mock (400 px compact, 900 px Board) and the notes under it.
+/* Design page (locked by Fred, 2026-10-13): a view bar, the window mock (400 px compact, 900 px Board) and the notes under it.
    Tokens, type and cell motif are the locked Console Cells / Cells Drawer ones (web/style.css). */
 :root {
   --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
@@ -425,7 +425,6 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .conn { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 0 6px; align-items: center; height: 26px; padding-left: 10px; cursor: pointer; }
 .conn .ln { width: 2px; height: 100%; background: var(--line); justify-self: center; }
 .conn .chip { display: inline-flex; gap: 5px; align-items: center; justify-self: start; padding: 0 6px; height: 18px; border-radius: 3px; border: 1px solid var(--line); font: 500 10.5px/16px var(--mono); color: var(--mut); white-space: nowrap; max-width: 100%; overflow: hidden; }
-.conn .chip .cells { grid-template-columns: repeat(10, 4px); }
 .conn .chip b { font-weight: 400; color: var(--ink); }
 .conn.cut .chip b { color: var(--ink); }
 .conn.fallback .chip { border-style: dashed; }
@@ -485,7 +484,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .plan1 li.add::after { content: " added"; font: 10.5px var(--mono); color: var(--you); font-weight: 400; }
 .plan1 li.old { color: var(--mut); }
 .plan1 .lbl .m { text-transform: none; letter-spacing: 0; }
-.measure { display: grid; grid-template-columns: 64px repeat(3, minmax(0, 1fr)); gap: 3px 10px; align-items: center; font: 11px var(--mono); color: var(--mut); }
+.measure { display: grid; grid-template-columns: 64px 58px minmax(0, 1fr) 58px; gap: 3px 10px; align-items: center; font: 11px var(--mono); color: var(--mut); }
 .measure .cells { grid-template-columns: repeat(20, minmax(0, 1fr)); }
 .measure .cells i { aspect-ratio: auto; height: 6px; }
 .measure .k { color: var(--mut); } .measure .k.hot { color: var(--ink); }
@@ -494,6 +493,8 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .measure .bar b { font-weight: 400; width: 34px; text-align: right; color: var(--ink); flex: none; }
 .measure .bar b.y { color: var(--you); }
 .measure .hd2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+.measure .fig { color: var(--ink); text-align: right; }
+.measure .r { text-align: right; }
 /* a fold: one closed line (label, the one fact worth seeing, a caret); the body opens in place */
 .fold { display: grid; gap: 6px; min-width: 0; }
 .fh { display: flex; gap: 8px; align-items: baseline; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--mut); font: 11px var(--mono); cursor: pointer; text-align: left; min-height: 24px; }
@@ -524,7 +525,6 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
   .top .rb { width: 26px; }
   .l2 .route { display: none; }
   .gg { gap: 6px; }
-  .gg .io2 { display: none; }
   .mfill .rest { display: none; }
 }
 </style>
@@ -533,7 +533,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
   <header>
     <h1>Cells Board</h1>
     <p>The interface for the harness plan and the brainstorm around it (plans 5, 18, 23, 24 and 25). The compact window keeps what Cells Drawer locked and gains the harness switch, rungs on any CLI, the per-step context view, the usage fills and the replan wait. The Board is the one new page: the window widened to 900 px, the chain of a task on the left as connected cells, one picked thing on the right. Same tokens, same type, same cell motif.</p>
-    <p>Figures are sample data. Orange still means "needs you" and nothing else; a cut handoff or an estimate is shown by shape (hatched, dashed, a tone) and a word, never by orange. Two zones (Opus review, 2026-10-13): what Fred acts on stays in sight; how, why, history and exact counts sit behind one closed line each.</p>
+    <p>Figures are sample data. Orange still means "needs you" and nothing else; a cut handoff or an estimate is shown by shape (hatched, dashed, a tone) and a word, never by orange. Two zones (Opus review, 2026-10-13): what Fred acts on stays in sight; how, why, history and exact counts sit behind one closed line each. Locked by Fred on 2026-10-13, every decision as proposed except ID-5: a handoff shows no cells for its words.</p>
   </header>
 
   <div class="views" role="group" aria-label="Mock view">
@@ -567,7 +567,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       <ul>
         <li><b>Two new tokens, for the chat only.</b> Orange is "needs you" (a replan to confirm, a question, a model over its pace that the router will leave). Red and green are state (FAIL, done). Blue stays the note being written. A harness has no colour: the rung is words, <code>codex · gpt-5.6-codex · medium</code>. The chat adds <code>--me</code> (violet, Fred's turns) and <code>--ai</code> (the writing blue, the agent's turns), used nowhere else (ID-8).</li>
         <li><b>One Doto figure per screen:</b> the task's cost on the Board head, today's spend on the list, the month on Usage.</li>
-        <li><b>Every quantity is cells:</b> context in 10K cells, handoffs in cells of 50 words, fills in 5 % cells against an allowance, FAIL rate in four tones. Unknown is unknown: no cells and the word, never a zero.</li>
+        <li><b>Every quantity is cells, but a handoff's words:</b> context in 10K cells, fills in 5 % cells against an allowance, FAIL rate in four tones. A handoff's word count is a figure in the inspector, never cells (ID-5, Fred: a visual for the words was confusing and cluttered the UI). Unknown is unknown: no cells and the word, never a zero.</li>
         <li><b>Motion:</b> the one blinking cell on the live step; the running puzzle and the waiting <code>?</code> as plan 21 made them. Nothing on the Board moves by itself except the live step.</li>
       </ul>
     </section>
@@ -577,7 +577,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       <ul>
         <li><b>Zone 1, in sight:</b> state (word and sprite), what needs Fred, the one figure that matters on the screen, the next action, the current step. A number stays in sight only if it changes what he does now.</li>
         <li><b>Zone 2, one closed line each:</b> how and why. Route notes, exact counts of finished things, provenance (thread ids, paths, diff stats), the checks, logs, scales, config names, and every sentence that explained the design (those moved to titles). The closed line is <code>Label · the one fact worth seeing ▾</code>, muted mono; a FAIL, an open question, a not-found or an over-pace keeps its tone there, and a FAIL or a failing check opens its fold by itself. The app keeps each fold's state per window.</li>
-        <li><b>One place per number:</b> the handoff words live on the connector chip only (<code>412 → 290 w · cut 122</code>); the step block lost its in / out line; the inspector head is one line, rung · cost · time.</li>
+        <li><b>One place per number:</b> the handoff words live in the inspector only (the Received and Handoff tabs, the handoff head); the connector chip says <code>handoff</code> and, after a cut, <code>handoff · cut 122 w</code>; the step block lost its in / out line; the inspector head is one line, rung · cost · time.</li>
         <li><b>Done things shrink:</b> a finished step is two lines on the chain and on the Task page; a planned step is one; the running task fits the first screen with its FAIL and its live step.</li>
         <li><b>Orange is Fred's only:</b> the <code>scout first</code> hint is muted with △, the balance route note is muted (the router already acted), the list's today breakdown is closed and says <code>3 models over pace · fills</code> only when true.</li>
       </ul>
@@ -597,7 +597,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       <ul>
         <li><b>Task head:</b> state and age, the title on two lines, <code>step 5c of 8</code> and the cost; project and effort in its title. Folded tasks are one quiet row whose second line is the orange <code>why</code> of a waiting task, else the step count. Picked: the inspector shows the Now line, prompt.md folded to its Done when, the open questions, the closed ones and the chain log folded.</li>
         <li><b>Step block:</b> a finished step is two lines: state sprite and word, number and kind, cost; then the rung as <code>harness · model · effort</code>, the time, and a 15-cell context mini gauge with its figure (or "ctx unknown"). The current, failed, waiting and picked steps keep the full block: the 30-cell context row and the sub line (the FAIL detail whole, the wait, the muted <code>△ scout first</code> hint). Attempt squares show only when a try failed. A planned step is one line.</li>
-        <li><b>Connector = the handoff:</b> a short line and a chip with the handoff's word cells and count as the next step received it: <code>160 w</code>; after a cut, <code>412 → 290 w · cut 122</code> with the cut part of the cells in a tone (ID-1, no orange); dashed <code>as written · not compacted</code> when the brief pass fell back to code; blue dashed <code>writing</code>; a dotted line with no chip before a planned step. Picked: what the next step received, one column, the cut lines struck in place.</li>
+        <li><b>Connector = the handoff:</b> a short line and a chip that names it, <code>handoff</code>; after a cut, <code>handoff · cut 122 w</code> with the cut in ink (ID-1, no orange; ID-5, no cells for words: the counts are the chip's title and the inspector's); dashed <code>as written · not compacted</code> when the brief pass fell back to code; blue dashed <code>writing</code>; a dotted line with no chip before a planned step. Picked: what the next step received, one column, the cut lines struck in place.</li>
         <li><b>Fix insert:</b> a bracket under the failed verify holding fix and the second verify, rejoining after. The failed verify keeps its red; the fix shows its escalated rung.</li>
         <li><b>Replan:</b> a step of its own kind (Haiku, no tools), orange while it waits for Fred; the inspector shows the new plan as one list with the added steps tagged (a dropped step would be struck in place) and Confirm / Keep old plan / Stop; why it ran and its route fold to one line each.</li>
         <li><b>Several tasks:</b> the scope's tasks stack, newest first, every one folded to a quiet row except the picked one. Left / Right moves between them.</li>
@@ -632,14 +632,14 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
       </ul>
     </section>
     <section>
-      <h3>Decisions for Fred (ID-1 to ID-9)</h3>
+      <h3>Decisions (taken by Fred, 2026-10-13: all as proposed but ID-5)</h3>
       <table>
-        <tr><th>#</th><th>Question</th><th>Proposed</th></tr>
-        <tr><td>ID-1</td><td>Brainstorm 7 said a connector turns orange when the brief cut findings</td><td>No: orange stays "needs you". A cut brief is a tone step on its word cells plus "cut 120 w"; a code fallback is dashed</td></tr>
+        <tr><th>#</th><th>Question</th><th>Decision</th></tr>
+        <tr><td>ID-1</td><td>Brainstorm 7 said a connector turns orange when the brief cut findings</td><td>No: orange stays "needs you". A cut is the words "cut 122 w" in ink on the chip; a code fallback is dashed</td></tr>
         <tr><td>ID-2</td><td>Where the auto hand off (D-5, off by default) is switched</td><td>A Window runs group in the settings popover, next to Harnesses, same Turn on / Turn off; config stays the source of truth</td></tr>
         <tr><td>ID-3</td><td>Context of a non-Claude step: an estimate (characters / 4, hatched) or unknown</td><td>Unknown, as plan 5 decided (3.6); the hatched estimate is a plan 25 option if the live runs show the adapters' tokens are usable</td></tr>
         <tr><td>ID-4</td><td>How the Board opens</td><td>A button that widens the window and opens the page, size kept in window.json; never by dragging alone</td></tr>
-        <tr><td>ID-5</td><td>Cells of a handoff</td><td>1 cell = 50 words, 10 cells = brief_max_words 500; a handoff over 500 words shows 10 cells plus the figure</td></tr>
+        <tr><td>ID-5</td><td>Cells of a handoff</td><td><b>No</b> (Fred): a handoff has no cells. A visual for its words was confusing and cluttered the UI. The word count stays a figure in the inspector (Received, Handoff, the handoff head, the Task page's handoff fold) and in the chip's title; brief_max_words stays 500 in config.json</td></tr>
         <tr><td>ID-9</td><td>Words for what passes between steps</td><td>"Handoff" everywhere the window shows it: a step <i>receives</i> one and <i>writes</i> one; "sent" or "after the brief pass" for the compacted version; "note" and "brief" stay code names. The Task page's "note ready" chip becomes "handoff ready"</td></tr>
         <tr><td>ID-6</td><td>Fills: cells of what</td><td>20 cells = the allowance of the window (day, week or month); 1 cell = 5 %; the orange outline cell marks the pace. Usage shows one bar per model, the window that binds, and opens the three on a click (review, P2)</td></tr>
         <tr><td>ID-7</td><td>The replan wait</td><td>Waits on the Task page and the Board as a task "waiting" (orange), with the new plan as one list, added steps tagged and dropped ones struck in place (the handoff rule, applied here); Confirm plan, Keep old plan (runs the old steps), Stop</td></tr>
@@ -675,7 +675,6 @@ const sprite = (n) => SPR[n] ? `<span class="spr${SPR[n].g3 ? " g3" : ""}" aria-
 const WORD = { running: ["Running", "n"], done: ["Done", "g"], failed: ["Fail", "r"], planned: ["Planned", "q"], waiting: ["Waiting", "y"], stuck: ["Stuck", "r"], stopped: ["Stopped", "q"], handed: ["Handed off", "y"] };
 const ctxCells = (k, live = false) => Array.from({ length: 30 }, (_, i) => (k == null ? "" : i < Math.round(k / 10) ? (i >= 15 ? (i >= 30 ? "r" : "y") : (live && i === Math.round(k / 10) - 1 ? "f live" : "f")) : ""));
 const ctxTone = (k) => k == null ? "" : k >= 300 ? "r" : k >= 150 ? "y" : "";
-const wCells = (w, cut = 0, n = 10) => Array.from({ length: n }, (_, i) => (i < Math.ceil((w - cut) / 50) ? "f" : i < Math.ceil(w / 50) ? "l2" : ""));
 const rungText = (s) => s.harness === "claude" ? `${s.model}${s.effort ? " · " + s.effort : ""}` : `${s.harness} · ${s.model}${s.effort ? " · " + s.effort : ""}`;
 const costText = (c, exact = true) => c == null ? '<span class="unk" title="the adapter reported no usage">? cost</span>' : (exact ? "" : "~") + money(c);
 
@@ -759,8 +758,8 @@ function connBlock(t, key, picked) {
   const cls = c.pending ? "pending" : c.writing ? "writing" : c.fallback ? "fallback" : c.cut ? "cut" : "";
   const chip = c.pending ? "" : c.writing ? `<span class="chip">writing</span>`
     : c.fallback ? `<span class="chip" title="${esc(c.why)}">as written · not compacted</span>`
-    : c.cut ? `<span class="chip" title="step ${key} wrote ${c.w + c.cut} words; the next step received ${c.w} once compacted, Findings cut ${c.cut} w"><span class="cells">${cellsHtml(wCells(c.w + c.cut, c.cut))}</span>${c.w + c.cut} → <b>${c.w} w</b> · cut ${c.cut}</span>`
-    : `<span class="chip" title="the handoff step ${key} left for the next step, compacted: ${c.w} words"><span class="cells">${cellsHtml(wCells(c.w))}</span><b>${c.w} w</b></span>`;
+    : c.cut ? `<span class="chip" title="step ${key} wrote ${c.w + c.cut} words; the next step received ${c.w} once compacted, Findings cut ${c.cut} w">handoff · <b>cut ${c.cut} w</b></span>`
+    : `<span class="chip" title="the handoff step ${key} left for the next step, compacted to ${c.w} words">handoff</span>`;
   return `<div class="conn ${cls}${picked === "c" + key ? " picked" : ""}" data-pick="c${key}" tabindex="0" role="button"><span class="ln"></span>${chip}</div>`;
 }
 function chainHtml(t, picked, folded) {
@@ -918,9 +917,9 @@ function inspMeasure() {
   const bar = (v, max, unit, tone = "f") => `<span class="bar"><span class="cells">${cellsHtml(Array.from({ length: 20 }, (_, k) => (k < Math.round(20 * v / max) ? tone : "")))}</span><b class="${tone === "y" ? "y" : ""}">${v}${unit}</b></span>`;
   const hot = rows.some(([, , c]) => c >= 150);
   return `<div class="ihead"><h2>Measure · CLAUDE-CONSOLE · last 12 tasks</h2><div class="meta"><span>median per kind</span></div></div>
-    <div class="measure"><span class="hd2">kind</span><span class="hd2">received</span><span class="hd2">context</span><span class="hd2">handoff</span>
-      ${rows.map(([k, i, c, o]) => `<span class="k${k === "fix" ? " hot" : ""}">${k}</span>${bar(i, 500, " w")}${bar(c, 200, "K", c >= 150 ? "y" : "f")}${bar(o, 500, " w")}`).join("")}</div>
-    <div class="legend"><span><i class="f"></i>median</span>${hot ? '<span><i class="y"></i>context past 150K</span>' : ""}<span>cell 25 w · 10K</span></div>
+    <div class="measure"><span class="hd2">kind</span><span class="hd2 r">received</span><span class="hd2">context</span><span class="hd2 r">handoff</span>
+      ${rows.map(([k, i, c, o]) => `<span class="k${k === "fix" ? " hot" : ""}">${k}</span><span class="fig" title="${i ? "median words of the handoff received" : "the task goal and the context pack"}">${i ? i + " w" : "pack"}</span>${bar(c, 200, "K", c >= 150 ? "y" : "f")}<span class="fig" title="median words of the handoff written">${o} w</span>`).join("")}</div>
+    <div class="legend"><span><i class="f"></i>median</span>${hot ? '<span><i class="y"></i>context past 150K</span>' : ""}<span>cell 10K · words as figures</span></div>
     <p class="note m">A kind that receives a small handoff and reaches a large context reads too much on its own: fix at 112K from 240 words in is the one to tune (scout first, or a turn cap).</p>`;
 }
 function boardHtml(v) {
@@ -936,7 +935,7 @@ function boardHtml(v) {
     <div class="top"><button class="rb" title="Back (Esc)" aria-label="Back">&#8592;</button><span class="crumb m">Board / CLAUDE-CONSOLE · ${v === "bempty" ? "0" : "3"} tasks</span><span class="sp"></span>
       <button class="rb" title="Pin on top">&#9650;</button><button class="rb" title="Fold">&#8211;</button><button class="rb x" title="Close">&#10005;</button></div>
     <div class="board"><div class="bchain">${chain}</div><div class="binsp">${insp}</div></div>
-    <div class="bfoot">${keys}<span class="sp"></span><button class="q" title="A step's context in cells of 10K; a handoff in cells of 50 words; the chip between two steps is the handoff the next one received" aria-label="Legend">?</button></div><span class="rsz"></span></div>`;
+    <div class="bfoot">${keys}<span class="sp"></span><button class="q" title="A step's context in cells of 10K; the chip between two steps is the handoff the next one received, its words in the inspector" aria-label="Legend">?</button></div><span class="rsz"></span></div>`;
 }
 
 // ---- compact views ------------------------------------------------------------------------------------------------
@@ -999,9 +998,7 @@ function taskPageHtml() {
     const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
     const cur = s.state === "running", planned = s.state === "planned";
     const showG = cur || s.state === "failed" || (s.ctx != null && s.ctx >= 150);  // the gauges stay in sight where they decide something; a click opens them on the other rows
-    const gg = showG ? `<span class="gg"><span title="received: the handoff of the step before, 1 cell = 50 words">in <span class="cells" style="--n:10">${cellsHtml(s.in ? wCells(s.in) : Array(10).fill(""))}</span><b>${s.in ? s.in + "w" : s.pack ? "pack" : "–"}</b></span>
-      <span title="context reached, 1 cell = 10K">ctx ${s.ctx == null ? `<b class="mut">unknown</b>` : `<span class="cells c30">${cellsHtml(ctxCells(s.ctx, cur).filter((_, k) => k % 2 === 0))}</span><b class="${ctxTone(s.ctx)}">${s.ctx}K</b>`}</span>
-      <span class="io2" title="handoff written, 1 cell = 50 words">out <span class="cells" style="--n:10">${cellsHtml(s.out ? wCells(s.out) : Array(10).fill(""))}</span><b>${s.out ? s.out + "w" : "–"}</b></span>${s.hint ? `<span title="${esc(s.hint)}">· △ scout first</span>` : ""}</span>` : "";
+    const gg = showG ? `<span class="gg"><span title="context reached, 1 cell = 10K">ctx ${s.ctx == null ? `<b class="mut">unknown</b>` : `<span class="cells c30">${cellsHtml(ctxCells(s.ctx, cur).filter((_, k) => k % 2 === 0))}</span><b class="${ctxTone(s.ctx)}">${s.ctx}K</b>`}</span>${s.hint ? `<span title="${esc(s.hint)}">· △ scout first</span>` : ""}</span>` : "";
     const sub = s.verdict ? `<span class="r">FAIL ${esc(s.detail)}</span>` : esc(s.goal);
     return `<div class="row${cur ? " cur" : ""}${showG || planned ? "" : " short"}" data-fold-row><span class="cells">${cells}</span>
       <span class="nm m">${esc(two(s.n))} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(rungText(s))}</span>` : ""}${triesHtml(s)}</span>
@@ -1134,15 +1131,15 @@ function usageHtml() {
 }
 
 const CAP = {
-  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: the head says which step it is on, then one block per step. A finished step is two lines (state, kind, cost; rung, time and a 15-cell context mini gauge); the picked, failed and running steps keep the full block with the 30-cell context row. The chips between the blocks are the handoffs, with their words once compacted (412 → 290 w · cut 122 after 03). Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost exact from the usage Codex reports. Right, the inspector head is one line, rung · cost · time, and opens on the <b>Chat</b>: the prompt the service built is folded to one line (it is not Fred's), the agent's turns on the left (blue edge), the tool events folded with a failed exit first, the HANDOFF block as a chip with its Next line, the source line at the end. Received, Handoff (412 → 290 w) and Route are the tabs behind it; inside them Files touched, Troubleshooting and Facts fold to one line each.",
+  step: "<b>Board, step 03 picked.</b> Left, the chain of the running task: the head says which step it is on, then one block per step. A finished step is two lines (state, kind, cost; rung, time and a 15-cell context mini gauge); the picked, failed and running steps keep the full block with the 30-cell context row. The chips between the blocks are the handoffs: the word and, after 03, cut 122 w; the counts themselves are in the inspector (ID-5, no cells for words). Step 03 ran on Codex: its context is unknown (plan 5, 3.6), its cost exact from the usage Codex reports. Right, the inspector head is one line, rung · cost · time, and opens on the <b>Chat</b>: the prompt the service built is folded to one line (it is not Fred's), the agent's turns on the left (blue edge), the tool events folded with a failed exit first, the HANDOFF block as a chip with its Next line, the source line at the end. Received, Handoff (412 → 290 w) and Route are the tabs behind it; inside them Files touched, Troubleshooting and Facts fold to one line each.",
   live: "<b>Board, the running step picked.</b> 5c verify on Opus, 2m 40s in: the chat streams as the session page's Chat tab does, newest at the end, the writing mark with the one blinking cell in the agent's label. The finished steps above it are two-line blocks, so the FAIL of 05 and the live step sit on the first screen. Stop sits on the head line. Up / Down along the chain switches the inspector and keeps the tab.",
-  conn: "<b>Board, the handoff after step 03 picked.</b> One column: what 04 received. The headings the brief pass cut are open, with the two Findings lines left in place, struck and tagged, so the eye reads what went through and skips what did not; Goal, Files touched and Troubleshooting fold to one line each with \"whole\". The head counts written, received and cut words. The code checks fold to one line, \"5 of 5 pass\", with the brief pass's cost; a failing check would show in red there and open the fold by itself. The cut shows as a tone step on the chip's cells and the words \"cut 122\", not as orange (ID-1).",
+  conn: "<b>Board, the handoff after step 03 picked.</b> One column: what 04 received. The headings the brief pass cut are open, with the two Findings lines left in place, struck and tagged, so the eye reads what went through and skips what did not; Goal, Files touched and Troubleshooting fold to one line each with \"whole\". The head counts written, received and cut words. The code checks fold to one line, \"5 of 5 pass\", with the brief pass's cost; a failing check would show in red there and open the fold by itself. On the chain the chip says \"handoff · cut 122 w\", in ink, not orange (ID-1) and without cells (ID-5).",
   task: "<b>Board, the task head picked.</b> In sight: the step it is on, its cost and effort, one line for what runs now and what comes next, and the open questions (orange ?). Behind one line each: prompt.md (its Done when line stays visible), the closed questions, and the chain log with its last move. Stop and Pause sit on the head line.",
   replan: "<b>Board, a replan waiting.</b> Task B is the picked one now: its scout asked for a replan, the Haiku pass added two steps, and the task waits (orange, as every wait for Fred). The inspector carries the new plan as one list with the added steps tagged, and Confirm plan / Keep old plan / Stop. Why it ran and the route fold to one line each. The planned steps on the chain are one-line blocks on a dotted line. The same box appears on the compact Task page and the list card carries the same two buttons.",
-  measure: "<b>Board, nothing picked.</b> The measure table of the project: per step kind, median handoff received, context reached and handoff written over the last tasks, each bar with its figure; the row the reading names is in ink. The footer's ? holds the cell scale.",
+  measure: "<b>Board, nothing picked.</b> The measure table of the project: per step kind over the last tasks, the median context reached as a bar with its figure, the median handoff received and written as figures only (ID-5); the row the reading names is in ink. The footer's ? holds the cell scale.",
   bempty: "<b>Board, no task in the scope.</b> The empty cells and one line; the inspector and the key hints stay blank. Esc or Back returns to the list at the compact size.",
   list: "<b>Compact list.</b> The today strip as locked, its breakdown closed; under it one line only because models are over their pace: \"3 models over pace · fills\", which opens the breakdown (spend legend, model mix, the over-pace figures and the Usage button). Needs you then starts on the first screen: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working card says which step of how many; the rung is on its doing line. Project names are hidden while the scope is one project.",
-  tpage: "<b>Compact Task page.</b> The steps list is the page: a finished step is two lines (name, rung, cost, Open; its goal), the failed step gives its sub line to the FAIL verdict whole, and the gauge line (in · ctx · out as cells with their figures) stays open only on the current, failed and past-150K rows, a click opens it on the others. The page opens scrolled to the current step. The handoff for the next step folds to one line with its words and its Next; opened, it shows the six headings and the facts the service added, folded.",
+  tpage: "<b>Compact Task page.</b> The steps list is the page: a finished step is two lines (name, rung, cost, Open; its goal), the failed step gives its sub line to the FAIL verdict whole, and the context gauge (15 cells and the figure; no in / out words, ID-5) stays open only on the current, failed and past-150K rows, a click opens it on the others. The page opens scrolled to the current step. The handoff for the next step folds to one line with its words and its Next; opened, it shows the six headings and the facts the service added, folded.",
   settings: "<b>Settings popover.</b> Under the project groups, two folded rows: Harnesses, open here because cmd is on but not found (the closed line keeps \"△ cmd not found\" in red), one row per CLI with glyph, state word, version and Turn on / Turn off; and Window runs with the auto hand off switch (ID-2), closed. The explanations moved to the rows' titles.",
   prep: "<b>Prep page.</b> The prompt and the step rows are the page. Scouted folds to its size and file count; the route reason folds under the selects (\"why codex · balance\"); the missing cap is one muted line with △. Every model select lists tiers as groups (think / write / read) with rungs on any harness that is on; opencode and cmd rungs only under read, and only on read kinds. Row 5 shows a refused pick: the note in red and the select back to auto.",
   session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the brief says context unknown in words with no cells; tabs Chat and Steps only. The chat starts with the folded Prompt row, then the same bubbles and folded tool rows as the Board (a failed exit first), the source line at the end. Continue resumes the thread; the levers that are off say \"claude only\" in one line.",

@@ -3,20 +3,21 @@
 - Asked by Fred, thread "Interface design for plan 5" ("exhaustive design").
 - Covers the window side of plan 5 (harness adapters, `plans/05-harnesses/`) and of the brainstorm
   `2026-10-13-orchestration.md` sections 3.1, 4, 5, 7 and 8 (plans 18, 23, 24, 25 in its section 9).
-- Mockup: `design/rework/proposed/cells-board.html` (twelve views, sample data, dark and light). Fred locks it
-  (D-6), then plan 25 and the window tasks of plans 5, 18, 23 and 24 take their code from it.
+- Mockup: `design/rework/locked/cells-board.html` (thirteen views, sample data, dark and light), locked by
+  Fred on 2026-10-13 (D-6): plan 25 and the window tasks of plans 5, 18, 23 and 24 take their code from it.
 - Read first: `web/app.js` (list, Task page, Prep page, session page, Usage page, picker popover),
   `web/style.css` (tokens, cells, sprites), `design/rework/locked/cells-drawer.html`, `usage.html`,
   `status-sprites.html`, plan 5 README (3.6, 3.7, decisions 10 to 13), plan 17 README (task.json, states).
-- State: design only, no code changed. Decisions D-1 to D-8 stand; this doc adds ID-1 to ID-7 (section 9).
+- State: design only, no code changed. Decisions D-1 to D-8 stand; ID-1 to ID-9 (section 12) are taken by
+  Fred, all as proposed except ID-5 (no cells for a handoff's words).
 
 ## 0. Short answer
 
 The compact window (340 to 400 px) keeps everything Cells Drawer locked and takes every new fact in place:
 a rung is words (`codex · gpt-5.6-codex · medium`) wherever a model showed, the settings popover gets a
 Harnesses group with a switch per CLI, every model select lists tiers (think / write / read) holding rungs on
-any CLI that is on, the Task page's step rows gain one line of three gauges (brief in, context reached, note
-out), the today breakdown and the Usage page show the fills per model, and a replan waits as any other wait.
+any CLI that is on, the Task page's step rows gain a context gauge (no word cells for the
+handoffs, ID-5), the today breakdown and the Usage page show the fills per model, and a replan waits as any other wait.
 
 The Board is the one new page: the window widened to 900 px from a button, the chain of a task on the left
 as connected cells (steps as blocks, briefs as the connectors, a fix insert as a bracket), and one picked
@@ -34,7 +35,9 @@ to two lines. The review's P1 and P2 lists are applied in the mock and in this d
   pace that the router leaves); red and green only for state; blue for a note being written. State is never
   colour alone: glyph or sprite plus word. Two tokens exist for the chat alone (ID-8): `--me` (violet,
   Fred's turns) and `--ai` (the writing blue, the agent's turns); they colour nothing else.
-- One Doto figure per screen. Every quantity in cells. An unknown is a word, never a zero (D-3).
+- One Doto figure per screen. Every quantity in cells, but a handoff's words: those are a figure in the
+  inspector only, never cells (ID-5, Fred: a visual for the word count was confusing and cluttered the UI).
+  An unknown is a word, never a zero (D-3).
 - Words: a step **receives** a handoff and **writes** one. Received is what it got from the step before, after
   the brief pass; Handoff is what it wrote for the step after. "Note" and "brief" stay names in the code
   (ID-9: Fred, 2026-10-13, Note / Brief took minutes to read at first sight).
@@ -182,11 +185,10 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
   line: the title's tooltip holds it. The Steps header reads `Steps · 8` and `step 5c of 8`; the page opens
   with the current step scrolled into view.
 - **Step rows**: a finished step is two lines, `NN kind rung · cost · Open` and its goal (muted, one line).
-  The gauge line, `in` (the handoff it received, cells of 50 words, 10 cells; step 1 shows `pack` for the
-  context pack), `ctx` (15 cells of the 30, past 150K in orange, the figure in the tone of the gauge;
-  `unknown` in words for a harness with no context) and `out` (the handoff it wrote, cells of 50 words;
-  hidden under 372 px), stays open only on the current step, a failed step and a step past 150K; a click on
-  the row opens it on the others. The cell scale is each gauge's title. A failed row gives its sub line to
+  The gauge line, `ctx` (15 cells of the 30, past 150K in orange, the figure in the tone of the gauge;
+  `unknown` in words for a harness with no context; no `in` / `out` word gauges, ID-5), stays open only on
+  the current step, a failed step and a step past 150K; a click on the row opens it on the others. The cell
+  scale is the gauge's title. A failed row gives its sub line to
   the verdict whole, `FAIL test_resume_command: options after resume`. Attempt squares show on a row only
   when a try failed; the reason (`try 1 no HANDOFF block`) is in the opened row. The hint `· △ scout first`
   is muted, not orange (it is tuning, not a wait), its figures in its title (`230 w in, 118K reached`; the
@@ -210,8 +212,8 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
 900 x 680 by default. Header: Back, crumb `Board / <scope> · N tasks`, window buttons. Body: two columns,
 the chain (300 px, scrolls) and the inspector (the rest, scrolls), a 1 px line between. Footer: the keys
 (`↑ ↓ step · ← → task · Enter chat · Esc back`, hidden on the empty Board) and a `?` at the right whose
-title is the legend (`a step's context in cells of 10K; a handoff in cells of 50 words; the chip between
-two steps is the handoff the next one received`).
+title is the legend (`a step's context in cells of 10K; the chip between two steps is the handoff the next
+one received, its words in the inspector`).
 
 ### 8.2 The chain
 
@@ -233,11 +235,11 @@ two steps is the handoff the next one received`).
   first` (figures in its title), or the task's wait in orange. No in / out line: the connectors carry the
   words. The current step has an ink edge on the left; the picked block an ink outline.
 - **Step block, planned**: one line, `PLANNED NN kind`; `rung at start (rule kind)` in its title.
-- **Connector**: the handoff between two steps as the next one received it, a 2 px line and a chip:
-  `[cells] 160 w`. Variants: after a cut, `412 → 290 w · cut 122` with the cut part of the cells in the `l2`
-  tone (ID-1, no orange); dashed border for a code fallback (`as written · not compacted`, the reason in
-  the title); blue dashed `writing`; before a planned step a dotted line with no chip. The footer's `?`
-  says what a connector is.
+- **Connector**: the handoff between two steps as the next one received it, a 2 px line and a chip that
+  names it: `handoff`, the word count in its title. Variants: after a cut, `handoff · cut 122 w` with the
+  cut in ink (ID-1, no orange; ID-5, no cells: the counts are in the inspector); dashed border for a code
+  fallback (`as written · not compacted`, the reason in the title); blue dashed `writing`; before a planned
+  step a dotted line with no chip. The footer's `?` says what a connector is.
 - **Fix insert**: a bracket (a 2 px line with two ticks) under the failed verify holding the fix and the
   second verify, rejoining the chain after them; the fix block shows its escalated rung.
 - **Replan**: a step block of kind `replan` (Haiku, no tools, 1 turn), orange while the task waits on it.
@@ -291,10 +293,11 @@ two steps is the handoff the next one received`).
   Done when line; **Chain log** folded, closed line `Chain log · 23 moves · last 14:38 5c planned ->
   running ▾`, open: one line per move with the route notes.
 - **Nothing picked** (Esc inside the Board, or a folded task picked): **Measure · <project> · last N
-  tasks · median per kind**: columns `received · context · handoff`, per kind a 20-cell bar with its figure
-  after it (`240 w`, `112K`; context past 150K in orange, and the legend shows that item only when a bar
-  is orange), the row the reading names in ink and the others muted, the cell scale in the legend (`cell
-  25 w · 10K`), and the one-line reading (brainstorm 5.1 item 6) without its provenance sentence.
+  tasks · median per kind**: columns `received · context · handoff`; per kind the received and written
+  handoffs as figures only (`240 w`, `pack` for the scout; ID-5) and the context as a 20-cell bar with its
+  figure (`112K`; past 150K in orange, and the legend shows that item only when a bar is orange), the row
+  the reading names in ink and the others muted, the cell scale in the legend (`cell 10K`), and the one-line
+  reading (brainstorm 5.1 item 6) without its provenance sentence.
 
 ### 8.4 Keyboard
 
@@ -331,7 +334,7 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | Rung | Claude, other harness | `sonnet · medium` / `codex · gpt-5.6-codex · medium` |
 | Step cost | exact, estimated, unknown | `0.84` / `~0.84` / `? cost` |
 | Step context | known, hand-off zone, unknown | cells and `92K` / `164K` in orange / `unknown: codex reports spend` |
-| Handoff connector | ok, cut, fallback, writing, pending | `handoff 290 w` / `· cut 122 w` (tone) / dashed / blue dashed / dotted line |
+| Handoff connector | ok, cut, fallback, writing, pending | `handoff` / `handoff · cut 122 w` (the cut in ink) / dashed / blue dashed / dotted line; the words in the chip's title |
 | Handoff line | kept, cut | plain / struck, muted, tagged `cut`, in place under its heading |
 | Fold | closed, open, opened by itself | `Label · the one fact ▾` muted mono / the body in place / the red or orange word in the closed line and the body open (FAIL, failing check, not found) |
 | Finished step | done, done and picked | two lines (state, kind, cost; rung, time, ctx mini) / the full block |
@@ -351,15 +354,15 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | Usage, list | fills per model (day / week / month: used, allowance, pace), FAIL counts per rung per hour | 18 |
 | Window | `window.json board: [w, h]`; `WindowApi.resize` to open and close the Board | 25 |
 
-## 12. Decisions for Fred
+## 12. Decisions (taken by Fred, 2026-10-13: all as proposed except ID-5)
 
-| # | Question | Proposed |
+| # | Question | Decision |
 |---|---|---|
-| ID-1 | Brainstorm 7 said a connector turns orange when the brief cut findings | No: orange stays "needs you". A cut is a tone step on the chip's cells plus `cut 122 w`; a code fallback is dashed |
+| ID-1 | Brainstorm 7 said a connector turns orange when the brief cut findings | No: orange stays "needs you". A cut is the words `cut 122 w` in ink on the chip; a code fallback is dashed |
 | ID-2 | Where the auto hand off (D-5, off by default) is switched | A Window runs group in the settings popover, next to Harnesses, Turn on / Turn off; config.json stays the source of truth |
 | ID-3 | Context of a non-Claude step: an estimate (characters / 4, hatched) or unknown | Unknown, as plan 5 3.6 decided; the hatched estimate is a plan 25 option if the live runs show usable token counts |
 | ID-4 | How the Board opens | A button that widens the window and opens the page, size kept in window.json; never by dragging alone |
-| ID-5 | Cells of a handoff | 1 cell = 50 words, 10 cells = `brief_max_words` 500; a handoff over 500 words shows 10 cells plus the figure |
+| ID-5 | Cells of a handoff | **No** (Fred): a handoff has no cells, a visual for its word count was confusing and cluttered the UI. The count stays a figure in the inspector (the Received and Handoff tabs, the handoff head, the Task page's handoff fold, the measure table) and in the connector chip's title. `brief_max_words` stays 500 in config.json; the measure table and the `cut` word on the chips show after ten tasks whether it bites |
 | ID-6 | Cells of a fill | 20 cells = the window's allowance (day, week or month), 1 cell = 5 %; the orange outline cell marks the pace. Usage shows one bar per model, the window that binds, and opens the three on a click (review, P2) |
 | ID-7 | The replan wait | A task `waiting` (orange) on the Task page, the Board and the list card, with the new plan as one list, added steps tagged and dropped ones struck in place (the handoff rule applied here, review 3.11); Confirm plan (its title says `replan_auto` is off), Keep old plan (runs Prep's steps), Stop; why it ran and the route fold |
 | ID-8 | Chat roles: Fred asked for an accent per side | Two tokens for the chat only, `--me` violet (Fred, right) and `--ai` the writing blue (the agent, left), tinted bubbles with a 2 px edge; tool events and the HANDOFF block folded (6.1) |
@@ -387,3 +390,8 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
   row and the exit-first tool rows (6.1), orange back to "needs you" only, the duplicate connector before 06
   fixed, one bar per model on Usage (9, ID-6), the replan as one list (ID-7), the balance note muted (8.3).
   Not applied: nothing of P1 and P2; of P3, the counts and words are aligned and the light theme re-shot.
+- 2026-10-13 - Fred locked the design: every decision as proposed except ID-5 (no cells for a handoff's
+  words: the connector chip says `handoff` or `handoff · cut 122 w`, the Task page keeps the context gauge
+  only, the measure table shows words as figures). `brief_max_words` stays 500. Mockup moved to
+  `design/rework/locked/cells-board.html`; BRAINSTORM 7.5 and the README name it. Next: plan 25 from
+  sections 8 and 11.
