@@ -43,7 +43,7 @@ NOTE_MAX = 20 * 1024
 GOAL_MAX = 6000
 STEP_GOAL_MAX = 1000
 TASK_STATES = ("planned", "running", "waiting", "stuck", "done", "stopped", "handed")  # handed: Fred handed off
-STEP_STATES = ("planned", "running", "done", "failed")
+STEP_STATES = ("planned", "running", "done", "failed", "handed")  # handed: the step Fred handed off
 EFFORT_CAP = {m: claude_cli.EFFORTS[-1] for m in claude_cli.MODELS}  # every alias took `max` (CLI 2.1.296)
 _TOP = ("opus", "high")  # the most a step runs on unless Fred picks fable
 _HINT = re.compile(r"Next model:\s*([a-z]+)/([a-z]+)")
@@ -164,7 +164,10 @@ def live_note(text: str) -> str:
 def note_state(task: dict, s: dict, live: str = "") -> str:
     """The state of step `s`'s handoff note for the window: "" (none yet), "writing" / "unchecked" (`live`, the
     step runs), "checked" (it passed; the brief is made or there is no next step), "ready" (passed, briefed,
-    the next step has not started), "sent" (the next step started)."""
+    the next step has not started), "sent" (the next step started), "handed" (Fred handed the task off here and the
+    session-handoff note is in the task folder)."""
+    if s["state"] == "handed":
+        return "handed" if task.get("handoff_note") else ""
     if s["state"] == "running":
         return live or "writing"
     if not s.get("handoff") or s["state"] != "done":
@@ -236,18 +239,24 @@ def note_file(task: dict, step: dict) -> str:
     return f"steps/{step['n']:02d}-{step['kind']}.md"
 
 
+def handoff_file(task: dict, step: dict) -> str:
+    """The session-handoff skill's note of the step Fred handed off."""
+    return f"steps/{step['n']:02d}-handoff.md"
+
+
 def brief_file(task: dict, step: dict) -> str:
     """The compacted note the next step reads (compact.py)."""
     return f"steps/{step['n']:02d}-{step['kind']}.brief.md"
 
 
-def note_text(task: dict, step: dict, block: str) -> str:
+def note_text(task: dict, step: dict, block: str, what: str = "") -> str:
+    """A note file: one head line, then `block` masked and cut at 20 KB. `what` replaces the step's kind and route."""
     body = redact.mask(block)
     raw = body.encode("utf-8")
     if len(raw) > NOTE_MAX:
         body = raw[:NOTE_MAX].decode("utf-8", "ignore").rstrip() + "\n[cut at 20 KB]"
-    head = f"# Step {step['n']:02d}: {step['kind']} on {step['model']}/{step['effort']}, session {step['session']}"
-    return f"{head}\n\n{body}"
+    what = what or f"{step['kind']} on {step['model']}/{step['effort']}"
+    return f"# Step {step['n']:02d}: {what}, session {step['session']}\n\n{body}"
 
 
 # -- steps and the chain (pure, on dicts) -----------------------------------------------------------------
@@ -511,8 +520,8 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0):
         if lever == "done" and state not in ("waiting", "stuck", "stopped", "handed"):
             return False, f"task is {state}", []
         why = "handed off by Fred" if lever == "handoff" else "marked done by Fred"
-        if s and s["state"] == "running":  # its turn is over (asks, or a hold): the step ends here
-            _finish(task, s, "done", now, lines, why)
+        if s and s["state"] == "running":  # its turn is over (asks, or a hold): the step ends here, handed or done
+            _finish(task, s, "handed" if lever == "handoff" else "done", now, lines, why)
         _task_to(task, "handed" if lever == "handoff" else "done", why, now, s, lines)
         task["owner"] = "fred"
     elif lever == "confirm":
@@ -588,6 +597,26 @@ def read_note(home, task: dict, n: int) -> str:
         return ""
 
 
+def write_handoff(home, task: dict, step: dict, text: str) -> str:
+    """The session-handoff skill's last message in the step Fred handed off, masked and cut like a step note;
+    sets task["handoff_note"] and returns the relative name."""
+    rel = handoff_file(task, step)
+    path = folder(home, task["id"]) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(note_text(task, step, text, "handoff note"), encoding="utf-8")
+    task["handoff_note"] = rel
+    return rel
+
+
+def read_handoff(home, task: dict) -> str:
+    if not task.get("handoff_note"):
+        return ""
+    try:
+        return (folder(home, task["id"]) / task["handoff_note"]).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def read_brief(home, task: dict, n: int) -> str:
     try:
         return (folder(home, task["id"]) / brief_file(task, step(task, n))).read_text(encoding="utf-8")
@@ -633,7 +662,7 @@ def clear(home, task: dict, keep_last: bool = True) -> list:
     if keep_last:
         last = step(task, task["last_good"]) if task["last_good"] else None
         keep = note_file(task, last) if last else ""
-        kept = {keep, brief_file(task, last) if last else ""}
+        kept = {keep, brief_file(task, last) if last else "", task.get("handoff_note") or ""}
         for path in sorted((root / "steps").glob("*.md")):
             if f"steps/{path.name}" not in kept:
                 path.unlink(missing_ok=True)

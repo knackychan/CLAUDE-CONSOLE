@@ -17,7 +17,8 @@ const DONE_SHOWN = 2;     // done sessions listed before "Show N more"
 const TABS = [["chat", "Chat"], ["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"]];
 const EFF_LEVELS = ["auto", "low", "medium", "high", "xhigh", "max"];  // the slider's values, in order
 const TASK_WORD = { planned: ["Task", "n"], running: ["Task", "n"], waiting: ["Waiting", "y"],
-  stuck: ["Stuck", "r"], done: ["Done", "g"], stopped: ["Stopped", "q"], handed: ["Handed off", "g"] };  // [word, tone]
+  stuck: ["Stuck", "r"], done: ["Done", "g"], stopped: ["Stopped", "q"], handed: ["Handed off", "y"],  // [word, tone]
+  handing: ["Handing off", "n"], handed_no_note: ["Handed off", "q"] };  // handed: the note is in, the next task is Fred's
 const SESSION_SPRITE = { running: "running", stop: "waiting", blocked: "stuck", done: "done" };  // session state -> sprite
 
 const px = (tone, ...rows) => rows.join("").split("").map((c) => (c === "x" ? tone : ""));  // one class per cell, "" is an off cell
@@ -42,6 +43,8 @@ const SPRITE = {  // grid (5 by default), ms per frame, frames as one class per 
   stopped: { frames: [px("q", ".....", ".xxx.", ".xxx.", ".xxx.", ".....")] },
   stuck: { frames: [px("r", "x...x", ".x.x.", "..x..", ".x.x.", "x...x")] },
   done: { frames: [px("g", ".....", "....x", "...x.", "x.x..", ".x...")] },
+  handed: { frames: [px("y", "..x..", "...x.", "xxxxx", "...x.", "..x..")] },  // an arrow: on to the next task
+  handed_no_note: { frames: [px("q", "..x..", "...x.", "xxxxx", "...x.", "..x..")] },
   planned: { frames: [Array.from({ length: 25 }, (_, k) => (k === 12 ? "l2" : ""))] },
 };
 function sprite(name, flip = false) {
@@ -59,7 +62,7 @@ function fresh(kind, id, value, ms) {  // true for ms after value changed from a
   if (was !== undefined && was !== value) freshUntil.set(key, now + ms);
   return (freshUntil.get(key) || 0) > now;
 }
-const taskSprite = (t) => (t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? "paused" : t.state === "handed" ? "done" : t.state);
+const taskSprite = (t) => (t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? "paused" : t.state === "handing" ? "running" : t.state);
 const sessionMark = (s, glyph, tn) => {  // the sprite of a session state, or its glyph (a finished session with a FAIL verdict keeps its x)
   const name = SESSION_SPRITE[s.state];
   return !name || (name === "done" && tn !== "g") ? glyph + " " : sprite(name, fresh("f", "s" + s.id, s.state, 240));
@@ -490,7 +493,10 @@ function renderTop() {
 // -- tasks (plan 17): a card in the list, the step tag on its sessions ---------------------------------
 function sameDir(a, b) { const n = (p) => String(p || "").replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase(); return n(a) === n(b); }
 function taskGroup(t) { return t.group === "working" ? "work" : t.group; }  // the service decides (task_row), counts read the same
-const taskShown = (t) => (t.state === "running" && (t.asks || t.hand_off) ? "waiting" : t.state);  // a step's chat waits for Fred
+const taskShown = (t) => (t.state === "handed" ? (t.handoff_note ? "handed" : t.group === "working" ? "handing" : "handed_no_note")
+  : t.state === "running" && (t.asks || t.hand_off) ? "waiting" : t.state);  // a step's chat waits for Fred
+const stepCell = (t, x) => (x.state === "handed" ? (t.state === "handed" && t.handoff_note ? "y" : "q")  // a handed step is not a checked one
+  : x.state === "running" ? "f live" : x.state === "failed" || x.verdict === "FAIL" ? "r" : x.state === "done" ? "g" : "");
 const handText = (h) => `↻ hand off: ${h}, one task = one chat`;
 function taskGroups() {  // the scope's tasks by group; a finished or stopped task leaves the list a day after its last change
   const mine = (snap.tasks || []).filter((t) => !scope || sameDir(t.project_dir, scope));
@@ -506,15 +512,18 @@ function taskTag(s) {  // "step 2/4" after the title of a session that runs a ta
 
 function taskCard(t) {
   const [word, tn] = TASK_WORD[taskShown(t)] || TASK_WORD.running, cur = taskStep(t);
-  const cells = t.steps.map((x) => x.state === "running" ? "f live" : x.state === "failed" || x.verdict === "FAIL" ? "r" : x.state === "done" ? "g" : "");
+  const cells = t.steps.map((x) => stepCell(t, x));
   const live = t.steps.find((x) => x.note === "writing" || x.note === "unchecked" || x.note === "ready");
+  const next = t.state === "handed" && t.handoff_note;  // a pending handoff: the next task and the note, one click each
   const ask = (t.asks || t.hand_off) && cur && cur.session;
-  const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.asks ? "" : t.why;
+  const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.asks || next ? "" : t.why;
   const third = (why ? `<div class="why m mut">${esc(why)}</div>` : "")
     + (t.asks ? `<div class="q">${esc(t.asks)}</div>` : "") + (t.hand_off ? `<div class="why m y">${esc(handText(t.hand_off))}</div>` : "")
     + (t.briefing ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>Haiku is compacting the note</span></div>' : "")
     + (live ? noteChip(live, t) : "")
-    + (ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "");
+    + (ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "")
+    + (next ? `<div class="lr"><button class="btn you sm" data-tact="next" data-tid="${esc(t.id)}" title="A new task seeded with the handoff note">Start next task</button>
+      <span class="link m" data-task="${esc(t.id)}" title="${esc(t.handoff_note)}">handoff note</span></div>` : "");
   return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
     <div class="l1"><span class="st ${tn}">${taskMark({ ...t, state: taskShown(t) })}${word}</span><span class="t">${esc(t.title)}</span>
     <span class="age m" title="since the last change">${ago(snap.now - t.updated)}</span></div>
@@ -925,6 +934,21 @@ function openPicker(from) {
 function closePicker() {
   $("pop").hidden = true;
   $("scope").setAttribute("aria-expanded", "false");
+}
+
+async function openFolder() {  // VS Code's Open Folder: the OS dialog picks it, then runs are allowed there
+  let dir = "";
+  try { dir = await window.pywebview.api.pick_folder(); } catch (err) { return; }
+  if (!dir) return;
+  try {
+    cfg.projects = (await api("/api/open_folder", { project_dir: dir })).projects;
+    fail = null;
+    pick(dir);
+  } catch (err) {
+    closePicker();
+    fail = { title: "Open folder failed", msg: err.message, retry: "" };
+    renderCompose();
+  }
 }
 
 function pick(dir) {  // a project scopes the list and becomes the task target; All projects keeps the target
@@ -1379,6 +1403,17 @@ async function renderLevers(s) {
   setHtml($("levers"), html);
 }
 
+function seedBox(b) {  // pre-fill the new-task box with a brief; Fred edits it and runs it
+  pick(b.project_dir);
+  showPage("list");
+  draft = b.text;
+  draftKept = false;
+  $("c-prompt").value = draft;
+  saveDraft();
+  renderCompose();
+  $("c-prompt").focus();
+}
+
 let stopTimer = null;
 async function act(name, button) {
   const s = current();
@@ -1408,15 +1443,7 @@ async function act(name, button) {
     let r = null;
     if (name === "brief" || name === "vbrief" || name === "next") {  // pre-fill the new-task box; Fred edits it and runs it
       const kind = { vbrief: "&kind=verify", next: "&kind=next" }[name] || "";
-      const b = await api("/api/brief?session=" + encodeURIComponent(s.id) + kind);
-      pick(b.project_dir);
-      showPage("list");
-      draft = b.text;
-      draftKept = false;
-      $("c-prompt").value = draft;
-      saveDraft();
-      renderCompose();
-      $("c-prompt").focus();
+      seedBox(await api("/api/brief?session=" + encodeURIComponent(s.id) + kind));
       button.disabled = false;
       return;
     }
@@ -1471,11 +1498,12 @@ function noteChip(s, t) {  // what the step does now, by its handoff note from t
     checked: ["✓ note checked", "checked"],
     ready: [`✓ note ready for step ${nxt}`, `checked, step ${nxt} has not started`],
     sent: [`note sent to step ${nxt}`, `step ${nxt} started with it`],
+    handed: ["↻ handed off · note written", "the session-handoff note; Start next task seeds a new task with it"],
   }[s.note] || [s.note, ""];
   return `<span class="hn ${s.note}" title="the HANDOFF note of step ${s.n}: ${esc(tip)}">${esc(word)}</span>`;
 }
 function chainRow(t, s) {
-  const tn = s.state === "failed" || s.verdict === "FAIL" ? "r" : s.note === "unchecked" ? "w" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
+  const tn = s.state === "handed" ? stepCell(t, s) : s.state === "failed" || s.verdict === "FAIL" ? "r" : s.note === "unchecked" ? "w" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
   const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
   const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), esc(s.goal)].filter(Boolean).join(" · ");
@@ -1484,6 +1512,16 @@ function chainRow(t, s) {
     <span class="m c">${s.cost ? money(s.cost) : ""}</span>
     ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
     ${noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+}
+
+function handedBox(d, t, cur, shown) {  // Fred handed the task off: the skill's note, then Start next task (Mark done ends it)
+  const [word, tn] = TASK_WORD[shown] || TASK_WORD.handed, dir = taskDir(t.id);
+  const body = d.handoff
+    ? `<pre class="text">${esc(d.handoff)}</pre>${dir ? `<div class="m tpath">${esc(dir + "\\" + t.handoff_note.replace(/\//g, "\\"))}</div>` : ""}`
+    : `<p class="note m mut">${shown === "handing" ? `The chat of step ${cur.n} is writing its handoff note.` : "No handoff note: the handoff run did not finish."}</p>`;
+  return `<div class="askbox${tn === "y" ? "" : " ho"}"><span class="st ${tn}">${taskMark({ ...t, state: shown })}${word} <span class="lc">· step ${cur.n}</span></span>
+    ${body}<div class="lr">${d.handoff ? '<button class="btn you" data-tact="next" title="A new task seeded with the handoff note">Start next task</button>' : ""}
+    ${cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button>` : ""}</div><div id="ta-msg" class="say"></div></div>`;
 }
 
 function drawTask() {
@@ -1504,7 +1542,8 @@ function drawTask() {
     ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>${row.paused_after
     ? `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>` : ""}`;
   const sl = d.step_levers || {}, ask = cur && cur.session ? row.asks : "", hand = cur && cur.session ? row.hand_off : "";
-  const why = ask || hand  // the step's question or hand-off hint, answered here; Hub.levers says when (step_levers)
+  const why = t.state === "handed" && cur ? handedBox(d, t, cur, shown)
+    : ask || hand  // the step's question or hand-off hint, answered here; Hub.levers says when (step_levers)
     ? `<div class="askbox"><span class="st y">${sprite("waiting")}${ask ? "Asks you" : "Hand off"} <span class="lc">· step ${cur.n}</span></span>
        ${ask ? `<div class="q">${esc(ask)}</div>
        <textarea class="in" id="t-answer" rows="3" aria-label="Answer" placeholder="Your answer continues step ${cur.n} in its chat."></textarea>` : ""}
@@ -1564,6 +1603,7 @@ async function openTask(id) {
 let tArmTimer = null;
 async function taskAct(name, button) {
   if (name === "raw") { rawOpen = !rawOpen; drawTask(); return; }  // page only: the brief or the raw note
+  if (name === "next") return startNext(button.dataset.tid || taskId, button);  // the card's button too
   if (!taskId) return;
   const arm = { stop: "Stop the task? Click again", clear: "Delete its notes and streams? Click again",
     handoff: "Hand off ends the task? Click again", done: "Mark the task done? Click again" }[name];
@@ -1587,6 +1627,20 @@ async function taskAct(name, button) {
     const msg = $("t-msg");
     if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
+}
+
+async function startNext(id, button) {  // a handed-off task: the new-task box seeded with its handoff note; nothing runs yet
+  const row = (snap.tasks || []).find((x) => x.id === id), cur = row && row.steps.find((x) => x.n === row.current);
+  if (!cur || !cur.session) return;
+  button.disabled = true;
+  try {
+    seedBox(await api("/api/brief?session=" + encodeURIComponent(cur.session) + "&kind=next"));
+  } catch (e) {
+    const msg = $("ta-msg");
+    if (msg && page === "task") msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
+    else button.textContent = "Failed: " + e.message;
+  }
+  button.disabled = false;
 }
 
 async function stepAct(name, button) {  // the current step's question or hand-off, from the Task page: a session lever
@@ -1899,6 +1953,7 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", (e) => { if (e.target.matches("#p-model, [data-smodel], [data-skind]")) stepsChanged(); });
 
+$("popen").addEventListener("click", openFolder);
 $("pfind").addEventListener("input", pickRows);
 $("pfind").addEventListener("keydown", (e) => {
   const rows = document.querySelectorAll("#prows .prow");

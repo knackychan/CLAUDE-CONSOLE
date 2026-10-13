@@ -1,6 +1,7 @@
 # Ticket: Prep fails with error_max_structured_output_retries
 
-Status: fix applied 2026-10-12, not confirmed in the field. Reopen if the card shows this error again.
+Status: second fix applied 2026-10-13 (schema loosened, Fred's choice); see "Fix 2". The 2026-10-12
+prompt fix did not hold.
 Open this file first in a fresh session, then read "If it happens again".
 
 ## Symptom
@@ -41,6 +42,30 @@ The CLI (`claude -p --json-schema ...`, Haiku) retried 5 times and every try mis
 - `py -m unittest discover -s tests`: 146 tests OK. The Try again path in `web/app.js` was not
   driven in the UI.
 - Not synced: `plans/03-levers.md` Step 7 still holds the old prompt text.
+
+## Reproduced (2026-10-13)
+
+- Request: Fred's "focus on the mobile app, settings area ... Obsidian synchronization, Google Drive
+  account ..." (four lines, three bugs), project `D:\MY DOCS\MY TOOLS\CONTENT MANAGER`, with its
+  routing misses filled in. Fred's Prep failed twice in the window.
+- 5 real calls: 1 ended in `error_max_structured_output_retries` ("must have required property
+  'done_when'"), 1 succeeded only on the 5th and last attempt, 3 succeeded at once.
+- The `stream-json` trace of each `StructuredOutput` attempt shows the keys are just absent, never
+  flattened: the flattening hypothesis is wrong. Missing per attempt: keep + last_decisions +
+  question; question; question + route; question + route; then all 9.
+- What drops is the tail of a long answer (`where` and `keep` ran past 1,000 characters each) and the
+  keys that would be `""`. On a retry Haiku resends the same object with the same keys missing, so
+  the 5 retries rarely help.
+
+## Fix 2 (2026-10-13)
+
+- `console/prep.py`: `SCHEMA` requires only `goal` and `route`; `route` is the first property;
+  `parse_output` sets every missing text field (`TEXT_KEYS`) to `""`. The prompt's Output rules stay.
+- `tests/test_prep.py`: `test_schema_shape` updated, `test_parse_output_fills_missing_text_fields`.
+- 5 live calls on the mobile request after the fix: 5 succeeded on the first attempt; 3 of them still
+  left out `question` or `last_decisions`, each of which used to cost a retry.
+- Left open: a missing `route` still fails the schema (not seen after the fix). If it shows up, the
+  next options are one automatic retry of the Prep job, or `prep_model` sonnet.
 
 ## If it happens again
 

@@ -12,11 +12,12 @@ from . import claude_cli, levers, redact, routing, tasks
 PROMPT_FILE = Path(__file__).resolve().parent / "prep_prompt.md"
 TYPES = ["mechanical", "lookup", "normal", "risky", "vague"]
 _TEXT = {"type": "string"}
+TEXT_KEYS = ["goal", "where", "keep", "done_when", "last_decisions", "question", "reason"]
+# Only goal and route are required, and route comes first: on long answers Haiku left out other keys and resent
+# the same object on all 5 retries (troubleshooting/prep-structured-output.md). parse_output fills the rest.
 SCHEMA = {
     "type": "object",
     "properties": {
-        "goal": _TEXT, "where": _TEXT, "keep": _TEXT, "done_when": _TEXT,
-        "last_decisions": _TEXT, "question": _TEXT, "reason": _TEXT,
         "route": {"type": "object", "properties": {
             "type": {"type": "string", "enum": TYPES},
             "model": {"type": "string", "enum": claude_cli.MODELS},
@@ -24,11 +25,12 @@ SCHEMA = {
             "reasoning": {"type": "string", "enum": routing.LEVELS},
             "volume": {"type": "string", "enum": routing.LEVELS},
         }, "required": ["type", "reasoning", "volume", "model", "effort"]},
+        **{key: _TEXT for key in TEXT_KEYS},
         "steps": {"type": "array", "items": {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(tasks.PREP_KINDS)}, "goal": _TEXT,
         }, "required": ["kind", "goal"]}},
     },
-    "required": ["goal", "where", "keep", "done_when", "last_decisions", "question", "route", "reason"],
+    "required": ["goal", "route"],
 }
 LABELS = [("goal", "Goal"), ("where", "Where"), ("keep", "Keep"), ("done_when", "Done when"),
           ("last_decisions", "Last decisions"), ("question", "Open question")]
@@ -77,6 +79,8 @@ def parse_output(stdout: str) -> dict:
     route = fields["route"]
     if route.get("model") not in claude_cli.MODELS or route.get("effort") not in claude_cli.EFFORTS:
         raise PrepError("Prep picked an unknown route")
+    for key in TEXT_KEYS:
+        fields.setdefault(key, "")
     return {"fields": fields, "cost": data.get("total_cost_usd") or 0, "turns": data.get("num_turns") or 0}
 
 

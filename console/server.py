@@ -648,6 +648,8 @@ class Hub:
             self.start_brief(task, task["briefing"])  # the service restarted while the last brief ran
             return ""
         cs = tasks.current_step(task)
+        if task["state"] == "handed" and not task.get("handoff_note") and cs and cs["state"] == "handed":
+            return self._handed(task, cs)
         if task["owner"] == "fred" and task["state"] in ("running", "waiting") and cs and cs["state"] == "running":
             return self._ended(task, cs)  # paused: the step that ended is closed; nothing starts after it
         if task["owner"] != "service" or task["state"] not in ("planned", "running", "waiting"):
@@ -672,6 +674,17 @@ class Hub:
                 self.version += 1
                 self.changed.notify_all()
         return "stuck"
+
+    def _handed(self, task: dict, cs: dict) -> str:
+        """Fred's Hand off ran /session-handoff in the step's chat: once that run made the chat Done, its last
+        message goes to steps/NN-handoff.md. The task stays handed off until Fred marks it done."""
+        s = self.session(cs["session"]) if cs["session"] else None
+        text = self.last_reply(s["handoff_by"]) if s and s["handoff_by"] else ""
+        if not text:
+            return ""
+        rel = tasks.write_handoff(self.folder, task, cs, text)
+        self._commit(task, [tasks._line(time.time(), cs, "handing", "handed", f"handoff note: {rel}")])
+        return "handed"
 
     def _ended(self, task: dict, cs: dict) -> str:
         """The current step's run: still going, waiting for Fred's answer, or ended (README 3.7). The verdict and
@@ -879,8 +892,10 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             r["stop_question"] if over and r["state"] == "stop" else "")
     hand_off = ("" if not (over and r["handoff_hint"]) else
                 "the context is large" if r["ctx_tone"] == "red" else f"{r['follow_ups']} follow-ups")
-    group = ("needs" if t["state"] in ("waiting", "stuck") or asks or hand_off else
-             "working" if t["state"] in ("planned", "running") else "done")
+    noted = t["state"] == "handed" and bool(t.get("handoff_note"))  # a pending handoff: Start next task
+    handing = t["state"] == "handed" and not noted and r is not None and r["state"] in BUSY  # the skill writes it
+    group = ("needs" if t["state"] in ("waiting", "stuck") or asks or hand_off or noted else
+             "working" if t["state"] in ("planned", "running") or handing else "done")
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
             "group": group, "asks": asks, "hand_off": hand_off,
             "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
@@ -888,6 +903,7 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             "cost": round(sum(tasks.step_cost(s) for s in t["steps"]), 4),
             "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
             "briefing": t.get("briefing") or 0, "cleared": bool(t.get("cleared")),
+            "handoff_note": t.get("handoff_note") or "",
             "paused_after": cs["n"] if t["owner"] == "fred" and t["state"] in ("running", "waiting") and cs
             and cs["state"] != "running" else 0,  # the step ended while paused: nothing starts until Resume
             "hold": t["why"].endswith(" over its pace"),
@@ -979,6 +995,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden", "text/plain")
         routes = {"/api/prep": self._prep, "/api/prep/drop": self._prep_drop, "/api/run": self._run, "/api/stop": self._stop,
                   "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
+                  "/api/open_folder": lambda body: self._allow(body, sessions_only=False),
                   "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
@@ -1139,12 +1156,13 @@ class Handler(BaseHTTPRequestHandler):
         self.hub.runs.open_terminal(sid)
         return self._json({"ok": True})
 
-    def _allow(self, body):
-        """Only folders Claude Code already ran in: the page cannot add an arbitrary path."""
+    def _allow(self, body, sessions_only: bool = True):
+        """Only folders Claude Code already ran in: the page cannot add an arbitrary path. The picker's
+        Open folder (sessions_only False) passes a folder Fred chose in the OS dialog."""
         want = body.get("project_dir")
         if not isinstance(want, str) or not want or not os.path.isdir(want):
             return self._error(400, "not a folder")
-        if not self.hub.seen(want):
+        if sessions_only and not self.hub.seen(want):
             return self._error(403, "only a folder with a Claude Code session can be allowed")
         try:
             self.hub.allow(want)
@@ -1213,8 +1231,9 @@ class Handler(BaseHTTPRequestHandler):
         if s is None or kind not in ("task", "verify", "next"):
             return self._error(404, "unknown session")
         task = self.hub.tasks.get(s["task"]) if s["task"] else None
-        note = tasks.read_brief(self.hub.folder, task, s["step"]) if task and kind == "next" else ""
-        if note:  # a task's step session: the next chat starts from the step's brief
+        note = ((tasks.read_handoff(self.hub.folder, task) or tasks.read_brief(self.hub.folder, task, s["step"]))
+                if task and kind == "next" else "")
+        if note:  # a task's step session: the next chat starts from the handoff note, else from the step's brief
             return self._json({"text": brief.build("next", last=note), "project_dir": s["project_dir"]})
         if kind == "next":  # after a Hand off: the next task starts from the skill's note
             off = self.hub.levers(sid)["next"]
@@ -1232,7 +1251,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"task": task, "levers": self.hub.task_levers(task_id),
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
-                           "brief": tasks.read_brief(self.hub.folder, task, last)})
+                           "brief": tasks.read_brief(self.hub.folder, task, last),
+                           "handoff": tasks.read_handoff(self.hub.folder, task)})
 
     def _stream(self):
         self.send_response(200)

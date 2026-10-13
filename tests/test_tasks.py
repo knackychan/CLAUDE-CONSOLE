@@ -513,11 +513,12 @@ class ChainTest(unittest.TestCase):
         end(task, question="which file?")
         ok, why, lines = tasks.fred(task, "handoff", NOW + 6)
         self.assertEqual((ok, task["state"], task["why"], task["owner"]), (True, "handed", "handed off by Fred", "fred"))
-        self.assertEqual(tasks.step(task, 1)["state"], "done")  # the asking step ends; step 2 never starts
-        self.assertEqual([(c["from"], c["to"]) for c in lines], [("running", "done"), ("task:waiting", "task:handed")])
+        self.assertEqual(tasks.step(task, 1)["state"], "handed")  # handed, not a checked step; step 2 never starts
+        self.assertEqual([(c["from"], c["to"]) for c in lines], [("running", "handed"), ("task:waiting", "task:handed")])
         self.assertEqual(tasks.fred(task, "handoff", NOW + 7)[:2], (False, "task is handed"))
         ok, _, lines = tasks.fred(task, "done", NOW + 8)  # handed over, then Fred calls it done
         self.assertEqual((ok, task["state"], task["why"]), (True, "done", "marked done by Fred"))
+        self.assertEqual(tasks.step(task, 1)["state"], "handed")
         stuck = make(("scout",))
         run(stuck, 1)
         stuck.update(state="stuck")
@@ -796,6 +797,23 @@ class NoteStateTest(unittest.TestCase):
         last = tasks.step(task, len(task["steps"]))
         last.update(state="done", handoff="x")
         self.assertEqual(tasks.note_state(task, last), "checked")
+
+    def test_handoff_note_of_a_handed_task(self):
+        task = make(("scout", "code"))
+        run(task, 1)
+        end(task, question="which file?")
+        tasks.fred(task, "handoff", NOW + 6)
+        one = tasks.step(task, 1)
+        self.assertEqual(tasks.note_state(task, one), "")  # the skill still writes it
+        with tempfile.TemporaryDirectory() as home:
+            self.assertEqual(tasks.read_handoff(home, task), "")
+            rel = tasks.write_handoff(home, task, one, "Decided: calc.py\nNext: step 2, token sk-ant-api03-" + "x" * 40)
+            self.assertEqual((rel, task["handoff_note"]), ("steps/01-handoff.md", rel))
+            self.assertEqual(tasks.note_state(task, one), "handed")
+            text = tasks.read_handoff(home, task)
+            self.assertTrue(text.startswith("# Step 01: handoff note, session "), text)
+            self.assertIn("Next: step 2", text)
+            self.assertNotIn("x" * 40, text)  # masked like a step note
 
 
 if __name__ == "__main__":

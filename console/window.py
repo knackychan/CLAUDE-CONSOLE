@@ -151,6 +151,12 @@ class WindowApi:
     def state(self) -> dict:
         return {"form": self._form, "on_top": self._on_top}
 
+    def pick_folder(self) -> str:
+        """The OS folder dialog (the picker's Open folder): the folder Fred chose, or "" when cancelled."""
+        import webview  # late, like __main__: the service and the tray work without pywebview
+        picked = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+        return picked[0] if picked else ""
+
     def form(self, name: str, height: int = 0) -> str:
         """"pill" (with `height` > 48 css px while a peek card shows) or "open"."""
         if name == "pill":

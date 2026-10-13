@@ -1,6 +1,7 @@
 import base64
 import http.client
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -628,6 +629,19 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(len(json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["projects"]), 1)
         self.assertEqual(self.call("/api/run", dict(run, model="gpt-9"))[0], 400)  # past the folder check
 
+    def test_open_folder_allows_a_folder_without_a_session(self):
+        fresh = Path(self.tmp.name) / "fresh"
+        fresh.mkdir()
+        self.folder.mkdir(parents=True)
+        (self.folder / "config.json").write_text('{"port": 8770, "projects": []}', encoding="utf-8")
+        self.assertEqual(self.call("/api/open_folder", {"project_dir": str(fresh / "nope")})[0], 400)
+        self.assertEqual(self.call("/api/allow", {"project_dir": str(fresh)})[0], 403)  # the session rule stays
+        status, data = self.call("/api/open_folder", {"project_dir": str(fresh)})
+        self.assertEqual(status, 200)
+        self.assertIn(os.path.normcase(str(fresh)), [os.path.normcase(p) for p in data["projects"]])
+        self.assertEqual(self.call("/api/open_folder", {"project_dir": str(fresh)})[0], 200)  # twice: no duplicate
+        self.assertEqual(len(json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["projects"]), 1)
+
     def test_draft_and_config(self):
         self.assertEqual(self.call("/api/draft", {"text": "half a prompt"}), (200, {"ok": True}))
         self.assertEqual(self.call("/api/draft")[1], {"text": "half a prompt"})
@@ -1057,14 +1071,27 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.call("/api/handoff", {"session": sid}), (200, {"session": sid}))
         task = self.hub.tasks[tid]
         self.assertEqual((task["state"], task["steps"][0]["state"], task["steps"][1]["state"]),
-                         ("handed", "done", "planned"))
+                         ("handed", "handed", "planned"))  # handed, not a checked step
         self.wait_idle(sid)
         self.hub.advance()
         self.assertEqual((task["state"], task["steps"][1]["state"]), ("handed", "planned"))  # nothing starts after
         self.assertEqual(self.session(sid)["kind"], "handoff")
+        self.assertEqual(task["handoff_note"], "steps/01-handoff.md")  # the skill's last message, kept in the task
+        self.assertIn("echo: /session-handoff", (self.folder / "tasks" / tid / "steps" / "01-handoff.md").read_text(
+            encoding="utf-8"))
+        self.assertIn(("handing", "handed"), [(c["from"], c["to"]) for c in self.chain(tid)])
         row = next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)
-        self.assertEqual(row["group"], "done")
+        self.assertEqual((row["group"], row["handoff_note"], row["steps"][0]["note"]),
+                         ("needs", "steps/01-handoff.md", "handed"))  # a pending handoff: Start next task
+        page = self.task(tid)[1]
+        self.assertIn("echo: /session-handoff", page["handoff"])
+        status, seed = self.call(f"/api/brief?session={sid}&kind=next")
+        self.assertEqual(status, 200)
+        self.assertIn("echo: /session-handoff", seed["text"])  # the next task starts from the handoff note
+        self.assertEqual(self.hub.advance(), [])  # written once
         self.assertEqual(self.call("/api/task/done", {"task": tid}), (200, {"task": tid, "state": "done"}))
+        row = next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)
+        self.assertEqual((row["group"], row["steps"][0]["state"]), ("done", "handed"))
         self.assertEqual(self.call("/api/task/done", {"task": tid}), (409, {"error": "task is done"}))
 
     def test_nothing_written_outside_home(self):

@@ -24,8 +24,12 @@ class PrepTest(unittest.TestCase):
         self.assertIn("| risky |", text)
 
     def test_schema_shape(self):
-        self.assertEqual(set(prep.SCHEMA["required"]), set(FIELDS))
+        # only goal and route are required: Haiku dropped the other keys on long answers and resent the same
+        # object on every retry (troubleshooting/prep-structured-output.md); route comes first so it is written
+        # before the long text
+        self.assertEqual(set(prep.SCHEMA["required"]), {"goal", "route"})
         self.assertEqual(set(prep.SCHEMA["properties"]), set(FIELDS) | {"steps"})
+        self.assertEqual(next(iter(prep.SCHEMA["properties"])), "route")
         route = prep.SCHEMA["properties"]["route"]
         self.assertEqual(route["type"], "object")
         self.assertEqual(set(route["required"]), {"type", "reasoning", "volume", "model", "effort"})
@@ -39,7 +43,7 @@ class PrepTest(unittest.TestCase):
         # Haiku sometimes left out `question` (nothing to ask) and `route` (flattened into the top level),
         # and the CLI then fails with error_max_structured_output_retries
         rules = prep.build_prompt("x").split("Output rules")[-1].split("Routing misses")[0]
-        for key in prep.SCHEMA["required"]:
+        for key in prep.SCHEMA["properties"]:
             self.assertIn(key, rules)
         self.assertIn('"question": ""', rules)
         self.assertIn("effort at the top level", rules)
@@ -52,6 +56,13 @@ class PrepTest(unittest.TestCase):
                     json.dumps({"structured_output": dict(FIELDS, route={"model": "gpt", "effort": "low"})})):
             with self.assertRaises(prep.PrepError):
                 prep.parse_output(bad)
+
+    def test_parse_output_fills_missing_text_fields(self):
+        short = {"goal": "Fix add()", "route": FIELDS["route"]}
+        fields = prep.parse_output(json.dumps({"structured_output": short}))["fields"]
+        for key, _label in prep.LABELS:
+            self.assertEqual(fields[key], "" if key != "goal" else "Fix add()")
+        self.assertEqual(fields["reason"], "")
 
     def test_error_result_names_the_cause(self):
         # `claude -p --max-turns 1` on a task that needs a tool: no `result`, the reason is in subtype + errors

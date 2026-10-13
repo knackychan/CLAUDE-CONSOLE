@@ -23,6 +23,13 @@
   Done with `handoff_by` the new chat, so Start next chat reads the new chat's note. No cold-cache confirm (the
   window skips it too). The skill treats the arguments as the chat. Before a PASS, Hand off works as before.
 
+- **A task's Hand off stays visible** (Fred: option 2, 2026-10-13; option 1, start the next task by itself, is
+  not built). The step Fred handed off ends `handed`, not `done`. Once the skill's run made the chat Done,
+  `Hub._handed` writes its last message to `steps/NN-handoff.md` (`task["handoff_note"]`). The task row is then
+  in Needs you as "Handed off" (orange arrow) with Start next task (the new-task box seeded from that note through
+  `/api/brief?kind=next`) and a `handoff note` link to the Task page, which shows the note. It stays there until
+  Fred clicks Mark done; while the skill runs it is "Handing off" under Working.
+
 ## Code (placed 2026-10-11)
 
 - `console/state.py`: `Session.handoff_by`, the session whose last message is the note (itself, or its
