@@ -23,6 +23,13 @@ Turns the useful part of a long chat into a few one-line records, so a fresh cha
    - project decision or progress: append one dated line to `## History` in the project's `PLAN.md`, in the format already used there (for example `- 2026-10-10 - <what>; <why>.`); a project without a `PLAN.md` gets none, use memory instead;
    - how the user wants work done, or a fact for every future chat: update or add an auto-memory file (check for an existing one first, then the `MEMORY.md` pointer);
    - a rule for every task in this repo: propose the CLAUDE.md line to the user, do not write it.
+   - a lesson, what you would tell someone starting this kind of task tomorrow (transferable, one sentence; most chats teach nothing, so leave it out rather than pad): append one line to `~/.claude/console/lessons.md` (create it with the line `# Lessons` and a blank line first if it does not exist), in exactly this shape, so Claude Console's rules review reads it:
+
+```
+- 2026-10-13 - CLAUDE CONSOLE - chat: a stream-json interrupt stops a turn cleanly where Ctrl+C to a hidden console does nothing.
+```
+
+     The project is the git root folder's name; the kind is `chat`.
 5. Remove or correct any older line this chat proved wrong (notes spread mistakes too).
 6. Print a starter prompt for the next chat, at most 5 lines: the project, the files to read first, the next step, the check that proves it is done.
 7. Tell the user the exit:
@@ -34,12 +41,14 @@ Turns the useful part of a long chat into a few one-line records, so a fresh cha
 - Every decision from step 2 appears in exactly one place (PLAN.md History, a memory file, or a proposed CLAUDE.md line shown to the user).
 - `git diff` shows only one-line additions or corrections to History / memory files, no code changes.
 - The starter prompt names a file to read and a check to run.
+- A lesson, when there was one, is one line in `~/.claude/console/lessons.md` and nowhere else.
 
 ## Never
 
 - Never write notes into folders the project's CLAUDE.md marks as generated, exported or wiped, and never create a new decisions file without the user asking.
 - Never paste a chat summary into memory or PLAN.md; one line per decision, or nothing.
 - Never edit CLAUDE.md in this skill; propose the line and let the user decide.
+- Never write a lesson that only applies to this one file or chat: most chats teach nothing, and a padded line costs every later review.
 
 ## Sources
 

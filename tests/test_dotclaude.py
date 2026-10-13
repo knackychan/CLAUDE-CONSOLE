@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 import cc_events
-from console import claude_cli, levers, prep
+from console import claude_cli, levers, paths, prep
 
 ROOT = Path(__file__).resolve().parent.parent
 DOT = ROOT / "dotclaude"
@@ -64,6 +64,28 @@ class DotClaudeTest(unittest.TestCase):
         day = time.mktime((2026, 10, 10, 12, 0, 0, 0, 0, -1))
         self.assertEqual(levers.miss_line("CLAUDE CONSOLE", "normal", "sonnet/medium", "sonnet/high",
                                           "tests/test_state.py:40 - KeyError: 'rules'", day), example)
+
+    def test_handoff_lesson_line_parses(self):
+        text = FILES["session-handoff"].read_text(encoding="utf-8")
+        self.assertIn("~/.claude/console/lessons.md", text)
+        example = next(line for line in text.splitlines() if re.match(r"- \d{4}-\d\d-\d\d - .* - chat: ", line))
+        with tempfile.TemporaryDirectory() as tmp:
+            levers.add_lesson(Path(tmp), example)
+            self.assertEqual(levers.read_lessons(Path(tmp), "CLAUDE CONSOLE"), [example])
+        day = time.mktime((2026, 10, 13, 12, 0, 0, 0, 0, -1))
+        body = example.split(" - chat: ", 1)[1]
+        self.assertEqual(levers.lesson_line("CLAUDE CONSOLE", "chat", body, day), example)
+        self.assertIn("most chats teach nothing", text)
+
+    def test_route_model_ignores_old_misses(self):
+        text = FILES["route-model"].read_text(encoding="utf-8")
+        self.assertIn("older than 14 days", text)
+        self.assertEqual(paths.DEFAULTS["miss_floor_days"], 14)  # the skill's number is the console's
+
+    def test_verifier_trusts_checks_over_reading(self):
+        text = FILES["verifier"].read_text(encoding="utf-8")
+        self.assertIn("never stands in for them", text)
+        self.assertIn("not when the work looks right", text)
 
 
 if __name__ == "__main__":

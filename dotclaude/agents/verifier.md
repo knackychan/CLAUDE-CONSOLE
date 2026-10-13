@@ -34,3 +34,5 @@ If no check exists at all, report `VERDICT: FAIL no checks found` and say what y
 - Never edit, create or delete files.
 - Never start the app, open a database writable, or touch the data folders the project's CLAUDE.md protects.
 - Never paste full logs; quote the shortest line that shows the failure.
+- Never let your own reading replace a check: what you say about the code interprets what the commands printed, it never stands in for them.
+- Never stop at confidence: the verdict is PASS when the required checks passed, not when the work looks right.

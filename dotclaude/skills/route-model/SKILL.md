@@ -11,7 +11,7 @@ Picks the cheapest route that should solve the task: effort level first, model t
 
 - The task as the user wrote it, and the project's plan if one exists (a zero-decision plan usually runs fine at lower effort).
 - The project's `CLAUDE.md`: what it calls risky (database, threading, installer, user data) decides the `risky` row.
-- `~/.claude/console/routing-misses.md`, the lines tagged with this project (` - <project folder name> - `). Past misses override the table.
+- `~/.claude/console/routing-misses.md`, the lines tagged with this project (` - <project folder name> - `) from the last 14 days. Past misses override the table.
 - The `verifier` agent (`.claude/agents/verifier.md` in the project, else `~/.claude/agents/verifier.md`).
 
 ## Route table
@@ -27,7 +27,7 @@ Picks the cheapest route that should solve the task: effort level first, model t
 ## Steps
 
 1. Check inputs: restate the task in one line. If it is vague, ask the clarifying questions before routing (a clear spec buys more than effort does).
-2. Read the project's lines in `~/.claude/console/routing-misses.md` and apply any that match this task type.
+2. Read the project's lines in `~/.claude/console/routing-misses.md` and apply any that match this task type. Ignore a line older than 14 days: it is history, not a rule (Claude Console drops it the same way, `miss_floor_days`).
 3. Pick the row. Tell the user the route on its own line, in this shape (Claude Console reads it): `Route: mechanical, low effort, cavecrew-builder on sonnet`.
 4. If the main session's level should change, tell the user the command (`/effort low|medium|high|xhigh|max`, or `/model haiku|sonnet|opus|fable`); Claude cannot run slash commands. Change routes at the start, not mid-task: a model switch rebuilds the prompt cache.
 5. For delegated parts, call the Agent tool with the row's agent and `model`; this skill counts as the explicit instruction for an `effort` value when the row names one.
