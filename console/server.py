@@ -282,6 +282,7 @@ class Hub:
                            "dotclaude/skills/session-handoff to ~/.claude/skills")
         nxt = base or ("" if s["handoff_by"] else "only after a Hand off")  # a new task seeded with the note
         out = {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate, "next": nxt,
+               "handoff_fresh": s["verdict"] == "PASS" and not s["task"],  # a new chat from a brief, no re-read
                "deescalate": deescalate, "deescalate_to": "/".join(start) if start else "",
                "after_verify": list(levers.after_verify(s["verdict"])), "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
                "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model)}
@@ -306,7 +307,8 @@ class Hub:
             return 404, {"error": "unknown session"}
         if info[lever]:
             return 409, {"error": info[lever]}
-        if info["cold"] and not confirm and lever != "deescalate":  # the page asks with a second click
+        fresh = lever == "handoff" and info["handoff_fresh"]  # nothing is re-read: no cold-cache confirm
+        if info["cold"] and not confirm and lever != "deescalate" and not fresh:  # the page asks with a second click
             c = info["cold"]
             return 409, {"error": f"cold cache: {c['tokens'] // 1000}K tokens, idle {c['idle_s'] / 3600:.0f} h, "
                                   f"would be re-read at full price (about ${c['cost']:.2f}); open the session to "
@@ -322,6 +324,10 @@ class Hub:
                 return 400, {"error": "empty prompt"}
         elif lever == "verify":
             text = levers.VERIFY_TEXT
+        elif lever == "handoff" and fresh:  # after a PASS: a new chat runs the skill on the session's brief
+            text = levers.HANDOFF_TEXT + " " + self.brief_text(sid, s, "handoff")
+            model, effort = levers.HANDOFF_ROUTE
+            extra = {"handoff_of": sid}
         elif lever == "handoff":
             text = levers.HANDOFF_TEXT
         else:  # escalate: one step up, once, and the miss is logged for Prep
@@ -331,15 +337,15 @@ class Hub:
             text = levers.escalate_text(s["verdict_detail"], new_model, new_effort)
             model, effort = new_model, new_effort
             extra = {"escalated": f"{route_from} -> {route_to}"}
-        fork = sid if info["fork"] else ""
+        fork = sid if info["fork"] and not fresh else ""
         with self.tlock:  # Continue in the current step of a stopped task resumes the task there; Hand off in the
             # current step hands the task over (tasks.fred)
             task = self.tasks.get(s["task"]) if s["task"] and lever in ("continue", "handoff") and not fork else None
             if task and ((lever == "continue" and task["state"] != "stopped")
                          or (tasks.current_step(task) or {}).get("session") != sid):
                 task = None
-            new = self.runs.start(info["cwd"], text, model, effort, resume=None if fork else sid, fork=fork,
-                                  title="↳ " + (s["title"] or sid[:8]) if fork else "",
+            new = self.runs.start(info["cwd"], text, model, effort, resume=None if fork or fresh else sid, fork=fork,
+                                  title="↳ " + (s["title"] or sid[:8]) if fork or fresh else "",
                                   route=s["route"] if fork else "", kind=lever, extra=extra,
                                   files=files if lever == "continue" else ())
             if miss:
@@ -400,6 +406,20 @@ class Hub:
             s = self.session(sid)
             items = transcript.turns(s["transcript_path"]) if s else []
         return next((i["text"] for i in reversed(items) if i["role"] == "claude"), "")
+
+    def brief_text(self, sid: str, s: dict, kind: str) -> str:
+        """brief.build from a session's facts (goal, last message, edited files, verdict, git status): no model
+        call, nothing written. What a new chat reads instead of the session's context."""
+        files = []
+        for step in self.steps(sid, MAX_STEPS):
+            if step["tool"] in WRITE_TOOLS and step["what"] and step["what"] not in files:
+                files.append(step["what"])
+        folder = s["project_dir"] if os.path.isdir(s["project_dir"] or "") else s["cwd"]
+        return brief.build(kind, goal=transcript.first_prompt(s["transcript_path"]) or s["title"],
+                           last=self.last_reply(sid), files=files, verdict=s["verdict"],
+                           detail=s["verdict_detail"],
+                           status=claude_cli.git_status(folder) if os.path.isdir(folder or "") else [],
+                           plan=os.path.isfile(os.path.join(folder or "", "PLAN.md")))
 
     def _live_note(self, sid: str) -> str:
         """tasks.live_note of a running step's reply so far; the stream is read again only when it grew."""
@@ -1170,18 +1190,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(409, off)
             return self._json({"text": brief.build("next", last=self.hub.last_reply(s["handoff_by"])),
                                "project_dir": s["project_dir"]})
-        turns = transcript.turns(s["transcript_path"])
-        files = []
-        for step in self.hub.steps(sid, MAX_STEPS):
-            if step["tool"] in WRITE_TOOLS and step["what"] and step["what"] not in files:
-                files.append(step["what"])
-        folder = s["project_dir"] if os.path.isdir(s["project_dir"] or "") else s["cwd"]
-        text = brief.build(kind, goal=transcript.first_prompt(s["transcript_path"]) or s["title"],
-                           last=next((t["text"] for t in reversed(turns) if t["role"] == "claude"), ""),
-                           files=files, verdict=s["verdict"], detail=s["verdict_detail"],
-                           status=claude_cli.git_status(folder) if os.path.isdir(folder or "") else [],
-                           plan=os.path.isfile(os.path.join(folder or "", "PLAN.md")))
-        return self._json({"text": text, "project_dir": s["project_dir"]})
+        return self._json({"text": self.hub.brief_text(sid, s, kind), "project_dir": s["project_dir"]})
 
     def _task(self, task_id: str):
         task = self.hub.tasks.get(task_id) if tasks.safe_id(task_id) else None

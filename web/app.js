@@ -102,6 +102,7 @@ let procShown = "";      // session|tab the process pane shows now
 let leversSig = "";
 let cold = null;        // {idle_s, tokens, cost} when a lever would re-read the open session at full price
 let coldTimer = null;
+let freshHandoff = false;  // Hand off after a PASS starts a new chat from a brief: it re-reads nothing
 const seen = new Set();  // peek events already shown, answered or dismissed
 const sent = {};         // "session|question" -> the session that runs the answer ("" = same one)
 const cardMsg = {};      // session -> the last error of a list card
@@ -1289,6 +1290,7 @@ async function renderLevers(s) {
   const lv = s.run_live ? null : await api("/api/levers?session=" + encodeURIComponent(s.id)).catch(() => null);
   if (openId !== s.id || leversSig !== sig) return;
   cold = lv && !lv.continue ? lv.cold : null;
+  freshHandoff = Boolean(lv && lv.handoff_fresh);
   let html = "";
   if (lv && !lv.continue && !s.stop_question) {
     html += `<div class="lr"><input id="fu" aria-label="Follow-up" placeholder="${lv.fork ? "Follow-up (runs in a window copy)" : "Follow-up"}">
@@ -1334,7 +1336,7 @@ async function act(name, button) {
   }
   const typed = name === "answer" ? $("answer") : name === "continue" ? $("fu") : null;
   if (typed && !typed.value.trim()) return;  // nothing to send: no cost to confirm
-  if (cold && GUARDED.includes(name) && !button.dataset.armed) {  // two clicks: a cold cache re-reads the context at full price
+  if (cold && GUARDED.includes(name) && !(name === "handoff" && freshHandoff) && !button.dataset.armed) {  // two clicks: a cold cache re-reads the context at full price
     button.dataset.armed = "1";
     button.dataset.label = button.textContent;
     button.textContent = `Re-read ~$${money(cold.cost)}? Click again`;

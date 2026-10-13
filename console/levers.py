@@ -10,6 +10,7 @@ VERIFY_TEXT = ("Check the work of this session. If a `verifier` agent is availab
                "run the project's tests or checks once. Do not edit any file. End your final message "
                "with one line: `VERDICT: PASS` or `VERDICT: FAIL <shortest failing line>`.")
 HANDOFF_TEXT = "/session-handoff"
+HANDOFF_ROUTE = ("sonnet", "medium")  # after a PASS: a fresh chat writes the note from a brief (Fred: c, 2026-10-13)
 HANDOFF_SKILL = Path("skills") / "session-handoff" / "SKILL.md"
 MISSES_FILE = "routing-misses.md"
 MISSES_HEAD = ("# Routing misses\n\nOne line per Escalate, written by Claude Console. "

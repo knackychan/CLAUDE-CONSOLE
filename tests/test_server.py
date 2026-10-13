@@ -553,6 +553,31 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.session(sid)["state"], "done")  # the source stays Done
         self.assertNotEqual(self.session(new)["state"], "done")
 
+    def test_handoff_after_pass_starts_fresh_from_a_brief(self):
+        skill = self.project / ".claude" / "skills" / "session-handoff"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add"})[1]["session"]
+        self.wait_idle(sid)
+        self.verdict(sid, "PASS")
+        with mock.patch.object(self.hub.runs, "start", wraps=self.hub.runs.start) as start:
+            status, data = self.call("/api/handoff", {"session": sid})
+        self.assertEqual(status, 200)
+        new = data["session"]
+        self.assertNotEqual(new, sid)  # a fresh session: the earlier context is not re-read
+        args, kw = start.call_args
+        self.assertEqual((kw["resume"], kw["fork"], kw["kind"]), (None, "", "handoff"))
+        self.assertEqual(tuple(args[2:4]), levers.HANDOFF_ROUTE)
+        prompt = args[1]
+        self.assertTrue(prompt.startswith(levers.HANDOFF_TEXT + " " + brief.HANDOFF_INTRO))
+        self.assertIn("fix add", prompt)  # the goal, from the brief
+        self.assertIn("Last check: PASS", prompt)
+        self.assertNotIn("\n", prompt)  # one line: the skill takes it as its arguments
+        self.wait_idle(new)
+        row = self.session(sid)
+        self.assertEqual((row["state"], row["handoff_by"]), ("done", new))
+        self.assertIn("echo: /session-handoff", self.call(f"/api/brief?session={sid}&kind=next")[1]["text"])
+
     def test_lever_order_after_verify(self):
         sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add"})[1]["session"]
         self.wait_idle(sid)

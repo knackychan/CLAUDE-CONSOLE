@@ -9,6 +9,7 @@ Turns the useful part of a long chat into a few one-line records, so a fresh cha
 
 ## Read first
 
+- If the skill came with arguments (Claude Console's Hand off after a PASS starts a fresh chat), they are a brief of the earlier chat: goal, last message, edited files, last check and git status. Treat the brief as "this chat" in the steps below, and take its decisions from it, the diff and the git log.
 - The project's `CLAUDE.md`, then its plan: `PLAN.md` at the repo root, or `projects/<name>/PLAN.md` in a repo with several projects. Its `## History` section is the decision log.
 - The auto-memory index `MEMORY.md` and any memory file it lists for the same project.
 - `git status --short` and `git log --oneline -5` for what actually changed.

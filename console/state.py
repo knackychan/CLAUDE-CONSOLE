@@ -112,6 +112,7 @@ class Session:
     handed_off: bool = False   # a Handoff run succeeded: Done
     handoff_by: str = ""       # the session whose last message is the handoff note (itself or its Handoff copy)
     forked_from: str = ""
+    handoff_of: str = ""       # a fresh Handoff chat (after a PASS): the session it hands off
     forks: list = field(default_factory=list)
     turns: list = field(default_factory=list)  # [start, end or None] per turn; the last start is turn_ts
     rules: dict = field(default_factory=dict)  # file -> {scope, lines, bytes}: CLAUDE.md / rules loaded
@@ -276,6 +277,8 @@ class State:
             s.stop_question = ""
             s.kind = rec.get("kind") or "run"
             s.handoff = s.kind == "handoff"
+            if rec.get("handoff_of"):
+                s.handoff_of = rec["handoff_of"]
             if rec.get("task"):
                 s.task, s.step = rec["task"], int(rec.get("step") or 0)
             if rec.get("escalated"):
@@ -316,7 +319,7 @@ class State:
                 s.replied_ts = ts
             if s.handoff and rec.get("subtype") == "success":
                 s.handed_off, s.handoff_by = True, s.id
-                parent = self.sessions.get(s.forked_from)
+                parent = self.sessions.get(s.forked_from or s.handoff_of)
                 if parent:
                     parent.handed_off, parent.handoff_by = True, s.id
             s.handoff = False

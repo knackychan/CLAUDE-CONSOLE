@@ -15,6 +15,14 @@
   PASS: Hand off (primary), Mark done. FAIL: Escalate (primary), Hand off, Mark done.
   No verdict: Hand off, Escalate (off until a FAIL), Mark done. Mark done is the Accept step.
 
+- **Hand off after a PASS re-reads nothing** (Fred: c, 2026-10-13). When the session's verdict is PASS and it
+  is not a task step, `Hub.levers` sets `handoff_fresh`; `Hub.pull` then starts a new chat (no resume, no fork) on
+  `levers.HANDOFF_ROUTE` (sonnet/medium) with `/session-handoff <brief>`: `brief.build("handoff")`, the facts of
+  the session (goal, last message, edited files, verdict, git status) on one line, since newlines in skill
+  arguments are not documented. Its `run_started` carries `handoff_of`; its successful end makes the source
+  Done with `handoff_by` the new chat, so Start next chat reads the new chat's note. No cold-cache confirm (the
+  window skips it too). The skill treats the arguments as the chat. Before a PASS, Hand off works as before.
+
 ## Code (placed 2026-10-11)
 
 - `console/state.py`: `Session.handoff_by`, the session whose last message is the note (itself, or its
