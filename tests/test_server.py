@@ -2,6 +2,7 @@ import base64
 import http.client
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -538,6 +539,73 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.hub.levers("c4")["escalate"], "")  # a click may, the service does not
         self.assertEqual([lever for s, lever in self.hub.auto_steps() if s == "c4"], [])
 
+    # -- plan 23: auto handoff at red ---------------------------------------------------------------------------
+    def skill_here(self):
+        skill = self.project / ".claude" / "skills" / "session-handoff"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+
+    def red(self, sid, tokens=312000):
+        events.append(self.folder, {"event": "Stop", "ts": time.time(), "session_id": sid,  # what the hook logs
+                                    "context_tokens": tokens})
+        self.hub.poll_once()
+
+    def test_setting_route_writes_handoff_auto_only(self):
+        self.assertEqual(self.call("/api/setting", {"key": "handoff_auto", "value": True}),
+                         (200, {"key": "handoff_auto", "value": True}))
+        self.assertIs(self.hub.cfg["handoff_auto"], True)
+        saved = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))
+        self.assertIs(saved["handoff_auto"], True)
+        self.assertIs(self.call("/api/config")[1]["handoff_auto"], True)
+        self.assertEqual(self.call("/api/setting", {"key": "brief_on", "value": False}),
+                         (400, {"error": "not a setting: brief_on"}))
+        self.assertEqual(self.call("/api/setting", {"key": "handoff_auto", "value": "yes"})[0], 400)
+        self.assertIs(self.hub.cfg["brief_on"], True)
+
+    def test_auto_handoff_hands_a_red_window_run_off(self):
+        self.skill_here()
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.red(sid)
+        self.assertEqual(self.hub.auto_steps(), [])  # handoff_auto is off by default
+        self.hub.cfg["handoff_auto"] = True
+        self.assertEqual(self.hub.auto_steps(), [(sid, "handoff")])
+        self.assertEqual(self.hub.runs.meta(sid)["model"], "sonnet")  # in place: a window run resumes
+        self.wait_idle(sid)
+        row = self.session(sid)
+        self.assertEqual((row["state"], row["group"], row["kind"], row["auto_handoff"]),
+                         ("done", "needs", "handoff", 312000))
+        self.assertEqual(self.hub.auto_steps(), [])  # once per session
+        self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["next"], "")  # Start next chat
+        self.assertEqual(self.call("/api/done", {"session": sid})[0], 200)
+        row = self.session(sid)
+        self.assertEqual((row["group"], row["auto_handoff"]), ("done", 0))
+
+    def test_auto_handoff_forks_a_red_vscode_chat_and_skips_route_steps(self):
+        self.skill_here()
+        self.hub.cfg["handoff_auto"] = True
+        self.hub.auto_since = 0
+        self.idle_chat("c6", hours=0, tokens=1000)
+        self.assertEqual(self.hub.auto_steps(), [])  # not red
+        self.idle_chat("c7", hours=0, tokens=312000)
+        self.assertEqual(self.hub.auto_steps(), [("c7", "handoff")])
+        fork = self.session("c7")["forks"][0]
+        self.wait_idle(fork)
+        row, copy_row = self.session("c7"), self.session(fork)
+        self.assertEqual((row["state"], row["group"], row["auto_handoff"], row["handoff_by"]),
+                         ("done", "needs", 312000, fork))  # the VS Code chat itself is never resumed
+        self.assertEqual((copy_row["kind"], copy_row["auto_handoff"]), ("handoff", 0))  # one card: the chat's
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.hub.cfg["handoff_auto"] = False
+        self.red(sid)
+        self.verdict(sid, "FAIL", "test_add - 3 != 4")
+        self.hub.cfg["handoff_auto"] = True
+        self.assertEqual(self.hub.auto_steps(), [(sid, "handoff")])  # red: the handoff, not an Escalate
+        self.wait_idle(sid)
+
     def test_handoff_marks_the_session_done(self):
         skill = self.project / ".claude" / "skills" / "session-handoff"
         skill.mkdir(parents=True)
@@ -723,6 +791,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual((row["task"], row["step"], row["kind"]), (tid, 1, "task"))
         limits = self.hub.runs.meta(step["session"])["limits"]
         self.assertEqual((limits["disallow"], limits["tools"], limits["budget"]), (["Agent"], "Read,Grep,Glob", 3))
+        self.assertEqual((limits["strict_mcp"], limits["max_turns"]), (True, 15))  # plan 23: no MCP, read_max_turns
         self.assertEqual(self.hub.snapshot()["preps"], [])  # the card became the task
         # a second task in the same project starts beside the first (plan 20: parallel tasks per project)
         other = tasks.new_task(str(self.project), "proj", "Other", "goal", tasks.plan_steps(
@@ -840,6 +909,63 @@ class TaskServerTest(RunServerTest):
         tid = self.make_task(words="HANDOFF-OK", steps=[{"kind": "scout", "goal": "look"}])
         self.settled(tid)
         self.assertEqual(len(levers.read_lessons(self.folder, "proj")), 1)  # no Lesson line: nothing added
+
+    def git(self, *args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=self.project, check=True,
+                       capture_output=True)
+
+    def test_facts_are_read_when_a_step_ends(self):
+        try:
+            self.git("init", "-q")
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("no git")
+        (self.project / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "base")
+        base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.project, capture_output=True, text=True).stdout.strip()
+        tid = self.make_task(words="HANDOFF-OK TESTS-OK")
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step1 = task["steps"][0]
+        self.assertEqual(step1["git_base"]["commit"], base)
+        self.assertEqual((step1["end_commit"], step1["facts"]["files"], step1["facts"]["tests"]), (base, 0, "23 OK"))
+        text = tasks.read_facts(self.folder, task, 1)
+        self.assertIn("no file changed", text)
+        self.assertIn("Ran 23 tests", text)
+        self.assertIn("Ran 23 tests", self.prompt_of(task["steps"][1]["session"]))  # step 2 reads the facts
+        # the step's own lines: written after its start, counted against git_base
+        (self.project / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        (self.project / "new.py").write_text("x = 1\n", encoding="utf-8")
+        with self.hub.tlock:
+            self.hub._facts(task, step1, step1["session"])
+        self.assertEqual((step1["facts"]["files"], step1["facts"]["plus"], step1["facts"]["minus"]), (2, 2, 1))
+        self.assertIn("calc.py", tasks.read_facts(self.folder, task, 1))
+        self.assertEqual(self.task(tid)[1]["task"]["steps"][0]["facts"], step1["facts"])
+
+    def test_brief_meta_and_the_carried_troubleshooting(self):
+        tid = self.make_task(words="HANDOFF-OK TROUBLE", steps=[{"kind": "scout", "goal": "look"},
+                                                               {"kind": "explain", "goal": "say"}])
+        task = self.settled(tid)
+        meta = task["steps"][0]["brief_meta"]
+        self.assertEqual(sorted(meta), ["by", "checks", "cost", "cut", "fallback", "raw_w", "sent_w", "turns"])
+        self.assertGreater(meta["raw_w"], 0)
+        self.assertEqual(meta["fallback"], "")
+        brief2 = tasks.read_brief(self.folder, task, 2)
+        self.assertIn("py -3.12 fails here: use py -3.14", brief2)  # carried whole through both briefs
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual(row["steps"][0]["brief_meta"], meta)
+        self.assertNotIn("git_base", row["steps"][0])
+
+    def test_lessons_reach_steps_of_their_kind(self):
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "scout", "read calc.py before tests"))
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "code", "run the suite twice"))
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "chat", "a chat lesson"))
+        tid = self.make_task(steps=self.TWO)
+        task = self.until(tid, self.at(2), "step 2 starts")
+        first = self.prompt_of(task["steps"][0]["session"])
+        self.assertIn("read calc.py before tests", first)
+        self.assertNotIn("run the suite twice", first)
+        self.assertNotIn("a chat lesson", first)
+        self.settled(tid)
 
     def over(self, tier):
         """A budget() with every rung of the tier over its pace."""
@@ -1114,7 +1240,7 @@ class TaskServerTest(RunServerTest):
             self.assertFalse(self.hub.runs.meta_path(sid).exists())
         folder = self.folder / "tasks" / tid
         self.assertEqual(sorted(p.name for p in (folder / "steps").iterdir()),
-                         ["02-explain.brief.md", "02-explain.md"])  # the last note and its brief
+                         ["02-explain.brief.md", "02-explain.facts.md", "02-explain.md"])  # the last note, its brief and facts
         saved = tasks.load(self.folder, tid)
         self.assertTrue(saved["cleared"])
         self.assertEqual((saved["state"], saved["steps"][0]["handoff"], saved["steps"][1]["handoff"]),
@@ -1202,7 +1328,8 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([(s["n"], s["kind"], s["state"]) for s in row["steps"]],
                          [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
         self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
-                                                          "verdict", "retries", "cost", "note", "attempts", "part", "hard"]))
+                                                          "verdict", "retries", "cost", "note", "attempts", "part", "hard",
+                                                          "end_commit", "brief_meta", "facts"]))
         self.assertIn(row["steps"][0]["note"], ("writing", "unchecked"))
         self.until(tid, self.at(2), "step 2 starts")
         steps = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)["steps"]
@@ -1215,6 +1342,8 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(data["levers"]["start"], "a step is running")
         self.assertIn("## Findings\nadd() is in calc.py:2", data["note"])
         self.assertIn("test_add covers it", data["brief"])
+        self.assertEqual((list(data["notes"]), list(data["briefs"]), list(data["facts"])), (["1"], ["1"], ["1"]))
+        self.assertEqual(data["notes"]["1"], data["note"])  # plan 23: every step's texts, keyed by its number
         self.assertEqual(self.task("../x")[0], 404)
         self.assertEqual(self.task("20260101-000000-ffff")[0], 404)
 
@@ -1256,6 +1385,7 @@ class TaskServerTest(RunServerTest):
         config = self.call("/api/config")[1]
         self.assertEqual((config["effort"], config["kinds"]), ("max", list(tasks.PREP_KINDS)))
         self.assertEqual(config["edit_kinds"], sorted(tasks.EDIT_KINDS))
+        self.assertIs(config["handoff_auto"], False)
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "turbo"})[0], 400)
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "auto"})[0], 200)
         self.assertEqual(self.call("/api/config")[1]["effort"], "auto")

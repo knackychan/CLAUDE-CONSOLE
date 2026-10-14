@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import (attach, brief, claude_cli, compact, events, guard, harness, levers, paths, plan, prep, redact, replan,
+from . import (attach, brief, claude_cli, compact, events, facts, guard, harness, levers, paths, plan, prep, redact, replan,
                review, routing, runs, tasks, transcript, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
@@ -29,7 +29,7 @@ MAX_FILES_BODY = attach.MAX_TOTAL * 4 // 3 + MAX_BODY  # /api/prep, /api/run and
 FILE_ROUTES = ("/api/prep", "/api/run", "/api/continue")
 MAX_PROMPT = 20000
 BUSY = {"running", "quiet", "stall"}
-READ_MAX_TURNS = 15  # a scout or search on an adapter with a turn cap (plan 23 replaces it with read_max_turns)
+AUTO_HANDOFF_STATES = ("replied", "idle", "verified", "verify_failed")  # plan 23: a turn that ended
 PROBE_S = 20
 READ_ONLY_TOOLS = "Read,Grep,Glob"  # a kind whose tools are exactly these is read only
 
@@ -62,6 +62,7 @@ class Hub:
         self.storage_at = 0.0
         self.version = 0
         self.auto_since = time.time()  # older verdicts never trigger an automatic step
+        self.auto_handed = set()  # plan 23: sessions handoff_auto handed off once (never twice)
         self._stop = threading.Event()
         self.models_mtime = self._models_mtime()  # models.json as cfg["models"] was read
         self.models_error = ""
@@ -450,7 +451,7 @@ class Hub:
                     out[lever] = base or "a task step: use the task's levers"
         return out
 
-    def pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = ()) -> tuple:
+    def pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = (), auto: int = 0) -> tuple:
         """Continue (also STOP answers and Resume), Verify, Handoff, Escalate: a new turn of a window
         run, or a window copy (fork) of a VS Code / terminal chat, which stays as it is. De-escalate starts
         no turn: the next one runs on the task's starting route. Returns (status, body); a click and the
@@ -491,6 +492,8 @@ class Hub:
             text = levers.escalate_text(s["verdict_detail"], new_model, new_effort)
             model, effort = new_model, new_effort
             extra = {"escalated": f"{route_from} -> {route_to}"}
+        if auto and lever == "handoff":  # plan 23: auto_steps handed it off at `auto` context tokens
+            extra = dict(extra, auto_handoff=int(auto))
         fork = sid if info["fork"] and not fresh else ""
         with self.tlock:  # Continue in the current step of a stopped task resumes the task there; Hand off in the
             # current step hands the task over (tasks.fred)
@@ -516,13 +519,27 @@ class Hub:
         step itself: Escalate after FAIL, de-escalate after PASS. Only verdicts about the last turn that
         arrived while this service runs, never a VS Code or terminal chat, never past a cold-cache
         confirm, and only what self.levers allows. Returns the (session, lever) pairs it pulled."""
-        now = time.time()
+        now, red, auto = time.time(), self.cfg["gauge_red_tokens"], bool(self.cfg.get("handoff_auto"))
+        hand, due = [], []
         with self.lock:
-            due = [(s.id, "escalate" if st == "verify_failed" else "deescalate")
-                   for s in self.state.sessions.values()
-                   if s.window and not s.task and s.verdict_ts >= self.auto_since  # a step's verdict is its chain's
-                   for st in [self.state.state_of(s, now)] if st in ("verify_failed", "verified")]
+            for s in self.state.sessions.values():
+                if s.task:  # a step's verdict and context are its chain's
+                    continue
+                st = self.state.state_of(s, now)
+                if (auto and (s.ctx_tokens or 0) >= red
+                        and st in AUTO_HANDOFF_STATES and not s.handoff and s.id not in self.auto_handed
+                        and s.turns and (s.turns[-1][1] or 0) >= self.auto_since):
+                    hand.append((s.id, s.ctx_tokens))  # plan 23: a red turn hands off; no route step
+                elif s.window and s.verdict_ts >= self.auto_since and st in ("verify_failed", "verified"):
+                    due.append((s.id, "escalate" if st == "verify_failed" else "deescalate"))
         pulled = []
+        for sid, tokens in hand:  # pull forks a VS Code chat first: it is never resumed in place
+            try:
+                if self.pull(sid, "handoff", auto=tokens)[0] == 200:
+                    self.auto_handed.add(sid)
+                    pulled.append((sid, "handoff"))
+            except (runs.RunError, OSError):
+                continue
         for sid, lever in due:
             try:
                 if self.pull(sid, lever)[0] == 200:
@@ -762,19 +779,26 @@ class Hub:
                 read.append(f"part {s['part']}")
             elif part_text:
                 read.append(f"step {n} section")
-        prompt = tasks.step_prompt(task, s, prev, retry, special=special, plan=plan_text, part=part_text)
+        last = task["last_good"]
+        lessons = tasks.lessons_for(levers.read_lessons(self.folder, task["project"]), kind)
+        prompt = tasks.step_prompt(task, s, prev, retry, special=special, plan=plan_text, part=part_text,
+                                   facts=tasks.read_facts(self.folder, task, last), lessons=lessons)
         route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
         adapter = harness.get(hname)
         read_only = tasks.RULES[kind][2] == READ_ONLY_TOOLS if kind in tasks.RULES else False
-        max_turns = (READ_MAX_TURNS if adapter.CAPS and kind in ("scout", "search") else
-                     self.cfg["design_max_turns"] if kind == "design" else 0)
+        max_turns = (self.cfg["design_max_turns"] if kind == "design" else
+                     self.cfg["read_max_turns"] if adapter.CAPS and kind in tasks.READ_CAPPED else 0)
+        if "git_base" not in s:  # D1 a: the tree before the first attempt; the facts count the step's own lines
+            head = claude_cli.git_head(task["project_dir"])
+            s["git_base"] = {"commit": head, "files": claude_cli.git_snapshot(task["project_dir"], head)}
         try:
             sid = self.runs.start(
                 task["project_dir"], prompt, model_name, route["effort"],
                 title=f"{task['title']} · {n}/{len(task['steps'])} {kind}", route=kind,
                 reason=" · ".join(route["notes"]), prep=task["prep"], kind="task",
                 extra={"task": task["id"], "step": n}, disallow=tasks.DISALLOW, tools=tasks.RULES[kind][2],
-                budget=self.cfg["task_step_budget_usd"], max_turns=max_turns, harness=hname, read_only=read_only)
+                budget=self.cfg["task_step_budget_usd"], max_turns=max_turns, harness=hname, read_only=read_only,
+                strict_mcp=True)
         except (runs.RunError, OSError) as exc:
             tasks._task_to(task, "stuck", str(exc), now, s, lines)
             return self._commit(task, lines)
@@ -932,6 +956,7 @@ class Hub:
         ended = action in ("next", "fix", "done") or (found is not None and action == "wait")
         if ended:
             tasks.write_note(self.folder, task, cs, block)
+            self._facts(task, cs, sid)
             lesson = tasks.lesson_of(block)
             if lesson:  # plan 22: one line per step that taught something, read by the rules review
                 levers.add_lesson(self.folder, levers.lesson_line(task["project"], cs["kind"], lesson, now))
@@ -952,6 +977,25 @@ class Hub:
             self._go_on(task)
         return action
 
+    def _facts(self, task: dict, cs: dict, sid: str) -> None:
+        """Plan 23: the step's end commit, its own lines against the tree it started on (D1 a) and its last test
+        command: s["end_commit"], s["facts"] and steps/NN-<kind>.facts.md, never compacted. A git or file error
+        leaves the facts it could read."""
+        cwd, base = task["project_dir"], cs.get("git_base") or {}
+        cs["end_commit"] = claude_cli.git_head(cwd)
+        after = claude_cli.git_snapshot(cwd, base.get("commit", "")) if base.get("files") is not None else None
+        changed = facts.delta(base["files"], after) if after is not None else {}
+        _, lines = runs.read_lines(self.runs.stream_path(sid), 0)
+        harness_name = (self.runs.meta(sid) or {}).get("harness") or "claude"
+        test = facts.last_test(lines) if harness_name == "claude" else None
+        cs["facts"] = facts.facts(changed, test)
+        try:
+            tasks.write_facts(self.folder, task, cs, facts.text(base.get("commit", ""), cs["end_commit"], changed,
+                                                                test, git=after is not None,
+                                                                read_tests=harness_name == "claude"))
+        except OSError:
+            pass
+
     def start_brief(self, task: dict, n: int) -> None:
         """The brief between step `n` and the next: Haiku compacts the note in a thread, the code fallback stands
         in when it fails or brief_on is off. task["briefing"] = n until steps/NN-<kind>.brief.md is written."""
@@ -959,6 +1003,7 @@ class Hub:
         nxt = tasks.step(task, n + 1) if n < len(task["steps"]) else None
         raw = tasks.read_note(self.folder, task, n)
         prev = tasks.read_brief(self.folder, task, n - 1)
+        touched = [p for k in range(1, n + 1) for p in facts.files_in(tasks.read_facts(self.folder, task, k))]
         task["briefing"] = n
         if not self.cfg["brief_on"]:
             text = compact.fallback(prev, raw)
@@ -967,13 +1012,13 @@ class Hub:
             return
         self.briefing.add(task["id"])
         threading.Thread(target=self._brief_job, args=(copy.deepcopy(task), copy.deepcopy(s), copy.deepcopy(nxt),
-                                                       prev, raw), name="cc-brief", daemon=True).start()
+                                                       prev, raw, touched), name="cc-brief", daemon=True).start()
 
-    def _brief_job(self, task: dict, s: dict, nxt, prev: str, raw: str) -> None:
+    def _brief_job(self, task: dict, s: dict, nxt, prev: str, raw: str, touched: list = ()) -> None:
         model = self.cfg["brief_model"]
         cfg = dict(self.cfg, brief_model=self.model_id(model) if model in claude_cli.MODELS else model)
         try:
-            res = compact.run_brief(cfg, self.runs.exe, task, s, nxt, prev, raw)
+            res = compact.run_brief(cfg, self.runs.exe, task, s, nxt, prev, raw, touched)
         except Exception as exc:  # run_brief never raises; if it does, the chain still goes on
             text = compact.fallback(prev, raw)
             res = {"text": text, "cost": 0, "words": len(text.split()), "fallback": f"{type(exc).__name__}: {exc}"}
@@ -991,6 +1036,7 @@ class Hub:
                    f"brief: {len(raw.split())} -> {res['words']} words, ${res['cost']:.2f}"
                    + (f", cut {len(res['cut'])} findings" if res.get("cut") else ""))
             task["briefing"] = 0
+            s["brief_meta"] = compact.brief_meta(res, raw)  # plan 23: what step n + 1 received
             try:
                 tasks.write_brief(self.folder, task, s, res["text"])
                 lines = [tasks._line(time.time(), s, "briefing", "briefed", why)]
@@ -1229,6 +1275,8 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             "plan": t.get("plan") or None, "redo": t.get("redo") or "",
             "steps": [{**{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
                                             "cost")}, "part": s.get("part") or 0, "hard": bool(s.get("hard")),
+                       "end_commit": s.get("end_commit", ""), "brief_meta": s.get("brief_meta"),
+                       "facts": s.get("facts"),  # plan 23
                        "note": tasks.note_state(t, s, live(s["session"]) if s["state"] == "running" else ""),
                        "attempts": [{"session": a["session"], "cost": a["cost"], "why": a["why"]}
                                     for a in tasks.attempts(s)]} for s in t["steps"]]}
@@ -1289,7 +1337,8 @@ class Handler(BaseHTTPRequestHandler):
                                "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
                                "project": window.get("project", ""), "brief": window.get("brief") is True,
                                "ladder": cfg["ladder"], "effort": window.get("effort", "auto"),
-                               "kinds": tasks.PREP_KINDS, "edit_kinds": sorted(tasks.EDIT_KINDS)})
+                               "kinds": tasks.PREP_KINDS, "edit_kinds": sorted(tasks.EDIT_KINDS),
+                               "handoff_auto": bool(cfg["handoff_auto"])})
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())
         if url.path == "/api/image":
@@ -1320,6 +1369,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
                   "/api/open_folder": lambda body: self._allow(body, sessions_only=False),
                   "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review,
+                  "/api/setting": self._setting,
                   "/api/harness": self._harness, "/api/models/reload": self._models_reload,
                   "/api/models/open": self._models_open}
         for lever in ("continue", "verify", "handoff", "escalate"):
@@ -1475,6 +1525,19 @@ class Handler(BaseHTTPRequestHandler):
         self.hub.poll_once()
         return self._json({"session": sid})
 
+    def _setting(self, body):
+        """Plan 23: one whitelisted boolean of config.json (paths.SETTINGS: handoff_auto), written and live at once."""
+        key, value = body.get("key"), body.get("value")
+        try:
+            paths.set_setting(self.hub.folder, key, value)
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        with self.hub.lock:
+            self.hub.cfg[key] = value
+            self.hub.version += 1
+            self.hub.changed.notify_all()
+        return self._json({"key": key, "value": value})
+
     def _lever(self, body, lever):
         files = attach.parse(body.get("files")) if lever == "continue" else []
         code, data = self.hub.pull(body.get("session"), lever, self._text(body, "text") if lever == "continue" else "",
@@ -1621,11 +1684,22 @@ class Handler(BaseHTTPRequestHandler):
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
                            "handoff": tasks.read_handoff(self.hub.folder, task),
+                           **self._step_texts(task),
                            "plan": plan.read(self.hub.folder, task),
                            "parts": {p["n"]: plan.read_part(self.hub.folder, task, p["n"])
                                      for p in (task.get("plan") or {}).get("parts", [])},
                            "replan_note": tasks.read_note(self.hub.folder, task, cs["n"])
                            if cs and cs["kind"] == "replan" else ""})
+
+    def _step_texts(self, task: dict) -> dict:
+        """Plan 23: every step's raw note, brief and facts, keyed by the step number as a string (absent: none)."""
+        out = {"notes": {}, "briefs": {}, "facts": {}}
+        for st in task["steps"]:
+            for key, read in (("notes", tasks.read_note), ("briefs", tasks.read_brief), ("facts", tasks.read_facts)):
+                text = read(self.hub.folder, task, st["n"])
+                if text:
+                    out[key][str(st["n"])] = text
+        return out
 
     def _stream(self):
         self.send_response(200)

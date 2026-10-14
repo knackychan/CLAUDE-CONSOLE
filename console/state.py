@@ -115,6 +115,7 @@ class Session:
     handoff_by: str = ""       # the session whose last message is the handoff note (itself or its Handoff copy)
     forked_from: str = ""
     handoff_of: str = ""       # a fresh Handoff chat (after a PASS): the session it hands off
+    auto_handoff: int = 0      # plan 23: the service handed it off by itself at this many context tokens
     forks: list = field(default_factory=list)
     turns: list = field(default_factory=list)  # [start, end or None] per turn; the last start is turn_ts
     rules: dict = field(default_factory=dict)  # file -> {scope, lines, bytes}: CLAUDE.md / rules loaded
@@ -262,6 +263,7 @@ class State:
             s.compactions += 1
         elif event == "marked_done":  # Fred's Mark done; the chat's next prompt brings it back
             s.in_turn, s.ended, s.doing = False, True, ""
+            s.auto_handoff = 0  # plan 23: the HANDED OFF card leaves Needs you
             self._turn_close(s, ts)
         elif event == "SessionEnd":
             s.in_turn = False
@@ -282,6 +284,10 @@ class State:
             s.handoff = s.kind == "handoff"
             if rec.get("handoff_of"):
                 s.handoff_of = rec["handoff_of"]
+            s.auto_handoff = 0
+            if rec.get("auto_handoff"):  # plan 23: Hub.auto_steps started it; the card is the chat it hands off
+                origin = self.sessions.get(rec.get("forked_from") or rec.get("handoff_of") or "")
+                (origin if origin and origin is not s else s).auto_handoff = int(rec["auto_handoff"])
             if rec.get("task"):
                 s.task, s.step = rec["task"], int(rec.get("step") or 0)
             if rec.get("escalated"):
@@ -489,6 +495,8 @@ class State:
                 group = "replied"
             else:
                 group = "working"
+            if s.auto_handoff and s.handed_off and not s.ended:  # plan 23: HANDED OFF waits for Start next chat
+                group = "needs"
             symbol, text, state_tone = STATES[state]
             follow_ups = max(0, s.prompts - 1)
             files = self.files(s)
@@ -516,7 +524,7 @@ class State:
                 "prep_model": s.prep_model, "prep_cost": s.prep_cost, "prep_turns": s.prep_turns,
                 "models": shares(fams(files)),
                 "task": s.task, "step": s.step,
-                "kind": s.kind, "handoff": s.handoff, "handoff_by": s.handoff_by if s.handed_off else "", "forked_from": s.forked_from, "forks": list(s.forks),
+                "kind": s.kind, "handoff": s.handoff, "handoff_by": s.handoff_by if s.handed_off else "", "auto_handoff": s.auto_handoff, "forked_from": s.forked_from, "forks": list(s.forks),
                 "follow_ups": follow_ups,
                 "handoff_hint": state not in DONE and (
                     tone == "red" or follow_ups >= self.cfg["handoff_after_followups"]),
