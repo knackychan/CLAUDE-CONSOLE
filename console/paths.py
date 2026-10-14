@@ -211,6 +211,31 @@ def add_project(folder: Path, project: str) -> None:
     os.replace(tmp, path)
 
 
+def set_config(folder: Path, values: dict, merge=("tiers",)) -> None:
+    """Write `values` into <folder>/config.json with every other key as written (plan 26; set_harness does the same
+    for one key): a key named in `merge` updates the file's object one level deep (a tier Fred did not touch keeps
+    its list), any other key replaces the file's value. Raises ValueError when config.json exists but cannot be read
+    (never overwrite Fred's file)."""
+    path = Path(folder) / "config.json"
+    data = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            raise ValueError(f"cannot read {path}: fix it by hand")
+    for key, value in values.items():
+        if key in merge and isinstance(value, dict) and isinstance(data.get(key), dict):
+            data[key] = {**data[key], **value}
+        else:
+            data[key] = value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name("config.json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
 _WINDOW_LOCK = threading.Lock()  # the page (project) and the window (form, place) both save
 
 
