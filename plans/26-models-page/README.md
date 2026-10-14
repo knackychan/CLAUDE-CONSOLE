@@ -18,6 +18,8 @@
 > Build order: 5 -> 24 -> 23 -> 18 -> 26 -> 25. Start state: plans 5, 24, 23 and 18 placed. Where a task edits a
 > function one of them also edits, its file says so in a "Lands on" line.
 
+**Placed 2026-10-14** on branch `claude/implement-orchestration-plans-1y4bic` (PR #1): every code task, tests first where the task says, one commit per task; open decisions as (a). Fred's live check and the close task are open.
+
 Status: written 2026-10-14. Tasks 1 to 3 were run in a scratch copy of today's tree with plan 18's Tasks 1 to 5
 applied first (plans 5, 23 and 24 not placed: their config keys `step_timeout_s`, `read_max_turns`,
 `design_max_turns`, `plan_max_kb`, `plan_max_parts`, `plan_hold`, `replan_auto` were added to that copy's

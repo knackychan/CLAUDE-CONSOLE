@@ -12,6 +12,8 @@
 > Written against today's code (plan 22 placed, 328 tests). Plan 23 (six-heading handoff, facts, tools per kind) is not
 > written yet: where it lands first, its README says which of this plan's lines move (3.5 names them).
 
+**Placed 2026-10-14** on branch `claude/implement-orchestration-plans-1y4bic` (PR #1): every code task, tests first where the task says, one commit per task; open decisions as (a). Fred's live check and the close task are open.
+
 Status: written 2026-10-14; Fred took (a) on D1, D2 and D3 the same day. Tasks 1 and 2 were run in a scratch copy of the working tree (39 tests OK: 21 in
 `tests/test_plan.py`, 6 in `tests/test_replan.py`, 12 in `tests/test_compact.py`); their final code is in the task
 files. The plan is written for the option taken on each; the task files' `D1` / `D2` / `D3` marks name the lines that would change otherwise.

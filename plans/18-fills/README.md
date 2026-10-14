@@ -23,6 +23,8 @@
 > Build order: 5 -> 24 -> 23 -> 18 -> 26 -> 25. Start state: plans 5, 24 and 23 placed. Where a task edits a function
 > one of them also edits, its file says so in a "Lands on" line.
 
+**Placed 2026-10-14** on branch `claude/implement-orchestration-plans-1y4bic` (PR #1): every code task, tests first where the task says, one commit per task; open decisions as (a). Fred's live check and the close task are open.
+
 Status: written 2026-10-14. Tasks 1 to 4 were run in a scratch copy of today's tree (plan 22 placed, plan 5 not
 placed: `Hub.rung_ok` was a two-line shim over `claude_cli.known_model`): `console/fills.py` with
 `tests/test_fills.py` 20 OK, `tests/test_tasks.py` 74 OK (65 - 1 + 10), `tests/test_usage.py` 4 new OK, the service

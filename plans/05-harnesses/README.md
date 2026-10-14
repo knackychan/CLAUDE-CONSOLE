@@ -10,6 +10,8 @@ signatures, the data shapes, the tests with what they assert, and the ordered st
 task is executed, test first, and placed one task at a time (test + commit). Anything that could drift from the
 design is pinned in section 3 (the contract) and in each task's "Drift guards".
 
+**Placed 2026-10-14** on branch `claude/implement-orchestration-plans-1y4bic` (PR #1): every code task, tests first where the task says, one commit per task; open decisions as (a). Fred's live check and the close task are open.
+
 **State: written 2026-10-13, reviewed the same day against the code, D-1 to D-8 and Fred's pasted `--help`
 outputs (section 6 lists what the review changed). Tasks 1 to 7 to execute. Start state: 328 tests OK on `master`
 (Windows; Linux discovers 326).**

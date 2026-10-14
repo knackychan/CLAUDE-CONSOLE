@@ -20,6 +20,8 @@
 > its window helpers `fold`, `handoffSections`, `headingBlock`, `.hchip`), 18 (rung text, `balance:` notes) and 26.
 > Where a task edits a function an earlier plan also edits, its file says so in a "Lands on" line.
 
+**Placed 2026-10-14** on branch `claude/implement-orchestration-plans-1y4bic` (PR #1): every code task, tests first where the task says, one commit per task; open decisions as (a). Fred's live check and the close task are open.
+
 Status: written 2026-10-14. Task 1 (the service side) was run in a scratch copy of the working tree with its final
 code and tests: `python3 -m unittest discover -s tests` ran 336 tests (the Linux baseline 326 plus 10 new), the only
 failures the 4 known Linux environment ones (`test_tray` import, `test_redact ... test_path_tools_are_relative_to_cwd`,

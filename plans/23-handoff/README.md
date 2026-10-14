@@ -18,6 +18,8 @@
 > (plan 22 placed, 326 tests on Linux, 328 on Fred's Windows) plus the contracts of plans 5 and 24; every place where
 > one of them edits the same lines first has a **Lands on** line in the task file (3.13 lists them).
 
+**Placed 2026-10-14** on branch `claude/implement-orchestration-plans-1y4bic` (PR #1): every code task, tests first where the task says, one commit per task; open decisions as (a). Fred's live check and the close task are open.
+
 Status: written 2026-10-14, not started. Tasks 1 to 5 were run in a scratch copy of the working tree (today's code,
 plans 5 and 24 not placed, so their lines are added there as their contracts pin them): the full suite gives 356
 tests, 352 OK and the 4 failures the Linux baseline already has (`test_tray` import, `test_redact
