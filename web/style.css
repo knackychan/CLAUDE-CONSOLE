@@ -859,3 +859,58 @@ html:not(.native) .native-only { display: none; }
 .branch .in { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
 .branch .in .sb { padding-left: 8px; }
 .branch .in .conn { padding-left: 0; }
+
+/* the Board's inspector (plan 25 Tasks 5 and 6): head, tabs, panes, checks, questions, chain log, Measure */
+.ihead { display: grid; gap: 4px; }
+.ihead .ln1 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.ihead h2 { font-size: 16px; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ihead .meta { display: flex; gap: 12px; flex-wrap: wrap; font: 11.5px var(--mono); color: var(--mut); }
+.ihead .meta b { color: var(--ink); font-weight: 400; }
+.ihead .meta .y { color: var(--you); } .ihead .meta .r { color: var(--bad); }
+.ihead .ln1 .lr { margin-left: auto; display: flex; gap: 6px; }
+.binsp .tabs { padding: 0; margin-top: -4px; }
+.ipane { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.ipane .chat .turn p { font-size: 12.5px; }
+.ipane .doing { margin-top: -4px; }
+.rn { display: flex; gap: 6px; flex-wrap: wrap; }
+.rn span { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; max-width: 100%; overflow-wrap: anywhere; }
+.rn span b { color: var(--ink); font-weight: 400; }
+.rn span.y { color: var(--you); border-color: color-mix(in srgb, var(--you) 45%, transparent); }
+.binsp .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.binsp pre.text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.checks { display: grid; gap: 3px; font: 11.5px var(--mono); color: var(--mut); overflow-wrap: anywhere; }
+.checks .g { color: var(--ok); } .checks .r { color: var(--bad); } .checks .y { color: var(--you); }
+.oq { display: grid; gap: 4px; }
+.oqr { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 12.5px; }
+.oqr .gl { font: 11px var(--mono); color: var(--you); }
+.oqr.closed .gl { color: var(--ok); }
+.oqr.closed span:nth-child(2) { color: var(--mut); }
+.oqr .m { color: var(--mut); white-space: nowrap; }
+.clog { display: grid; gap: 1px; }
+.clog > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; font: 11.5px/19px var(--mono); color: var(--mut); }
+.clog > div > span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now { display: flex; gap: 8px; align-items: center; font: 12.5px var(--ui); color: var(--ink); min-width: 0; }
+.now .cells { grid-template-columns: 6px; flex: none; }
+.now > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.now .m { color: var(--mut); margin-left: auto; white-space: nowrap; }
+.measure { display: grid; grid-template-columns: 64px 58px minmax(0, 1fr) 58px; gap: 3px 10px; align-items: center; font: 11px var(--mono); color: var(--mut); }
+.measure .cells { grid-template-columns: repeat(20, minmax(0, 1fr)); }
+.measure .cells i { aspect-ratio: auto; height: 6px; }
+.measure .k { color: var(--mut); } .measure .k.hot { color: var(--ink); }
+.measure .bar { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.measure .bar .cells { flex: 1; min-width: 0; }
+.measure .bar b { font-weight: 400; width: 34px; text-align: right; color: var(--ink); flex: none; }
+.measure .bar b.y { color: var(--you); }
+.measure .hd2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+.measure .fig { color: var(--ink); text-align: right; }
+.measure .r { text-align: right; }
+.legend i.y { background: var(--you); }
+/* the per-step context line on the Task page (plan 25 Task 7) */
+.gg { grid-column: 2 / -1; display: flex; gap: 10px; align-items: center; min-width: 0; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; }
+.gg > span { display: inline-flex; gap: 4px; align-items: center; min-width: 0; }
+.gg .cells { grid-template-columns: repeat(var(--n, 10), 3px); flex: none; }
+.gg .cells.c30 { grid-template-columns: repeat(15, 3px); }
+.gg b { font-weight: 400; color: var(--ink); }
+.gg b.y { color: var(--you); } .gg b.r { color: var(--bad); } .gg b.mut { color: var(--mut); }
+.gg .cells.c30 i { aspect-ratio: auto; height: 6px; width: 3px; }
+.chain .row[data-grow] { cursor: pointer; }

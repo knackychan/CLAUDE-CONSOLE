@@ -85,6 +85,8 @@ const foldLabel = new Map(); // plan 23: fold label -> open, kept across redraws
 let settingBusy = false; // POST /api/setting in flight (the Window runs switch)
 let settingErr = "";
 let planOpen = new Set(); // the Task page's open plan folds (plan 24); closed on openTask
+const grown = new Set();  // plan 25: "<task>:<n>" rows whose ctx gauge line a click opened; cleared in openTask
+let scrollCur = false;    // the Task page scrolls its current row into view once per openTask
 let planEdit = false;    // the plan askbox shows the editor
 let planEditPart = 0;    // which text the editor holds: 0 the index, k part k
 let tab = "chat";       // chat | steps | agents | timeline
@@ -1674,18 +1676,28 @@ function noteChip(s, t) {  // what the step does now, by its handoff note from t
   }[s.note] || [s.note, ""];
   return `<span class="hn ${s.note}" title="the HANDOFF note of step ${s.n}: ${esc(tip)}">${esc(word)}</span>`;
 }
+function stepGauge(t, s) {  // the step's context as 15 cells and the figure; unknown is a word (ID-3)
+  const ctx = stepCtx(s), live = s.state === "running";
+  const cells = ctx == null ? `<b class="mut" title="${esc(ctxUnknown(s))}">unknown</b>`
+    : `<span class="cells c30">${cellsHtml(ctxClasses(ctx).filter((_, k) => k % 2 === 0).map((c, k, a) => (live && c && !a[k + 1] ? c + " live" : c)))}</span><b class="${ctxFigTone(ctx)}">${kTokens(ctx)}</b>`;
+  const hint = scoutHint(t, s, null);
+  return `<span class="gg"><span title="context reached, 1 cell = 10K">ctx ${cells}</span>${hint ? `<span>· ${hint}</span>` : ""}</span>`;
+}
 function chainRow(t, s) {
+  const ran = s.state !== "planned", ctx = stepCtx(s), key = t.id + ":" + s.n;
+  const auto = s.n === t.current || s.state === "failed" || s.verdict === "FAIL" || (ctx != null && cfg && ctx >= cfg.gauge[0]);
+  const gauge = ran && (auto || grown.has(key)), short = ran && !gauge;
   const tn = s.state === "handed" ? stepCell(t, s) : s.state === "failed" || s.verdict === "FAIL" ? "r" : s.note === "unchecked" ? "w" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
   const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
   const waits = t.state === "waiting" && s.n === t.current && /^(plan |replanned:|asks: Plan gap:)/.test(t.why || "");  // a plan wait: the reason, in orange
   const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), waits ? `<span class="y">${esc(t.why)}</span>` : esc(s.goal)].filter(Boolean).join(" · ");
   const from = s.part ? `<span class="tg" title="a write step the design step made: sub-plan ${s.part} of ${((t.plan || {}).parts || []).length}">from plan</span>` : "";
-  return `<div class="row${s.n === t.current ? " cur" : ""}${fresh("c", "t" + t.id + "." + s.n, s.state, 300) && s.state === "done" ? " adv" : ""}${s.note ? " n-" + s.note : ""}"><span class="cells">${cells}</span>
-    <span class="nm m">${two(s.n)} ${esc(s.kind)}${from}${s.model ? ` <span class="mdl">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}</span>
-    <span class="m c">${s.cost ? money(s.cost) : ""}</span>
+  return `<div class="row${s.n === t.current ? " cur" : ""}${short ? " short" : ""}${fresh("c", "t" + t.id + "." + s.n, s.state, 300) && s.state === "done" ? " adv" : ""}${s.note ? " n-" + s.note : ""}"${ran && !auto ? ` data-grow="${s.n}"` : ""}><span class="cells">${cells}</span>
+    <span class="nm m">${two(s.n)} ${esc(s.kind)}${from}${s.model ? ` <span class="mdl">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}${triesHtml(s)}</span>
+    <span class="m c">${!ran ? "" : s.cost == null ? "?" : s.cost ? money(s.cost) : ""}</span>
     ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
-    ${noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+    ${gauge ? stepGauge(t, s) : ""}${short && (s.note === "sent" || s.note === "checked") ? "" : noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
 }
 
 function handedBox(d, t, cur, shown) {  // Fred handed the task off: the skill's note, then Start next task (Mark done ends it)
@@ -1771,9 +1783,9 @@ function headingBlock(h, cut = [], open = ["goal", "findings", "questions", "nex
   const ul = (items, mono = false) => `<ul${mono ? ' class="mono"' : ""}>${items.map(li).join("")}</ul>`;
   const count = (items) => { const c = items.filter((x) => cut.includes(x)).length;
     return c ? `${items.length - c} kept · ${c} cut` : `${items.length} ${items.length === 1 ? "line" : "lines"}${whole ? " · whole" : ""}`; };
-  const sec = (key, label, info, body) => open.includes(key) ? `<div class="hsec"><span class="lbl">${label}<span class="m">${info}</span></span>${body}</div>` : fold(label, info, body, { cls: "hf" });
+  const sec = (key, label, info, body) => open.includes(key) ? `<div class="hsec"><span class="lbl">${label}<span class="m">${info}</span></span>${body}</div>` : fold(label, info, body, { cls: "hf", key: "h." + key });
   const base = (p) => p.replace(/^.*\//, "").replace(/ \(.*$/, "");
-  return `<div class="hb">${sec("goal", "Goal", "", `<p>${esc(h.goal) || "(none)"}</p>`)}
+  return `<div class="hb">${sec("goal", "Goal", whole && h.goal ? "whole · " + esc(h.goal) : "", `<p>${esc(h.goal) || "(none)"}</p>`)}
     ${sec("findings", "Findings", count(h.findings), ul(h.findings))}
     ${sec("files", "Files touched", h.files.length ? `${h.files.length} · ${h.files.slice(0, 2).map(base).map(esc).join(", ")}${h.files.length > 2 ? " +" + (h.files.length - 2) : ""}` : "none", ul(h.files, true))}
     ${sec("trouble", "Troubleshooting", h.trouble.length ? count(h.trouble) : "none", ul(h.trouble))}
@@ -1784,12 +1796,13 @@ function handoffBlock(text) {  // the last HANDOFF ... END HANDOFF of a reply: [
   const t = String(text || ""), a = t.lastIndexOf("\nHANDOFF\n"), b = t.lastIndexOf("\nEND HANDOFF");
   return a >= 0 && b > a ? [t.slice(0, a), t.slice(a + 9, b)] : null;
 }
-function factsFold(f, text) {  // the facts the service read when the step ended: never compacted (README 3.4)
-  if (!f && !text) return "";
-  const fail = f && f.tests.startsWith("FAIL");
-  const info = f ? `${f.files} ${f.files === 1 ? "file" : "files"} +${f.plus} -${f.minus}${f.tests ? " · " + esc(f.tests) : ""}` : "read";
-  return fold("Facts", info, `<p class="mono">${esc(text || "").replace(/\n/g, "<br>")}</p>`,
-              { cls: "facts", tone: fail ? "r" : "", open: fail, title: "git diff --stat from the step's start to its end, and its last test command: code reads them, no model" });
+function factsFold(s, text) {  // the facts the service gathered when the step ended (plan 23): diff stat and the test line
+  const f = (s && s.facts) || null;
+  if (!f || !text) return "";
+  const fail = String(f.tests || "").startsWith("FAIL");  // plan 23: "" (no test run), "23 OK" or "FAIL <first failing line>"
+  const info = `${f.files} ${f.files === 1 ? "file" : "files"} +${f.plus}${f.minus ? " -" + f.minus : ""} · ${esc(f.tests || "no test run")}`;
+  return fold("Facts", info, `<pre class="text mono">${esc(text)}</pre>`, { cls: "facts", tone: fail ? "r" : "", open: fail, force: fail, key: "facts",
+    title: "git diff --stat from the step's start to its end, and its last test command: code reads them, no model" });
 }
 function handoffFold(t, d, n, sn, meta, nextStep) {
   const brief = (d.briefs || {})[String(n)] || "", raw = (d.notes || {})[String(n)] || "";
@@ -1800,18 +1813,19 @@ function handoffFold(t, d, n, sn, meta, nextStep) {
   const head = meta ? `<div class="hd"><span class="m" title="${esc(meta.fallback ? "the brief pass failed: " + meta.fallback + "; code cut the note" : `by ${meta.by}, ${meta.turns} turns, $${money(meta.cost)}`)}">${meta.fallback ? "sent as written, cut by code" : `compacted from ${meta.raw_w} w`}</span>
       <span class="link m" data-tact="raw">${rawOpen ? "as sent" : `as ${two(n)} wrote it`}</span></div>` : "";
   const body = rawOpen ? headingBlock(wrote, cut, ["goal", "findings", "trouble", "questions", "next"]) : headingBlock(sent, [], undefined, true);
-  return `<div class="blk">${fold(label, info, head + body + factsFold(sn && sn.facts, (d.facts || {})[String(n)]))}</div>`;
+  return `<div class="blk">${fold(label, info, head + body + factsFold(sn || {}, (d.facts || {})[String(n)]))}</div>`;
 }
 function pfold(key, label, info, body, o = {}) {
   const open = planOpen.has(key);
   return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-tact="pfold" data-key="${esc(key)}" aria-expanded="${open}"><span class="lbl">${label}</span><span class="fi">${info}</span><span class="car">${open ? "▴" : "▾"}</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
 }
 const partText = (d, n) => String((d.parts || {})[n] || "").replace(/^# Part [^\n]*\n+/, "");
-function planRowHtml(t, d, cur) {  // after the chain: closed it is one line; open, the plan by heading and the current step's section
+function planOpenHtml(t, d, cur, o = {}) {  // the open plan by heading and the current step's section; o.board: keyed folds for the inspector, o.design / o.verify open Goal + Decisions / Acceptance
   const p = t.plan;
   if (!p) return "";
-  const parts = p.parts || [], split = parts.length > 0, words = Number(p.words || 0).toLocaleString("en"), curN = cur ? cur.n : 0;
-  const closed = `from ${two(p.from)} design · ` + (split ? `${parts.length} sub-plans · ${words} w` : `${words} w · never cut`);
+  const parts = p.parts || [], split = parts.length > 0, curN = cur ? cur.n : 0;
+  const mk = (key, label, info, inner, open) => o.board ? fold(label, info, inner, { cls: "hf", key: "plan." + key.replace(/[^a-z0-9]+/gi, "").toLowerCase().slice(0, 30), open })
+    : pfold(key, label, info, inner, { cls: "hf" });
   let body = "";
   for (const sc of planSections(d.plan)) {
     if (split && sc.title === "Sub-plans") continue;
@@ -1820,11 +1834,12 @@ function planRowHtml(t, d, cur) {  // after the chain: closed it is one line; op
       body += `<span class="lbl">Steps · ${subs.length}</span>` + subs.map((x) => {
         const mine = Number((/^Step (\d+)/.exec(x.title) || [])[1]) === curN, text = x.body.join("\n").trim();
         return mine ? `<div class="hsec"><span class="lbl">${esc(x.title)} <span class="tg n">this step</span></span>${stepBody(text)}</div>`
-          : pfold("st:" + x.title, esc(x.title), "", stepBody(text), { cls: "hf" });
+          : mk("st:" + x.title, esc(x.title), "", stepBody(text), false);
       }).join("");
       continue;
     }
-    body += pfold("s:" + sc.title, esc(sc.title), "", mdBlock(sc.body), { cls: "hf" });
+    const open = o.board && ((/^goal/i.test(sc.title) && (o.design || !cur)) || (/^decisions/i.test(sc.title) && o.design) || (/^acceptance/i.test(sc.title) && o.verify));
+    body += mk("s:" + sc.title, esc(sc.title), "", mdBlock(sc.body), !!open);
   }
   if (split) {
     const stepOf = (n) => t.steps.find((s) => s.part === n);
@@ -1838,6 +1853,14 @@ function planRowHtml(t, d, cur) {  // after the chain: closed it is one line; op
     body += `<span class="lbl">Sub-plans · ${parts.length}</span><div class="parts">${rows}</div>`
       + (mine ? `<div class="hsec"><span class="lbl">Part ${mine.n} · ${esc(mine.title)} <span class="tg n">this step</span></span>${stepBody(partText(d, mine.n))}</div>` : "");
   }
+  return body;
+}
+function planRowHtml(t, d, cur) {  // after the chain: closed it is one line; open, the plan by heading and the current step's section
+  const p = t.plan;
+  if (!p) return "";
+  const parts = p.parts || [], split = parts.length > 0, words = Number(p.words || 0).toLocaleString("en");
+  const closed = `from ${two(p.from)} design · ` + (split ? `${parts.length} sub-plans · ${words} w` : `${words} w · never cut`);
+  const body = planOpenHtml(t, d, cur);
   return `<div class="blk">${pfold("plan", "Plan", esc(closed), `<div class="blk">${body || '<p class="m mut" style="margin:0">plan.md is empty.</p>'}</div>`)}</div>`;
 }
 function confirmLabel(t, row) {  // the one button that answers the wait: the same words in the askbox and the bar
@@ -1903,7 +1926,7 @@ function drawTask() {
   const paused = t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? " · paused" : "";
   const head = `<div class="head tk"><span class="st ${tn}">${taskMark({ ...t, state: shown })}${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
     <h2>${esc(t.title)}</h2>
-    <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)} · $${money(row.cost)}</span></div>
+    <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)} · $${money(row.cost)}</span><button class="btn sm" data-go="board" title="The chain as connected cells, with the handoffs between the steps: the window widens (Esc returns)">&#8660; Board</button></div>
     ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>${row.paused_after
     ? `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>` : ""}`;
   const sl = d.step_levers || {}, ask = cur && cur.session ? row.asks : "", hand = cur && cur.session ? row.hand_off : "";
@@ -1930,6 +1953,7 @@ function drawTask() {
   const brief = t.briefing ? `<div class="blk"><span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Compacting the handoff of ${two(t.briefing)}</span></div>`
     : n ? handoffFold(t, d, n, sn, meta, nextStep) : "";
   setHtml($("tscroll"), head + why + chain + planRow + brief);
+  if (scrollCur) { scrollCur = false; const r = $("tscroll").querySelector(".row.cur"); if (r) r.scrollIntoView({ block: "nearest" }); }
   const b = (name, cls, label) => `<button class="btn${cls}" data-tact="${name}">${label}</button>`;
   let buttons = "";
   if (lv.stop === "") buttons += b("stop", " stop", "Stop");
@@ -1969,6 +1993,8 @@ async function openTask(id) {
   taskId = id;
   taskData = null;
   rawOpen = false;
+  grown.clear();
+  scrollCur = true;
   foldLabel.clear();
   planOpen = new Set();
   planEdit = false;
@@ -1977,14 +2003,17 @@ async function openTask(id) {
 }
 
 let tArmTimer = null;
+function actMsg() { return page === "board" ? $("b-msg") : $("ta-msg") || $("t-msg"); }  // where a failed lever says why
+function actRedraw() { if (page === "board") { boardData = null; renderBoard(); } else { taskSig = ""; if (page === "task") renderTaskPage(); } }
 async function taskAct(name, button) {
+  const id = button.dataset.tid || taskId;
   if (name === "raw") { rawOpen = !rawOpen; drawTask(); return; }  // page only: the brief or the raw note
-  if (name === "next") return startNext(button.dataset.tid || taskId, button);  // the card's button too
+  if (name === "next") return startNext(id, button);  // the card's button too
   if (name === "pfold") { const k = button.dataset.key; if (planOpen.has(k)) planOpen.delete(k); else planOpen.add(k); drawTask(); return; }
-  if (name === "edit") { planEdit = !planEdit; drawTask(); return; }
+  if (name === "edit") { planEdit = !planEdit; if (page === "board") renderBoard(); else drawTask(); return; }
   if (name === "saveplan") return savePlan(button);
   if (name === "gapanswer") return gapAnswer(button);
-  if (!taskId && !button.dataset.tid) return;
+  if (!id) return;
   const arm = { stop: "Stop the task? Click again", clear: "Delete its notes and streams? Click again",
     handoff: "Hand off ends the task? Click again", done: "Mark the task done? Click again" }[name];
   if (arm && !button.dataset.armed) {  // two clicks: a stop loses the running step, a clear deletes the notes
@@ -1998,46 +2027,51 @@ async function taskAct(name, button) {
   if (name === "answer" || name === "handoff") return stepAct(name, button);  // session levers on the step's chat
   button.disabled = true;
   try {
-    await api("/api/task/" + name, { task: button.dataset.tid || taskId });
+    await api("/api/task/" + name, { task: id });
+    if (name === "clear" && page === "board") {  // the Board's pick moves to the next task, not to the list
+      const list = boardTasks(), k = list.findIndex((x) => x.id === id), to = list[k + 1] || list[k - 1];
+      boardTask = to ? to.id : "";
+      boardPick = "t";
+      boardData = boardChat = null;
+      renderBoard();
+      return;
+    }
     if (name === "clear") { taskId = null; showPage("list"); return; }
-    taskSig = "";  // redraw now, not at the next snapshot
-    if (page === "task") renderTaskPage();
+    actRedraw();  // redraw now, not at the next snapshot
   } catch (e) {
     button.disabled = false;
-    const msg = page === "task" ? $("ta-msg") || $("t-msg") : null;
+    const msg = page === "task" || page === "board" ? actMsg() : null;
     if (!msg) button.textContent = "Failed: " + e.message;
     else msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
 }
 
 async function gapAnswer(button) {  // a Plan gap: the answer joins the plan's Decisions and continues the step (POST /api/task/answer)
-  const box = $("t-answer"), text = box ? box.value.trim() : "";
+  const ask = button.closest(".askbox"), box = (ask && ask.querySelector("textarea")) || $("t-answer"), text = box ? box.value.trim() : "";
   if (!text) return;
   button.disabled = true;
   try {
-    await api("/api/task/answer", { task: taskId, text });
+    await api("/api/task/answer", { task: button.dataset.tid || taskId, text });
     box.value = "";
-    taskSig = "";
-    renderTaskPage();
+    actRedraw();
   } catch (e) {
     button.disabled = false;
-    const msg = $("ta-msg");
+    const msg = actMsg();
     if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
 }
 
 async function savePlan(button) {  // Fred's edit of the index or of a part, through the service only
-  const box = $("t-edit");
+  const ed = button.closest(".edbox"), box = (ed && ed.querySelector("textarea")) || $("t-edit");
   if (!box) return;
   button.disabled = true;
   try {
-    await api("/api/task/plan", { task: taskId, text: box.value, part: planEditPart });
+    await api("/api/task/plan", { task: button.dataset.tid || taskId, text: box.value, part: planEditPart });
     planEdit = false;
-    taskSig = "";
-    renderTaskPage();
+    actRedraw();
   } catch (e) {
     button.disabled = false;
-    const msg = $("ta-msg");
+    const msg = actMsg();
     if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
 }
@@ -2057,18 +2091,19 @@ async function startNext(id, button) {  // a handed-off task: the new-task box s
 }
 
 async function stepAct(name, button) {  // the current step's question or hand-off, from the Task page: a session lever
-  const t = taskData && taskData.task, cur = t && t.steps.find((s) => s.n === t.current), box = $("t-answer");
+  const tid = button.dataset.tid, bd = tid && boardData && boardData.id === tid ? boardData.data : null;
+  const t = bd ? bd.task : taskData && taskData.task, cur = t && t.steps.find((s) => s.n === t.current);
+  const ask = button.closest(".askbox"), box = (ask && ask.querySelector("textarea")) || $("t-answer");
   const text = name === "answer" && box ? box.value.trim() : "";
   if (!cur || !cur.session || (name === "answer" && !text)) return;
   button.disabled = true;
   try {
     await api("/api/" + (name === "answer" ? "continue" : "handoff"), name === "answer" ? { session: cur.session, text } : { session: cur.session });
     if (box) box.value = "";
-    taskSig = "";  // redraw now, not at the next snapshot
-    renderTaskPage();
+    actRedraw();  // redraw now, not at the next snapshot
   } catch (e) {
     button.disabled = false;
-    const msg = $("ta-msg");
+    const msg = actMsg();
     if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
 }
@@ -2626,6 +2661,8 @@ async function openBoard(id) {  // the window widens to the saved Board size; Es
   boardTask = t ? t.id : "";
   boardPick = t && t.steps.some((s) => s.n === t.current) && t.state !== "done" ? "s" + t.current : t ? "t" : "";
   boardData = boardChat = null;
+  planEdit = false;
+  planEditPart = 0;
   if (native()) { try { await window.pywebview.api.board(true); } catch (e) { /* the window keeps its size */ } }
   showPage("board");
 }
@@ -2656,12 +2693,44 @@ async function renderBoard() {
     boardData = { id, sig, data };
   }
   const d = boardData.data;
+  if (d && boardPick[0] === "s") await boardChatFetch(d, row);
+  else if (boardPick === "") await measureFetch();
+  if (page !== "board" || boardTask !== row.id) return;
   setHtml($("bchain"), tasks.map((t) => chainHtml(t, t.id === row.id ? d : null, t.id === row.id ? boardPick : null)).join(""));
   setHtml($("bwrap"), `<div class="binsp">${await boardInspector(row, d)}</div>`, { sel: ".binsp", reset: boardWrapKey() });
 }
-function boardInspector(row, d) {  // Tasks 5 and 6 fill the cases; until they land a pick shows no inspector
+async function boardChatFetch(d, row) {  // the picked step's chat: when the pick changed, and every 2 s while the step runs
+  const s = d.task.steps.find((x) => "s" + x.n === boardPick);
+  if (!s || !s.session) { boardChat = null; return; }
+  const live = snap.sessions.find((x) => x.id === s.session), running = s.state === "running";
+  const turn = live ? live.turn_ts : 0;
+  if (boardChat && boardChat.sid === s.session && boardChat.running === running && (!running || (snap.now - boardChat.at < 2 && boardChat.turn === turn))) return;
+  const sid = s.session, chat = await api("/api/chat?session=" + encodeURIComponent(sid)).catch(() => null);
+  if (page !== "board" || boardPick !== "s" + s.n) return;
+  boardChat = chat ? { sid, at: snap.now, chat, running, turn } : null;
+}
+async function measureFetch() {  // the Measure table: once a minute per project
+  const project = boardProject();
+  if (!project) { measureData = null; return; }
+  if (measureData && measureData.project === project && snap.now - measureData.at < 60) return;
+  const data = await api("/api/measure?project=" + encodeURIComponent(project) + "&n=10").catch(() => null);
+  if (page !== "board" || boardPick !== "") return;
+  measureData = { project, at: snap.now, data };
+}
+function boardInspector(row, d) {
   if (d === false) return '<p class="note m">This task is gone: it was cleared or its folder was removed.</p>';
-  return "";
+  const t = d.task;
+  if (boardPick === "t") return inspTask(t, d, row);
+  const m = /^([sc])(\d+)$/.exec(boardPick), s = m && t.steps.find((x) => x.n === Number(m[2]));
+  if (s && m[1] === "c") return inspConn(t, s, d, row);
+  if (s) {
+    if (s.kind === "replan" && s.n === t.current && String(t.why || "").startsWith("replanned:")) return inspReplan(t, s, d, row);
+    if (s.n === t.current && /^(asks: )?Plan gap:/.test(row.asks || row.why || "")) return inspGap(t, s, d, row);
+    return inspStep(t, s, d, row);
+  }
+  const project = boardProject();
+  if (!project) return '<div class="ihead"><h2>Measure</h2></div><p class="note m">Pick a project to measure its tasks.</p>';
+  return inspMeasure(measureData && measureData.project === project ? measureData.data : null, projectName(project));
 }
 function boardWrapKey() {  // true when the pick changed since the last draw: a new pick starts at the top, a redraw keeps the scroll
   const k = boardTask + "|" + boardPick + "|" + itab, changed = boardWrapKey.last !== k;
@@ -2731,7 +2800,7 @@ function stepCost(s) {
 }
 function rungTime(s) {
   const rung = modelText(rungOf(s.harness, s.model), s.effort);
-  const t = s.state === "running" && s.started ? elapsed(snap.now - s.started) : s.ended && s.started ? elapsed(s.ended - s.started) : "";
+  const t = stepTime(s);
   return `${esc(rung)}${t ? " · " + t : ""}`;
 }
 function triesHtml(s) {  // one 7 px square per attempt: red failed, green the one that passed, ink the live one
@@ -2805,6 +2874,222 @@ function emptyBoard() {
     <p>No task in ${esc(where)}. Type a task in the list; its steps show here as they run.</p></div>`;
 }
 
+// the inspector (plan 25 Tasks 5 and 6): the picked step, handoff, task head or the Measure table
+const ITABS = ["chat", "recv", "hand", "route", "plan"];
+const wc = (x) => String(x || "").split(/\s+/).filter(Boolean).length;
+const stepNo = (s) => (s ? two(s.n) : "");
+function stepTime(s) {
+  return s.state === "running" && s.started ? elapsed(snap.now - s.started) : s.ended && s.started ? elapsed(s.ended - s.started) : "";
+}
+function stepCostFig(s) {  // the cost figure for the inspector's meta: summed over attempts, or the word unknown
+  const got = (s.attempts || []).filter((a) => a.cost != null), c = got.length ? got.reduce((x, a) => x + a.cost, 0) : s.cost;
+  return c == null ? "unknown" : money(c);
+}
+function sentWords(t, d, s) {  // the words step s received: the previous step's brief, from its meta or its file
+  const prev = t.steps.find((x) => x.n === s.n - 1);
+  if (!prev) return null;
+  const m = prev.brief_meta;
+  if (m && m.sent_w != null) return m.sent_w;
+  const b = (d.briefs || {})[String(prev.n)];
+  return b ? wc(b) : null;
+}
+function busyBox(tid) { return `<div id="b-msg" class="say" data-tid="${esc(tid)}"></div>`; }
+function stepHead(t, s, d, row, extra = "") {
+  const shown = stepShown(t, s, row), [word, tn, spr] = BWORD[shown], lv = d.levers || {};
+  const failedTry = shown === "failed" && (s.attempts || []).length > 1 ? (s.attempts.find((a) => a.why) || s.attempts[0]) : null;
+  const buttons = (s.session ? '<button class="btn sm" data-open="' + esc(s.session) + '" title="The session page, with its levers">Open chat</button>' : "")
+    + (s.state === "running" && lv.stop === "" ? `<button class="btn sm stop" data-tact="stop" data-tid="${esc(t.id)}" title="Interrupts the run; the task stops">Stop</button>` : "")
+    + (failedTry ? `<button class="btn sm" data-open="${esc(failedTry.session)}">Open try 1</button>` : "");
+  const rung = s.state === "planned" ? "rung at start" : modelText(rungOf(s.harness, s.model), s.effort), time = stepTime(s);
+  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(spr)}${word}</span><h2>${stepNo(s)} ${esc(s.kind)}${extra}</h2><span class="lr">${buttons}</span></div>
+    <div class="meta"><span>${esc(rung)}</span><span>cost <b>${stepCostFig(s)}</b></span>${time ? `<span>${time}</span>` : ""}</div></div>${busyBox(t.id)}`;
+}
+function recvPane(t, s, d) {
+  if (s.n === 1) return '<p class="note m">No handoff: step 1 gets the task goal and Prep\'s context pack.</p>';
+  const prev = t.steps.find((x) => x.n === s.n - 1), brief = (d.briefs || {})[String(s.n - 1)] || "", meta = (prev && prev.brief_meta) || {};
+  if (!brief) return `<p class="note m">The brief of step ${two(s.n - 1)} is not on disk (cleared, or the step never ran).</p>`;
+  const w = meta.sent_w != null ? meta.sent_w : wc(brief);
+  const plan = prev && prev.kind === "design" && t.plan && t.plan.from === prev.n
+    ? `<p class="note m">and plan.md, ${Number(t.plan.words || 0).toLocaleString("en")} w, never cut (the Plan tab)</p>` : "";
+  return `<div class="blk"><div class="hd"><span class="lbl">From ${two(s.n - 1)}</span><span class="m">${w} w · ${meta.fallback ? "as written" : "compacted"}</span></div>${plan}
+    ${headingBlock(handoffSections(brief), [], ["goal", "findings", "questions", "next"])}</div>`;
+}
+function handPane(t, s, d) {
+  const note = (d.notes || {})[String(s.n)] || "", meta = s.brief_meta || {}, nx = t.steps.find((x) => x.n === s.n + 1);
+  if (s.state === "running") return '<p class="note m">Writing. Shows here when the run ends.</p>';
+  if (s.state === "planned") return '<p class="note m">Not started.</p>';
+  if (!note) return '<p class="note m">No handoff: the step ended without a HANDOFF block.</p>';
+  const raw = meta.raw_w != null ? meta.raw_w : wc(note), got = meta.sent_w;
+  const info = nx ? `wrote ${raw} w · ${two(nx.n)} received ${got == null ? "?" : got} w${meta.fallback ? " · sent as written" : ""}` : `wrote ${raw} w`;
+  return `<div class="blk"><div class="hd"><span class="lbl">${nx ? "For " + two(nx.n) : "For the task's end"}</span><span class="m">${info}</span></div>
+    ${headingBlock(handoffSections(note), (meta.cut || []).map(normItem))}${factsFold(s, (d.facts || {})[String(s.n)])}</div>`;
+}
+function routePane(s) {
+  const notes = (s.notes || []).map((n) => `<span${/every .* over pace/.test(n) ? ' class="y"' : ""}>${esc(n)}</span>`).join("");
+  const tries = (s.attempts || []).length > 1 ? `<div class="blk"><span class="lbl">Attempts</span><p class="note m">${stepTries(s)}</p></div>` : "";
+  return `<div class="blk"><span class="lbl">Goal</span><p class="note" style="color:var(--ink)">${esc(s.goal)}</p></div>
+    <div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${notes || "<span>none yet</span>"}</div></div>${tries}`;
+}
+function planEditBox(t, d, tid) {  // plan 24's editor, on the Board: the index or a part, saved through the service
+  const parts = (t.plan || {}).parts || [];
+  const sel = parts.length ? `<select id="b-editpart" aria-label="Which text">${[`<option value="0">index</option>`, ...parts.map((x) => `<option value="${x.n}"${x.n === planEditPart ? " selected" : ""}>part ${x.n}: ${esc(x.title)}</option>`)].join("")}</select>` : "";
+  const text = planEditPart ? partText(d, planEditPart) : d.plan;
+  return `<div class="edbox">${sel}<textarea class="in" id="b-edit" rows="9" aria-label="plan.md" spellcheck="false">${esc(text)}</textarea>
+    <div class="lr"><button class="btn go sm" data-tact="saveplan" data-tid="${esc(tid)}" title="Writes the plan through the service; the task folder stays the service's">Save</button></div></div>`;
+}
+function planPane(t, d, s) {
+  const p = t.plan, n = s.n, design = n === p.from, verify = s.kind === "verify" || s.kind === "fix", parts = p.parts || [];
+  const mine = parts.find((x) => { const st = t.steps.find((y) => y.part === x.n); return st && st.n === n; });
+  const maxkb = (cfg && cfg.tuning && cfg.tuning.plan_max_kb && cfg.tuning.plan_max_kb.value) || 100;
+  const head = design ? `written by this step · ${p.kb != null ? p.kb : "?"} KB of ${maxkb}`
+    : parts.length ? `index and part ${mine ? mine.n : "none"} sent to this step`
+    : verify ? "the whole plan: Steps and Acceptance are what you check" : `the whole plan, your ### Step ${n} again at the end of the prompt`;
+  const next = t.steps.find((x) => x.n === n + 1), waits = t.state === "waiting" && /^(plan |asks: Plan gap:)/.test(t.why || "");
+  const canEdit = design && next && next.state === "planned" && (waits || t.owner === "fred");
+  const edit = canEdit ? `<button class="btn sm" data-tact="edit" aria-expanded="${planEdit}" title="The plan in place, until the next step starts">Edit</button>` : "";
+  return `<div class="blk"><div class="hd"><span class="lbl">plan.md${parts.length ? ` + ${parts.length} parts` : ""}</span><span class="m">${head}</span>${edit}</div>
+    ${canEdit && planEdit ? planEditBox(t, d, t.id) : ""}${planOpenHtml(t, d, s, { board: true, design, verify })}</div>`;
+}
+function chatTab(t, s, d) {
+  if (!s.session) return s.kind === "replan" ? '<p class="note m">No chat: the replan step runs one Haiku turn with no tools; its answer is in the Handoff tab.</p>'
+    : '<p class="note m">Not started: the chat shows here as the step runs.</p>';
+  if (!boardChat || boardChat.sid !== s.session || !boardChat.chat) return '<p class="note m">Reading the chat.</p>';
+  const row = snap.sessions.find((x) => x.id === s.session);
+  return chatPane(boardChat.chat, s.session, (row && row.source) || "chat", { prompt: true, step: s, compact: true, board: true });
+}
+function inspStep(t, s, d, row) {
+  const has = d.plan && t.plan && s.n >= t.plan.from, prev = t.steps.find((x) => x.n === s.n - 1);
+  const inW = sentWords(t, d, s), meta = s.brief_meta || {}, nx = t.steps.find((x) => x.n === s.n + 1);
+  const outW = meta.raw_w != null ? meta.raw_w : (d.notes || {})[String(s.n)] ? wc(d.notes[String(s.n)]) : null;
+  const sentW = meta.sent_w;
+  const tabs = [["chat", "Chat"], ["recv", `Received${inW != null && prev ? ` <span class="n">${inW} w</span>` : ""}`],
+    ["hand", `Handoff${outW != null ? ` <span class="n">${outW}${sentW != null && sentW < outW && nx ? " → " + sentW : ""} w</span>` : ""}`], ["route", "Route"]];
+  if (has) tabs.push(["plan", `Plan <span class="n">${Number(t.plan.words || 0).toLocaleString("en")} w</span>`]);
+  const tab = tabs.some(([k]) => k === itab) ? itab : "chat";
+  const pane = tab === "chat" ? chatTab(t, s, d) : tab === "recv" ? recvPane(t, s, d) : tab === "hand" ? handPane(t, s, d) : tab === "route" ? routePane(s) : planPane(t, d, s);
+  return `${stepHead(t, s, d, row)}${tabsHtml(tabs, tab)}<div class="ipane">${pane}</div>`;
+}
+function tabsHtml(tabs, tab) {
+  return `<div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-itab="${k}" aria-selected="${tab === k}" tabindex="${tab === k ? 0 : -1}">${l}</button>`).join("")}</div>`;
+}
+function replanBox(t, s, d, row) {
+  const r = t.replan || { before: [], after: [], added: [], dropped: [] }, tid = esc(t.id), lv = d.levers || {};
+  const line = (x) => `${esc(x.kind)}: ${esc(x.goal)}`;
+  const dropped = (r.dropped || []).map((i) => r.before[i]).filter(Boolean);
+  const why = ((d.replan_note || "").match(/^## Why\s*\n+([^\n]*)/m) || [, ""])[1] || r.why || "";
+  const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
+  return `<div class="askbox"><span class="st y">${sprite("waiting")}Replanned <span class="lc">· after step ${two(s.n - 1)}</span></span>
+    ${why ? `<div class="q">${esc(why)}</div>` : ""}
+    <div class="plan1"><span class="lbl">New plan · ${r.after.length} steps <span class="m">(was ${r.before.length})</span></span>
+      <ol>${r.after.map((x, k) => `<li class="${(r.added || []).includes(k) ? "add" : "old"}">${line(x)}</li>`).join("")}</ol></div>
+    ${dropped.length ? `<div class="plan1"><span class="lbl">Dropped · ${dropped.length}</span><ol>${dropped.map((x) => `<li class="drop">${line(x)}</li>`).join("")}</ol></div>` : ""}
+    <div class="lr">${b("confirm", " you", "Confirm plan")}${b("keep", "", "Keep old plan")}${b("stop", " stop", "Stop")}</div></div>`;
+}
+function inspReplan(t, s, d, row) {
+  const prev = t.steps.find((x) => x.n === s.n - 1), next = ((prev && (d.notes || {})[String(prev.n)]) || "").match(/## Next\s*\n+([^\n]*)/);
+  const notes = (s.notes || []).map((n) => `<span>${esc(n)}</span>`).join("");
+  return `<div class="ihead"><div class="ln1"><span class="st y">${sprite("waiting")}Waiting</span><h2>${stepNo(s)} replan</h2></div></div>${busyBox(t.id)}
+    ${replanBox(t, s, d, row)}
+    ${fold("Why it ran", `${prev ? two(prev.n) + "'s Next asked for a replan" : "a replan"}`, `<p class="note">${next ? `The handoff of step ${two(prev.n)} ended with <span class="m">Next: ${esc(next[1])}</span>, so the service inserted this step.` : "The service inserted this step."}</p>`, { key: "replanwhy" })}
+    ${fold("Route", `${rungTime(s)} · ${stepCostFig(s)}`, `<div class="rn">${notes || "<span>none yet</span>"}</div>`, { key: "replanroute" })}`;
+}
+function inspGap(t, s, d, row) {
+  const q = String(row.asks || row.why || "").replace(/^(asks: )?Plan gap:\s*/, ""), lv = d.levers || {}, tid = esc(t.id);
+  const has = d.plan && t.plan && s.n >= t.plan.from;
+  const tabs = [["chat", "Chat"], ["recv", "Received"], ["hand", "Handoff"], ["route", "Route"]];
+  if (has) tabs.push(["plan", `Plan <span class="n">${Number(t.plan.words || 0).toLocaleString("en")} w</span>`]);
+  const tab = tabs.some(([k]) => k === itab) ? itab : "chat";
+  const pane = tab === "chat" ? chatTab(t, s, d) : tab === "recv" ? recvPane(t, s, d) : tab === "hand" ? handPane(t, s, d) : tab === "route" ? routePane(s) : planPane(t, d, s);
+  const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
+  return `${stepHead(t, s, d, row, ' <span class="m mut">· from plan</span>')}
+    <div class="askbox"><span class="st y">${sprite("waiting")}Plan gap <span class="lc">· step ${two(s.n)} stopped, nothing chosen</span></span>
+      <div class="q">${esc(q)}</div>
+      <textarea class="in" id="b-answer" rows="2" aria-label="Answer" placeholder="Your answer joins the plan's Decisions as Fred, ${new Date().toISOString().slice(0, 10)}: ... and continues step ${two(s.n)} in its chat."></textarea>
+      <div class="lr">${b("answer", " you", "Send answer").replace('data-tact="answer"', 'data-tact="gapanswer"')}${b("redo", "", "Redo design")}${b("stop", " stop", "Stop")}</div></div>
+    ${tabsHtml(tabs, tab)}<div class="ipane">${pane}</div>`;
+}
+function checksFold(meta) {  // what the code checked on the brief pass's answer (plan 23): closed unless one failed
+  const list = meta.checks || [];
+  if (!list.length) return "";
+  const bad = list.filter((c) => !c.ok);
+  const info = (bad.length ? `<span class="r">${bad.length} FAIL: ${esc(bad[0].name)}</span>` : `${list.length - bad.length} of ${list.length} pass`)
+    + (meta.by ? ` · compacted by ${esc(meta.by)}` : "") + (meta.cost != null ? ` · $${Number(meta.cost).toFixed(3)}` : "")
+    + (meta.turns ? ` · ${meta.turns} ${meta.turns === 1 ? "turn" : "turns"}` : "");
+  const rows = list.map((c) => `<span><span class="${c.ok ? "g" : "r"}">${c.ok ? "✓" : "✗"}</span> ${esc(c.name)}${c.why ? ": " + esc(c.why) : ""}</span>`).join("");
+  return fold("Checks", info, `<div class="checks">${rows}</div>`, { open: !!bad.length, force: !!bad.length, key: "checks" });
+}
+function inspConn(t, s, d, row) {  // the handoff after step s: what the next step received, the cut lines struck in place
+  const nx = t.steps.find((x) => x.n === s.n + 1), meta = s.brief_meta || {}, note = (d.notes || {})[String(s.n)] || "";
+  const title = `<h2>Handoff from ${stepNo(s)} ${esc(s.kind)} to ${nx ? stepNo(nx) + " " + esc(nx.kind) : "the end"}</h2>`;
+  if (!note) {
+    const why = t.briefing === s.n || s.state === "running" ? `Haiku is compacting the handoff for step ${stepNo(s)}.` : meta.fallback ? esc(meta.fallback) : "Not written yet.";
+    return `<div class="ihead">${title}</div><p class="note m">${why}</p>`;
+  }
+  const h = handoffSections(note), cut = (meta.cut || []).map(normItem), all = [].concat(h.findings, h.files, h.trouble, h.questions);
+  for (const c of cut) if (!all.includes(c)) h.findings.push(c);  // a cut line the note no longer holds: listed under Findings, tagged cut
+  const open = ["questions", "next"].concat(["findings", "files", "trouble"].filter((k) => h[k].some((x) => cut.includes(x))));
+  const raw = meta.raw_w != null ? meta.raw_w : wc(note), got = meta.sent_w;
+  const cutMeta = meta.fallback ? "<span>sent as written</span>" : meta.cut && meta.cut.length ? `<span>cut <b>${raw - (got || 0)} w</b>, ${meta.cut.length} Findings lines</span>` : "";
+  return `<div class="ihead"><div class="ln1">${title}</div>
+    <div class="meta"><span>${stepNo(s)} wrote <b>${raw} w</b></span>${got != null ? `<span>${nx ? stepNo(nx) : "next"} received <b>${got} w</b></span>` : ""}${cutMeta}</div></div>${busyBox(t.id)}
+    <div class="blk"><span class="lbl">What ${nx ? stepNo(nx) : "the next step"} received</span>${headingBlock(h, cut, open, true)}</div>${checksFold(meta)}`;
+}
+function inspTask(t, d, row) {
+  const shown = taskShown(row), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, lv = d.levers || {}, tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
+  const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn sm${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
+  const gap = /^(asks: )?Plan gap:/.test(row.asks || row.why || ""), replan = (t.why || "").startsWith("replanned:");
+  const buttons = b("stop", " stop", "Stop") + b("pause", "", "Pause") + b("resume", " go", "Resume") + b("retry", " go", "Retry") + b("clear", "", "Clear");
+  const nxt = cur && t.steps.find((x) => x.n === cur.n + 1);
+  const now = cur && cur.state === "running"
+    ? `<div class="now"><span class="cells"><i class="f live"></i></span><span>Now <b>${stepNo(cur)} ${esc(cur.kind)}</b> · ${rungTime(cur)}</span><span class="m">${nxt ? `next ${stepNo(nxt)} ${esc(nxt.kind)}` : "last step"}</span></div>` : "";
+  let wait = "";
+  if (row.asks && !gap) {
+    wait = `<div class="askbox"><span class="st y">${sprite("waiting")}Asks you <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span><div class="q">${esc(row.asks)}</div>
+      <textarea class="in" id="b-tanswer" rows="2" aria-label="Answer" placeholder="Your answer continues step ${cur ? two(cur.n) : ""} in its chat."></textarea>
+      <div class="lr">${cur && cur.session ? `<button class="btn you" data-tact="answer" data-tid="${tid}">Send answer</button>` : ""}${cur && cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button>` : ""}</div></div>`;
+  } else if (gap || replan) {
+    wait = `<div class="askbox"><span class="st y">${sprite("waiting")}${gap ? "Plan gap" : "Replanned"} <span class="lc">· answered in step ${cur ? two(cur.n) : ""}</span></span>
+      <div class="lr">${cur ? `<button class="btn" data-bpick="s${cur.n}">Open step ${cur.n}</button>` : ""}</div></div>`;
+  } else if ((t.state === "waiting" || t.state === "stuck") && t.why) {
+    const c = lv.confirm === "" ? `<button class="btn you" data-tact="confirm" data-tid="${tid}">${esc(confirmLabel(t, row))}</button>` : "";
+    wait = `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state === "stuck" ? "stuck" : "waiting")}${word}</span><div class="q">${esc(t.why)}</div>${c ? `<div class="lr">${c}</div>` : ""}</div>`;
+  }
+  const qs = d.questions || [], open = qs.filter((q) => !q.closed), closed = qs.filter((q) => q.closed);
+  const qrow = (q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.opened)}${q.closed ? " · closed " + two(q.closed) : ""}</span></div>`;
+  const doneWhen = (String(t.goal || "").match(/Done when:\s*([^\n]*)/) || [, ""])[1] || String(t.goal || "").split("\n")[0].slice(0, 80);
+  const log = d.chain || [], last = log[log.length - 1];
+  const move = (c) => `${c.step ? two(c.step) : "task"} ${esc(c.from)} -> ${esc(c.to)}`;
+  const n = row.count;
+  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
+    <div class="meta"><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span></div></div>${busyBox(t.id)}
+    ${now}${wait}
+    ${fold("prompt.md", `Done when: ${esc(doneWhen)}`, `<pre class="text">${esc(t.goal)}</pre>`, { key: "promptmd" })}
+    <div class="blk"><span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("") || '<p class="note m">none</p>'}</div>
+      ${closed.length ? fold("", `${closed.length} closed`, `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf", key: "qclosed" }) : ""}</div>
+    ${log.length ? fold("Chain log", `${log.length} moves · last ${hhmm(last.ts)} ${move(last)}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}`;
+}
+function inspMeasure(m, name) {
+  if (!m) return '<div class="ihead"><h2>Measure</h2></div><p class="note m">The measure is not available.</p>';
+  const head = `<div class="ihead"><h2>Measure · ${esc(name)} · last ${m.tasks} ${m.tasks === 1 ? "task" : "tasks"}</h2><div class="meta"><span>median per kind</span></div></div>`;
+  if (!m.tasks || !(m.kinds || []).length) return `${head}<p class="note m">No finished step in ${esc(name)} yet: the table fills as tasks run.</p>`;
+  const yel = cfg ? cfg.gauge[0] : 150000;
+  let anyY = false;
+  const bar = (v) => {
+    if (v == null) return '<span class="bar"><b class="mut" title="no context reading">unknown</b></span>';
+    const tone = v >= yel ? "y" : "f", n = Math.min(20, Math.round(20 * v / 200000));
+    if (tone === "y") anyY = true;
+    return `<span class="bar"><span class="cells">${cellsHtml(Array.from({ length: 20 }, (_, k) => (k < n ? tone : "")))}</span><b class="${tone === "y" ? "y" : ""}">${kTokens(v)}</b></span>`;
+  };
+  const w = (v) => (v == null ? "?" : v + " w");
+  const rows = m.kinds.map((k) => `<span class="k${k.kind === m.hot ? " hot" : ""}">${esc(k.kind)}</span>`
+    + (k.received == null && k.kind === "scout" ? '<span class="fig" title="the task goal and the context pack">pack</span>' : `<span class="fig" title="median words of the handoff received">${w(k.received)}</span>`)
+    + bar(k.context) + `<span class="fig" title="median words of the handoff written">${w(k.handoff)}</span>`).join("");
+  const hot = m.kinds.find((k) => k.kind === m.hot);
+  const read = hot ? `<p class="note m">A kind that receives a small handoff and reaches a large context reads too much on its own: ${esc(hot.kind)} at ${kTokens(hot.context)} from ${hot.received == null ? "?" : hot.received} words in is the one to tune (scout first, or a turn cap).</p>` : "";
+  return `${head}<div class="measure"><span class="hd2">kind</span><span class="hd2 r">received</span><span class="hd2">context</span><span class="hd2 r">handoff</span>${rows}</div>
+    <div class="legend"><span><i class="f"></i>median</span>${anyY ? `<span><i class="y"></i>context past ${kTokens(yel)}</span>` : ""}<span>cell 10K · words as figures</span></div>${read}`;
+}
+
 // -- events ------------------------------------------------------------------------------
 async function go(name, button) {
   if (name === "list") { backTo = null; showPage("list"); }
@@ -2872,6 +3157,13 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
+  const gr = e.target.closest("[data-grow]");  // plan 25: a finished row opens its ctx gauge line in place
+  if (gr && !e.target.closest("button,a,.link")) {
+    const key = taskId + ":" + gr.dataset.grow;
+    if (grown.has(key)) grown.delete(key); else grown.add(key);
+    drawTask();
+    return;
+  }
   const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],#brief,#today,#overpace");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
@@ -2943,9 +3235,9 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("change", (e) => {
-  if (e.target.id === "t-editpart") {  // the plan editor switches between the index and a part
+  if (e.target.id === "t-editpart" || e.target.id === "b-editpart") {  // the plan editor switches between the index and a part
     planEditPart = Number(e.target.value) || 0;
-    const d = taskData, box = $("t-edit");
+    const onBoard = e.target.id === "b-editpart", d = onBoard ? boardData && boardData.data : taskData, box = $(onBoard ? "b-edit" : "t-edit");
     if (d && box) box.value = planEditPart ? partText(d, planEditPart) : d.plan;
     return;
   }
@@ -3006,6 +3298,12 @@ document.addEventListener("keydown", (e) => {
     if (e.target.matches("[data-tab]") && s) {
       tab = TABS[(TABS.findIndex(([k]) => k === tab) + d + TABS.length) % TABS.length][0];
       renderProc(s).then(() => { const f = $("tab-" + tab); if (f) f.focus(); }).catch(() => {});
+      e.preventDefault();
+    } else if (e.target.matches("[data-itab]")) {  // plan 25: the Board's tabs
+      const all = [...e.target.parentElement.querySelectorAll("[data-itab]")], to = all[(all.indexOf(e.target) + d + all.length) % all.length];
+      itab = to.dataset.itab;
+      saveDraft();
+      renderBoard().then(() => { const f = document.querySelector(`[data-itab="${itab}"]`); if (f) f.focus(); });
       e.preventDefault();
     } else if (e.target.matches("[data-eff]")) {  // the slider is a radio group: the arrows move the pick
       stepEffort(d);
