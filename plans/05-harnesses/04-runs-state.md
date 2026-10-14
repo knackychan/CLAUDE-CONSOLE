@@ -71,10 +71,10 @@
 ## Tests
 
 `tests/test_runs.py` (new, `HarnessRunsTest`, built on the module's existing fixtures with a scratch home):
-- `test_start_codex_writes_prompt_on_stdin_and_closes_it`: `RunManager(cfg, home, exe=[fake_claude], exes={"codex": [sys.executable, "tests/fake_codex.py"]})`; `start(cwd, "hi", "gpt-5.6-codex", "medium", harness="codex")`; wait for `run_ended`: the stream holds `thread.started` .. `turn.completed` then `cc_exit 0`; the meta has `harness == "codex"`, `harness_session == "th_fake"`; `run_started` carries `harness`; `run_ended` carries `tokens` and no `cost` key.
+- `test_start_codex_writes_prompt_on_stdin_and_closes_it`: `RunManager(cfg, home, exe=[fake_claude], exes={"codex": [sys.executable, "tests/fake_codex.py"]})`; `start(cwd, "hi", "gpt-6.1-sol", "medium", harness="codex")`; wait for `run_ended`: the stream holds `thread.started` .. `turn.completed` then `cc_exit 0`; the meta has `harness == "codex"`, `harness_session == "th_fake"`; `run_started` carries `harness`; `run_ended` carries `tokens` and no `cost` key.
 - `test_resume_codex_uses_the_thread_id`: a second `start(..., resume=sid, harness="codex")` builds a command with `resume th_fake` (patch `_spawn` to capture the command).
 - `test_step_timeout_stops_a_capless_run`: `cfg["step_timeout_s"] = 1`, prompt `SLOW`: `run_ended.subtype == "error_step_timeout"`, `stopped False`, `interrupted False`; `tasks.cap_reason` gives the timeout text.
-- `test_resume_takes_the_harness_from_the_meta`: after the Codex run ends, `start(cwd, "go on", "gpt-5.6-codex", "medium", resume=sid)` with no `harness` argument builds a Codex command (`resume th_fake`), never a `claude` one.
+- `test_resume_takes_the_harness_from_the_meta`: after the Codex run ends, `start(cwd, "go on", "gpt-6.1-sol", "medium", resume=sid)` with no `harness` argument builds a Codex command (`resume th_fake`), never a `claude` one.
 - `test_stdin_closed_for_argv_adapters`: a stub adapter whose `run_command` returns `(cmd, None)` and whose command is a script that reads stdin to EOF then prints a result line: the run ends (no hang) within 5 s.
 - `test_prompt_too_long_for_cmd`: a 40 000-character prompt on `harness="cmd"` (the fake) raises `RunError` before any process starts.
 - `test_chat_dispatches_on_harness`: `chat_of(sid)` of the Codex run gives roles `[you, tool, claude, result]`.

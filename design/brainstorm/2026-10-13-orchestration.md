@@ -116,9 +116,9 @@ Proposal: the three tiers are named by their job, not by a Claude model, and eac
 
 ```json
 "tiers": {
-  "think": ["claude:opus/high", "codex:gpt-5.6/high", "claude:claude-opus-4-8/high"],
-  "write": ["claude:sonnet/medium", "codex:gpt-5.6-codex/medium", "opencode:deepseek/deepseek-v4/-"],
-  "read":  ["claude:haiku/low", "opencode:zai/glm-5-flash/-", "codex:gpt-5.6-mini/low"]
+  "think": ["claude:opus/high", "codex:gpt-6-astra/high", "claude:claude-opus-4-8/high"],
+  "write": ["claude:sonnet/medium", "codex:gpt-6.1-sol/medium", "codex:gpt-6-sol/medium"],
+  "read":  ["claude:haiku/low", "opencode:opencode-go/deepseek-v4.1-flash/-", "cmd:deepseek/deepseek-v4.1-flash/-", "codex:gpt-6-luna/low"]
 }
 ```
 
@@ -130,7 +130,7 @@ Model names above are placeholders: the plan lists the exact ids each installed 
 
 - Per model (the model, not the harness: Opus through two CLIs is one fill), three fills: today, this week, this month, as tokens and list-price cost, from the usage the console already prices (Claude transcripts) or the adapter reports. Kept in `usage-days.json` next to the daily history, nothing new on disk.
 - Each fill is a share of that model's allowance in config.json, `allowance`: `{"opus": {"day_usd": 10, "week_usd": 50, "month_usd": 150}, ...}`, with a linear pace inside the window (on day 10 of 30 the month allowance is a third full). A fill over its pace is the warning (orange outline, `opus 84 % of pace`), as plan 18 designed.
-- Balancing: within a tier `step_route` takes the rung whose model has the lowest share of pace, with a hysteresis so two rungs do not alternate on every step (switch only when the leader is over `warn_at` and another rung is under it by `balance_margin`, default 0.2). The note says why: `balance: opus 84 % -> codex:gpt-5.6 31 %`. A tier with every rung over pace takes the least full and says so; `verify` never goes below the step it checks and holds for Fred as today.
+- Balancing: within a tier `step_route` takes the rung whose model has the lowest share of pace, with a hysteresis so two rungs do not alternate on every step (switch only when the leader is over `warn_at` and another rung is under it by `balance_margin`, default 0.2). The note says why: `balance: opus 84 % -> codex:gpt-6-astra 31 %`. A tier with every rung over pace takes the least full and says so; `verify` never goes below the step it checks and holds for Fred as today.
 - The window shows the fills as columns of cells per model on the Usage page and the list header (the spend row's cells, one column per model, three rows day / week / month), so the "which one am I overusing" question is read at a glance, not computed.
 - `peak_hours` stays optional: per provider, local hours when its rungs count as fuller by a fixed step (`"anthropic": {"hours": "14-19", "add": 0.2}`), a note again. Off until the FAIL-rate view below gives a reason.
 
@@ -215,7 +215,7 @@ The compact mode stays what D11 to D13 locked: the pill, the list, the session p
 
 The expanded mode is a page the window shows when it is wider than about 700 px (the resize grip already allows up to 900), reached from the Task page with "Board" and from the list with a wide-window button. Working name: **Cells Board**. Same tokens, same cell motif, same type (Segoe UI, Cascadia Mono, Doto for the one focal figure). Two columns:
 
-- **Left, the chain** (about 300 px): one cell block per step in order: state sprite and word, kind, rung (`codex · gpt-5.6-codex · medium`), cost, the 10K context cells, the brief-in and note-out word cells, attempts as small chips. Between steps a short connector that is the brief: its word count on it, hatched when the brief fell back to code, orange when it cut findings. A fix insert shows as a branch of two cells under the failed verify, rejoining after. Tasks of the same project stack vertically, folded to one row each except the picked one.
+- **Left, the chain** (about 300 px): one cell block per step in order: state sprite and word, kind, rung (`codex · gpt-6.1-sol · medium`), cost, the 10K context cells, the brief-in and note-out word cells, attempts as small chips. Between steps a short connector that is the brief: its word count on it, hatched when the brief fell back to code, orange when it cut findings. A fix insert shows as a branch of two cells under the failed verify, rejoining after. Tasks of the same project stack vertically, folded to one row each except the picked one.
 - **Right, the inspector** (the rest): whatever is picked on the left, Square's "one selected context" rule. A step shows its goal, its route notes (`rule code: sonnet/medium · cooldown: ... · floor code: ...`), the brief it read, the note it wrote with Findings / Files / Questions / Next as four blocks, the Open and Stop buttons. A connector shows the raw note and the brief side by side with what was cut. The task head shows prompt.md, the running open-questions list and the chain log.
 - Keyboard: Up / Down moves the pick along the chain, Left / Right between tasks, Enter opens the step session, Esc returns to the Task page.
 

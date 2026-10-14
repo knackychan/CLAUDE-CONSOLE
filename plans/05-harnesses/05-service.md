@@ -66,16 +66,16 @@
 - `GET /api/chat`: `chat_of` for window runs.
 - `POST /api/terminal`: 409 `claude only` from the RunError.
 
-## Tests (`HarnessServerTest`, `make_server` with the fake claude and `exes={"codex": fake_codex}`, codex `on` in the test cfg with `models {"gpt-5.6-codex": "sonnet"}`)
+## Tests (`HarnessServerTest`, `make_server` with the fake claude and `exes={"codex": fake_codex}`, codex `on` in the test cfg with `models {"gpt-6.1-sol": "sonnet"}`)
 
 - `test_config_lists_harnesses`: `/api/config` has `harnesses` with the four names; `codex.on True`, `codex.found True` after the probe (poll until the probe thread is done, 5 s cap), `codex.version` starts with `codex-cli`; `opencode.on False`.
 - `test_harness_switch`: `POST /api/harness {"name": "opencode", "on": true}` writes config.json and returns `opencode.on True`, `found False` (no fake given); turning `claude` off is 400; an unknown name 400.
-- `test_run_on_a_codex_rung`: `POST /api/run {"model": "codex:gpt-5.6-codex", ...}` starts a run whose `run_started` has `harness codex` and `model gpt-5.6-codex`; the snapshot row shows `harness codex`; `/api/levers` for it has `verify == "claude only"`, `terminal == "claude only"`, `continue == ""` once ended.
-- `test_run_refuses_off_or_unknown_rung`: `cmd:deepseek-flash` with cmd off -> 409 with `cmd is off`; `codex:nope` -> 400.
-- `test_task_step_pick_on_codex`: `POST /api/task` with a scout step whose `model` is `codex:gpt-5.6-codex`: the step runs on codex (`run_started.harness`), `read_only` in the meta, the step dict has `harness == "codex"`, its notes contain `harness: codex`; a HANDOFF-OK echo from the fake completes the step and the chain goes on (the next step on Claude's fake).
+- `test_run_on_a_codex_rung`: `POST /api/run {"model": "codex:gpt-6.1-sol", ...}` starts a run whose `run_started` has `harness codex` and `model gpt-6.1-sol`; the snapshot row shows `harness codex`; `/api/levers` for it has `verify == "claude only"`, `terminal == "claude only"`, `continue == ""` once ended.
+- `test_run_refuses_off_or_unknown_rung`: `cmd:deepseek-v4.1-flash` with cmd off -> 409 with `cmd is off`; `codex:nope` -> 400.
+- `test_task_step_pick_on_codex`: `POST /api/task` with a scout step whose `model` is `codex:gpt-6.1-sol`: the step runs on codex (`run_started.harness`), `read_only` in the meta, the step dict has `harness == "codex"`, its notes contain `harness: codex`; a HANDOFF-OK echo from the fake completes the step and the chain goes on (the next step on Claude's fake).
 - `test_chat_and_final_message_for_codex`: `/api/chat?session=` gives the fake's items; `Hub.final_message` returns the agent text and `success`.
-- `test_cheap_rung_refused_on_a_code_step`: with `cmd` on and found (the fake) and `models {"deepseek-flash": "haiku"}`: `POST /api/task` with a `code` step on `cmd:deepseek-flash` is 400 `read steps only`; a `scout` step on it is accepted.
-- `test_step_pick_falls_back_when_harness_off`: a task whose scout step picked `codex:gpt-5.6-codex`, then `POST /api/harness` codex off before the step starts: the step runs on Claude's haiku rung, its tier stays the pick's (`sonnet` in the test cfg) and it runs on Claude's sonnet rung with the note `harness: codex off -> sonnet`.
+- `test_cheap_rung_refused_on_a_code_step`: with `cmd` on and found (the fake) and `models {"deepseek-v4.1-flash": "haiku"}`: `POST /api/task` with a `code` step on `cmd:deepseek-v4.1-flash` is 400 `read steps only`; a `scout` step on it is accepted.
+- `test_step_pick_falls_back_when_harness_off`: a task whose scout step picked `codex:gpt-6.1-sol`, then `POST /api/harness` codex off before the step starts: the step runs on Claude's haiku rung, its tier stays the pick's (`sonnet` in the test cfg) and it runs on Claude's sonnet rung with the note `harness: codex off -> sonnet`.
 - `test_step_timeout_reaches_the_retry_reason`: `step_timeout_s` 1, a scout step on codex with `SLOW` in its goal: the task's `why` names the step timeout.
 - `test_probe_never_raises`: a harness `on` with an `exe` path that does not exist: `found False`, `version ""`, no exception, the service keeps serving.
 

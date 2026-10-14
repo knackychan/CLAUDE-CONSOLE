@@ -14,7 +14,7 @@
 ## 0. Short answer
 
 The compact window (340 to 400 px) keeps everything Cells Drawer locked and takes every new fact in place:
-a rung is words (`codex · gpt-5.6-codex · medium`) wherever a model showed, the settings popover gets a
+a rung is words (`codex · gpt-6.1-sol · medium`) wherever a model showed, the settings popover gets a
 Harnesses group with a switch per CLI, every model select lists tiers (think / write / read) holding rungs on
 any CLI that is on, the Task page's step rows gain a context gauge (no word cells for the
 handoffs, ID-5), the today breakdown and the Usage page show the fills per model, and a replan waits as any other wait.
@@ -75,8 +75,8 @@ to a given size and back, which `resize(w, h, keep)` already does for the grip.
 - **Today strip breakdown** (`todaymore`): closed by default, as locked ("one click away"). Under the strip
   one line shows only while a model is over its pace: `3 models over pace · fills ▾` (the figure in orange),
   and opens the breakdown: the spend legend, the model mix as one line (`opus 48 · sonnet 27 · codex 14 ·
-  haiku 9 %`), a second muted line for `opencode · deepseek-v4-flash: cost unknown, 2 runs` and `window
-  runs 9`, then one fills line, `fills · opus 84 · sonnet 84 · gpt-5.6-codex 91 % of pace today` with the
+  haiku 9 %`), a second muted line for `opencode · deepseek-v4.1-flash: cost unknown, 2 runs` and `window
+  runs 9`, then one fills line, `fills · opus 84 · sonnet 84 · gpt-6.1-sol 91 % of pace today` with the
   over-pace figures in orange and the Usage button. No cells in the breakdown: the Usage page carries the
   fills. Needs you then starts on the first screen.
 - **Task card**: line 2 reads `step 5c of 8` (the fix steps counted, as the Task page does); the current
@@ -137,7 +137,7 @@ mono line. The levers: one primary `Run as task`, `Run` as the plain second butt
 
 - **Model selects** (`modelOptions`): tier groups `think`, `write`, `read` (and `fable` on the Run route),
   each holding rungs on any harness that is on and found, Claude's ladder first as `opus 4.8`, then
-  `codex · gpt-5.6`, then the older Claude rungs. `opencode` and `cmd` rungs appear under `read` only, and
+  `codex · gpt-6-astra`, then the older Claude rungs. `opencode` and `cmd` rungs appear under `read` only, and
   only on the Run route and on step rows whose kind's rule tier is read (`cfg.kinds_tier`). Plan 5 alone
   (before plan 18) draws the same select with the Claude ladder groups followed by one group per harness;
   the tier names arrive with plan 18.
@@ -145,7 +145,7 @@ mono line. The levers: one primary `Run as task`, `Run` as the plain second butt
   the row's say line and the select returns to auto. Changing a kind redraws its select; a pick the new kind
   cannot hold falls back to auto the same way.
 - **Route reason**: folded under the selects, closed line `why codex · balance ▾`; open: the rule, what
-  balancing did (`balance: sonnet 84 % of pace -> codex · gpt-5.6-codex 31 %`), the effort source. A rung
+  balancing did (`balance: sonnet 84 % of pace -> codex · gpt-6.1-sol 31 %`), the effort source. A rung
   with no cap keeps one muted line in sight, `△ no turn cap: stops at 1800 s`, the full sentence (`codex has
   no turn or spend cap: this run ends at step_timeout_s (1800 s) if it is still going`) in its title.
 - **Scouted**: folded, closed line `Scouted · context pack 1.9 KB · 3 files ▾`; open: the `path:lines`
@@ -157,7 +157,7 @@ mono line. The levers: one primary `Run as task`, `Run` as the plain second butt
 
 ## 6. Session page of a non-Claude step (plan 5 decision 10)
 
-- **Head**: the model chip reads `codex · gpt-5.6-codex · medium` (`modelText` on a `harness:model` rung,
+- **Head**: the model chip reads `codex · gpt-6.1-sol · medium` (`modelText` on a `harness:model` rung,
   no version lookup); on a task step the project name leaves the where row (the `task · step 3 of 8` link
   carries it) so the chip has the room. No note line: the brief already says `context unknown`; the thread
   id and the resume mode sit in the chat's source line and in the Continue button's title (`resumes the
@@ -348,7 +348,7 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | Thing | States shown | Word and mark |
 |---|---|---|
 | Harness row | on, off, not found, pending | `● on` / `○ off` / `△ not found` / `...` |
-| Rung | Claude, other harness | `sonnet · medium` / `codex · gpt-5.6-codex · medium` |
+| Rung | Claude, other harness | `sonnet · medium` / `codex · gpt-6.1-sol · medium` |
 | Step cost | exact, estimated, unknown | `0.84` / `~0.84` / `? cost` |
 | Step context | known, hand-off zone, unknown | cells and `92K` / `164K` in orange / `unknown: codex reports spend` |
 | Handoff connector | ok, cut, fallback, writing, pending | `handoff` / `handoff · cut 122 w` (the cut in ink) / dashed / blue dashed / dotted line; the words in the chip's title |

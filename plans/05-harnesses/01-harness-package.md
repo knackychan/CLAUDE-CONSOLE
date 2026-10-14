@@ -22,7 +22,7 @@ docstring: what an adapter is (README 3.3), the rung names, who calls what
 NAMES = ("claude", "codex", "opencode", "cmd")
 REGISTRY: dict, filled by _load() from the sibling modules (importlib.import_module(f".{name}", __package__))
 get(name) -> module                         KeyError on an unknown name
-split_rung(rung) -> (harness, model)        "codex:gpt-5.6-codex" -> ("codex", "gpt-5.6-codex"); "sonnet" -> ("claude", "sonnet")
+split_rung(rung) -> (harness, model)        "codex:gpt-6.1-sol" -> ("codex", "gpt-6.1-sol"); "sonnet" -> ("claude", "sonnet")
 rung(harness, model) -> str                 the inverse; a Claude rung has no prefix
 section(cfg, name) -> dict                  cfg["harnesses"].get(name) or {"on": name == "claude", "exe": ""}
 tiers_of(cfg, name) -> tuple                get(name).TIERS
@@ -92,13 +92,13 @@ attachments) that only Claude has; `runs.start` passes them only to this adapter
 ## Tests (`tests/test_harness.py`, class `HarnessTest`)
 
 - `test_registry_has_the_four_names`: `harness.NAMES == ("claude", "codex", "opencode", "cmd")`; `get("claude").NAME == "claude"`; `get("x")` raises KeyError. (Tasks 2 and 3 add their modules; until then `REGISTRY` holds `claude` only and `get("codex")` raises: the test checks `set(REGISTRY) <= set(NAMES)`.)
-- `test_rung_names`: `split_rung("codex:gpt-5.6-codex") == ("codex", "gpt-5.6-codex")`, `split_rung("sonnet") == ("claude", "sonnet")`, `rung("claude", "sonnet") == "sonnet"`, `rung("cmd", "deepseek-flash") == "cmd:deepseek-flash"`.
-- `test_tier_of_a_rung_from_config`: with a cfg where `codex.models == {"gpt-5.6-codex": "sonnet"}`: `claude_cli.tier_of("codex:gpt-5.6-codex", cfg) == "sonnet"`, `tier_of("codex:nope", cfg) == ""`, `tier_of("claude-opus-4-8") == "opus"` (no cfg).
-- `test_known_model_needs_on_and_listed`: `known_model(cfg_off, "codex:gpt-5.6-codex")` is False; with `on: True` it is True; a `cmd` model mapped to `sonnet` is not known (TIERS is `("haiku",)` for cmd: this needs Task 3's module, so the test uses a stub module registered in `REGISTRY` with `TIERS = ("haiku",)`); Claude rungs as before (`"sonnet"`, a ladder rung).
+- `test_rung_names`: `split_rung("codex:gpt-6.1-sol") == ("codex", "gpt-6.1-sol")`, `split_rung("sonnet") == ("claude", "sonnet")`, `rung("claude", "sonnet") == "sonnet"`, `rung("cmd", "deepseek-v4.1-flash") == "cmd:deepseek-v4.1-flash"`.
+- `test_tier_of_a_rung_from_config`: with a cfg where `codex.models == {"gpt-6.1-sol": "sonnet"}`: `claude_cli.tier_of("codex:gpt-6.1-sol", cfg) == "sonnet"`, `tier_of("codex:nope", cfg) == ""`, `tier_of("claude-opus-4-8") == "opus"` (no cfg).
+- `test_known_model_needs_on_and_listed`: `known_model(cfg_off, "codex:gpt-6.1-sol")` is False; with `on: True` it is True; a `cmd` model mapped to `sonnet` is not known (TIERS is `("haiku",)` for cmd: this needs Task 3's module, so the test uses a stub module registered in `REGISTRY` with `TIERS = ("haiku",)`); Claude rungs as before (`"sonnet"`, a ladder rung).
 - `test_models_of_filters_by_tier`: `models_of(cfg, "cmd")` drops a `sonnet` entry and keeps a `haiku` one (same stub).
 - `test_which_prefers_the_given_exe`: a temp file path as `exe` is returned as is; a missing path falls to `shutil.which` (patched to return a fixed string); nothing found gives `None`.
 - `test_claude_adapter_wraps_claude_cli`: `run_command([fake], "sonnet", "medium", cwd, sid, prompt="hi")` returns the same list as `claude_cli.run_command([fake], "sonnet", "medium", sid)` and stdin bytes equal to `claude_cli.user_message("hi" + STOP_FOOTER)`; a `/skill` prompt gets no footer; `is_result({"type": "result"})`; `summary` on three recorded lines (init, assistant with text, result) gives `final`, `cost`, `session_id`, `exit_cap False`; `exit_cap True` for `error_max_turns`.
-- `test_model_alias_ignores_harness_rungs`: `model_alias("opencode:openrouter/anthropic/claude-sonnet-4-6") == ""`, `model_alias("codex:gpt-5.6-codex") == ""`, `model_alias("claude-sonnet-4-6") == "sonnet"` (unchanged), and a Claude id with a colon in it, if any, is not split (`split_rung` splits only on a name in `NAMES`).
+- `test_model_alias_ignores_harness_rungs`: `model_alias("opencode:openrouter/anthropic/claude-sonnet-4-6") == ""`, `model_alias("codex:gpt-6.1-sol") == ""`, `model_alias("claude-sonnet-4-6") == "sonnet"` (unchanged), and a Claude id with a colon in it, if any, is not split (`split_rung` splits only on a name in `NAMES`).
 - `test_set_harness_writes_one_key`: on a temp folder with a config.json holding `{"projects": ["x"]}`, `set_harness(folder, "codex", True)` leaves `projects` and gives `harnesses.codex.on == True`; an unknown name raises ValueError; an unreadable file raises ValueError.
 - `test_defaults_and_claude_exe_fallback`: `DEFAULTS["harnesses"]["claude"]["on"] is True`, the other three `False`; `load_config` with `claude_exe` set and the harness exe empty copies it; `paths.HARNESSES == harness.NAMES`.
 

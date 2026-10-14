@@ -242,7 +242,7 @@ in `design/references/`.
 Cells Board (locked by Fred, 2026-10-13): `design/rework/locked/cells-board.html`, designed in
 `design/brainstorm/2026-10-13-interface.md`, is the window side of the harness adapters (plan 5) and of
 the orchestration brainstorm (plans 18, 23, 24, 25). The compact window keeps the pages above and gains the
-Harnesses switch in the picker popover, rungs as words (`codex · gpt-5.6-codex · medium`) wherever a model
+Harnesses switch in the picker popover, rungs as words (`codex · gpt-6.1-sol · medium`) wherever a model
 showed, tier selects (think / write / read), a context gauge per step and the handoff fold on the Task page,
 the fills per model on the list and the Usage page, the replan wait. The Board is the one new page, at 900
 px from a button: the task's chain on the left (steps as blocks, handoffs as the connectors), one picked

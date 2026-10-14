@@ -90,7 +90,7 @@ as the last line). `--version` prints `codex-cli 0.0.0-fake`.
 
 ## Tests (`CodexTest`)
 
-- `test_command_shape`: `run_command([..], "gpt-5.6-codex", "xhigh", "D:/p", "sid", prompt="hi")` gives a list that starts with `exec`, contains `--json`, `-C D:/p`, `-m gpt-5.6-codex`, `-c model_reasoning_effort="high"`, `-s workspace-write`, ends with `-`; stdin bytes end with the STOP footer; `read_only=True` gives `-s read-only`; `resume=True` gives `... resume sid -` as the last three items, every option before them; `fork="th"` gives `... fork th -`.
+- `test_command_shape`: `run_command([..], "gpt-6.1-sol", "xhigh", "D:/p", "sid", prompt="hi")` gives a list that starts with `exec`, contains `--json`, `-C D:/p`, `-m gpt-6.1-sol`, `-c model_reasoning_effort="high"`, `-s workspace-write`, ends with `-`; stdin bytes end with the STOP footer; `read_only=True` gives `-s read-only`; `resume=True` gives `... resume sid -` as the last three items, every option before them; `fork="th"` gives `... fork th -`.
 - `test_summary_from_documented_lines`: the five fake lines above give `final` = the agent text, `subtype == "success"`, `tokens == {"input": 1200, "output": 300, "cache_read": 800, "context": None}`, `session_id == "th_fake"`, `cost is None`; with `turn.failed` instead, `subtype == "error"`.
 - `test_chat_items`: the same lines give roles `[tool, claude, result]` in order; the tool text starts with `command_execution`.
 - `test_fake_runs_end_to_end`: `subprocess.run` the fake with `exec --json -` and a prompt on stdin: stdout parses line by line, the last line `is_result`, `summary` matches; `--version` prints `codex-cli`; a resume command from `run_command` runs (no exit 2).

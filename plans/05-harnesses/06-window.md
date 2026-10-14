@@ -49,7 +49,7 @@
 
 - 400 and 340 px: the popover with the Harnesses group (codex on and found with a version, opencode off, cmd on
   but not found with the config line), Turn on / Turn off round trip, a Prep card whose `#p-model` lists
-  `codex · gpt-5.6-codex`, a run on it with the session head chip `codex · gpt-5.6-codex · medium` and
+  `codex · gpt-6.1-sol`, a run on it with the session head chip `codex · gpt-6.1-sol · medium` and
   `context unknown`, the levers bar with Verify / Hand off / Escalate / Open in terminal off and their reason,
   a task card whose scout step shows `codex · ...`. No `Uncaught` in the console log. Screenshots read.
 - `node --check web/app.js` OK; `py -m unittest discover -s tests` 376 OK.
