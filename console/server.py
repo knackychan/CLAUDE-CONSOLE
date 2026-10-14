@@ -34,14 +34,15 @@ FOLD_KEY = re.compile(r"[a-z][a-z0-9.]{0,39}")
 FOLDS_MAX = 64
 BUSY = {"running", "quiet", "stall"}
 
+AUTO_HANDOFF_STATES = ("replied", "idle", "verified", "verify_failed")  # plan 23: a turn that ended
+PROBE_S = 20
+READ_ONLY_TOOLS = "Read,Grep,Glob"  # a kind whose tools are exactly these is read only
+
 
 def folds_ok(folds) -> bool:
     """window.json `folds`: {fold key: open} with at most FOLDS_MAX keys of the FOLD_KEY shape."""
     return (isinstance(folds, dict) and len(folds) <= FOLDS_MAX
             and all(isinstance(k, str) and FOLD_KEY.fullmatch(k) and isinstance(v, bool) for k, v in folds.items()))
-AUTO_HANDOFF_STATES = ("replied", "idle", "verified", "verify_failed")  # plan 23: a turn that ended
-PROBE_S = 20
-READ_ONLY_TOOLS = "Read,Grep,Glob"  # a kind whose tools are exactly these is read only
 
 
 class Hub:
@@ -1487,9 +1488,9 @@ class Handler(BaseHTTPRequestHandler):
                 "tiers": self.hub.tier_view(),
                 "kinds_tier": {k: tasks.kind_tier(k) for k in tasks.PREP_KINDS},
                 "handoff_auto": bool(cfg["handoff_auto"]),
-            "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
-            "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()},
-            "board_tab": window.get("board_tab", "chat"), "folds": window.get("folds") or {}}
+                "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
+                "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()},
+                "board_tab": window.get("board_tab", "chat"), "folds": window.get("folds") or {}}
 
     def do_GET(self):
         if not guard.host_ok(self.headers.get("Host"), self._port()):
@@ -1896,7 +1897,7 @@ class Handler(BaseHTTPRequestHandler):
     def _measure(self, query):
         """GET /api/measure?project=<folder>&n=10: the Board's measure table (tasks.measure)."""
         project, n = query.get("project", [""])[0], query.get("n", ["10"])[0]
-        if not project or len(project) > 1000 or not n.isdigit():
+        if not project or len(project) > 1000 or not (n.isascii() and n.isdigit() and len(n) <= 4):
             return self._error(400, "bad measure query")
         return self._json(tasks.measure(self.hub.folder, project, int(n)))
 

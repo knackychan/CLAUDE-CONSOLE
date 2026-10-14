@@ -1510,6 +1510,25 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(len(self.hub.cfg["tiers"]["think"]), len(paths.DEFAULTS["tiers"]["think"]))  # untouched tier
         self.assertEqual(self.hub.cfg["allowances"], {"opus": {"day_usd": 12}})
 
+    def test_a_one_tier_save_keeps_the_other_tiers_as_written(self):
+        """Plan 27 B6: the page posts only the tiers that changed; the service merges per tier, so a tier that names
+        a model gone from models.json stays in config.json as written and never blocks a Save of another tier."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        think = [{"rung": "opus", "effort": "auto"}, {"rung": "codex:gpt-gone", "effort": "high"}]
+        read = [{"rung": "haiku", "effort": "auto"}]
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)], "tiers": {
+            "think": think, "write": [{"rung": "sonnet", "effort": "auto"}], "read": read}}), encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {"tiers": {"write": ["sonnet", "opus"]}}})
+        self.assertEqual(status, 200, data)
+        written = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["tiers"]
+        self.assertEqual((written["think"], written["read"]), (think, read))
+        self.assertEqual([r["rung"] for r in written["write"]], ["sonnet", "opus"])
+        self.assertEqual(self.call("/api/config/models", {"changes": {"tiers": {"read": ["haiku", "sonnet"]}}})[0], 200)
+        written = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["tiers"]
+        self.assertEqual(written["think"], think)
+        status, data = self.call("/api/config/models", {"changes": {"tiers": {"think": think}}})
+        self.assertEqual((status, data["errors"]), (400, {"tiers": "think 2: unknown model: codex:gpt-gone"}))
+
     def test_models_page_reload_shows_a_hand_edit(self):
         """Plan 26 README 3.1: a hand edit of config.json shows on the page after Reload (GET /api/config)."""
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -2102,6 +2121,11 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(status, 200)
         self.assertEqual((data["tasks"], [r["kind"] for r in data["kinds"]]), (1, ["scout"]))
         self.assertEqual(self.call(f"/api/measure?project={quote(str(self.project))}&n=0")[1]["tasks"], 1)  # n >= 1
+
+    def test_measure_refuses_a_digit_that_is_not_ascii(self):
+        """Plan 27 B8: `²` passes str.isdigit but not int(); the answer is the promised 400, not a dropped connection."""
+        for n in ("%C2%B2", "%D9%A3", "12345"):
+            self.assertEqual(self.call(f"/api/measure?project=x&n={n}"), (400, {"error": "bad measure query"}), n)
 
 
 for _name in dir(RunServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parent
