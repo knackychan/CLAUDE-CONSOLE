@@ -41,7 +41,26 @@ DEFAULTS = {
     "plan_max_parts": 6,
     "plan_hold": False,  # the task waits after the design step for Confirm
     "replan_auto": False,  # a replan proposal applies without Confirm
-    "budget_warn_at": 0.8,  # share of a model's pace at which a step moves one model down
+    "budget_warn_at": 0.8,  # plan 18: share of pace that marks a model over pace and holds a verify on it
+    # plan 18: the job tiers; each step takes the emptiest model of its tier (README 3.2 of plans/18-fills)
+    "tiers": {
+        "think": [{"rung": "opus", "effort": "auto"}, {"rung": "codex:gpt-6-astra", "effort": "auto"},
+                  {"rung": "opencode:opencode-go/kimi-k3", "effort": "auto"},
+                  {"rung": "opencode:opencode-go/glm-5.3", "effort": "auto"},
+                  {"rung": "claude-opus-4-8", "effort": "auto"}, {"rung": "fable", "effort": "auto"}],
+        "write": [{"rung": "sonnet", "effort": "auto"}, {"rung": "codex:gpt-6.1-sol", "effort": "auto"},
+                  {"rung": "codex:gpt-6-sol", "effort": "auto"}, {"rung": "opus", "effort": "auto"},
+                  {"rung": "opencode:opencode-go/deepseek-v4.1-flash", "effort": "auto"},
+                  {"rung": "cmd:deepseek/deepseek-v4.1-flash", "effort": "auto"}],
+        "read": [{"rung": "haiku", "effort": "auto"}, {"rung": "codex:gpt-6-luna", "effort": "auto"},
+                 {"rung": "opencode:opencode-go/deepseek-v4.1-flash", "effort": "auto"},
+                 {"rung": "cmd:deepseek/deepseek-v4.1-flash", "effort": "auto"}],
+    },
+    "allowances": {},  # model key -> {"day_usd", "week_usd", "month_usd"}; a key without one has no allowance
+    "balance_margin": 0.1,  # the previous step's rung stays while its share is this close to the lowest
+    "cache_bonus": 0.1,  # taken off the previous rung's share while its prompt cache is warm (5 minutes)
+    "month_start_day": 1,  # the billing day the month window starts on (1 to 28)
+    "peak_hours": {},  # provider -> {"hours": "14-19", "add": 0.2}; off
     "ladder": {  # newest rung first per tier, the alias first
         "haiku": ["haiku", "claude-haiku-4-5"],
         "sonnet": ["sonnet", "claude-sonnet-4-6"],

@@ -16,7 +16,8 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, levers, redact, routing
+from . import claude_cli, fills, levers, redact, routing
+from .fills import RANK_TIER, TIER_RANK, TIERS  # plan 18: the job tiers (the contract names them here)
 
 RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify and fix are computed.
     "scout": ("haiku", "low", "Read,Grep,Glob"),
@@ -74,14 +75,24 @@ def verify_route(checked: tuple) -> tuple:
     return model, effort
 
 
+def kind_tier(kind: str) -> str:
+    """A kind's job tier: its rule's rank read as a tier (design think; code, document, explain, debug write; the
+    rest read); "" for verify and fix, which the rule computes."""
+    return RANK_TIER.get(RULES.get(kind, ("",))[0], "")
+
+
 def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(), prev: str = "",
-               budget=None, warn_at: float = 0.8, effort: str = "auto") -> dict:
-    """The route of one step: rule, pick, demand, floor, hint, cap, budget, fixed effort (README 3.5), in
-    that order, each one appending a note. A pick keeps its model against the floor and the hint (they may
-    still raise the effort); only the budget may move it. `hold` non-empty means the task waits for Fred."""
-    models, efforts = claude_cli.MODELS, claude_cli.EFFORTS
+               budget=None, warn_at: float = 0.8, effort: str = "auto", cfg=None, prev_rung: str = "",
+               prev_age=None, hard: bool = False, refuse=None, now: float = None) -> dict:
+    """The route of one step: rule, pick, demand, floor, hint, cap, balance, fixed effort (README 3.5 of plan 17,
+    step 7 rewritten by plan 18), in that order, each one appending a note. A pick keeps its model against the floor
+    and the hint (they may still raise the effort) and is never balanced. `budget` is Hub.budget() (fills per model
+    key); `cfg` gives the tiers, the balance keys and models.json; `refuse(rung)` a reason a rung cannot run now.
+    Returns {"model": the rank of the rung, "rung", "effort", "notes", "hold"}; without `cfg` the rung is the rank
+    alias (plan 17's behaviour). `hold` non-empty means the task waits for Fred."""
+    efforts = claude_cli.EFFORTS
     fixed = effort != "auto"
-    notes, hold = [], ""
+    notes, hold, rung = [], "", ""
     if kind == "verify":
         model, level = verify_route(checked)
     elif kind == "fix":
@@ -90,10 +101,15 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
     else:
         model, level = RULES[kind][:2]
     notes.append(f"rule {kind}: {model}/{level}")
-    picked = claude_cli.model_alias(pick)
+    picked = (fills.rank_of(pick, cfg) if cfg is not None else claude_cli.model_alias(pick)) if pick else ""
     if picked:
         model = picked
-        notes.append(f"pick: {picked}")
+        notes.append(f"pick: {pick if cfg is not None else picked}")
+        why = refuse(pick) if refuse and cfg is not None else ""
+        if why:
+            notes.append(f"pick refused: {why} -> balance")
+        else:
+            rung = pick if cfg is not None else ""
     if (demand or {}).get("reasoning") == "high" and kind in ("code", "debug") \
             and efforts.index(level) < efforts.index("high"):
         level = "high"
@@ -116,28 +132,43 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
             notes.append(f"hint: {hint[0]}/{hint[1]} -> one step up")
     chosen = (model, level)
     if model == "fable" and picked != "fable" and not (checked and checked[0] == "fable"):
-        model = "opus"  # code never picks fable; a fix or verify of a step Fred put on fable may keep it
+        model = "opus"  # code never routes a rank to fable; a hard-only fable rung of the think tier may (balance)
     if not fixed and model == "opus" and efforts.index(level) > efforts.index(_TOP[1]):
         level = _TOP[1]
     if (model, level) != chosen:
         notes.append(f"cap: {model}/{level}")
-    share = (budget or {}).get(model, 0)
-    if share >= warn_at and model != "haiku":
-        if kind == "verify":
-            hold = f"{model} over its pace"
-            notes.append(f"budget: {model} {round(share * 100)} % -> hold")
+    share = None
+    if cfg is not None and not rung:  # 7. balance (plan 18): the emptiest model of the tier, from the first step
+        check = kind in ("verify", "fix")
+        rungs = fills.pool(cfg, model, check=check, hard=hard and not check, refuse=refuse)
+        tier = RANK_TIER.get(model, "")
+        if rungs:
+            pickd = fills.balance(rungs, budget or {}, cfg, tier=tier, prev_rung="" if check else prev_rung,
+                                  prev_age=prev_age, now=now)
+            rung, share = pickd["rung"], pickd["share"]
+            notes.append(pickd["note"])
+            if pickd["effort"] != "auto" and not fixed:
+                level = pickd["effort"]
+                notes.append(f"rung effort: {level}")
         else:
-            was = model
-            model, level = models[models.index(model) - 1], efforts[min(efforts.index(level) + 1, len(efforts) - 1)]
-            notes.append(f"budget: {was} {round(share * 100)} % -> {model}/{level}")
+            rung = model
+            notes.append(f"balance: no usable {tier} rung -> {model}")
+        model = fills.rank_of(rung, cfg) or model
+    elif cfg is not None:
+        share = ((budget or {}).get(fills.model_key(rung, cfg)) or {}).get("share")
+    if not rung:
+        rung = model
+    if kind == "verify" and cfg is not None and share is not None and share >= warn_at:
+        hold = f"{fills.model_key(rung, cfg)} over its pace"
+        notes.append(f"over pace: {rung} {round(share * 100)} % -> hold")
     if fixed:
         level = effort
         notes.append(f"fixed effort: {effort}")
-        cap = EFFORT_CAP[model]
-        if efforts.index(level) > efforts.index(cap):
-            level = cap
-            notes.append(f"cap {model}: {cap}")
-    return {"model": model, "effort": level, "notes": notes, "hold": hold}
+    cap = EFFORT_CAP.get(model, efforts[-1])
+    if efforts.index(level) > efforts.index(cap):
+        level = cap
+        notes.append(f"cap {model}: {cap}")
+    return {"model": model, "rung": rung, "effort": level, "notes": notes, "hold": hold}
 
 
 # -- the handoff block ------------------------------------------------------------------------------------

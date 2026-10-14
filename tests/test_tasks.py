@@ -166,22 +166,6 @@ class RulesTest(unittest.TestCase):
         self.assertEqual(tasks.step_route("verify", checked=("sonnet", "medium"))["model"], "opus")
         self.assertEqual(tasks.step_route("verify", checked=("haiku", "low"))["model"], "sonnet")
 
-    def test_budget_pressure_moves_a_step_down(self):
-        route = tasks.step_route("design", budget={"opus": 0.84})
-        self.assertEqual((route["model"], route["effort"]), ("sonnet", "xhigh"))
-        self.assertTrue(any(n.startswith("budget:") for n in route["notes"]))
-        route = tasks.step_route("code", budget={"sonnet": 0.9})
-        self.assertEqual((route["model"], route["effort"]), ("haiku", "high"))
-        route = tasks.step_route("verify", checked=("sonnet", "medium"), budget={"opus": 0.9})
-        self.assertEqual((route["model"], route["effort"]), ("opus", "medium"))
-        self.assertEqual(route["hold"], "opus over its pace")
-        route = tasks.step_route("scout", budget={"haiku": 0.99})  # haiku is never moved down
-        self.assertEqual((route["model"], route["effort"], route["hold"]), ("haiku", "low", ""))
-        route = tasks.step_route("design", budget={"opus": 0.79})  # under the line
-        self.assertEqual((route["model"], route["effort"]), ("opus", "high"))
-        route = tasks.step_route("design", budget={"opus": 0.5}, warn_at=0.4)
-        self.assertEqual(route["model"], "sonnet")
-
     def test_fixed_effort_runs_every_step_at_that_level(self):
         want = {"scout": "haiku", "code": "sonnet", "design": "opus"}
         for kind, model in want.items():
@@ -927,6 +911,114 @@ class NoteStateTest(unittest.TestCase):
             self.assertTrue(text.startswith("# Step 01: handoff note, session "), text)
             self.assertIn("Next: step 2", text)
             self.assertNotIn("x" * 40, text)  # masked like a step note
+
+
+BALANCE_CFG = {  # plan 18: tiers over three harnesses (models.json shape of plan 5) and the balance keys
+    "models": {"codex": {"gpt-6-astra": "opus", "gpt-6.1-sol": "sonnet"},
+               "opencode": {"opencode-go/kimi-k3": "opus", "opencode-go/deepseek-v4.1-flash": "haiku"}},
+    "tiers": {"think": [{"rung": "opus", "effort": "auto"}, {"rung": "codex:gpt-6-astra", "effort": "high"},
+                        {"rung": "opencode:opencode-go/kimi-k3", "effort": "auto"}, {"rung": "fable", "effort": "auto"}],
+              "write": [{"rung": "sonnet", "effort": "auto"}, {"rung": "codex:gpt-6.1-sol", "effort": "auto"},
+                        {"rung": "opus", "effort": "auto"},
+                        {"rung": "opencode:opencode-go/deepseek-v4.1-flash", "effort": "auto"}],
+              "read": [{"rung": "haiku", "effort": "auto"}]},
+    "balance_margin": 0.1, "cache_bonus": 0.1, "budget_warn_at": 0.8, "peak_hours": {},
+}
+
+
+def shares(by_key):
+    """A Hub.budget() reduced to what step_route reads: the share per model key."""
+    return {key: {"share": share} for key, share in by_key.items()}
+
+
+class BalanceRouteTest(unittest.TestCase):
+    """Plan 18: step 7 of step_route is the balance over the tier's rungs."""
+
+    def route(self, kind, **kw):
+        return tasks.step_route(kind, cfg=BALANCE_CFG, warn_at=0.8, **kw)
+
+    def test_tier_names(self):
+        self.assertEqual(tasks.TIERS, ("read", "write", "think"))
+        self.assertEqual(tasks.TIER_RANK, {"read": "haiku", "write": "sonnet", "think": "opus"})
+        self.assertEqual(tasks.RANK_TIER, {"haiku": "read", "sonnet": "write", "opus": "think", "fable": "think"})
+        self.assertEqual({k: tasks.kind_tier(k) for k in ("design", "code", "explain", "scout", "test", "verify")},
+                         {"design": "think", "code": "write", "explain": "write", "scout": "read", "test": "read",
+                          "verify": ""})
+
+    def test_without_cfg_the_rung_is_the_rank(self):
+        route = tasks.step_route("code", budget=shares({"sonnet": 0.99}))
+        self.assertEqual((route["model"], route["rung"], route["hold"]), ("sonnet", "sonnet", ""))
+        self.assertEqual(route["notes"], ["rule code: sonnet/medium"])
+
+    def test_balance_spreads_a_tier(self):
+        route = self.route("code", budget=shares({"sonnet": 0.84, "gpt-6.1-sol": 0.31, "deepseek-v4.1-flash": 0.5}))
+        self.assertEqual((route["model"], route["rung"], route["effort"]), ("sonnet", "codex:gpt-6.1-sol", "medium"))
+        self.assertIn("balance: sonnet 84 % -> codex:gpt-6.1-sol 31 %", route["notes"])
+        route = self.route("code", budget=shares({"sonnet": 0.2, "gpt-6.1-sol": 0.31}))
+        self.assertEqual(route["rung"], "sonnet")
+        self.assertEqual(route["notes"][-1], "balance: sonnet 20 %")
+
+    def test_a_cheap_rung_runs_at_its_own_rank(self):
+        route = self.route("code", budget=shares({"sonnet": 0.6, "gpt-6.1-sol": 0.5, "deepseek-v4.1-flash": 0.1}))
+        self.assertEqual((route["model"], route["rung"]), ("haiku", "opencode:opencode-go/deepseek-v4.1-flash"))
+
+    def test_hard_only_rungs_need_a_hard_step(self):
+        budget = shares({"sonnet": 0.6, "gpt-6.1-sol": 0.5, "opus": 0.05, "deepseek-v4.1-flash": 0.4})
+        self.assertEqual(self.route("code", budget=budget)["rung"], "opencode:opencode-go/deepseek-v4.1-flash")
+        route = self.route("code", budget=budget, hard=True)
+        self.assertEqual((route["model"], route["rung"]), ("opus", "opus"))
+        route = self.route("design", budget=shares({"opus": 0.5, "gpt-6-astra": 0.6, "kimi-k3": 0.7, "fable": 0.1}))
+        self.assertEqual(route["rung"], "opus")  # fable is hard only in think
+        route = self.route("design", budget=shares({"opus": 0.5, "gpt-6-astra": 0.6, "kimi-k3": 0.7, "fable": 0.1}), hard=True)
+        self.assertEqual((route["model"], route["rung"]), ("fable", "fable"))
+
+    def test_rung_effort_is_used_unless_the_task_fixes_one(self):
+        budget = shares({"opus": 0.9, "gpt-6-astra": 0.2, "kimi-k3": 0.95})
+        route = self.route("design", budget=budget)
+        self.assertEqual((route["rung"], route["effort"]), ("codex:gpt-6-astra", "high"))
+        self.assertIn("rung effort: high", route["notes"])
+        route = self.route("design", budget=budget, effort="max")
+        self.assertEqual((route["rung"], route["effort"]), ("codex:gpt-6-astra", "max"))
+        self.assertNotIn("rung effort: high", route["notes"])
+
+    def test_previous_rung_kept_within_margin(self):
+        budget = shares({"sonnet": 0.4, "gpt-6.1-sol": 0.31, "deepseek-v4.1-flash": 0.9})
+        self.assertEqual(self.route("code", budget=budget)["rung"], "codex:gpt-6.1-sol")
+        self.assertEqual(self.route("code", budget=budget, prev_rung="sonnet")["rung"], "sonnet")
+        budget = shares({"sonnet": 0.48, "gpt-6.1-sol": 0.31, "deepseek-v4.1-flash": 0.9})
+        self.assertEqual(self.route("code", budget=budget, prev_rung="sonnet", prev_age=900)["rung"], "codex:gpt-6.1-sol")
+        self.assertEqual(self.route("code", budget=budget, prev_rung="sonnet", prev_age=30)["rung"], "sonnet")
+
+    def test_verify_balances_one_rank_above_and_holds_over_pace(self):
+        route = self.route("verify", checked=("sonnet", "medium"), budget=shares({"opus": 0.9, "gpt-6-astra": 0.3, "kimi-k3": 0.0}))
+        self.assertEqual((route["model"], route["rung"], route["hold"]), ("opus", "codex:gpt-6-astra", ""))
+        route = self.route("verify", checked=("sonnet", "medium"), budget=shares({"opus": 0.9, "gpt-6-astra": 0.95}))
+        self.assertEqual((route["rung"], route["hold"]), ("opus", "opus over its pace"))
+        self.assertIn("balance: every think rung over pace -> opus 90 %", route["notes"])
+        self.assertIn("over pace: opus 90 % -> hold", route["notes"])
+        route = self.route("verify", checked=("haiku", "low"), budget=shares({"sonnet": 0.5, "gpt-6.1-sol": 0.1}))
+        self.assertEqual((route["model"], route["rung"]), ("sonnet", "codex:gpt-6.1-sol"))  # never deepseek
+        route = self.route("fix", checked=("sonnet", "high"), budget=shares({"opus": 0.5, "kimi-k3": 0.0}))
+        self.assertEqual(route["rung"], "opus")  # never opencode
+
+    def test_off_rungs_are_skipped(self):
+        off = lambda rung: "codex is off" if rung.startswith("codex:") else ""
+        route = self.route("code", budget=shares({"sonnet": 0.84, "gpt-6.1-sol": 0.31}), refuse=off)
+        self.assertEqual(route["rung"], "sonnet")
+        route = self.route("scout", refuse=lambda rung: "off")
+        self.assertEqual((route["rung"], route["notes"][-1]), ("haiku", "balance: no usable read rung -> haiku"))
+
+    def test_pick_runs_as_given_and_a_refused_pick_balances(self):
+        route = self.route("code", pick="codex:gpt-6.1-sol", budget=shares({"sonnet": 0.1, "gpt-6.1-sol": 0.9}))
+        self.assertEqual((route["model"], route["rung"]), ("sonnet", "codex:gpt-6.1-sol"))
+        self.assertFalse(any(n.startswith("balance:") for n in route["notes"]))
+        off = lambda rung: "codex is off" if rung.startswith("codex:") else ""
+        route = self.route("code", pick="codex:gpt-6.1-sol", refuse=off)
+        self.assertEqual((route["model"], route["rung"]), ("sonnet", "sonnet"))
+        self.assertIn("pick refused: codex is off -> balance", route["notes"])
+        route = self.route("design", pick="opencode:opencode-go/kimi-k3")
+        self.assertEqual((route["model"], route["rung"], route["notes"][1]),
+                         ("opus", "opencode:opencode-go/kimi-k3", "pick: opencode:opencode-go/kimi-k3"))
 
 
 if __name__ == "__main__":
