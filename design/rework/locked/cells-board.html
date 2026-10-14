@@ -542,6 +542,31 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .plan1 li.add::after { content: " added"; font: 10.5px var(--mono); color: var(--you); font-weight: 400; }
 .plan1 li.old { color: var(--mut); }
 .plan1 .lbl .m { text-transform: none; letter-spacing: 0; }
+.plan1 li.drop { color: var(--mut); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--mut) 55%, transparent); }
+/* the plan (brainstorm 8b, 2026-10-14): plan.md by heading, one fold each, the picked step's section (or its sub-plan) open and
+   tagged `this step`; sub-plans as one row each (number, title, its step and state); the plan is words and folds, never cells */
+.tg { display: inline-block; font: 500 9.5px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; vertical-align: 1px; color: var(--mut); }
+.tg.n { color: var(--ink); border-color: var(--ink); }
+.tg.w { color: var(--wip); border-color: color-mix(in srgb, var(--wip) 55%, transparent); }
+.hsec .lbl.s { margin-top: 6px; }
+.hsec ol { margin: 0; padding-left: 18px; }
+.hsec ol li { font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.hsec pre.text { background: var(--win); max-height: none; font-size: 11.5px; }
+.hsec .lbl .tg { margin-left: 2px; }
+.parts { display: grid; gap: 1px; }
+.prt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 8px; align-items: baseline; font: 12.5px var(--ui); padding: 4px 0; border-top: 1px solid var(--line); }
+.prt:first-child { border-top: 0; }
+.prt .o { font: 11px var(--mono); color: var(--mut); }
+.prt .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prt.cur .tt { font-weight: 600; }
+.prt .m { white-space: nowrap; }
+.prt .m .g { color: var(--ok); } .prt .m .y { color: var(--you); } .prt .m .q { color: var(--mut); }
+.prt .sub { grid-column: 2 / -1; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain .row .nm .tg { margin-left: 4px; vertical-align: 0; }
+.askbox textarea.in { font: 13px var(--ui); }
+.askbox .plan1 { padding: 2px 0; }
+.askbox .edbox { flex-basis: 100%; display: grid; gap: 6px; }
+.askbox .edbox textarea { font: 11.5px/1.45 var(--mono); }
 .measure { display: grid; grid-template-columns: 64px 58px minmax(0, 1fr) 58px; gap: 3px 10px; align-items: center; font: 11px var(--mono); color: var(--mut); }
 .measure .cells { grid-template-columns: repeat(20, minmax(0, 1fr)); }
 .measure .cells i { aspect-ratio: auto; height: 6px; }
@@ -648,11 +673,15 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <button data-v="conn" aria-pressed="false">Handoff picked</button>
     <button data-v="task" aria-pressed="false">Task picked</button>
     <button data-v="replan" aria-pressed="false">Replan waits</button>
+    <button data-v="plan" aria-pressed="false">Plan tab</button>
+    <button data-v="gap" aria-pressed="false">Plan gap waits</button>
     <button data-v="measure" aria-pressed="false">Measure</button>
     <button data-v="bempty" aria-pressed="false">Empty</button>
     <span class="grp">Compact</span>
     <button data-v="list" aria-pressed="false">List</button>
     <button data-v="tpage" aria-pressed="false">Task page</button>
+    <button data-v="tplan" aria-pressed="false">Task · sub-plans</button>
+    <button data-v="thold" aria-pressed="false">Task · plan hold</button>
     <button data-v="settings" aria-pressed="false">Settings</button>
     <button data-v="prep" aria-pressed="false">Prep</button>
     <button data-v="session" aria-pressed="false">Codex session</button>
@@ -718,6 +747,17 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
         <li><b>Nothing picked</b> (keyboard Esc inside the Board, or a folded task): the inspector shows the measure table of the picked task's project, handoff received against context reached per kind.</li>
       </ul>
       <p>Keyboard: Up / Down along the chain (steps and handoffs), Left / Right between tasks, Enter opens the step's session page, Esc clears the pick then leaves the Board. The pick is an ink outline, as a focused control is.</p>
+    </section>
+    <section>
+      <h3>The plan (brainstorm 8b, Fred 2026-10-14)</h3>
+      <p>The design step writes the plan: the service saves the PLAN block of its final message as <code>plan.md</code> in the task folder, never compacted and never held to the handoff word limit; every later step reads it whole. It is words and folds, never cells.</p>
+      <ul>
+        <li><b>Plan row (Task page):</b> under the steps, closed line <code>Plan · from 02 design · 2,140 w · never cut</code>, or <code>· 3 sub-plans · 4,870 w</code> when the designer split it. Open: the six headings as one closed line each (Decisions counts its closed forks), the current step's <code>### Step N</code> open, a verify opens Acceptance. With sub-plans: the Sub-plans rows (number, title, its step and state; <code>hard</code>, depends on, owns on the second line) and the current part open.</li>
+        <li><b>Plan tab (Board):</b> a fifth tab on the design step and every step after it, <code>Plan 2,140 w</code>, no arrow because a plan is never cut; the same rendering, the picked step's section tagged <code>this step</code>. Editable in place on the design step while the next step has not started. The connector after the design step says <code>handoff · plan</code>.</li>
+        <li><b>Sub-plans on the chain:</b> the write steps the plan made carry <code>from plan</code> (muted on the block, a tag on the Task page row); each is routed on its own, a <code>hard</code> part takes a stronger rung for that step alone.</li>
+        <li><b>Plan gap:</b> a writer that meets a fork the plan does not settle stops with <code>Plan gap:</code> under Open questions; the task waits (orange) with the question in sight, the box of a replan: Send answer (the answer joins the plan's Decisions as <code>Fred, &lt;date&gt;: ...</code> and continues the step in its chat), Redo design, Stop. The list card carries Answer and Redo design.</li>
+        <li><b>plan_hold</b> (off by default): the task waits after the design step with <code>Plan ready · 3 sub-plans · 4,870 w</code> and one line on what the split did; Confirm plan, Edit (the index in place; Save writes through the service), Stop. Over <code>plan_max_kb</code> the same box reads <code>plan 132 KB, over 100</code> with Accept and Redo design.</li>
+      </ul>
     </section>
     <section>
       <h3>Harnesses in the compact window</h3>
@@ -797,8 +837,40 @@ const BRIEF3 = {
   goal: NOTE3.goal, findings: [NOTE3.findings[0], NOTE3.findings[1]],
   files: NOTE3.files, trouble: NOTE3.trouble, questions: NOTE3.questions, next: NOTE3.next, words: 290, raw: 412, cut: 122,
 };
+// the plan the design step wrote (brainstorm 8b): plan.md, saved by the service from the PLAN block, never cut. One ### Step N per later
+// edit step; Decisions closed; Acceptance is what verify checks.
+const PLAN_A = { from: 2, words: 2140, kb: 12.4,
+  goal: "Harness adapters: Codex exec behind the adapter module and the Steps tab reading its JSON events. Done when 9 tests pass against tests/fake_codex.py, one live codex exec in a scratch folder returns a HANDOFF block, and the Steps tab lists that run's events.",
+  decisions: ["The prompt goes to codex on stdin, never in argv: codex.cmd cuts argv at the first newline (plan 5 README 3.3).", "Options stand before the subcommand: [exe, \"exec\", *options, \"resume\", id, \"-\"].", "The final text is the last item.completed whose item.type is agent_message; turn.completed carries the usage.", "summary() returns tokens None: a turn's spend is not a context size (ID-3).", "Fixtures replay through tests/fake_codex.py; no network in tests."],
+  out: ["OpenCode and Command Code (plan 5 Tasks 3 and 4).", "The Usage mix for other harnesses (plan 18).", "Any change to console/claude_cli.py beyond the REGISTRY import."],
+  files: ["console/harness/codex.py (new): run_command, resume_command, is_result, summary, chat, stop", "console/harness/__init__.py: REGISTRY[\"codex\"]", "tests/fake_codex.py (new): replays tests/fixtures/codex-run.jsonl", "tests/test_harness.py (new): 9 tests", "PLAN.md, plans/05-harnesses/README.md (Step 6)"],
+  steps: {
+    3: { kind: "code", files: ["console/harness/codex.py", "console/harness/__init__.py", "tests/fake_codex.py", "tests/test_harness.py"],
+      actions: ["Write tests/test_harness.py first: the 9 tests below fail.", "run_command(exe, prompt, model, effort, cwd) -> list: [*exe, \"exec\", \"--json\", \"-m\", model, \"-s\", \"workspace-write\", \"-C\", cwd, \"-c\", f\"model_reasoning_effort={effort}\", \"-\"]; the prompt on stdin.", "resume_command(exe, thread_id, options) -> list: the options, then \"resume\", thread_id, \"-\" (code below).", "is_result(event) -> bool: event[\"type\"] == \"turn.completed\".", "summary(events, prices) -> dict: cost from usage x prices[\"codex\"], tokens None, text = the last agent_message.", "REGISTRY[\"codex\"] in console/harness/__init__.py; run the suite: 9 pass."],
+      code: "def resume_command(exe: list, thread_id: str, options: list) -> list:\n    \"\"\"codex exec [OPTIONS] resume <id> -: the options first, the prompt on stdin.\"\"\"\n    return [*exe, \"exec\", *options, \"resume\", thread_id, \"-\"]",
+      tests: ["test_run_command_puts_the_prompt_on_stdin", "test_resume_command_options_before_subcommand", "test_is_result_on_turn_completed", "test_summary_reads_usage_and_no_context", "test_fake_codex_replays_the_fixture (and 4 more)"],
+      done: "py -m unittest tests.test_harness -q prints OK (9 tests)" },
+    6: { kind: "document", files: ["PLAN.md", "plans/05-harnesses/README.md"], actions: ["One History line in PLAN.md: Task 2 placed, the test count.", "The README's state column: Task 2 done."], code: "", tests: ["(none: docs)"], done: "git diff --stat names the two files only" } },
+  acceptance: ["tests/test_harness.py: 9 tests pass against the fake.", "No shell string anywhere in codex.py: argument lists only.", "Nothing written outside paths.home().", "The diff touches only the files under ## Files."] };
+// a plan split into sub-plans (Fred, 2026-10-14): plan.md is the index (Goal, Decisions, Out of scope, Sub-plans, Acceptance), one
+// plan/NN-<slug>.md per part, one write step each; a writer reads the index and its own part, verify reads them all
+const PLAN_D = { from: 2, words: 4870, kb: 28.1,
+  goal: "Models and tuning page (interface 9b): Kinds, Tiers and Tuning tabs that edit config.json through POST /api/config/models; the service reloads it; nothing is rebuilt.",
+  decisions: ["Saved keys are the whitelist paths.TUNING; any other key in the body is refused with 400.", "A kind's model and effort read auto unless pinned; a pinned value is the kind's default, the Prep card may still change one step.", "Models of a CLI that is off or not found are hidden, one line counts them; they are never removed from models.json.", "The page is one section in web/index.html, three renderers in web/app.js next to usageHtml."],
+  out: ["The Board (plan 25).", "Allowances and fills (plan 18): the Allowances fold shows the config values read only.", "Any change to models.json."],
+  parts: [
+    { n: 1, title: "Kinds tab and the config route", kind: "code", step: 3, state: "done", owns: ["console/server.py (/api/config/models)", "console/paths.py (TUNING)", "web/app.js (modelsPage, kindsTab)"], depends: [], hard: false, words: 1540,
+      actions: ["paths.TUNING: the whitelisted keys with their ranges and defaults.", "POST /api/config/models: validate, write config.json whole through .tmp and os.replace, reload the hub's cfg.", "kindsTab(cfg): one krow per kind grouped Read / Write / Think / Checks, the quiet pickers, the edited edge and reset."],
+      tests: ["test_config_models_refuses_unknown_key", "test_config_models_writes_and_reloads", "test_kinds_tab_marks_an_edited_row"], done: "py -m unittest tests.test_server tests.test_window -q: OK" },
+    { n: 2, title: "Tiers tab with drag order", kind: "code", step: 4, state: "waiting", owns: ["web/app.js (tiersTab, rungRows)", "web/style.css (.rrow)"], depends: [1], hard: false, words: 1620,
+      actions: ["tiersTab(cfg): one pcard per tier, a rrow per rung with the drag handle, the effort picker, the remove cross; the hidden line for a CLI that is off.", "Drag and drop with the HTML5 events on data-tier and data-i: on drop, reorder the tier's list in the page state and mark the card edited.", "The console's own passes card: Prep, Handoff pass, Rules review, Run default as job rows."],
+      tests: ["test_tiers_tab_reorders_on_drop", "test_hidden_rungs_count_line", "test_passes_card_lists_four_jobs"], done: "node --check web/app.js; py -m unittest tests.test_window -q: OK" },
+    { n: 3, title: "Tuning tab and Save", kind: "code", step: 5, state: "planned", owns: ["web/app.js (tuningTab, saveModels)", "web/index.html"], depends: [1], hard: true, words: 1710,
+      actions: ["tuningTab(cfg): the tf rows per card with key, default and range from /api/config; a value out of range marks the row bad and blocks Save.", "saveModels(): the edited keys only, POST /api/config/models, Discard restores the loaded values.", "The levers bar: N changes · used from the next step."],
+      tests: ["test_tuning_tab_marks_a_value_out_of_range", "test_save_sends_edited_keys_only", "test_discard_restores_loaded_values"], done: "py -m unittest tests.test_window -q: OK; the page at 400 and 340 px in headless Edge" } ],
+  acceptance: ["POST /api/config/models with an unknown key answers 400 and writes nothing.", "A Save shows in config.json and in the next step's route notes without a restart.", "The three tabs render at 340 px with no horizontal scroll.", "The diff touches only the files each part owns."] };
 const T = [
-  { id: "a", title: "Harness adapters: Codex exec and the Steps tab", project: "CLAUDE-CONSOLE", effort: "auto", cost: 4.62, state: "running", age: "3m", current: "5c",
+  { id: "a", title: "Harness adapters: Codex exec and the Steps tab", project: "CLAUDE-CONSOLE", effort: "auto", cost: 4.62, state: "running", age: "3m", current: "5c", plan: PLAN_A,
     prompt: "Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events.\nWhere: console/harness/codex.py (new), console/harness/__init__.py REGISTRY, tests/fake_codex.py, tests/test_harness.py.\nKeep: argument lists, never shell strings; nothing written outside paths.home(); the prompt on stdin, never argv.\nDone when: 9 tests pass against the fake, one live codex exec in a scratch folder returns a HANDOFF block.",
     questions: [{ q: "Which exe is the real one: codex.cmd is the npm shim, the .exe sits under node_modules/@openai/codex/vendor", by: 1, closed: 3 }, { q: "Does -c model_reasoning_effort reach the model?", by: 3, closed: 0 }, { q: "Should turn.failed count as a retry or a stuck?", by: 5, closed: 6 }],
     log: [["14:02:10", "task:planned -> task:running"], ["14:02:11", "1 planned -> running (rule scout: read · claude:haiku/low)"], ["14:04:01", "1 running -> done (note 210 w)"], ["14:04:03", "briefed 1 (160 w)"], ["14:04:04", "2 planned -> running (rule design: think · claude:opus/high)"], ["14:13:30", "2 running -> done (note 480 w)"], ["14:13:34", "briefed 2 (310 w)"], ["14:13:35", "3 planned -> running (pick codex:gpt-6.1-sol · balance: sonnet 84 % -> codex 31 %)"], ["14:19:48", "3 running -> done (note 412 w)"], ["14:19:52", "briefed 3 (290 w, Findings cut 122 w)"], ["14:19:53", "4 planned -> running (rule test: read · opencode:deepseek-v4.1-flash)"], ["14:22:10", "4 running -> done (cost unknown)"], ["14:22:13", "briefed 4 (240 w)"], ["14:22:14", "5 planned -> running (verify: one tier above read -> write · claude:sonnet/medium)"], ["14:25:40", "5 running -> done (verdict FAIL)"], ["14:25:41", "fix inserted after 5 (escalate sonnet/medium -> sonnet/high), verify after it"], ["14:25:42", "5b planned -> running"], ["14:31:02", "5b running -> failed (no HANDOFF block)"], ["14:31:03", "5b failed -> planned (retry 1)"], ["14:31:04", "5b planned -> running"], ["14:38:20", "5b running -> done (note 260 w)"], ["14:38:24", "briefed 5b (230 w)"], ["14:38:25", "5c planned -> running (verify: one tier above write -> think · claude:opus/medium · every think rung over pace: least full)"]],
@@ -813,7 +885,21 @@ const T = [
       ] },
       { n: 6, kind: "document", harness: "claude", model: "haiku", effort: "low", state: "planned", cost: null, ctx: null, in: null, out: null, time: "", goal: "PLAN.md History line and plans/05-harnesses/README.md state.", notes: [], tries: [] },
     ],
-    conns: { "1": { w: 160 }, "2": { w: 310 }, "3": { w: 290, cut: 122 }, "4": { w: 240 }, "5": { w: 0, fallback: true, why: "verify FAIL: the handoff goes to the fix step as written" }, "5b": { w: 230 }, "5c": { writing: true }, "6": { pending: true } } },
+    conns: { "1": { w: 160 }, "2": { w: 310, plan: true }, "3": { w: 290, cut: 122 }, "4": { w: 240 }, "5": { w: 0, fallback: true, why: "verify FAIL: the handoff goes to the fix step as written" }, "5b": { w: 230 }, "5c": { writing: true }, "6": { pending: true } } },
+  { id: "d", title: "Models and tuning page (plan 26)", project: "CLAUDE-CONSOLE", effort: "auto", cost: 3.17, state: "waiting", why: "plan gap: does the drag order write ladder in config.json or models.json? (step 04)", age: "2m", current: 4, plan: PLAN_D,
+    prompt: "Goal: the Models and tuning page of interface 9b: Kinds, Tiers and Tuning tabs saved to config.json without a rebuild.\nWhere: web/app.js (a models page next to usageHtml), web/index.html, web/style.css, console/server.py (POST /api/config/models), console/paths.py.\nKeep: config.json is the source of truth; models.json is never written by the page.\nDone when: a Save shows in the next step's route notes without a restart; the three tabs render at 340 px.",
+    questions: [{ q: "Plan gap: does the drag order write ladder in config.json or models.json?", by: 4, closed: 0 }],
+    log: [["15:40:02", "task:planned -> task:running"], ["15:40:03", "1 planned -> running (rule scout: read · claude:haiku/low)"], ["15:41:50", "1 running -> done (note 240 w)"], ["15:41:53", "briefed 1 (190 w)"], ["15:41:54", "2 planned -> running (rule design: think · opencode:kimi-k3 · balance: opus 84 % -> kimi-k3 22 %)"], ["15:53:10", "2 running -> done (note 320 w)"], ["15:53:10", "plan.md saved: 3 sub-plans, 4,870 w, 28.1 KB (plan_max_kb 100)"], ["15:53:10", "design split into 3 sub-plans: 3 code steps (Prep had 1); test, verify, document re-placed after them"], ["15:53:14", "briefed 2 (260 w)"], ["15:53:15", "3 planned -> running (rule code: write · claude:sonnet/medium · from plan part 1)"], ["16:02:40", "3 running -> done (note 280 w)"], ["16:02:44", "briefed 3 (210 w)"], ["16:02:45", "4 planned -> running (rule code: write · codex:gpt-6.1-sol · balance: sonnet 84 % -> codex 31 % · from plan part 2)"], ["16:06:12", "4 running -> waiting (asks: Plan gap: does the drag order write ladder in config.json or models.json?)"], ["16:06:12", "task:running -> task:waiting (plan gap, step 04)"]],
+    steps: [
+      { n: 1, kind: "scout", harness: "claude", model: "haiku", effort: "low", state: "done", cost: 0.03, exact: true, ctx: 31, in: 0, pack: "pack 2.4 KB", out: 240, time: "1m 47s", goal: "Read interface 9b, web/app.js usageHtml and console/paths.py DEFAULTS; cite where config.json is written today.", notes: ["rule scout: read", "claude · haiku · low"], tries: ["g"] },
+      { n: 2, kind: "design", harness: "opencode", model: "kimi-k3", effort: "", state: "done", cost: null, ctx: null, in: 190, out: 320, time: "11m 16s", goal: "Decide the config route, the page's renderers and the tabs; write the plan.", notes: ["rule design: think", "opencode · kimi-k3 (think tier, design only)", "balance: opus 84 % -> opencode · kimi-k3 22 %", "cap 30 turns (design_max_turns)", "plan: 3 sub-plans, 4,870 w, 28.1 KB"], tries: ["g"] },
+      { n: 3, kind: "code", part: 1, harness: "claude", model: "sonnet", effort: "medium", state: "done", cost: 0.92, exact: true, ctx: 71, in: 260, out: 280, time: "9m 25s", goal: "Part 1: Kinds tab and the config route", notes: ["rule code: write", "claude · sonnet · medium", "from plan: part 1 of 3"], tries: ["g"] },
+      { n: 4, kind: "code", part: 2, harness: "codex", model: "gpt-6.1-sol", effort: "medium", state: "waiting", cost: 0.41, exact: true, ctx: null, in: 210, out: null, time: "3m 27s", goal: "Part 2: Tiers tab with drag order", notes: ["rule code: write", "balance: sonnet 84 % -> codex · gpt-6.1-sol 31 %", "from plan: part 2 of 3 (depends on 1)"], tries: ["f"] },
+      { n: 5, kind: "code", part: 3, harness: "claude", model: "", effort: "", state: "planned", goal: "Part 3: Tuning tab and Save", notes: [], tries: [] },
+      { n: 6, kind: "test", harness: "claude", model: "", effort: "", state: "planned", goal: "Run tests/test_window.py and the page at 340 px in headless Edge.", notes: [], tries: [] },
+      { n: 7, kind: "verify", harness: "claude", model: "", effort: "", state: "planned", goal: "", notes: [], tries: [] },
+      { n: 8, kind: "document", harness: "claude", model: "", effort: "", state: "planned", goal: "PLAN.md History line; the interface doc's 9b state.", notes: [], tries: [] },
+    ], conns: { "1": { w: 190 }, "2": { w: 260, plan: true }, "3": { w: 210 }, "4": { pending: true }, "5": { pending: true }, "6": { pending: true }, "7": { pending: true } } },
   { id: "b", title: "Usage fills per model (plan 18)", project: "CLAUDE-CONSOLE", effort: "auto", cost: 0.11, state: "waiting", why: "replanned: 2 steps added", age: "1m", current: 2,
     prompt: "Goal: plan 18 Task 1, the fills per model in usage-days.json and Hub.budget().\nWhere: console/usage.py, console/server.py (Hub.budget), tests/test_usage.py.",
     questions: [{ q: "Is a week Monday to Sunday or the last 7 days?", by: 1, closed: 0 }],
@@ -844,7 +930,8 @@ const triesHtml = (s) => s.tries.length > 1 || s.tries.includes("r") ? `<span cl
 function stepBlock(t, s, pick, picked) {
   const [word, tn] = WORD[s.state] || WORD.running;
   const live = s.state === "running", isPicked = picked === pick;
-  const l1 = `<div class="l1"><span class="st ${tn}">${sprite(s.state)}${word}</span><span class="nm">${esc(two(s.n))} ${esc(s.kind)}</span>${s.state === "planned" ? "" : `<span class="cost${s.cost == null ? " unk" : ""}">${s.cost == null ? "? cost" : (s.exact ? "" : "~") + money(s.cost)}</span>`}</div>`;
+  const from = s.part ? ` <span class="m" title="a write step the design step made: sub-plan ${s.part} of ${t.plan.parts.length}">· from plan</span>` : "";
+  const l1 = `<div class="l1"><span class="st ${tn}">${sprite(s.state)}${word}</span><span class="nm">${esc(two(s.n))} ${esc(s.kind)}${from}</span>${s.state === "planned" ? "" : `<span class="cost${s.cost == null ? " unk" : ""}">${s.cost == null ? "? cost" : (s.exact ? "" : "~") + money(s.cost)}</span>`}</div>`;
   if (s.state === "planned") return `<div class="sb one${isPicked ? " picked" : ""}" data-pick="${pick}" tabindex="0" role="button" title="rung at start (rule ${esc(s.kind)})">${l1}</div>`;
   const rung = `<span class="rt">${esc(rungText(s))}${s.time ? ` · ${esc(s.time)}` : ""}</span>`;
   const unkTitle = `${esc(s.harness)} reports a turn's spend, not a context size`;
@@ -864,6 +951,7 @@ function connBlock(t, key, picked) {
   const cls = c.pending ? "pending" : c.writing ? "writing" : c.fallback ? "fallback" : c.cut ? "cut" : "";
   const chip = c.pending ? "" : c.writing ? `<span class="chip">writing</span>`
     : c.fallback ? `<span class="chip" title="${esc(c.why)}">as written · not compacted</span>`
+    : c.plan ? `<span class="chip" title="the handoff of step ${key}, compacted to ${c.w} words, and plan.md (${t.plan.words.toLocaleString("en")} words, never cut), which every later step reads">handoff · <b>plan</b></span>`
     : c.cut ? `<span class="chip" title="step ${key} wrote ${c.w + c.cut} words; the next step received ${c.w} once compacted, Findings cut ${c.cut} w">handoff · <b>cut ${c.cut} w</b></span>`
     : `<span class="chip" title="the handoff step ${key} left for the next step, compacted to ${c.w} words">handoff</span>`;
   return `<div class="conn ${cls}${picked === "c" + key ? " picked" : ""}" data-pick="c${key}" tabindex="0" role="button"><span class="ln"></span>${chip}</div>`;
@@ -970,7 +1058,9 @@ function inspStep(t, s) {
   const facts = s.facts ? fold("Facts", esc(s.facts.line), `<p class="mono">git diff --stat c41e2a7..9b02f11<br>${s.facts.diff.map(esc).join("<br>")}</p><p class="mono">${esc(s.facts.test).replace(/\n/g, "<br>")}</p>`, { cls: "facts", tone: /FAIL/.test(s.facts.line) ? "r" : "", open: /FAIL/.test(s.facts.line) }) : "";
   const tries = s.tries.length > 1 ? `<div class="blk"><span class="lbl">Attempts</span><p class="note m"><span class="link">try 1</span> no HANDOFF block · try 2 passed</p></div>` : "";
   const tabs = [["chat", "Chat"], ["brief", `Received${s.in ? ` <span class="n">${s.in} w</span>` : ""}`], ["note", `Handoff${s.out ? ` <span class="n">${s.out}${sent && sent !== s.out ? " → " + sent : ""} w</span>` : ""}`], ["route", "Route"]];
+  if (t.plan && Number(s.n) >= t.plan.from) tabs.push(["plan", `Plan <span class="n">${t.plan.words.toLocaleString("en")} w</span>`]);  // no arrow: a plan is never cut
   const pane = itab === "chat" ? chatHtml(c, s)
+    : itab === "plan" ? planPane(t, s)
     : itab === "note" ? `<div class="blk"><div class="hd"><span class="lbl">For ${esc(nextOf(s))}</span><span class="m">${s.out ? `wrote ${s.out} w${sent ? ` · ${esc(nextOf(s))} received ${sent} w` : conn && conn.fallback ? " · sent as written" : ""}` : ""}</span></div>${wrote}${facts}</div>`
     : itab === "brief" ? `<div class="blk"><div class="hd"><span class="lbl">${s.in ? "From " + esc(prevOf(s)) : "Received"}</span><span class="m">${s.in ? `${s.in} w · compacted` : ""}</span></div>${read}</div>`
     : `<div class="blk"><span class="lbl">Goal</span><p class="note" style="color:var(--ink)">${esc(s.goal)}</p></div>
@@ -1018,6 +1108,58 @@ function inspReplan(t, s) {
     ${fold("Why it ran", "01's Next asked for a replan", `<p class="note">The handoff of step 01 ended with <span class="m">Next: Replan: usage.py has no week bucket yet</span>, so the service inserted this step (plan 24). Code checked the answer: known kinds, at most 6 steps, at most 2 added, verify after the last edit.</p>`)}
     ${fold("Route", "haiku · no tools · 1 turn · $0.005 · 6s", `<div class="rn">${s.notes.map((n) => `<span>${esc(n)}</span>`).join("")}</div>`)}`;
 }
+// ---- the plan (brainstorm 8b): plan.md by heading, one fold each; the picked step's ### Step N (or its sub-plan) open and tagged
+function planSection(key, label, info, body, open) {
+  return open ? `<div class="hsec"><span class="lbl">${label}<span class="m">${info}</span></span>${body}</div>` : fold(label, info, body, { cls: "hf" });
+}
+const ulist = (items, mono = false) => `<ul${mono ? ' class="mono"' : ""}>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+function stepBody(st) {  // what a ### Step N section (or a sub-plan) holds: Files, Actions, Tests, Done check; the final code where the design depends on it
+  return `<span class="lbl s">Files</span>${ulist(st.files || st.owns, true)}<span class="lbl s">Actions</span><ol>${st.actions.map((a) => `<li>${esc(a)}</li>`).join("")}</ol>
+    ${st.code ? `<pre class="text">${esc(st.code)}</pre>` : ""}<span class="lbl s">Tests</span>${ulist(st.tests, true)}<span class="lbl s">Done check</span><p class="mono">${esc(st.done)}</p>`;
+}
+function partRow(p, cur) {  // one sub-plan: number, title, its step and state; the current part in ink
+  const tn = p.state === "done" ? "g" : p.state === "waiting" ? "y" : "q", word = p.state === "done" ? "done" : p.state === "waiting" ? "waiting" : "planned";
+  const sub = [p.hard ? '<span class="tg n" title="the designer judged this part hard: a stronger rung for this step alone">hard</span>' : "", p.depends.length ? `depends on ${p.depends.join(", ")}` : "", `owns ${p.owns.map((f) => f.replace(/ \(.*$/, "")).join(", ")}`].filter(Boolean).join(" · ");
+  return `<div class="prt${p.n === cur ? " cur" : ""}"><span class="o">${p.n}</span><span class="tt">${esc(p.title)}</span><span class="m mut">${two(p.step)} ${p.kind} · <span class="${tn}">${word}</span></span><span class="sub" title="${esc(sub.replace(/<[^>]+>/g, ""))}">${sub}</span></div>`;
+}
+function planHtml(p, cur, o = {}) {
+  // cur: the picked step's number; its ### Step N (or its part) opens and is tagged; a verify opens Acceptance; the design step opens Goal and Decisions
+  const openGoal = o.design || !cur, openDec = o.design;
+  const mine = p.parts ? p.parts.find((x) => x.step === cur) : (p.steps[cur] ? cur : null);
+  let steps;
+  if (p.parts) {
+    const part = mine ? `<div class="hsec"><span class="lbl">Part ${mine.n} · ${esc(mine.title)} <span class="tg n">this step</span><span class="m">plan/${two(mine.n)}-${mine.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.md · ${mine.words.toLocaleString("en")} w</span></span>${stepBody(mine)}</div>` : "";
+    steps = planSection("parts", "Sub-plans", `${p.parts.length} · one write step each`, `<div class="parts">${p.parts.map((x) => partRow(x, mine ? mine.n : 0)).join("")}</div>`, true) + part;
+  } else {
+    const secs = Object.entries(p.steps).map(([n, st]) => planSection("s" + n, `Step ${n}: ${st.kind}${Number(n) === cur ? ' <span class="tg n">this step</span>' : ""}`, `${st.files.length} files · ${st.actions.length} actions · ${st.tests.length} tests`, stepBody(st), Number(n) === cur)).join("");
+    steps = planSection("steps", "Steps", `${Object.keys(p.steps).length} sections`, secs, true);
+  }
+  return `<div class="hb plan">
+    ${planSection("goal", "Goal", openGoal ? "" : esc(p.goal), `<p>${esc(p.goal)}</p>`, openGoal)}
+    ${planSection("dec", "Decisions", `${p.decisions.length} closed`, ulist(p.decisions), openDec)}
+    ${planSection("out", "Out of scope", `${p.out.length} lines`, ulist(p.out), false)}
+    ${p.files ? planSection("files", "Files", `${p.files.length} · ${p.files.slice(0, 2).map((f) => f.replace(/^.*\//, "").replace(/ .*$/, "")).join(", ")}${p.files.length > 2 ? " +" + (p.files.length - 2) : ""}`, ulist(p.files, true), false) : ""}
+    ${steps}
+    ${planSection("acc", "Acceptance", `${p.acceptance.length} checks`, ulist(p.acceptance), o.verify)}</div>`;
+}
+function planPane(t, s) {  // the Plan tab of a step: the plan as the step received it, its own part open
+  const p = t.plan, n = Number(s.n) || 0, design = n === p.from, verify = s.kind === "verify" || s.kind === "fix";
+  const head = design ? `written by this step · ${p.kb} KB of 100 (plan_max_kb)` : p.parts ? `index and part ${(p.parts.find((x) => x.step === n) || {}).n || "none"} sent to this step` : verify ? "the whole plan: Steps and Acceptance are what you check" : `the whole plan, your ### Step ${n} again at the end of the prompt`;
+  return `<div class="blk"><div class="hd"><span class="lbl">plan.md${p.parts ? ` + ${p.parts.length} parts` : ""}</span><span class="m">${head}</span></div>${planHtml(p, n, { design, verify })}</div>`;
+}
+function inspGap(t, s) {  // a writer stopped on a Plan gap: the question in sight, Answer joins the plan's Decisions and continues the step in its chat
+  const q = t.why.replace(/^plan gap: /, "").replace(/ \(step \d+\)$/, "");
+  const tabs = [["chat", "Chat"], ["brief", `Received <span class="n">${s.in} w</span>`], ["note", "Handoff"], ["route", "Route"], ["plan", `Plan <span class="n">${t.plan.words.toLocaleString("en")} w</span>`]];
+  const pane = itab === "plan" ? planPane(t, s) : itab === "route" ? `<div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${s.notes.map((n) => `<span>${esc(n)}</span>`).join("")}</div></div>` : `<p class="note m">The mock shows this step's Plan tab; the other tabs read as on step 03.</p>`;
+  return `<div class="ihead"><div class="ln1"><span class="st y">${sprite("waiting")}Waiting</span><h2>${two(s.n)} ${esc(s.kind)} <span class="m mut">· from plan</span></h2><span class="lr"><button class="btn sm" title="The session page, with its levers">Open chat</button></span></div>
+    <div class="meta"><span>${esc(rungText(s))}</span><span>cost <b>${money(s.cost)}</b></span><span>${esc(s.time)}</span></div></div>
+    <div class="askbox"><span class="st y">${sprite("waiting")}Plan gap <span class="lc">· step ${two(s.n)} stopped, nothing chosen</span></span>
+      <div class="q">${esc(q)}</div>
+      <textarea class="in" rows="2" aria-label="Answer" placeholder="Your answer joins the plan's Decisions as Fred, ${new Date().toISOString().slice(0, 10)}: ... and continues step ${two(s.n)} in its chat."></textarea>
+      <div class="lr"><button class="btn you" title="Appends the answer under ## Decisions of plan.md, then continues step 04 in its own chat with the answer">Send answer</button><button class="btn" title="Runs the design step again with this question; the steps still planned are rebuilt from the new plan, the done ones stay">Redo design</button><button class="btn stop">Stop</button></div></div>
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-itab="${k}" aria-selected="${itab === k}">${l}</button>`).join("")}</div>
+    <div class="ipane">${pane}</div>`;
+}
 function inspMeasure() {
   const rows = [["scout", 0, 34, 190], ["design", 170, 96, 420], ["code", 300, 88, 380], ["test", 280, 41, 160], ["verify", 250, 58, 180], ["fix", 240, 112, 250], ["document", 210, 22, 140]];
   const bar = (v, max, unit, tone = "f") => `<span class="bar"><span class="cells">${cellsHtml(Array.from({ length: 20 }, (_, k) => (k < Math.round(20 * v / max) ? tone : "")))}</span><b class="${tone === "y" ? "y" : ""}">${v}${unit}</b></span>`;
@@ -1029,16 +1171,16 @@ function inspMeasure() {
     <p class="note m">A kind that receives a small handoff and reaches a large context reads too much on its own: fix at 112K from 240 words in is the one to tune (scout first, or a turn cap).</p>`;
 }
 function boardHtml(v) {
-  const picked = { step: "s3", live: "s5c", conn: "c3", task: "ta", replan: "s2", measure: "", bempty: "" }[v];
-  const tasks = [T[1], T[0], T[2]];  // the scope's tasks, newest first; only the picked one is unfolded
-  const openId = v === "replan" ? "b" : "a";
+  const picked = { step: "s3", live: "s5c", conn: "c3", task: "ta", replan: "s2", plan: "s3", gap: "s4", measure: "", bempty: "" }[v];
+  const tasks = ["d", "b", "a", "c"].map((id) => T.find((x) => x.id === id));  // the scope's tasks, newest first; only the picked one is unfolded
+  const openId = v === "replan" ? "b" : v === "gap" ? "d" : "a";
   const chain = v === "bempty" ? `<div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div><p>No task in CLAUDE-CONSOLE. Type a task in the list; its steps show here as they run.</p></div>`
     : tasks.map((t) => chainHtml(t, picked, t.id !== openId)).join("");
   const t = T.find((x) => x.id === openId), s = picked && picked[0] === "s" ? findStep(t, picked) : null;
-  const insp = v === "bempty" ? "" : v === "measure" ? inspMeasure() : v === "replan" ? inspReplan(t, s) : s ? inspStep(t, s) : picked && picked[0] === "c" ? inspConn(t, picked.slice(1)) : inspTask(t);
+  const insp = v === "bempty" ? "" : v === "measure" ? inspMeasure() : v === "replan" ? inspReplan(t, s) : v === "gap" ? inspGap(t, s) : s ? inspStep(t, s) : picked && picked[0] === "c" ? inspConn(t, picked.slice(1)) : inspTask(t);
   const keys = v === "bempty" ? "" : `<span><span class="kbd">↑</span><span class="kbd">↓</span> step</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> chat</span><span><span class="kbd">Esc</span> back</span>`;
   return `<div class="win wide" data-view="board">
-    <div class="top"><button class="rb" title="Back (Esc)" aria-label="Back">&#8592;</button><span class="crumb m">Board / CLAUDE-CONSOLE · ${v === "bempty" ? "0" : "3"} tasks</span><span class="sp"></span>
+    <div class="top"><button class="rb" title="Back (Esc)" aria-label="Back">&#8592;</button><span class="crumb m">Board / CLAUDE-CONSOLE · ${v === "bempty" ? "0" : tasks.length} tasks</span><span class="sp"></span>
       <button class="rb" title="Pin on top">&#9650;</button><button class="rb" title="Fold">&#8211;</button><button class="rb x" title="Close">&#10005;</button></div>
     <div class="board"><div class="bchain">${chain}</div><div class="binsp">${insp}</div></div>
     <div class="bfoot">${keys}<span class="sp"></span><button class="q" title="A step's context in cells of 10K; the chip between two steps is the handoff the next one received, its words in the inspector" aria-label="Legend">?</button></div><span class="rsz"></span></div>`;
@@ -1063,7 +1205,7 @@ const NOTE5B = {  // the handoff of the fix step, as the Task page shows it
 function listHtml() {
   const over = FILLS.filter((f) => f.over);
   return `<div class="win" data-view="list">
-    ${topBar('<span class="grip">⋮⋮</span><button class="scope" aria-expanded="false"><span class="nm">CLAUDE-CONSOLE</span><span class="car">▾</span></button><button class="needs">2 need you</button><button class="wide-btn" title="Open the Board: the window widens to 900 px">⇔ Board</button>', "")}
+    ${topBar('<span class="grip">⋮⋮</span><button class="scope" aria-expanded="false"><span class="nm">CLAUDE-CONSOLE</span><span class="car">▾</span></button><button class="needs">3 need you</button><button class="wide-btn" title="Open the Board: the window widens to 900 px">⇔ Board</button>', "")}
     <div class="scroll">
       <button class="today" aria-expanded="false"><span class="big">7.41</span><span class="cells row30">${cellsHtml(Array.from({ length: 30 }, (_, k) => [k < 15 ? "h" : "", k === 23 ? "mk" : ""].filter(Boolean).join(" ")))}</span>
         <span class="sub m"><span>today, USD · $0.09 / min</span><span>limit $15</span></span></button>
@@ -1073,7 +1215,12 @@ function listHtml() {
         <div class="legend"><span>opus 48 · sonnet 27 · codex 14 · haiku 9 %</span></div>
         <div class="legend"><span>opencode · deepseek-v4.1-flash: cost unknown, 2 runs</span><span>window runs 9</span></div>
         <div class="fline"><span class="m">fills · ${over.map((f) => `<b class="y">${esc(f.nm)} ${f.day[0]}</b>`).join(" · ")} % of pace today</span><button class="btn sm">Usage ›</button></div></div>
-      <div class="sec"><span class="lbl y">Needs you · 2</span></div>
+      <div class="sec"><span class="lbl y">Needs you · 3</span></div>
+      <div class="card task y" tabindex="0" role="button">
+        <div class="l1"><span class="st y">${sprite("waiting")}Waiting</span><span class="t">Models and tuning page (plan 26)</span><span class="age m">2m</span></div>
+        <div class="l2 m"><span class="who">step 4 of 8 · code · from plan</span><span class="cost">3.17</span><span class="ctx"><span class="cells" style="--n:8">${cellsHtml(["g", "g", "g", "y", "", "", "", ""])}</span></span></div>
+        <div class="why m y">plan gap from 04: does the drag order write ladder in config.json or models.json?</div>
+        <div class="lr"><button class="btn you sm" title="Opens the Task page: your answer joins the plan's Decisions and continues step 04">Answer</button><button class="btn sm">Redo design</button></div></div>
       <div class="card task y" tabindex="0" role="button">
         <div class="l1"><span class="st y">${sprite("waiting")}Waiting</span><span class="t">Usage fills per model (plan 18)</span><span class="age m">1m</span></div>
         <div class="l2 m"><span class="who">step 2 of 6 · replan</span><span class="cost">0.11</span><span class="ctx"><span class="cells" style="--n:6">${cellsHtml(["g", "y", "", "", "", ""])}</span></span></div>
@@ -1097,29 +1244,63 @@ function listHtml() {
       <div class="effort"><button aria-checked="true">Auto</button>${["low", "medium", "high", "xhigh", "max"].map((e, k) => `<button aria-checked="false" title="${e}"><span class="cells"><i></i></span></button>`).join("")}<span class="eh">effort: auto (the rules pick per step)</span></div>
       <div class="say"><span class="tgt">in CLAUDE-CONSOLE <span class="car">▾</span></span><span class="hint"><span class="kbd">Enter</span>Prep <span class="kbd">Ctrl+Enter</span>Run raw</span></div></div><span class="rsz"></span></div>`;
 }
-function taskPageHtml() {
-  const t = T[0];
+const NOTE_D3 = {  // the handoff of part 1's step, as the Task page of task D shows it
+  goal: "Models and tuning page. This step: part 1, the Kinds tab and the config route.", findings: ["POST /api/config/models validates against paths.TUNING and writes config.json whole (console/server.py:1312); the hub reloads cfg in place.", "kindsTab draws the four cards; an edited row carries the blue edge and its reset (web/app.js:2140)."],
+  files: ["console/paths.py (TUNING)", "console/server.py (/api/config/models)", "web/app.js (modelsPage, kindsTab)", "tests/test_server.py (+2), tests/test_window.py (+1)"], trouble: ["A whole-file write of config.json while the hub reads it: write through .tmp and os.replace, as task.json does."], questions: [], next: "04 code: part 2, the Tiers tab; kindsTab's row helpers are reusable for the rung rows.",
+};
+function indexText(p) {  // plan.md as the service saved it: the index of a split plan, editable in place while the next step has not started
+  const rows = p.parts.map((x) => `| ${x.n} | ${x.title} | ${x.kind} | ${x.owns.map((f) => f.replace(/ \(.*$/, "")).join(", ")} | ${x.depends.join(", ") || "-"} | ${x.hard ? "yes" : "no"} |`).join("\n");
+  return `# Plan: Models and tuning page\n\n## Goal\n${p.goal}\n\n## Decisions\n${p.decisions.map((d) => "- " + d).join("\n")}\n\n## Out of scope\n${p.out.map((d) => "- " + d).join("\n")}\n\n## Sub-plans\n| # | Part | Kind | Owns | Depends on | Hard |\n|---|---|---|---|---|---|\n${rows}\n\n## Acceptance\n${p.acceptance.map((d) => "- " + d).join("\n")}\n`;
+}
+function taskPageHtml(v = "tpage") {
+  // tpage: task A as locked, plus the Plan row; tplan: task D waiting on a Plan gap, the Plan row open on the sub-plans; thold: task D right
+  // after its design step with plan_hold on (Plan ready: Confirm plan, Edit, Stop; the write steps the plan made are planned, "from plan")
+  const hold = v === "thold";
+  const D = T.find((x) => x.id === "d");
+  const t = v === "tpage" ? T[0] : hold ? { ...D, state: "waiting", why: "plan ready: confirm", cost: 1.10, current: 2, age: "1m",
+    steps: D.steps.map((s) => (s.n >= 3 ? { ...s, state: "planned", model: "", effort: "", cost: null, ctx: null, time: "", tries: [] } : s)) } : D;
+  const cur = findStep(t, "s" + t.current);
   const row = (s) => {
-    const tn = s.state === "failed" ? "r" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
+    const tn = s.state === "failed" ? "r" : s.state === "done" ? "g" : s.state === "running" ? "f" : s.state === "waiting" ? "y" : "";
     const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
-    const cur = s.state === "running", planned = s.state === "planned";
+    const cur = s.state === "running" || s.state === "waiting", planned = s.state === "planned";
     const showG = cur || s.state === "failed" || (s.ctx != null && s.ctx >= 150);  // the gauges stay in sight where they decide something; a click opens them on the other rows
     const gg = showG ? `<span class="gg"><span title="context reached, 1 cell = 10K">ctx ${s.ctx == null ? `<b class="mut">unknown</b>` : `<span class="cells c30">${cellsHtml(ctxCells(s.ctx, cur).filter((_, k) => k % 2 === 0))}</span><b class="${ctxTone(s.ctx)}">${s.ctx}K</b>`}</span>${s.hint ? `<span title="${esc(s.hint)}">· △ scout first</span>` : ""}</span>` : "";
-    const sub = s.verdict ? `<span class="r">FAIL ${esc(s.detail)}</span>` : esc(s.goal);
+    const sub = s.verdict ? `<span class="r">FAIL ${esc(s.detail)}</span>` : s.state === "waiting" ? `<span class="y">${esc(t.why)}</span>` : esc(s.goal);
+    const from = s.part ? `<span class="tg" title="a write step the design step made: sub-plan ${s.part} of ${t.plan.parts.length}">from plan</span>` : "";
     return `<div class="row${cur ? " cur" : ""}${showG || planned ? "" : " short"}" data-fold-row><span class="cells">${cells}</span>
-      <span class="nm m">${esc(two(s.n))} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(rungText(s))}</span>` : ""}${triesHtml(s)}</span>
+      <span class="nm m">${esc(two(s.n))} ${esc(s.kind)}${from}${s.model ? ` <span class="mdl">${esc(rungText(s))}</span>` : ""}${triesHtml(s)}</span>
       <span class="m c">${s.cost == null ? (planned ? "" : "?") : money(s.cost)}</span>${planned ? "<span></span>" : '<button class="btn sm">Open</button>'}
       ${gg}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
   };
-  return `<div class="win" data-view="tpage">
+  const [word, tn] = WORD[t.state] || WORD.running;
+  const head = `<div class="head"><span class="st ${tn}">${sprite(t.state)}${t.state === "running" ? "Task" : word} <span class="lc">· ${t.age}</span></span><h2 title="C:\\Users\\fred\\.claude\\console\\tasks\\${t.id}7f3e">${esc(t.title)}</h2>
+        <div class="where"><span class="m">CLAUDE-CONSOLE / effort: auto · $${money(t.cost)}</span><button class="btn sm" title="The chain as connected cells, with the handoffs between the steps: the window widens to 900 px (Esc returns)">⇔ Board</button></div></div>`;
+  // the askbox: a Plan gap waits like a replan (the question, Answer, Redo design, Stop); plan_hold waits with Plan ready (Confirm plan, Edit, Stop)
+  const ask = v === "tplan" ? `<div class="askbox"><span class="st y">${sprite("waiting")}Plan gap <span class="lc">· step ${two(cur.n)} stopped, nothing chosen</span></span>
+        <div class="q">${esc(t.why.replace(/^plan gap: /, "").replace(/ \(step \d+\)$/, ""))}</div>
+        <textarea class="in" rows="2" aria-label="Answer" placeholder="Your answer joins the plan's Decisions as Fred, 2026-10-14: ... and continues step ${two(cur.n)} in its chat."></textarea>
+        <div class="lr"><button class="btn you" title="Appends the answer under ## Decisions of plan.md, then continues step ${two(cur.n)} in its own chat with the answer">Send answer</button><button class="btn" title="Runs the design step again with this question; the steps still planned are rebuilt from the new plan, the done ones stay">Redo design</button><button class="btn" title="The session page of step ${two(cur.n)}">Open step ${cur.n}</button></div></div>`
+    : hold ? `<div class="askbox"><span class="st y">${sprite("waiting")}Plan ready <span class="lc">· 3 sub-plans · 4,870 w</span></span>
+        <div class="q">The design step wrote the plan and split it into 3 parts: 3 code steps follow (Prep had 1). Confirm to start 03, or edit the plan first.</div>
+        <div class="lr"><button class="btn you" title="plan_hold is on: the plan waits for you before code runs. Turn it off in config.json to run at once">Confirm plan</button><button class="btn" data-fold aria-expanded="false" title="The index in place; a part opens from the Plan row">Edit</button><div class="edbox" hidden><textarea class="in m" rows="9" aria-label="plan.md" spellcheck="false">${esc(indexText(t.plan))}</textarea><div class="lr"><button class="btn go sm" title="Writes plan.md through the service (the task folder stays the service's); the steps are rebuilt from the saved table">Save</button><span class="say">editable until 03 starts · parts from the Plan row</span></div></div></div>
+        <div class="say">plan_hold is on: a plan waits for you before code runs</div></div>` : "";
+  const planRow = t.plan ? fold("Plan", t.plan.parts ? `from ${two(t.plan.from)} design · ${t.plan.parts.length} sub-plans · ${t.plan.words.toLocaleString("en")} w` : `from ${two(t.plan.from)} design · ${t.plan.words.toLocaleString("en")} w · never cut`,
+    `<div class="blk">${planHtml(t.plan, hold ? 0 : Number(cur.n) || 0, { verify: cur && cur.kind === "verify" })}</div>`, { open: v === "tplan", title: "plan.md in the task folder, saved by the service from the design step's PLAN block; every later step reads it whole (a writer: the index and its own part)" }) : "";
+  const handoff = v === "tpage" ? fold("Handoff for 5c", `230 w · Next: ${esc(NOTE5B.next.replace(/^5c verify: /, ""))}`, `<div class="blk"><div class="hd"><span class="m">compacted from 260 w</span><span class="link m">as 5b wrote it</span></div>${headingBlock(NOTE5B)}${fold("Facts", "1 file +4 · 23 tests OK", `<p class="mono">git diff --stat 9b02f11..e7a4c02<br>console/harness/codex.py | 4 +-<br>py -m unittest tests.test_harness -q<br>OK (23 tests)</p>`, { cls: "facts" })}</div>`)
+    : hold ? fold("Handoff for 03", "260 w · Next: 03 code: part 1, the Kinds tab and the config route", `<div class="blk"><div class="hd"><span class="m">compacted from 320 w</span><span class="link m">as 02 wrote it</span></div><p class="note m">the six headings, as on task A</p></div>`)
+    : fold("Handoff for 04", `210 w · Next: ${esc(NOTE_D3.next)}`, `<div class="blk"><div class="hd"><span class="m">compacted from 280 w</span><span class="link m">as 03 wrote it</span></div>${headingBlock(NOTE_D3)}</div>`);
+  const levers = v === "tpage" ? `<div class="lr"><button class="btn stop">Stop</button><button class="btn">Pause</button></div><div class="say">Retry, Clear off: task is running</div>`
+    : `<div class="lr"><button class="btn stop">Stop</button><button class="btn">Pause</button></div><div class="say">Retry, Clear off: task is waiting</div>`;
+  return `<div class="win" data-view="${v}">
     ${topBar(back, "Task")}
     <div class="scroll stack">
-      <div class="head"><span class="st n">${sprite("running")}Task <span class="lc">· 3m</span></span><h2 title="C:\\Users\\fred\\.claude\\console\\tasks\\a7f3e">${esc(t.title)}</h2>
-        <div class="where"><span class="m">CLAUDE-CONSOLE / effort: auto · $4.62</span><button class="btn sm" title="The chain as connected cells, with the handoffs between the steps: the window widens to 900 px (Esc returns)">⇔ Board</button></div></div>
-      <div class="blk"><div class="hd"><span class="lbl">Steps · ${nSteps(t)}</span><span class="m">step 5c of 8</span></div><div class="chain">${flatSteps(t).map(row).join("")}</div></div>
-      ${fold("Handoff for 5c", `230 w · Next: ${esc(NOTE5B.next.replace(/^5c verify: /, ""))}`, `<div class="blk"><div class="hd"><span class="m">compacted from 260 w</span><span class="link m">as 5b wrote it</span></div>${headingBlock(NOTE5B)}${fold("Facts", "1 file +4 · 23 tests OK", `<p class="mono">git diff --stat 9b02f11..e7a4c02<br>console/harness/codex.py | 4 +-<br>py -m unittest tests.test_harness -q<br>OK (23 tests)</p>`, { cls: "facts" })}</div>`)}
+      ${head}${ask}
+      <div class="blk"><div class="hd"><span class="lbl">Steps · ${nSteps(t)}</span><span class="m">step ${esc(t.current)} of ${nSteps(t)}</span></div><div class="chain">${flatSteps(t).map(row).join("")}</div></div>
+      ${planRow}
+      ${handoff}
     </div>
-    <div class="levers"><div class="lr"><button class="btn stop">Stop</button><button class="btn">Pause</button></div><div class="say">Retry, Clear off: task is running</div></div><span class="rsz"></span></div>`;
+    <div class="levers">${levers}</div><span class="rsz"></span></div>`;
 }
 function settingsHtml() {
   // a setting row: glyph, name over its second line, one control (a switch reading on / off, or a fixed word)
@@ -1298,10 +1479,14 @@ const CAP = {
   conn: "<b>Board, the handoff after step 03 picked.</b> One column: what 04 received. The headings the brief pass cut are open, with the two Findings lines left in place, struck and tagged, so the eye reads what went through and skips what did not; Goal, Files touched and Troubleshooting fold to one line each with \"whole\". The head counts written, received and cut words. The code checks fold to one line, \"5 of 5 pass\", with the brief pass's cost; a failing check would show in red there and open the fold by itself. On the chain the chip says \"handoff · cut 122 w\", in ink, not orange (ID-1) and without cells (ID-5).",
   task: "<b>Board, the task head picked.</b> In sight: the step it is on, its cost and effort, one line for what runs now and what comes next, and the open questions (orange ?). Behind one line each: prompt.md (its Done when line stays visible), the closed questions, and the chain log with its last move. Stop and Pause sit on the head line.",
   replan: "<b>Board, a replan waiting.</b> Task B is the picked one now: its scout asked for a replan, the Haiku pass added two steps, and the task waits (orange, as every wait for Fred). The inspector carries the new plan as one list with the added steps tagged, and Confirm plan / Keep old plan / Stop. Why it ran and the route fold to one line each. The planned steps on the chain are one-line blocks on a dotted line. The same box appears on the compact Task page and the list card carries the same two buttons.",
+  plan: "<b>Board, step 03 picked, the Plan tab.</b> A task whose design step wrote a plan (brainstorm 8b) has a fifth tab on the design step and on every step after it, <code>Plan 2,140 w</code> with no arrow: a plan is never cut. The plan renders by heading, one closed line each (Goal, Decisions with its count of closed forks, Out of scope, Files, Steps, Acceptance), and the picked step's own <code>### Step 3</code> section is open and tagged <code>this step</code>: its Files, the ordered Actions with the final code where the design depends on it, the Tests by name and the Done check. The connector after 02 design says <code>handoff · plan</code>. On the design step itself the tab opens on Goal and Decisions and is editable in place while 03 has not started; on a verify it opens on Acceptance, which is what verify checks.",
+  gap: "<b>Board, a Plan gap waiting.</b> Task D is the picked one: its design step split the plan into three sub-plans, so three code steps follow where Prep had one (<code>from plan</code> on their blocks); 03 is done and 04, on Codex, hit a fork the plan does not settle and stopped instead of choosing. The task waits (orange) with the question in sight and the same box as a replan: Send answer appends <code>Fred, 2026-10-14: ...</code> under the plan's Decisions and continues 04 in its own chat; Redo design runs 02 again with the question; Stop. The Plan tab shows the index with the Sub-plans rows (number, title, its step and state, <code>hard</code> and what it owns on the second line) and part 2 open as this step's part: a writer reads the index and its own part only. With plan_hold on, the same box reads Plan ready after the design step (see Task · plan hold).",
   measure: "<b>Board, nothing picked.</b> The measure table of the project: per step kind over the last tasks, the median context reached as a bar with its figure, the median handoff received and written as figures only (ID-5); the row the reading names is in ink. The footer's ? holds the cell scale.",
   bempty: "<b>Board, no task in the scope.</b> The empty cells and one line; the inspector and the key hints stay blank. Esc or Back returns to the list at the compact size.",
   list: "<b>Compact list.</b> The today strip as locked, its breakdown closed; under it one line only because models are over their pace: \"3 models over pace · fills\", which opens the breakdown (spend legend, model mix, the over-pace figures and the Usage button). Needs you then starts on the first screen: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working card says which step of how many; the rung is on its doing line. Project names are hidden while the scope is one project.",
   tpage: "<b>Compact Task page.</b> The steps list is the page: a finished step is two lines (name, rung, cost, Open; its goal), the failed step gives its sub line to the FAIL verdict whole, and the context gauge (15 cells and the figure; no in / out words, ID-5) stays open only on the current, failed and past-150K rows, a click opens it on the others. The page opens scrolled to the current step. The handoff for the next step folds to one line with its words and its Next; opened, it shows the six headings and the facts the service added, folded.",
+  tplan: "<b>Compact Task page, a split plan and a Plan gap.</b> The steps list shows the three code steps the design step made, tagged <code>from plan</code> (Prep had one); 04 is the waiting row and gives its sub line to the question. Above the list the askbox reads as the Board's: the question, an answer box (the answer joins the plan's Decisions and continues 04 in its chat), Send answer, Redo design, Open step. Under the steps the Plan row, closed line <code>Plan · from 02 design · 3 sub-plans · 4,870 w</code>, is open here on the Sub-plans rows (each with its step and state) and on part 2, the current one; the index headings fold to one line each. The handoff fold keeps its place under it.",
+  thold: "<b>Compact Task page, plan_hold on.</b> The moment after the design step: the task waits (orange) with Plan ready, <code>from 02 design · 3 sub-plans · 4,870 w</code>, and one line saying what the split did (3 code steps follow where Prep had 1). Confirm plan starts 03; Edit opens the index in place (Save writes plan.md through the service, the task folder stays its own); Stop. The write steps the plan made sit in the list as planned rows tagged <code>from plan</code>; the Plan row is closed. With plan_hold off (the default) this box never shows: the split applies by itself as the designer's call and 03 starts at once.",
   settings: "<b>Settings popover.</b> Under the project groups, one raised Settings band with a card per group. Harnesses is open here because cmd is on but not found (its closed line keeps \"△ cmd not found\" in red). One row per CLI: glyph, the name over its version (or what limits it), and one switch that is both the state word and the action; cmd's switch is red and the row says what to fix. Window runs (closed) holds the auto hand off switch (ID-2) with its one-line why. Click a switch or a card's head to try it.",
   prep: "<b>Prep page.</b> What you typed is a quote with Fred's violet edge, Scouted folded under it. The prompt, the steps and the one-session route are cards with the Settings card head (name, one fact, an action). A step is two lines: its goal first, editable in place and never cut, then the kind and the rung as quiet pickers (auto dashed, a picked rung filled); the remove cross is faint until the row is hovered. Row 5, a code step, runs on opencode · deepseek-v4.1-flash (cheap models may take write steps, Fred 2026-10-14); row 2, a design step, shows a refused pick: a red tint, the note in red, the rung back to auto. One primary action, Run as task; Run is the second button; Run raw, Edit and Cancel are quiet text buttons.",
   session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-6.1-sol · medium; the brief says context unknown in words with no cells; tabs Chat and Steps only. The chat starts with the folded Prompt row, then the same bubbles and folded tool rows as the Board (a failed exit first), the source line at the end. Continue resumes the thread; the levers that are off say \"claude only\" in one line.",
@@ -1310,8 +1495,8 @@ const CAP = {
 };
 function show(v) {
   document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
-  const html = ["step", "live", "conn", "task", "replan", "measure", "bempty"].includes(v) ? boardHtml(v)
-    : v === "list" ? listHtml() : v === "tpage" ? taskPageHtml() : v === "settings" ? settingsHtml() : v === "prep" ? prepHtml() : v === "session" ? sessionHtml() : v === "models" ? modelsHtml() : usageHtml();
+  const html = ["step", "live", "conn", "task", "replan", "plan", "gap", "measure", "bempty"].includes(v) ? boardHtml(v)
+    : v === "list" ? listHtml() : ["tpage", "tplan", "thold"].includes(v) ? taskPageHtml(v) : v === "settings" ? settingsHtml() : v === "prep" ? prepHtml() : v === "session" ? sessionHtml() : v === "models" ? modelsHtml() : usageHtml();
   document.getElementById("stage").innerHTML = html;
   document.getElementById("cap").innerHTML = CAP[v] || "";
   const sc = document.querySelector(".win .scroll"), cur = document.querySelector(".chain .row.cur");
@@ -1319,12 +1504,12 @@ function show(v) {
   location.hash = v;
   curView = v;
 }
-document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => show(b.dataset.v)));
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => { itab = ["plan", "gap"].includes(b.dataset.v) ? "plan" : "chat"; show(b.dataset.v); }));
 document.addEventListener("click", (e) => {  // picking on the Board: step or brief blocks switch the inspector in this mock
   const p = e.target.closest("[data-pick]");
   if (!p) return;
   const k = p.dataset.pick;
-  if (k === "s3") show("step"); else if (k === "s5c") show("live"); else if (k === "c3") show("conn"); else if (k === "ta") show("task"); else if (k === "s2") show("replan");
+  if (k === "s3") show(curView === "plan" ? "plan" : "step"); else if (k === "s5c") show("live"); else if (k === "c3") show("conn"); else if (k === "ta") show("task"); else if (k === "s2") show("replan"); else if (k === "s4") show("gap");
 });
 document.addEventListener("click", (e) => {  // a fold opens in place: tool rows, the prompt row, drawers, the fills rows
   const t = e.target.closest("[data-fold]");
@@ -1361,7 +1546,6 @@ document.addEventListener("click", (e) => {  // the inspector's tabs
   show(curView);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") show("measure"); });
-document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => { itab = "chat"; }));
 show(CAP[location.hash.slice(1)] ? location.hash.slice(1) : "step");
 </script>
 </body>
