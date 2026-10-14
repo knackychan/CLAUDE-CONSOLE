@@ -64,7 +64,8 @@ def build_prompt(task: dict, n: int, briefs: str) -> str:
 def check(task: dict, n: int, answer, max_steps: int) -> tuple:
     """(steps, "") when the answer is a usable remaining chain, else ([], why). The steps are blank dicts numbered
     from n + 1, the verify re-placed after the last edit, as tasks.plan_steps does; known kinds with a goal only;
-    at most MAX_ADDED more than the remaining steps; the chain (verify left out) within max_steps."""
+    at most MAX_ADDED more than the remaining steps; the chain (verify left out) within tasks.room_after. An answer
+    with no edit kind keeps the verify the replaced steps held, of the last edit step before n (plan 27)."""
     rest = remaining(task, n)
     items = answer.get("steps") if isinstance(answer, dict) else None
     if not isinstance(items, list) or not items:
@@ -79,8 +80,9 @@ def check(task: dict, n: int, answer, max_steps: int) -> tuple:
         kept.append((item["kind"], redact.clip(goal, tasks.STEP_GOAL_MAX)))
     if len(kept) > len(rest) + MAX_ADDED:
         return [], f"{len(kept) - len(rest)} steps added, over {MAX_ADDED}"
-    if n + len(kept) > max_steps:
-        return [], f"{n + len(kept)} steps in all, over task_max_steps {max_steps}"
+    room = tasks.room_after(task, n, max_steps)
+    if len(kept) > room:
+        return [], f"{max_steps - room + len(kept)} steps in all, over task_max_steps {max_steps}"
     steps = [tasks._blank(n + i + 1, kind, goal) for i, (kind, goal) in enumerate(kept)]
     edits = [i for i, s in enumerate(steps) if s["kind"] in tasks.EDIT_KINDS]
     if edits:
@@ -88,6 +90,11 @@ def check(task: dict, n: int, answer, max_steps: int) -> tuple:
         steps.insert(after, tasks._blank(0, "verify", f"Check step {n + after}", checked=n + after))
         for i, s in enumerate(steps):
             s["n"] = n + i + 1
+    else:
+        before = [s["n"] for s in task["steps"] if s["n"] < n and s["kind"] in tasks.EDIT_KINDS]
+        tail = any(s["n"] > n and s["kind"] == "verify" and s["state"] != "done" for s in task["steps"])
+        if before and tail:  # the code is done, its verify was in the replaced tail: it stays, last
+            steps.append(tasks._blank(n + len(steps) + 1, "verify", f"Check step {before[-1]}", checked=before[-1]))
     return steps, ""
 
 

@@ -1776,14 +1776,14 @@ class TaskServerTest(RunServerTest):
     def test_plan_over_the_size_waits(self):
         self.hub.cfg["plan_max_kb"] = 0.3
         tid = self.plan_task()
-        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the size")
+        task = self.until(tid, lambda t: t["state"] == "waiting" and not t.get("briefing"), "the task waits on the size")
         self.assertTrue(task["why"].startswith("plan ") and " KB, over 0.3" in task["why"], task["why"])
         self.assertEqual(self.task(tid)[1]["levers"]["redo"], "")
         self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
         self.until(tid, self.at(3), "step 3 starts")
         self.assertIn("plan accepted by Fred", self.whys(tid))
         other = self.plan_task()  # a second task: Redo design plans again
-        task = self.until(other, lambda t: t["state"] == "waiting", "the second task waits")
+        task = self.until(other, lambda t: t["state"] == "waiting" and not t.get("briefing"), "the second task waits")
         why = task["why"]
         self.assertEqual(self.call("/api/task/redo", {"task": other})[0], 200)
         task = self.hub.tasks[other]
@@ -1887,7 +1887,7 @@ class TaskServerTest(RunServerTest):
         self.assertNotEqual(self.hub.tasks[tid]["why"], "replanned: 1 steps added")
 
     def test_replan_refused_when_no_room(self):
-        self.hub.cfg["task_max_steps"] = 5  # the chain is 5 long (scout, design, code, test, verify)
+        self.hub.cfg["task_max_steps"] = 4  # scout, design, code, test (the verify is not counted): no room for a 5th
         tid = self.replan_task()
         self.until(tid, self.at(2), "step 2 starts")
         self.assertTrue(any(w.startswith("replan refused: no room") for w in self.whys(tid)))
@@ -1902,6 +1902,105 @@ class TaskServerTest(RunServerTest):
         self.assertTrue((folder / "plan.md").is_file())
         self.assertTrue(any((folder / "plan").glob("*.md")))
         self.assertTrue((folder / "task.json").is_file())
+
+    # -- plan 27 Task 2: plan and replan edges --------------------------------------------------------------
+
+    def test_design_step_replan_line_is_refused(self):
+        tid = self.plan_task(goals={2: "plan it REPLAN-ASK"})
+        task = self.until(tid, self.at(3), "step 3 starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "verify", "test"])
+        self.assertIn("replan refused: design step (a search step is needed first)", self.whys(tid))
+        self.assertIn("Your part of the plan:\n### Step 3: code", self.full_prompt(task["steps"][2]["session"]))
+        self.assertIn("the service refuses a `Replan:` line from this step", self.full_prompt(task["steps"][1]["session"]))
+
+    def test_plan_gap_answer_needs_a_plan(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look"}, {"kind": "code", "goal": "write PLAN-GAP"}])
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the question")
+        self.assertEqual(task["why"], "asks: Plan gap: which file holds the ladder?")
+        self.assertNotIn("plan", task)
+        self.assertEqual(self.task(tid)[1]["levers"]["answer"], "no plan gap waits")
+        self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": "config.json"}),
+                         (409, {"error": "no plan gap waits"}))
+        self.assertFalse((self.folder / "tasks" / tid / "plan.md").exists())
+
+    def test_redo_to_a_single_plan_drops_the_parts(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT", kinds=("scout", "design", "code"))
+        self.until(tid, self.at(3), "part 1 runs")
+        self.hub.tasks[tid]["goal"] += " PLAN-GAP"  # part 2 stops on a gap; part 1 has its prompt already
+        task = self.until(tid, lambda t: t["state"] == "waiting", "part 2 waits on a gap")
+        self.assertEqual([(s["kind"], s["state"], s.get("part")) for s in task["steps"][2:4]],
+                         [("code", "done", 1), ("code", "running", 2)])
+        task["goal"] = task["goal"].replace(" PLAN-GAP", "").replace("PLAN-SPLIT", "PLAN-OK")
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(4), "step 4 runs on the single plan")
+        self.assertEqual(task["plan"]["parts"], [])
+        self.assertNotIn("part", task["steps"][3])
+        self.assertNotIn("hard", task["steps"][3])
+        self.assertEqual(task["steps"][3]["goal"], "Report module")
+        self.assertEqual(task["steps"][2]["part"], 1)  # a done step keeps what it ran with
+        self.assertFalse((self.folder / "tasks" / tid / "plan").exists())
+        self.assertIn("Your part of the plan:\n### Step 4: code", self.full_prompt(task["steps"][3]["session"]))
+
+    def test_redo_room_counts_the_done_steps(self):
+        self.hub.cfg["task_max_steps"] = 4
+        tid = self.plan_task(kinds=("scout", "design", "code", "code"), goals={4: "second PLAN-GAP"})
+        task = self.until(tid, lambda t: t["state"] == "waiting", "step 4 waits on a gap")
+        task["goal"] = task["goal"].replace("PLAN-OK", "PLAN-SPLIT")
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the split does not fit")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "code", "verify"])
+        self.assertEqual(task["why"], "plan: 2 steps after the design step, over task_max_steps (after one retry)")
+
+    def test_replan_pass_needs_the_project_allowed(self):
+        tid = self.replan_task()
+        self.hub.cfg["projects"] = []  # Fred took the project off the list while the scout ran
+        task = self.until(tid, lambda t: t["state"] != "running", "the task leaves running")
+        self.assertEqual((task["state"], task["why"]),
+                         ("stuck", "runs are off in this project: pick it on the home view and allow runs"))
+        self.assertEqual((task["steps"][1]["kind"], task["steps"][1]["state"]), ("replan", "planned"))
+        self.assertIn("brief fallback: runs are off in this project: pick it on the home view and allow runs",
+                      self.whys(tid))
+
+    def test_replan_pass_restarted_after_a_restart_needs_the_project_allowed(self):
+        self.hub.cfg["task_max_steps"] = 8
+        tid = self.replan_task()
+        self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the replan")
+        with self.hub.tlock:  # the state a service restart finds: the pass was running, no thread holds the task
+            task = self.hub.tasks[tid]
+            task.update(state="running", owner="service", why="")
+            task["steps"][1].update(state="running", session="")
+            self.hub.briefing.discard(tid)
+            self.hub.cfg["projects"] = []  # and Fred took the project off the list meanwhile
+            with mock.patch.object(self.hub, "start_replan") as start:
+                self.assertEqual(self.hub._advance_one(task), "stuck")
+            start.assert_not_called()
+        self.assertEqual((task["state"], task["why"]),
+                         ("stuck", "runs are off in this project: pick it on the home view and allow runs"))
+
+    def test_redo_waits_while_the_brief_writes(self):
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task()
+        self.until(tid, lambda t: t["state"] == "waiting" and not t.get("briefing"), "the task holds, briefed")
+        self.hub.briefing.add(tid)  # the design step's brief thread is still writing
+        self.assertEqual(self.task(tid)[1]["levers"]["redo"], "brief still writing")
+        self.assertEqual(self.call("/api/task/redo", {"task": tid}), (409, {"error": "brief still writing"}))
+        self.hub.briefing.discard(tid)
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+
+    def test_plan_edit_refused_on_a_stopped_task(self):
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task()
+        self.until(tid, lambda t: t["state"] == "waiting", "the task holds")
+        text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        self.assertEqual(self.call("/api/task/stop", {"task": tid})[0], 200)
+        self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": text}),
+                         (409, {"error": "the plan can be edited while the task waits on it or is paused"}))
+
+    def test_replan_step_tier_follows_brief_model(self):
+        self.hub.cfg.update(brief_model="sonnet", task_max_steps=8)
+        tid = self.replan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the replan")
+        self.assertEqual((task["steps"][1]["model"], task["steps"][1]["tier"]), ("sonnet", "sonnet"))
 
     # -- plan 25: the Board ---------------------------------------------------------------------------------
     def test_task_carries_questions_chain_and_ctx(self):

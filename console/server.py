@@ -750,6 +750,17 @@ class Hub:
             hard=(task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard")),
             refuse=lambda rung: self.rung_ok(rung, s["kind"]), pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
 
+    def _base(self, task: dict) -> str:
+        """Why nothing may run in the task's folder now ("" = it may): the project left the list, no claude.exe, or
+        the folder is gone. task_levers, _go_on (the replan pass) and start_brief (the brief pass) ask it."""
+        if not self.allowed(task["project_dir"]):
+            return "runs are off in this project: pick it on the home view and allow runs"
+        if not self.runs.exe:
+            return "claude.exe not found; set \"claude_exe\" in config.json"
+        if not os.path.isdir(task["project_dir"]):
+            return "the task's folder is gone"
+        return ""
+
     def task_levers(self, task_id) -> dict:
         """What each task lever would do and why one is off ("" = allowed); None for an unknown id. The one
         gate: advance and the POST handlers both ask it."""
@@ -758,14 +769,7 @@ class Hub:
             if task is None:
                 return None
             state, owner, cs, nxt = task["state"], task["owner"], tasks.current_step(task), self._next_step(task)
-            if not self.allowed(task["project_dir"]):
-                base = "runs are off in this project: pick it on the home view and allow runs"
-            elif not self.runs.exe:
-                base = "claude.exe not found; set \"claude_exe\" in config.json"
-            elif not os.path.isdir(task["project_dir"]):
-                base = "the task's folder is gone"
-            else:
-                base = ""
+            base = self._base(task)
             live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
             if base:
                 start = base
@@ -790,11 +794,13 @@ class Hub:
                              "" if state in ("stuck", "stopped") else f"task is {state}")
             why = task["why"]
             gap = state == "waiting" and why.startswith("asks: Plan gap:")
-            answer = base or ("" if gap else "no plan gap waits")
+            answer = base or ("" if gap and task.get("plan") else "no plan gap waits")  # plan 27: a plan-less task asks plainly
             has_design = any(x["kind"] == "design" for x in task["steps"])
             redo = base or ("" if has_design and (gap or (state == "waiting" and why.startswith("plan "))
                                                  or (state == "stuck" and cs and cs["kind"] == "design"))
                             else "nothing to redo")
+            if not redo and task["id"] in self.briefing:  # plan 27: an old brief must not land after the redo
+                redo = "brief still writing"
             keep = base or ("" if state == "waiting" and why.startswith("replanned:") else "no plan change waits")
             confirm = base or ("" if (state == "waiting" and (why in ("confirm Fable", "plan ready: confirm")
                                                               or why.startswith(("replanned:", "plan "))))
@@ -957,6 +963,12 @@ class Hub:
             return ""
         if cs and cs["state"] == "running" and cs["kind"] == replan.KIND and not cs["session"]:
             if task["id"] not in self.briefing:  # the service restarted while the pass ran: run it again
+                base = self._base(task)
+                if base:  # plan 27: as in _go_on, the pass runs claude in the folder and needs the project
+                    lines = []
+                    tasks._task_to(task, "stuck", base, time.time(), cs, lines)
+                    self._commit(task, lines)
+                    return "stuck"
                 self.start_replan(task, cs["n"])
             return ""
         if cs and cs["state"] == "running":
@@ -1026,11 +1038,12 @@ class Hub:
         if cs["kind"] == "design" and ok and not block_error:  # plan 24: the PLAN block, parsed and checked by plan.py
             found = plan.parse(text)
             later = [x for x in task["steps"] if x["n"] > cs["n"] and x["state"] != "done"]  # a redo keeps done steps
-            room = max(self.cfg["task_max_steps"] - cs["n"], 1)
+            room = max(tasks.room_after(task, cs["n"], self.cfg["task_max_steps"]), 1)  # plan 27: done steps kept
             why = ("no PLAN block" if found is None else
                    plan.check(found, later, self.cfg["plan_max_parts"], room))
             block_error = why if why == "no PLAN block" else f"plan: {why}" if why else ""
-        gap = plan.gap(block) if block and ok and not block_error and cs["kind"] != "design" else ""
+        gap = (plan.gap(block) if block and ok and not block_error and cs["kind"] != "design" and task.get("plan")
+               else "")  # plan 27: `Plan gap:` means something only in a task with a plan
         if gap:  # a Plan gap under Open questions without a STOP line is a question all the same
             cs["asked"] = meta.get("started")
             action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
@@ -1045,7 +1058,8 @@ class Hub:
                                             cap=tasks.cap_reason(subtype, meta.get("limits")))
         self.sync_costs(task)
         if found is not None and action in ("next", "fix", "done"):
-            task.pop("redo", None)
+            if task.pop("redo", None) is not None:  # plan 27: the old plan's parts go before the new plan is saved
+                plan.drop_parts(self.folder, task, cs["n"])
             task["plan"] = plan.save(self.folder, task, found, cs["n"])
             meta = task["plan"]
             what = (f"{len(meta['parts'])} sub-plans, " if meta["parts"] else "") + f"{meta['words']:,} w, {meta['kb']} KB"
@@ -1070,8 +1084,12 @@ class Hub:
         if ended:
             task["briefing"] = cs["n"]  # saved with the transition, so a restart finds the unfinished brief
         ask = replan.ask_line(block) if block and ended and cs["kind"] != "replan" else ""
-        if ask and action == "next":
-            if len(task["steps"]) < self.cfg["task_max_steps"]:
+        if ask and cs["kind"] == "design":  # plan 27: an insert would renumber the steps the plan's sections name
+            lines.append(tasks._line(now, cs, "done", "done", f"replan refused: design step ({ask})"))
+        elif ask and action == "next":
+            later = sum(1 for x in task["steps"] if x["n"] > cs["n"] and x["state"] != "done"
+                        and x["kind"] not in ("verify", "fix"))
+            if later + 1 <= tasks.room_after(task, cs["n"], self.cfg["task_max_steps"]):  # the verify not counted
                 lines += replan.insert(task, cs["n"], now, ask)
             else:
                 lines.append(tasks._line(now, cs, "done", "done", f"replan refused: no room ({ask})"))
@@ -1110,10 +1128,11 @@ class Hub:
         prev = tasks.read_brief(self.folder, task, n - 1)
         touched = [p for k in range(1, n + 1) for p in facts.files_in(tasks.read_facts(self.folder, task, k))]
         task["briefing"] = n
-        if not self.cfg["brief_on"]:
+        base = self._base(task)  # plan 27: no pass in a folder taken off the list; the code fallback stands in
+        if not self.cfg["brief_on"] or base:
             text = compact.fallback(prev, raw)
             self._brief_done(task["id"], n, {"text": text, "cost": 0, "words": len(text.split()),
-                                             "fallback": "brief is off"}, raw)
+                                             "fallback": base or "brief is off"}, raw)
             return
         self.briefing.add(task["id"])
         threading.Thread(target=self._brief_job, args=(copy.deepcopy(task), copy.deepcopy(s), copy.deepcopy(nxt),
@@ -1182,6 +1201,12 @@ class Hub:
         if nxt["kind"] == replan.KIND:
             if task["state"] == "waiting" or task["id"] in self.briefing:
                 return ""
+            base = self._base(task)
+            if base:  # plan 27: the pass runs claude in the folder, so it needs the project as a step does
+                lines = []
+                tasks._task_to(task, "stuck", base, now, nxt, lines)
+                self._commit(task, lines)
+                return "stuck"
             self.start_replan(task, nxt["n"])
             return "start"
         if self.task_levers(task["id"])["start"]:
@@ -1195,7 +1220,7 @@ class Hub:
         s, now = tasks.step(task, n), time.time()
         lines = tasks.start_step(task, n, "", {"model": self.cfg["brief_model"], "effort": "low",
                                               "notes": ["replan: the pass, no tools"]}, "", now)
-        s["tier"] = "haiku"
+        s["tier"] = fills.rank_of(self.cfg["brief_model"], self.cfg)  # plan 27: the rank brief_model runs on
         self._commit(task, lines)
         briefs = "\n\n".join(b for b in (tasks.read_brief(self.folder, task, k) for k in range(1, n)) if b)
         self.briefing.add(task["id"])  # the same flag: nothing else starts while a thread of the task runs
@@ -1269,7 +1294,8 @@ class Hub:
                 return 404, {"error": "unknown task or no plan"}
             cs = tasks.current_step(task)
             waits = task["state"] == "waiting" and (task["why"].startswith(("plan ", "asks: Plan gap:")))
-            paused = task["owner"] == "fred" and not (cs and cs["state"] == "running")
+            paused = (task["owner"] == "fred" and task["state"] in ("running", "waiting")  # plan 27: paused only
+                      and not (cs and cs["state"] == "running"))
             if not (waits or paused):
                 return 409, {"error": "the plan can be edited while the task waits on it or is paused"}
             if part and not any(p["n"] == part for p in task["plan"]["parts"]):
@@ -1280,7 +1306,8 @@ class Hub:
                                 "text": text if p["n"] == part else plan.part_body(plan.read_part(self.folder, task, p["n"]))}
                                for p in task["plan"]["parts"]]}
             later = [x for x in task["steps"] if x["n"] > task["plan"]["from"] and x["state"] != "done"]
-            why = plan.check(found, later, self.cfg["plan_max_parts"], max(self.cfg["task_max_steps"] - task["plan"]["from"], 1))
+            room = max(tasks.room_after(task, task["plan"]["from"], self.cfg["task_max_steps"]), 1)
+            why = plan.check(found, later, self.cfg["plan_max_parts"], room)
             if why:
                 return 409, {"error": "plan: " + why}
             rel = plan.write(self.folder, task, text, part)

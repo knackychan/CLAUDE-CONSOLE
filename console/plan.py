@@ -3,6 +3,7 @@ message, parsed and checked here, saved by the service as tasks/<id>/plan.md and
 later step. Pure functions on text and dicts; the file functions take the data home, as tasks.py's do. The plan is never
 compacted and never cut: the only bound is plan_max_kb, and over it the task waits for Fred."""
 import re
+import shutil
 from datetime import date
 from pathlib import Path
 from string import Template
@@ -258,6 +259,18 @@ def save(home, task: dict, plan: dict, n: int) -> dict:
     return {"from": n, "words": words(plan), "kb": kb(plan), "parts": meta}
 
 
+def drop_parts(home, task: dict, n: int) -> None:
+    """Before a redo's plan is saved (plan 27): the earlier plan's plan/ folder goes, and the planned steps after
+    design step `n` lose `part`, `hard` and their `Part k: ` goal head, so a single plan reaches them through its
+    `### Step N` sections (a split rebuilds them anyway). Done steps keep what they ran with."""
+    shutil.rmtree(tasks.folder(home, task["id"]) / PART_DIR, ignore_errors=True)
+    for s in task["steps"]:
+        if s["n"] > n and s["state"] != "done" and "part" in s:
+            del s["part"]
+            s.pop("hard", None)
+            s["goal"] = re.sub(r"^Part \d+: ", "", s["goal"], count=1)
+
+
 def read(home, task: dict) -> str:
     try:
         return (tasks.folder(home, task["id"]) / FILE).read_text(encoding="utf-8")
@@ -286,27 +299,29 @@ def part_body(text: str) -> str:
 
 def write(home, task: dict, text: str, k: int = 0) -> str:
     """Fred's edit of the index (k = 0) or of part k, through the service; a part is written with its head line
-    again. Returns the relative file name."""
+    again, masked like save. Returns the relative file name."""
     rel = FILE if not k else next(p["file"] for p in task["plan"]["parts"] if p["n"] == k)
     path = tasks.folder(home, task["id"]) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     if k:
         title = next(p["title"] for p in task["plan"]["parts"] if p["n"] == k)
         text = f"# Part {k}: {title}\n\n" + part_body(text)
-    path.write_text(str(text or ""), encoding="utf-8")
+    path.write_text(redact.mask(str(text or "")), encoding="utf-8")
     return rel
 
 
 def with_answer(index: str, answer: str, day: str = "") -> str:
-    """The index with `- Fred, <date>: <answer>` as the last line of ## Decisions."""
+    """The index with `- Fred, <date>: <answer>` as the last line of ## Decisions; the answer on one line, its
+    whitespace collapsed (a multi-line answer adds no heading)."""
     day = day or date.today().isoformat()
+    answer = " ".join(str(answer or "").split())
     lines = str(index or "").splitlines()
     out, on, placed = [], False, False
     for line in lines:
         if on and line.startswith("## ") and not placed:
             while out and not out[-1].strip():
                 out.pop()
-            out += [f"- Fred, {day}: {answer.strip()}", ""]
+            out += [f"- Fred, {day}: {answer}", ""]
             placed = True
         if line.strip() == "## Decisions":
             on = True
@@ -314,13 +329,13 @@ def with_answer(index: str, answer: str, day: str = "") -> str:
     if on and not placed:
         while out and not out[-1].strip():
             out.pop()
-        out.append(f"- Fred, {day}: {answer.strip()}")
+        out.append(f"- Fred, {day}: {answer}")
     return "\n".join(out).rstrip() + "\n"
 
 
 def add_answer(home, task: dict, answer: str, day: str = "") -> str:
-    """Append Fred's answer to the Decisions of plan.md; returns the line written."""
-    text = with_answer(read(home, task), answer, day)
+    """Append Fred's answer to the Decisions of plan.md, masked by write; returns the line written."""
+    text = redact.mask(with_answer(read(home, task), answer, day))
     write(home, task, text)
     return text.rstrip().splitlines()[-1] if not section(text, "## Decisions") else section(text, "## Decisions").splitlines()[-1]
 
@@ -340,16 +355,18 @@ def design_text(task: dict, step: dict, cfg: dict, redo: str = "") -> str:
                      "its place and its work, and its handoff is above.")
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
         turns=cfg["design_max_turns"], later="\n".join(lines), edit_steps=edits, redo=redo_text,
-        max_kb=cfg["plan_max_kb"], max_parts=cfg["plan_max_parts"], room=max(cfg["task_max_steps"] - step["n"], 1),
+        max_kb=cfg["plan_max_kb"], max_parts=cfg["plan_max_parts"],
+        room=max(tasks.room_after(task, step["n"], cfg["task_max_steps"]), 1),
         write_kinds=", ".join(WRITE_KINDS))
 
 
 def design_input(home, task: dict, n: int) -> str:
-    """What the design step reads instead of a brief: the raw handoff notes of every earlier step, whole (D1)."""
+    """What the design step reads instead of a brief: the raw handoff notes of every earlier step, whole (D1); on a
+    redo (task["redo"]) also the notes of the done steps after n, which the redo keeps (plan 27)."""
     out = []
     for s in task["steps"]:
-        if s["n"] >= n:
-            break
+        if s["n"] == n or (s["n"] > n and not (task.get("redo") and s["state"] == "done")):
+            continue
         note = tasks.read_note(home, task, s["n"])
         if note:
             out.append(note)

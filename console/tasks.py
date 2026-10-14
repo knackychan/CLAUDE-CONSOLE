@@ -370,6 +370,14 @@ def plan_steps(proposed, max_steps: int) -> list:
     return steps
 
 
+def room_after(task: dict, n: int, max_steps: int) -> int:
+    """How many steps may still follow step `n` (plan 27): task_max_steps minus n minus the done steps a redo kept
+    after n. A verify or fix is never counted (the service re-places it), here and in what the callers count:
+    plan.check (a split), replan.check (a replan answer) and Hub._ended (a `Replan:` line)."""
+    kept = sum(1 for s in task["steps"] if s["n"] > n and s["state"] == "done" and s["kind"] not in ("verify", "fix"))
+    return max_steps - n - kept
+
+
 def new_task(project_dir: str, project: str, title: str, goal: str, steps: list, type_: str, demand,
              prep: str, effort: str, now: float) -> dict:
     if not steps:

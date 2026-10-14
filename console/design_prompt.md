@@ -92,4 +92,6 @@ repeats what it needs from the index (the signatures it calls, the data shapes i
 another part.
 
 A plan that needs another kind of step than a write step (a search, a test run before the code) cannot add it
-here: say so in the HANDOFF block's Next line as `Replan: <what and why>`, and the service inserts a replan.
+here, and the service refuses a `Replan:` line from this step (it would renumber the steps your sections name).
+When you cannot close the plan without such a step, ask Fred for it before the design step: stop with the
+question line the end of this prompt describes, naming the kind of step, what it must find, and why.
