@@ -53,6 +53,15 @@ class NumbersTest(unittest.TestCase):
                                   "step_timeout_s": "a whole number between 60 and 7200",
                                   "budget_warn_at": "a number between 0.1 and 2"})
 
+    def test_a_huge_integer_is_refused_not_raised(self):
+        """Plan 27 (B7): float(10**400) overflows; validate keeps its never-raises promise and gives the range."""
+        clean, errors = check(task_max_steps=10 ** 400, budget_warn_at=-10 ** 400, daily_budget_usd=10 ** 400,
+                              allowances={"opus": {"day_usd": 10 ** 400}})
+        self.assertEqual(clean, {})
+        self.assertEqual(errors, {"task_max_steps": "between 1 and 12", "budget_warn_at": "between 0.1 and 2",
+                                  "daily_budget_usd": "between 0 and 1000",
+                                  "allowances": "opus day_usd: between 0 and 100000"})
+
     def test_unknown_keys_and_empty_saves_are_refused(self):
         self.assertEqual(check(port=1)[1], {"port": "not a setting this page changes"})
         self.assertEqual(check(prices={})[1], {"prices": "not a setting this page changes"})

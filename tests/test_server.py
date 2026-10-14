@@ -1462,6 +1462,53 @@ class TaskServerTest(RunServerTest):
         self.assertIn("fix it by hand", data["error"])
         self.assertEqual((self.folder / "config.json").read_text(encoding="utf-8"), "{ broken")  # never overwritten
 
+    def test_models_page_refuses_a_huge_integer(self):
+        """Plan 27 (B7): a number too big for a float is a 400 with the range, not a dropped connection."""
+        status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 10 ** 400}})
+        self.assertEqual((status, data["errors"]), (400, {"task_max_steps": "between 1 and 12"}))
+
+    def test_models_page_reload_resets_a_deleted_key_and_drops_a_refused_value(self):
+        """Plan 27 (K2): a page key removed from config.json by hand goes back to its default on Reload; a value
+        tuning.validate refuses is not taken (the live value stays) and console.log says so."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        path = self.folder / "config.json"
+        path.write_text(json.dumps({"projects": [str(self.project)], "brief_max_words": 450, "task_max_steps": 8,
+                                    "kinds": {"code": {"rung": "haiku", "effort": "low"}}}), encoding="utf-8")
+        os.utime(path, (time.time() + 5, time.time() + 5))
+        self.call("/api/config")
+        self.assertEqual((self.hub.cfg["brief_max_words"], self.hub.cfg["task_max_steps"]), (450, 8))
+        path.write_text(json.dumps({"projects": [str(self.project)], "task_max_steps": 99, "plan_hold": "yes"}),
+                        encoding="utf-8")
+        os.utime(path, (time.time() + 10, time.time() + 10))
+        cfg = self.call("/api/config")[1]
+        self.assertEqual(self.hub.cfg["brief_max_words"], paths.DEFAULTS["brief_max_words"])  # deleted: the default
+        self.assertEqual((cfg["kind_pins"], self.hub.cfg["kinds"]), ({}, {}))
+        self.assertEqual((self.hub.cfg["task_max_steps"], self.hub.cfg["plan_hold"]), (8, False))  # refused: kept
+        log = (self.folder / "console.log").read_text(encoding="utf-8")
+        self.assertIn("config.json task_max_steps refused: between 1 and 12", log)
+        self.assertIn("config.json plan_hold refused: true or false", log)
+
+    def test_a_config_write_that_fails_is_a_500(self):
+        """Plan 27 (K1): os.replace can raise PermissionError on Windows (a reader holds the file); every config POST
+        answers 500 with the reason and the live config keeps its value."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)]}), encoding="utf-8")
+        fresh = Path(self.tmp.name) / "fresh"
+        fresh.mkdir()
+        before = (self.hub.cfg["task_max_steps"], self.hub.cfg["handoff_auto"], self.hub.cfg["harnesses"]["codex"]["on"],
+                  list(self.hub.cfg["projects"]))
+        with mock.patch("console.paths.os.replace", side_effect=PermissionError(13, "Access is denied")):
+            for route, body in (("/api/config/models", {"changes": {"task_max_steps": 7}}),
+                                ("/api/setting", {"key": "handoff_auto", "value": True}),
+                                ("/api/harness", {"name": "codex", "on": not before[2]}),
+                                ("/api/open_folder", {"project_dir": str(fresh)})):
+                self.assertEqual(self.call(route, body), (500, {"error": "cannot write config.json: Access is denied"}),
+                                 route)
+        self.assertEqual((self.hub.cfg["task_max_steps"], self.hub.cfg["handoff_auto"],
+                          self.hub.cfg["harnesses"]["codex"]["on"], list(self.hub.cfg["projects"])), before)
+        self.assertEqual(json.loads((self.folder / "config.json").read_text(encoding="utf-8")),
+                         {"projects": [str(self.project)]})
+
     def test_a_pinned_kind_routes_its_steps(self):
         status, data = self.call("/api/config/models", {"changes": {"kinds": {"code": {"rung": "claude-haiku-4-5",
                                                                                          "effort": "low"}}}})

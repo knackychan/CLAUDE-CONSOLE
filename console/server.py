@@ -112,7 +112,9 @@ class Hub:
 
     def reload_tuning(self) -> None:
         """Reread the Models page keys (tuning.KEYS) from config.json when its mtime changed, so a hand edit shows
-        after Reload (plan 26 README 3.1); every other key keeps its value from the service start."""
+        after Reload (plan 26 README 3.1); every other key keeps its value from the service start. Plan 27 (K2): a
+        page key absent from the file goes back to its default; a value tuning.validate refuses is not taken (the
+        live value stays) and console.log names it."""
         mtime = self._config_mtime()
         if mtime is None or mtime == self.config_mtime:
             return
@@ -126,11 +128,17 @@ class Hub:
             return
         with self.lock:
             for key in tuning.KEYS:
-                if key in user:
-                    default = paths.DEFAULTS.get(key)
-                    value = user[key]
-                    self.cfg[key] = {**default, **value} if isinstance(default, dict) and isinstance(value, dict) \
-                        else value
+                if key not in user:
+                    self.cfg[key] = copy.deepcopy(paths.DEFAULTS.get(key))
+            present = {key: user[key] for key in tuning.KEYS if key in user}
+            clean, errors = tuning.validate(present, self.cfg) if present else ({}, {})
+            for key in present:
+                if key in errors:
+                    self._log(f"config.json {key} refused: {errors[key]}")
+                    continue
+                default, value = paths.DEFAULTS.get(key), clean[key]
+                self.cfg[key] = {**default, **value} if isinstance(default, dict) and isinstance(value, dict) \
+                    else value
             self.version += 1
             self.changed.notify_all()
 
@@ -1588,6 +1596,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             message = str(exc)
             return self._error(400 if name == "claude" and not on else 500, message)
+        except OSError as exc:  # plan 27 (K1): the write failed (os.replace on Windows while a reader holds the file)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
 
     def _models_reload(self, body):
         self.hub.reload_models(force=True)
@@ -1642,6 +1652,8 @@ class Handler(BaseHTTPRequestHandler):
             paths.set_setting(self.hub.folder, key, value)
         except ValueError as exc:
             return self._error(400, str(exc))
+        except OSError as exc:  # plan 27 (K1)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
         with self.hub.lock:
             self.hub.cfg[key] = value
             self.hub.version += 1
@@ -1698,6 +1710,8 @@ class Handler(BaseHTTPRequestHandler):
             self.hub.allow(want)
         except ValueError as exc:
             return self._error(409, str(exc))
+        except OSError as exc:  # plan 27 (K1)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
         return self._json({"projects": project_list(self.hub.cfg)})
 
     def _config_models(self, body):
@@ -1707,6 +1721,8 @@ class Handler(BaseHTTPRequestHandler):
             errors = self.hub.save_models(body.get("changes"))
         except ValueError as exc:
             return self._error(409, str(exc))
+        except OSError as exc:  # plan 27 (K1)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
         if errors:
             text = "; ".join(f"{k}: {v}" if k else v for k, v in errors.items())
             return self._json({"error": text, "errors": errors}, 400)
