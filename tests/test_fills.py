@@ -218,5 +218,22 @@ class FailHoursTest(unittest.TestCase):
         self.assertEqual((out["gpt-6.1-sol"]["fails"][14], out["gpt-6.1-sol"]["via"]), (1, ["codex"]))
 
 
+class PlanFiveTest(unittest.TestCase):
+    """fills duplicates plan 5's names so it runs on its own; these keep the two copies equal."""
+
+    def test_names_match_plan_5(self):
+        from console import claude_cli, harness, paths
+        self.assertEqual(fills.HARNESSES, tuple(harness.NAMES))
+        cfg = dict(paths.DEFAULTS, models=paths.MODELS_DEFAULT)
+        for name, models in paths.MODELS_DEFAULT.items():
+            for model in models:
+                rung = model if name == "claude" else f"{name}:{model}"
+                self.assertEqual(fills.split_rung(rung), claude_cli.split_rung(rung), rung)
+                self.assertEqual(fills.rank_of(rung, cfg), claude_cli.tier_of(rung, cfg), rung)
+        for tier in fills.TIERS:  # every default rung of a tier is a model models.json lists
+            for rung, _ in fills.tier_rungs(paths.DEFAULTS, tier):
+                self.assertTrue(fills.rank_of(rung, cfg), rung)
+
+
 if __name__ == "__main__":
     unittest.main()

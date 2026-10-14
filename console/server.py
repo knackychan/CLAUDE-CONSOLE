@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import (attach, brief, claude_cli, compact, events, facts, guard, harness, levers, paths, plan, prep, redact, replan,
+from . import (attach, brief, claude_cli, compact, events, facts, fills, guard, harness, levers, paths, plan, prep, redact, replan,
                review, routing, runs, tasks, transcript, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
@@ -50,6 +50,7 @@ class Hub:
         self.history = usage.History(cfg["prices"])
         self.usage_days = {}  # day -> totals: every transcript merged with usage-days.json
         self.usage_ready = False
+        self.usage_other = usage.load_other(folder)  # plan 18: day -> {model key: runs of other harnesses}
         self.preps = {}  # Prep jobs on the window's strip: id -> {id, project_dir, raw, ts, state, card | error}
         self.user_home = Path.home()  # where ~/.claude/skills is looked up (tests point it elsewhere)
         self.lock = threading.Lock()
@@ -187,7 +188,31 @@ class Hub:
             if new:
                 self.version += 1
                 self.changed.notify_all()
+        for rec in new:  # plan 18: the fills count other harnesses' runs from their run_ended lines
+            if rec.get("event") == "run_ended":
+                self.count_run(rec)
         return len(new)
+
+    def count_run(self, rec: dict) -> bool:
+        """One ended run of a harness other than Claude (whose transcripts the history prices) into usage-days.json:
+        the cost it reported, else its tokens at the price row of its model key, else one unknown run (D-3)."""
+        meta = self.runs.meta(rec["session_id"]) or {}
+        harness_name = meta.get("harness") or "claude"
+        if harness_name == "claude" or not meta.get("model"):
+            return False
+        key = fills.model_key(f"{harness_name}:{meta['model']}", self.cfg)
+        cost = rec.get("cost")
+        if not isinstance(cost, (int, float)):
+            cost = fills.price(rec.get("tokens"), (self.cfg.get("prices") or {}).get(key))  # D3: None = unknown
+        ts = float(rec.get("ts") or time.time())
+        if not usage.add_other(self.folder, f"{rec['session_id']}@{ts}", usage.day_of(ts), key, rec.get("tokens"), cost):
+            return False
+        other = usage.load_other(self.folder)
+        with self.lock:
+            self.usage_other = other
+            self.version += 1
+            self.changed.notify_all()
+        return True
 
     def read_costs(self) -> int:
         """Read what the shown sessions' transcripts added (estimated cost); new messages push a snapshot."""
@@ -217,12 +242,18 @@ class Hub:
 
     def usage_report(self) -> dict:
         with self.lock:
-            days, ready, storage = self.usage_days, self.usage_ready, self.storage
-        today = usage.day_of(time.time())
+            days, ready, storage, other = self.usage_days, self.usage_ready, self.storage, self.usage_other
+        now = time.time()
+        today = usage.day_of(now)
+        days = fills.merge_other(days, other)  # plan 18: the other harnesses' priced runs and unknown counts
+        with self.tlock:
+            hours = fills.fail_hours(self.tasks, self.cfg, now)
         return {"ready": ready, "today": today, "first": min(days) if days else "",
                 "limit": self.cfg["daily_budget_usd"], "days": days,
                 "weeks": usage.weeks(days, today), "months": usage.months(days, today),
-                "storage": storage, "storage_warn_mb": self.cfg["storage_warn_mb"]}
+                "storage": storage, "storage_warn_mb": self.cfg["storage_warn_mb"],
+                "fills": self.budget(), "fail_hours": hours, "warn_at": self.cfg["budget_warn_at"],
+                "balance_margin": self.cfg["balance_margin"]}
 
     def history_loop(self) -> None:
         while not self._stop.is_set():
@@ -323,7 +354,10 @@ class Hub:
     def snapshot(self) -> dict:
         now = time.time()
         with self.lock:
-            snap = self.state.snapshot(now, self.usage, self.usage_days.get(usage.day_of(now)))
+            today = usage.day_of(now)
+            day = fills.merge_other({today: self.usage_days[today]} if today in self.usage_days else {},
+                                    {today: self.usage_other.get(today) or {}}).get(today)
+            snap = self.state.snapshot(now, self.usage, day)
             snap["preps"] = sorted(({**{k: v for k, v in j.items() if k != "files"},
                                      "attached": attach.summary(j["files"])} for j in self.preps.values()),
                                    key=lambda j: j["ts"])
@@ -336,7 +370,20 @@ class Hub:
             snap["counts"] = {"needs": count("needs") + tg("needs"),
                               "replied": count("replied"), "working": count("working") + tg("working"),
                               "done": count("done"), "empty": count("empty")}
-            return snap
+        snap["spend"]["fills"] = self.fill_marks()  # outside the lock: budget() takes it
+        return snap
+
+    def fill_marks(self) -> dict:
+        """The today strip's fills line (plan 18): models at or over budget_warn_at of their pace, over pace first
+        by share, and today's unpriced runs per model."""
+        warn, over, unknown = self.cfg["budget_warn_at"], [], []
+        for key, f in self.budget().items():
+            share, today = f.get("share"), (f.get("day") or {}).get("unknown_runs")
+            if share is not None and share >= warn:
+                over.append([key, share, f.get("binding", "")])
+            if today:
+                unknown.append([key, today])
+        return {"over": sorted(over, key=lambda x: -x[1]), "unknown": unknown, "warn_at": warn}
 
     def steps(self, session_id: str, limit: int = 200) -> list:
         with self.lock:
@@ -550,24 +597,21 @@ class Hub:
 
     # -- plan 17: the task chain ---------------------------------------------------------
     def budget(self) -> dict:
-        """model id -> share of its pace used. Sub-plan 18 fills it from the usage windows; {} until then."""
-        return {}
+        """Plan 18: model key -> its fills (README 3.3 of plans/18-fills): the day, week and month windows, the one
+        that binds and its share of pace. {} until the history thread has read the transcripts once: while usage is
+        unknown the tiers' order routes, never a guess of zero."""
+        with self.lock:
+            if not self.usage_ready:
+                return {}
+            days, other = self.usage_days, self.usage_other
+        return fills.fills(days, other, self.cfg, time.time())
 
-    def tier_budget(self) -> dict:
-        """tier -> the least share over the tier's rungs (a rung budget() does not list counts as unused): a tier
-        is over its pace only when every rung is. What tasks.step_route receives; {} while budget() is."""
-        shares, out = self.budget(), {}
-        for tier, rungs in (self.cfg.get("ladder") or {}).items():
-            if any(rung in shares for rung in rungs):
-                out[tier] = min(shares.get(rung, 0) for rung in rungs)
-        return out
-
-    def model_id(self, tier: str) -> str:
-        """The model to pass for a tier: the first rung of the ladder under budget_warn_at of its pace, else the
-        tier alias."""
-        shares, warn = self.budget(), self.cfg["budget_warn_at"]
-        rungs = (self.cfg.get("ladder") or {}).get(tier) or [tier]
-        return next((rung for rung in rungs if shares.get(rung, 0) < warn), tier)
+    def tier_view(self) -> dict:
+        """/api/config `tiers`: every rung of each tier as config.json lists it, with its rank, model key, whether it
+        is hard only, and why it cannot run now ("" when it can). The window hides a rung with a reason."""
+        return {tier: [{"rung": r, "effort": e, "rank": fills.rank_of(r, self.cfg), "key": fills.model_key(r, self.cfg),
+                        "hard": fills.hard_only(r, tier, self.cfg), "why": self.rung_ok(r)}
+                       for r, e in fills.tier_rungs(self.cfg, tier)] for tier in tasks.TIERS}
 
     def last_reply(self, sid: str) -> str:
         """Claude's last message in a session: its window run's stream, or its transcript."""
@@ -628,13 +672,19 @@ class Hub:
         return None
 
     def _route_for(self, task: dict, s: dict) -> dict:
-        """tasks.step_route for step `s`, with everything it reads: the checked step, the misses, the last note."""
+        """tasks.step_route for step `s`, with everything it reads: the checked step, the misses, the last note, the
+        fills, the previous step's rung and age (the warm-cache bonus), hard (Prep's demand or a hard sub-plan part)
+        and the gate on rungs (rung_ok: harness off or not found, not on this kind)."""
+        last = tasks.step(task, task["last_good"]) if task["last_good"] else None
+        ended = last.get("ended") if last else None
         return tasks.step_route(
-            s["kind"], pick=claude_cli.tier_of(s["pick"], self.cfg) if s["pick"] else "",
-            checked=tasks.checked_route(task, s), demand=task["demand"],
+            s["kind"], pick=s["pick"], checked=tasks.checked_route(task, s), demand=task["demand"],
             misses=routing.fresh(levers.read_misses(self.folder, task["project"]), self.cfg["miss_floor_days"]),
             prev=tasks.read_note(self.folder, task, task["last_good"]),
-            budget=self.tier_budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"])
+            budget=self.budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"], cfg=self.cfg,
+            prev_rung=last["model"] if last else "", prev_age=time.time() - ended if ended else None,
+            hard=(task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard")),
+            refuse=lambda rung: self.rung_ok(rung, s["kind"]))
 
     def task_levers(self, task_id) -> dict:
         """What each task lever would do and why one is off ("" = allowed); None for an unknown id. The one
@@ -693,7 +743,7 @@ class Hub:
             return {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry,
                     "confirm": confirm, "clear": clear, "done": done, "answer": answer, "redo": redo, "keep": keep,
                     "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
-                    "next_route": f"{route['model']}/{route['effort']}" if route and not route["hold"] else "",
+                    "next_route": f"{route['rung']}/{route['effort']}" if route and not route["hold"] else "",
                     "cwd": task["project_dir"]}
 
     def _commit(self, task: dict, lines=()) -> None:
@@ -745,24 +795,14 @@ class Hub:
             route = dict(route, notes=route["notes"] + ["budget: hold released by Fred"], hold="")
             task.pop("hold_ok", None)
         self.reload_models()
-        kind, tier = s["kind"], route["model"]
-        pick, notes = s["pick"], list(route["notes"])  # a rung Fred picked is used as given, unless the budget moved
-        # the step to another tier
-        model = pick if pick and pick not in claude_cli.MODELS and claude_cli.tier_of(pick, self.cfg) == tier \
-            else self.model_id(tier)
+        kind, tier, model = s["kind"], route["model"], route["rung"]  # plan 18: the route chose the rung
+        if tier == "fable" and not task["fable_ok"]:  # a hard-only fable rung of the think tier bills credits too
+            tasks._task_to(task, "waiting", "confirm Fable", now, s, lines)
+            return self._commit(task, lines)
         hname, model_name = claude_cli.split_rung(model)
+        notes = list(route["notes"])
         if hname != "claude":
-            why = self.rung_ok(model, kind)
-            if why:  # turned off or not found since Prep, or a cheap rung on a kind it may not run (decision 12)
-                model = self.model_id(tier)
-                hname, model_name = "claude", model
-                word = ("off" if not harness.is_on(self.cfg, claude_cli.split_rung(pick)[0]) else
-                        "not found" if "not found" in why else "refused")
-                notes.append(f"harness: {claude_cli.split_rung(pick)[0]} {word} -> {model}")
-            else:
-                notes.append(f"harness: {hname}")
-        elif pick and claude_cli.split_rung(pick)[0] != "claude" and not claude_cli.tier_of(pick, self.cfg):
-            notes.append(f"model gone from models.json: {pick}")
+            notes.append(f"harness: {hname}")
         route = dict(route, notes=notes)
         retry = task["why"] if s["retries"] == 1 and s["state"] == "planned" else ""
         prev = tasks.read_brief(self.folder, task, task["last_good"])
@@ -1015,8 +1055,10 @@ class Hub:
                                                        prev, raw, touched), name="cc-brief", daemon=True).start()
 
     def _brief_job(self, task: dict, s: dict, nxt, prev: str, raw: str, touched: list = ()) -> None:
-        model = self.cfg["brief_model"]
-        cfg = dict(self.cfg, brief_model=self.model_id(model) if model in claude_cli.MODELS else model)
+        model, ran = self.cfg["brief_model"], s.get("model") or ""
+        if model in claude_cli.MODELS and fills.split_rung(ran)[0] == "claude" and fills.rank_of(ran) == model:
+            model = ran  # plan 18 (5.1 item 2): the pass runs on the rung the step used, while its cache is warm
+        cfg = dict(self.cfg, brief_model=model)
         try:
             res = compact.run_brief(cfg, self.runs.exe, task, s, nxt, prev, raw, touched)
         except Exception as exc:  # run_brief never raises; if it does, the chain still goes on
@@ -1096,8 +1138,7 @@ class Hub:
                          daemon=True).start()
 
     def _replan_job(self, task: dict, n: int, briefs: str) -> None:
-        model = self.cfg["brief_model"]
-        cfg = dict(self.cfg, brief_model=self.model_id(model) if model in claude_cli.MODELS else model)
+        cfg = dict(self.cfg)  # plan 18: brief_model as config.json says (a Claude alias runs as given)
         try:
             res = replan.run_replan(cfg, self.runs.exe, task, n, briefs)
         except Exception as exc:  # run_replan never raises; if it does, the step fails like a bad answer
@@ -1338,6 +1379,8 @@ class Handler(BaseHTTPRequestHandler):
                                "project": window.get("project", ""), "brief": window.get("brief") is True,
                                "ladder": cfg["ladder"], "effort": window.get("effort", "auto"),
                                "kinds": tasks.PREP_KINDS, "edit_kinds": sorted(tasks.EDIT_KINDS),
+                               "tiers": self.hub.tier_view(),
+                               "kinds_tier": {k: tasks.kind_tier(k) for k in tasks.PREP_KINDS},
                                "handoff_auto": bool(cfg["handoff_auto"])})
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())

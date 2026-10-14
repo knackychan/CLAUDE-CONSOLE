@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import attach, brief, claude_cli, events, guard, levers, paths, server, tasks
+from console import attach, brief, claude_cli, events, guard, levers, paths, server, tasks, usage
 
 
 class GuardTest(unittest.TestCase):
@@ -967,9 +967,9 @@ class TaskServerTest(RunServerTest):
         self.assertNotIn("a chat lesson", first)
         self.settled(tid)
 
-    def over(self, tier):
-        """A budget() with every rung of the tier over its pace."""
-        return lambda: {rung: 0.9 for rung in self.hub.cfg["ladder"][tier]}
+    def over(self, key):
+        """A budget() (plan 18) with one model key at 90 % of its pace, binding on the day."""
+        return lambda: {key: {"share": 0.9, "binding": "day", "day": {"unknown_runs": 0}}}
 
     def test_stop_question_waits_for_fred(self):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "look STOP-ASK"}, self.TWO[1]])
@@ -1115,13 +1115,12 @@ class TaskServerTest(RunServerTest):
         self.assertEqual((step["state"], self.hub.runs.meta(step["session"])["model"]), ("running", "fable"))
         self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 409)
 
-    @unittest.skip("plan 18 Task 4 rewrites it")
     def test_budget_hold_waits_for_fred(self):
         self.hub.budget = self.over("opus")
-        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it"}])  # a design step drops one model
+        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it PLAN-OK"}])  # over pace no longer moves a step
         step = self.hub.tasks[tid]["steps"][0]
-        self.assertEqual((step["model"], step["effort"]), ("sonnet", "xhigh"))
-        self.assertIn("budget: opus 90 % -> sonnet/xhigh", self.session(step["session"])["route_reason"])
+        self.assertEqual((step["model"], step["tier"], step["effort"]), ("opus", "opus", "high"))
+        self.assertIn("balance: every think rung over pace -> opus 90 %", self.session(step["session"])["route_reason"])
         self.settled(tid)
         tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])  # its verify would run on opus: it holds
         task = self.until(tid, lambda t: t["state"] == "waiting", "the verify holds")
@@ -1129,7 +1128,6 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([s["state"] for s in task["steps"]], ["done", "planned"])
         self.assertEqual(self.hub.advance(), [])  # it waits for Fred, it does not poll the budget
 
-    @unittest.skip("plan 18 Task 4 rewrites it")
     def test_budget_hold_released_by_confirm(self):
         self.hub.budget = self.over("opus")
         tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
@@ -1149,7 +1147,6 @@ class TaskServerTest(RunServerTest):
         counts = self.hub.snapshot()["counts"]
         self.assertEqual((counts["needs"], counts["working"]), (1, 0))  # the task, not also its step session
 
-    @unittest.skip("plan 18 Task 4 rewrites it")
     def test_counts_a_held_task_as_needs(self):
         self.hub.budget = self.over("opus")
         tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
@@ -1347,18 +1344,67 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.task("../x")[0], 404)
         self.assertEqual(self.task("20260101-000000-ffff")[0], 404)
 
-    @unittest.skip("plan 18 Task 4 rewrites it")
-    def test_rung_under_budget_pressure(self):
-        self.hub.budget = lambda: {"opus": 0.9}  # the alias is over, the older rungs are not
-        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it"}])
+    def test_balance_spreads_a_tier(self):
+        """Plan 18: a write tier of two Claude rungs; the emptiest model runs, its verify one rank above it."""
+        self.hub.cfg["tiers"] = dict(self.hub.cfg["tiers"], write=[{"rung": "sonnet", "effort": "auto"},
+                                                                   {"rung": "claude-haiku-4-5", "effort": "auto"}])
+        self.hub.budget = lambda: {"sonnet": {"share": 0.9, "binding": "week"}, "haiku": {"share": 0.2, "binding": "day"}}
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
         step = self.hub.tasks[tid]["steps"][0]
-        self.assertEqual((step["tier"], step["model"], step["effort"]), ("opus", "claude-opus-4-8", "high"))
-        self.assertEqual(self.hub.runs.meta(step["session"])["model"], "claude-opus-4-8")
-        self.settled(tid)
-        self.hub.budget = self.over("opus")  # every rung over: the tier drop of step_route
-        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it again"}])
-        step = self.hub.tasks[tid]["steps"][0]
-        self.assertEqual((step["tier"], step["model"], step["effort"]), ("sonnet", "sonnet", "xhigh"))
+        self.assertEqual((step["model"], step["tier"]), ("claude-haiku-4-5", "haiku"))
+        self.assertEqual(self.hub.runs.meta(step["session"])["model"], "claude-haiku-4-5")
+        self.assertIn("balance: sonnet 90 % -> claude-haiku-4-5 20 %", step["notes"])
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the verify holds")
+        self.assertEqual(task["why"], "sonnet over its pace")  # haiku's code is checked on sonnet, over its pace
+
+    def test_a_hard_design_step_on_fable_waits_for_the_confirm(self):
+        """Plan 18: fable is hard only in think; when the balance picks it, the Fable confirm still holds the step."""
+        self.hub.budget = lambda: {"opus": {"share": 0.9, "binding": "day"}, "fable": {"share": 0.1, "binding": "day"}}
+        tid = self.make_task(text="THINK plan it", steps=[{"kind": "design", "goal": "plan it"}])  # reasoning high
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the fable step waits")
+        self.assertEqual((task["why"], task["steps"][0]["state"]), ("confirm Fable", "planned"))
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(1), "the design step starts")
+        self.assertEqual((task["steps"][0]["model"], task["steps"][0]["tier"]), ("fable", "fable"))
+
+    def test_budget_reads_the_usage_days(self):
+        today = usage.day_of(time.time())
+        self.assertEqual(self.hub.budget(), {})  # usage not read yet: the tiers' order routes
+        self.hub.cfg["allowances"] = {"opus": {"day_usd": 10, "week_usd": 50, "month_usd": 150}}
+        with self.hub.lock:
+            self.hub.usage_days = {today: {"cost": 5.0, "tokens": [0, 0, 0, 0], "projects": {}, "models": {"opus": 5.0}}}
+            self.hub.usage_ready = True
+        fill = self.hub.budget()["opus"]
+        self.assertEqual((fill["day"]["used_usd"], fill["day"]["allowance_usd"]), (5.0, 10.0))
+        self.assertIn(fill["binding"], ("day", "week", "month"))
+        self.assertEqual(fill["via"], ["claude"])
+        self.assertIsNone(self.hub.budget()["sonnet"]["share"])  # no allowance
+        data = self.call("/api/usage")[1]
+        self.assertEqual((data["fills"]["opus"]["day"]["used_usd"], data["fail_hours"], data["warn_at"]), (5.0, {}, 0.8))
+        cfg = self.call("/api/config")[1]
+        self.assertEqual(cfg["kinds_tier"]["design"], "think")
+        self.assertEqual(cfg["kinds_tier"]["scout"], "read")
+        think = {r["rung"]: r for r in cfg["tiers"]["think"]}
+        self.assertEqual((think["opus"]["why"], think["opus"]["key"], think["fable"]["hard"]), ("", "opus", True))
+        self.assertNotEqual(think["codex:gpt-6-astra"]["why"], "")  # codex is not usable here
+
+    def test_runs_of_another_harness_count_once(self):
+        sid, ts = "0000-codex", time.time()
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
+        self.hub.runs.meta_path(sid).write_text(json.dumps({"harness": "codex", "model": "gpt-6.1-sol"}), encoding="utf-8")
+        self.hub.cfg["prices"] = dict(self.hub.cfg["prices"], **{"gpt-6.1-sol": {"input": 2, "output": 10, "cache_read": 0.2}})
+        rec = {"event": "run_ended", "session_id": sid, "ts": ts,
+               "tokens": {"input": 1_000_000, "output": 100_000, "cache_read": 0}}
+        self.assertTrue(self.hub.count_run(rec))
+        self.assertFalse(self.hub.count_run(rec))  # a restart replays the line: counted once
+        row = self.hub.usage_other[usage.day_of(ts)]["gpt-6.1-sol"]
+        self.assertEqual((row["cost"], row["runs"], row["unknown"]), (3.0, 1, 0))
+        self.assertTrue(self.hub.count_run(dict(rec, ts=ts + 1, tokens=None)))  # no usage: unknown, never zero
+        self.assertEqual(self.hub.usage_other[usage.day_of(ts)]["gpt-6.1-sol"]["unknown"], 1)
+        self.hub.runs.meta_path("0000-claude").write_text(json.dumps({"model": "sonnet"}), encoding="utf-8")
+        self.assertFalse(self.hub.count_run(dict(rec, session_id="0000-claude")))  # the transcripts price Claude
+        today = self.hub.snapshot()["spend"]
+        self.assertEqual(today["fills"]["over"], [])
 
     def test_a_rung_can_be_run_by_hand(self):
         run = {"project_dir": str(self.project), "prompt": "fix add", "effort": "low"}
@@ -1881,7 +1927,7 @@ class HarnessServerTest(TaskServerTest):
         task = self.until(tid, self.at(2), "step 2 starts")
         step = task["steps"][1]
         self.assertEqual((step["harness"], step["model"], step["tier"]), ("claude", "sonnet", "sonnet"))
-        self.assertIn("harness: codex off -> sonnet", step["notes"])
+        self.assertIn("pick refused: codex is off -> balance", step["notes"])
         self.assertEqual(self.hub.runs.meta(step["session"])["harness"], "claude")
 
     def test_step_timeout_reaches_the_retry_reason(self):
