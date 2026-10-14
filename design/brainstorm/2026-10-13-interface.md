@@ -330,7 +330,8 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
   as the orange outline cell, the figure as the share of pace (orange over pace), then the other two windows
   as text (`w 71 · m 52`); a click on the row opens the three bars. A model with no allowance: a dotted bar,
   `–`, `no allowance`. Legend: `used`, `pace`, `20 cells = allowance`, `orange over pace`. The config names
-  fold: `config · balance_margin 0.2 · warn_at 0.8 ▾`, open: the router sentence, the Opus fill counting
+  fold: `config · balance_margin 0.1 · warn_at 0.8 ▾`, open: the router sentence (each step takes the emptiest
+  model of its tier, the same one again while fills are within the margin), the Opus fill counting
   both CLIs, `allowance` in config.json. (ID-6 unchanged: the cells stay 20 per window.)
 - **Days**: the calendar, the picked day and the Days / Weeks / Months columns stay as locked, above the
   heatmap (the calendar is what the page was for); the picked day's model line lists harness rungs and
@@ -357,7 +358,8 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
   the rung that wrote the step) and `fix` (the failed step's tier, never opencode or cmd) sit in a Checks card,
   set by the rule, not editable. Writes `kinds: {kind: {rung, effort}}`; a kind absent from it keeps the code's
   rule.
-- **Tiers**: one card per tier with its ladder top down: drag handle, order, `harness · model`, effort, remove.
+- **Tiers**: one card per tier with its rungs (each step takes the emptiest of them, the order breaks ties
+  and is used while usage is unknown): drag handle, order, `harness · model`, effort, remove.
   A rung on a harness that is off or not found is struck and skipped (its title says why). `+ rung` lists the
   models of the harnesses that are on; think accepts Claude and Codex only (decision 11). A last card holds the
   console's own passes: Prep, the handoff pass, the rules review and the composer's Run default
@@ -367,8 +369,9 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
   default has the blue `--wip` edge and a `reset` link; a value out of range turns the field red and its line
   says the range, and Save stays off until it is fixed. The allowances per model fold to one line.
   Keys: `task_max_steps`, `task_step_budget_usd`, `step_timeout_s`, `opus_max_turns`, `read_max_turns`,
-  `brief_max_words` (500), `brief_timeout_s`, `gauge_red_tokens`, `gauge_yellow_tokens`, `budget_warn_at`,
-  `balance_hysteresis`, `daily_budget_usd`, `allowances`.
+  `brief_max_words` (500), `brief_timeout_s`, `gauge_red_tokens`, `gauge_yellow_tokens`, `balance_margin`
+  (0.1: each step takes the emptiest model of its tier, the same one again while fills are within it),
+  `budget_warn_at` (marks over pace, holds a verify; no longer moves a step), `daily_budget_usd`, `allowances`.
 - **Save**: the levers row reads `3 changes · used from the next step`, Discard and Save. Save posts the
   changed keys only (`POST /api/config/models`, through `guard.py`, a whitelist of the keys above, each
   validated); the service writes config.json as `set_harness` does (every other key as written) and reloads
