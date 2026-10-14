@@ -242,14 +242,66 @@ def months(days: dict, today: str, n: int = 12) -> list:
     return out
 
 
-def load_days(folder) -> dict:
-    """The closed days kept in usage-days.json ({} when missing or unreadable)."""
+FILE_LOCK = threading.Lock()  # usage-days.json: the history thread saves days, the hub thread adds runs (plan 18)
+SEEN_DAYS = 3  # run ids are kept this many days: the event reader replays the last two daily files at start
+
+
+def _read(folder) -> dict:
     try:
         data = json.loads((Path(folder) / DAYS_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    days = data.get("days") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _write(folder, data: dict) -> None:
+    path = Path(folder) / DAYS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(DAYS_FILE + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def load_days(folder) -> dict:
+    """The closed days kept in usage-days.json ({} when missing or unreadable)."""
+    days = _read(folder).get("days")
     return {d: v for d, v in days.items() if isinstance(v, dict)} if isinstance(days, dict) else {}
+
+
+def load_other(folder) -> dict:
+    """The runs of other harnesses per day (plan 18): {day: {model key: {"cost", "runs", "unknown", "tokens"}}}
+    ({} when missing or unreadable). Kept for good, next to the days."""
+    other = _read(folder).get("other")
+    return {d: v for d, v in other.items() if isinstance(v, dict)} if isinstance(other, dict) else {}
+
+
+def add_other(folder, run_id: str, day: str, key: str, tokens, cost) -> bool:
+    """Count one ended run of another harness under `day` and `key`: its priced cost, or one unknown run when
+    `cost` is None (D-3, never zero); its tokens [input, output, cache read] when known. False when `run_id` was
+    already counted (a restart replays the event files) or the file cannot be written."""
+    with FILE_LOCK:
+        data = _read(folder)
+        seen = data.get("seen") if isinstance(data.get("seen"), dict) else {}
+        if any(run_id in ids for ids in seen.values() if isinstance(ids, list)):
+            return False
+        other = data.get("other") if isinstance(data.get("other"), dict) else {}
+        row = other.setdefault(day, {}).setdefault(key, {"cost": 0.0, "runs": 0, "unknown": 0, "tokens": [0, 0, 0]})
+        row["runs"] += 1
+        if cost is None:
+            row["unknown"] += 1
+        else:
+            row["cost"] = round(row["cost"] + float(cost), 6)
+        if isinstance(tokens, dict):
+            row["tokens"] = [a + int(tokens.get(k) or 0) for a, k in zip(row["tokens"], ("input", "output", "cache_read"))]
+        cutoff = (_date(day) - timedelta(days=SEEN_DAYS - 1)).isoformat()
+        seen = {d: ids for d, ids in seen.items() if d >= cutoff and isinstance(ids, list)}
+        seen.setdefault(day, []).append(run_id)
+        data.update(other=other, seen=seen)
+        try:
+            _write(folder, data)
+        except OSError:
+            return False
+        return True
 
 
 def merge_days(kept: dict, scanned: dict) -> dict:
@@ -264,17 +316,16 @@ def merge_days(kept: dict, scanned: dict) -> dict:
 
 def save_days(folder, days: dict, today: str) -> bool:
     """Keep the closed days (before `today`) of `days` merged into usage-days.json; False when nothing
-    changed (no write)."""
-    kept = load_days(folder)
-    merged = merge_days(kept, {d: v for d, v in days.items() if d < today})
-    if merged == kept:
-        return False
-    path = Path(folder) / DAYS_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(DAYS_FILE + ".tmp")
-    tmp.write_text(json.dumps({"days": dict(sorted(merged.items()))}, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
-    return True
+    changed (no write). Every other key of the file is kept."""
+    with FILE_LOCK:
+        data = _read(folder)
+        kept = load_days(folder)
+        merged = merge_days(kept, {d: v for d, v in days.items() if d < today})
+        if merged == kept:
+            return False
+        data["days"] = dict(sorted(merged.items()))  # "other" and "seen" (plan 18) stay as written
+        _write(folder, data)
+        return True
 
 
 def folder_sizes(home) -> dict:

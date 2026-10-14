@@ -167,5 +167,43 @@ class DaysFileTest(unittest.TestCase):
             self.assertEqual(usage.load_days(folder), {})
 
 
+class OtherRunsTest(unittest.TestCase):
+    """Plan 18: runs of other harnesses kept per day in usage-days.json, next to the days."""
+    TOK = {"input": 1000, "output": 200, "cache_read": 500}
+
+    def test_a_run_counts_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertTrue(usage.add_other(folder, "s1@1.0", "2026-10-14", "gpt-6.1-sol", self.TOK, 0.25))
+            self.assertFalse(usage.add_other(folder, "s1@1.0", "2026-10-14", "gpt-6.1-sol", self.TOK, 0.25))
+            self.assertTrue(usage.add_other(folder, "s1@2.0", "2026-10-14", "gpt-6.1-sol", self.TOK, 0.5))
+            row = usage.load_other(folder)["2026-10-14"]["gpt-6.1-sol"]
+            self.assertEqual(row, {"cost": 0.75, "runs": 2, "unknown": 0, "tokens": [2000, 400, 1000]})
+
+    def test_an_unpriced_run_is_unknown_never_zero(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.add_other(folder, "s2@1.0", "2026-10-14", "deepseek-v4.1-flash", None, None)
+            usage.add_other(folder, "s2@2.0", "2026-10-14", "deepseek-v4.1-flash", self.TOK, None)
+            row = usage.load_other(folder)["2026-10-14"]["deepseek-v4.1-flash"]
+            self.assertEqual((row["runs"], row["unknown"], row["cost"], row["tokens"]), (2, 2, 0.0, [1000, 200, 500]))
+
+    def test_save_days_keeps_the_other_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.add_other(folder, "s3@1.0", "2026-10-12", "kimi-k3", self.TOK, 1.0)
+            day = {"cost": 2.0, "tokens": [1, 2, 3, 4], "projects": {}, "models": {"opus": 2.0}}
+            self.assertTrue(usage.save_days(folder, {"2026-10-12": day}, "2026-10-14"))
+            self.assertEqual(usage.load_days(folder)["2026-10-12"]["cost"], 2.0)
+            self.assertEqual(usage.load_other(folder)["2026-10-12"]["kimi-k3"]["cost"], 1.0)
+            usage.add_other(folder, "s3@2.0", "2026-10-13", "kimi-k3", self.TOK, 1.0)
+            self.assertEqual(usage.load_days(folder)["2026-10-12"]["cost"], 2.0)  # adding a run keeps the days
+
+    def test_seen_ids_are_kept_three_days(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.add_other(folder, "old@1.0", "2026-10-10", "kimi-k3", None, None)
+            usage.add_other(folder, "new@1.0", "2026-10-14", "kimi-k3", None, None)
+            seen = json.loads((Path(folder) / usage.DAYS_FILE).read_text(encoding="utf-8"))["seen"]
+            self.assertEqual(seen, {"2026-10-14": ["new@1.0"]})
+            self.assertEqual(usage.load_other(folder)["2026-10-10"]["kimi-k3"]["runs"], 1)  # the counts stay
+
+
 if __name__ == "__main__":
     unittest.main()
