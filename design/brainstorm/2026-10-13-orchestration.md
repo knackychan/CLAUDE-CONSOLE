@@ -237,6 +237,29 @@ Cost: about $0.005 per replan. It gives the chain the flexibility Fred is afraid
 
 **D-7** Add `replan` as a step kind, Haiku, no tools, validated by code, Fred confirms by default. **Fred, 2026-10-13: yes.**
 
+## 8b. The design step writes the plan (Fred, 2026-10-14)
+
+Fred: the design step is the one that writes the plan, the plan is never held to the handoff word limit, and it is exhaustive and guided enough that the writing model that follows it takes no decision and does not drift. It is `plan.md` in the task folder, read as context by the steps it assigns.
+
+- **Who writes it.** The `design` step (think tier). A task whose Prep plan has a design step gets a `plan.md`; one without keeps today's chain of briefs.
+- **How it reaches the folder.** The task folder stays written by the service only (plan 17's hard rule, CLAUDE.md: code writes `~/.claude/console/` only), so the design step stays read-only: its final message carries the plan between a `PLAN` line and an `END PLAN` line, before the HANDOFF block, and the service saves that text verbatim as `tasks/<id>/plan.md`. Same file whatever the harness (Claude, Codex, OpenCode think rungs).
+- **No word limit, never cut.** The brief pass compacts the HANDOFF block only; the plan goes around it whole. `NOTE_MAX` counts the note without the plan. The only bound is a safety size, `plan_max_kb` 100 in config.json: over it nothing is cut, the task waits for Fred ("plan 132 KB, over 100": Accept / Redo design). Clear on done keeps `plan.md` with `task.json` and the last note.
+- **Its shape, checked by code** (like the HANDOFF block: missing parts fail the step's check, one retry with the reason, then stuck):
+  - `## Goal`: the task goal restated, and what done looks like.
+  - `## Decisions`: every fork the work meets, each closed with its answer and a one-line why. Nothing left as "choose", "either" or "if needed".
+  - `## Out of scope`: what the writing steps must not touch.
+  - `## Files`: each file to create or change, and what changes in it.
+  - `## Steps`: one `### Step N: <kind>` for each later step of the task (the assignments), each with its ordered actions, the exact signatures, and the final code wherever the design depends on it (as this repo's own sub-plans do), the tests to write by name, and the done check (a command and what it prints).
+  - `## Acceptance`: what verify checks, one line each.
+  - Code checks: the six headings, a `### Step N` for every later edit step (`code`, `document`, `debug`, `edit`, `draft`), no `TBD` or `TODO` anywhere, and no Decisions line left as a question (ending in `?`).
+- **How later steps read it.** Every later step's prompt carries the whole `plan.md` under "The plan (follow it, do not change it)", and its own `### Step N` section again at the end, next to the rules, as "Your part of the plan". The brief of the previous step still follows, for what happened since. Verify gets the plan and checks the diff against Steps and Acceptance; a departure is a FAIL "plan drift: <what>", and fix gets the same plan.
+- **No decisions by the writer.** The step prompt rule: "If the plan does not settle something this step needs, do not choose: stop and put it under Open questions, starting with `Plan gap:`". A `Plan gap:` question puts the task `waiting` on the Task page with Answer / Redo design / Stop. Fred's answer is appended to `## Decisions` as "Fred, <date>: ..." and the step runs again; Redo design reruns the design step with the question.
+- **Steps stay Prep's.** The plan may not add or remove steps. A design that needs different steps writes `Replan:` in its Next line (D-7), Fred confirms, and the plan's `### Step` sections must then match the new list.
+- **Fred can read and edit it before code runs.** The Board shows `plan.md` as a Plan tab of the design step and of the task; `plan_hold` in config.json (default off) makes the task wait after the design step for Fred's Confirm, with the plan editable in place.
+- **Cost.** The plan is resent to each later step; at about 3,000 words it is about 4,000 input tokens per step, mostly cache reads after the first. Cheaper than a writing step that guesses.
+
+**D-9** The design step writes an exhaustive `plan.md` into the task folder through the service, never compacted or cut, checked by code, read whole by every later step, with `Plan gap:` stops instead of writer decisions. **Fred, 2026-10-14: asked for it.** Defaults picked here, open to change: the plan lives at the task root (not `steps/`), `plan_max_kb` 100, `plan_hold` off.
+
 ## 9. Suggested order of sub-plans
 
 | # | Sub-plan | Depends on | Size |
@@ -244,7 +267,7 @@ Cost: about $0.005 per replan. It gives the chain the flexibility Fred is afraid
 | 5 | Harness adapters: the adapter module, `claude_cli` moved behind it, the `harnesses` setting with the probe and the window switch (3.1), Codex adapter, then OpenCode, the step and Prep rungs, `step_timeout_s`, the Usage mix with other harnesses; the context pack lite from Prep's citations (5.1 item 3); Command Code's adapter (the smallest) | the installed CLIs' `--help` pasted as facts | medium |
 | 18 | Tiers think / write / read with rungs across harnesses (OpenCode and Command Code in `read` only), usage fills per model (day / week / month, allowance and pace), balancing in `step_route` with the warm-cache bonus, the fill columns on the Usage page and the list header; the FAIL-rate-by-hour view | 5 for non-Claude rungs, runs on Claude rungs alone first | medium |
 | 23 | Handoff everywhere: the six-heading HANDOFF block (Goal, Findings, Files touched, Troubleshooting, Open questions, Next) in the step prompt, the brief pass and the skill; facts under the brief (git diff --stat, failing test lines); auto handoff at red for window runs; the two continuity checks; end commit per step; `--strict-mcp-config` and `--tools` per kind; `read_max_turns`; goal cut to 600 and lessons by kind (5.1) | nothing | small to medium |
-| 24 | Replan step kind | nothing | small |
+| 24 | Replan step kind; the design step's `plan.md` (8b): the PLAN block, its code check, the prompt sections, `Plan gap:` waiting, `plan_hold` | nothing | small to medium |
 | 25 | Cells Board: mockup, then the page | 18 for the rung text, else runs on today's routes | medium, after the mockup is locked |
 
 Plans 5 and 23 can start now; 18 is the one that changes how routes are written in config.json, so it wants Fred's D-4 first.
@@ -261,6 +284,7 @@ Plans 5 and 23 can start now; 18 is the one that changes how routes are written 
 | D-6 | Cells Board mockup before code, two columns | yes | ok |
 | D-7 | `replan` step kind, Haiku, Fred confirms by default | yes | yes |
 | D-8 | Per-harness on / off and path in config.json, a switch in the window, off rungs never route | yes | yes (Fred asked for it) |
+| D-9 | The design step writes an exhaustive `plan.md` in the task folder, never cut, read whole by later steps, `Plan gap:` stops | yes | yes (Fred asked for it, 2026-10-14) |
 
 ## 11. History
 
@@ -269,3 +293,4 @@ Plans 5 and 23 can start now; 18 is the one that changes how routes are written 
 - 2026-10-13 - Fred asked for more ways to save context and took all six (section 5.1): facts under the brief, no MCP and tools per kind for steps, a warm-cache bonus in balancing, a context pack lite from Prep's citations, turn caps on read kinds, a shorter goal and lessons by kind, measure on the Board. Plans 5, 18 and 23 in section 9 carry them.
 - 2026-10-13 - Fred pasted `codex exec --help` (codex-cli 0.162.1) and `opencode run --help`: the adapter table now carries the installed flags (Codex: `-m`, `-s workspace-write`, `-C`, `--json`, `-o`, `resume` / `fork`; OpenCode: `-m provider/model#variant`, `--format json`, `--auto`, `--session` / `--fork`, `--standalone`, no `--dir`), neither has a turn or spend cap; then `cmdc --help` (Command Code 1.81.0, self-updated from 1.26.0 during the call: `-p`, `--max-turns` with exit 8, `--output-format json`, `-m`, `--effort`, `--permission-mode`, `--fork-session`, credit-based account). Fred asked for the console to adapt to which CLIs a user has: D-8, a per-harness switch (3.1).
 - 2026-10-13 - Plan 5 reviewed against the code and the pasted `--help` outputs (`plans/05-harnesses/README.md` section 6). Where it differs from section 3 here, the plan wins: Codex's final message comes from the `--json` stream, not `-o`; Codex usage is spend, not a context size; read-only OpenCode steps use the `OPENCODE_PERMISSION` variable instead of a shipped agent; OpenCode reads its prompt from a `--file`; a pick whose harness is off at step start falls back to Claude's rung of its tier; context pack lite and the Usage mix moved out of plan 5.
+- 2026-10-14 - Fred: the design step writes the plan, as `plan.md` in the task folder, never held to the 500-word handoff limit, exhaustive enough that the writing model takes no decision. Section 8b and D-9; the plan goes into plan 24 with replan.
