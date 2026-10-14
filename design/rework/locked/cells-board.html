@@ -674,8 +674,8 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <section>
       <h3>Harnesses in the compact window</h3>
       <ul>
-        <li><b>Settings:</b> the project picker's popover gains a Settings band under Runs off: a card per group, its head a fold line. <code>Harnesses · 2 on · △ cmd not found</code> opens to one row per CLI: a glyph (<code>●</code>, <code>○</code>, <code>△</code>), the name over its probed version (or <code>read steps only</code>, or the red reason), and one on / off switch that is the state word and the action at once, <code>...</code> until the service answers; <code>claude</code> reads <code>always on</code>. It opens by itself while a harness is on but not found: that switch turns red and the row says <code>not found · no cmdc.exe on PATH</code> and <code>Set "exe" in config.json, or turn it off.</code> <code>Window runs · auto hand off: off</code> holds the auto hand off switch (ID-2) with its one-line why.</li>
-        <li><b>Rungs:</b> every model select lists tiers as groups, think / write / read, each holding rungs on any harness that is on and found. OpenCode and Command Code rungs appear under read only; a step row whose kind is a write or think kind does not list them, and a pick that a kind cannot hold shows "opencode: read steps only (cheap tier)" and falls back to Auto.</li>
+        <li><b>Settings:</b> the project picker's popover gains a Settings band under Runs off: a card per group, its head a fold line. <code>Harnesses · 2 on · △ cmd not found</code> opens to one row per CLI: a glyph (<code>●</code>, <code>○</code>, <code>△</code>), the name over its probed version (or <code>cheap models · read and write steps</code>, or the red reason), and one on / off switch that is the state word and the action at once, <code>...</code> until the service answers; <code>claude</code> reads <code>always on</code>. It opens by itself while a harness is on but not found: that switch turns red and the row says <code>not found · no cmdc.exe on PATH</code> and <code>Set "exe" in config.json, or turn it off.</code> <code>Window runs · auto hand off: off</code> holds the auto hand off switch (ID-2) with its one-line why.</li>
+        <li><b>Rungs:</b> every model select lists tiers as groups, think / write / read, each holding rungs on any harness that is on and found. OpenCode and Command Code hold cheap models only, listed under read; they are offered on read and write kinds (Fred, 2026-10-14: well-designed code can be written by a cheap model) and never on design, verify or fix, where a pick shows "opencode: not on design, verify or fix steps" and falls back to Auto.</li>
         <li><b>Where the rung shows:</b> the task card and the Task page rows (<code>codex · gpt-6.1-sol</code> before the effort), the session head chip, the Board block. A Claude rung keeps today's <code>sonnet · medium</code>.</li>
         <li><b>A non-Claude session page:</b> the brief says "context unknown" with no cells and an estimated or unknown spend; tabs Chat and Steps (what the adapter's stream gives), no Agents or Timeline (those come from Claude's hooks); levers Continue and Stop, the rest off with "claude only". A pick whose harness went off at step start shows the route note <code>harness: codex off -> sonnet</code>.</li>
       </ul>
@@ -1079,7 +1079,7 @@ function settingsHtml() {
   const sr = (gl, tn, nm, sub, ctl, o = {}) => `<div class="sr${o.off ? " off" : ""}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="gl ${tn}">${gl}</span><span class="nm">${nm}</span><span class="ctl">${ctl}</span><span class="sub${o.subR ? " r" : ""}">${sub}</span>${o.why ? `<span class="why">${o.why}</span>` : ""}</div>`;
   const harness = sr("●", "g", "claude", "2.1.296", '<span class="fixed">always on</span>', { title: "Prep and the brief pass run on it; it cannot be turned off" })
     + sr("●", "g", "codex", "codex-cli 0.162.1", sw(true, "codex"))
-    + sr("○", "", "opencode", "read steps only", sw(false, "opencode"), { off: true })
+    + sr("○", "", "opencode", "cheap models · read and write steps", sw(false, "opencode"), { off: true })
     + sr("△", "r", "cmd", "not found · no cmdc.exe on PATH", sw(true, "cmd", { bad: true }), { subR: true, why: `Set <code title="C:\\Users\\fred\\.claude\\console\\config.json, under harnesses.cmd (not the .cmd shim)">"exe"</code> in config.json, or turn it off.` });
   const windowRuns = sr("○", "", "Auto hand off", "at 300K · red zone", sw(false, "auto hand off"), { why: "Hands off a window run that ends its turn in the red zone and seeds the next chat; a VS Code chat is forked first." });
   return `<div class="win" data-view="settings">
@@ -1095,7 +1095,7 @@ function settingsHtml() {
         <div class="grp lbl">Runs off · 1</div>
         <button class="prow off" role="option"><span class="ck"></span><span class="nm">fashion_packshots_ai</span><span class="meta">runs off</span><span class="c">-</span></button>
         <div class="pset"><span class="lbl">Settings</span>
-          ${fold("Harnesses", '2 on · <span class="r">△ cmd not found</span>', harness, { open: true, title: "opencode and cmd rungs run read steps only (cheap tier); rungs of a harness that is off never route; a step picked on one falls back to Claude's rung of its tier" })}
+          ${fold("Harnesses", '2 on · <span class="r">△ cmd not found</span>', harness, { open: true, title: "opencode and cmd run cheap models, on read and write steps, never design, verify or fix; rungs of a harness that is off never route; a step picked on one falls back to Claude's rung of its tier" })}
           ${fold("Window runs", "auto hand off: off", windowRuns)}
         </div>
       </div>
@@ -1104,12 +1104,12 @@ function settingsHtml() {
 }
 function prepHtml() {
   const sel = (value, kind = "") => {
-    const readOnly = ["scout", "search", "draft", "proofread", "edit", "test"].includes(kind) || kind === "run";
+    const cheapOk = ["scout", "search", "draft", "proofread", "edit", "test", "code", "document", "explain", "debug"].includes(kind) || kind === "run";
     const opt = (v, text) => `<option value="${v}"${v === value ? " selected" : ""}>${text}</option>`;
     return `<select aria-label="Model">${kind ? opt("", "auto") : ""}
       <optgroup label="think">${opt("opus", "opus 4.8")}${opt("codex:gpt-6-astra", "codex · gpt-6-astra")}${opt("claude-opus-4-7", "opus 4.7")}</optgroup>
       <optgroup label="write">${opt("sonnet", "sonnet 4.6")}${opt("codex:gpt-6.1-sol", "codex · gpt-6.1-sol")}${opt("codex:gpt-6-sol", "codex · gpt-6-sol")}</optgroup>
-      <optgroup label="read">${opt("haiku", "haiku 4.5")}${opt("codex:gpt-6-luna", "codex · gpt-6-luna")}${readOnly ? ["deepseek-v4.1-flash", "glm-5.3-flash", "qwen3.8-flash", "gpt-6-luna"].map((m) => opt("opencode:opencode-go/" + m, "opencode · " + m)).join("") : ""}</optgroup>
+      <optgroup label="read">${opt("haiku", "haiku 4.5")}${opt("codex:gpt-6-luna", "codex · gpt-6-luna")}${cheapOk ? ["deepseek-v4.1-flash", "glm-5.3-flash", "qwen3.8-flash", "gpt-6-luna"].map((m) => opt("opencode:opencode-go/" + m, "opencode · " + m)).join("") : ""}</optgroup>
       ${kind ? "" : '<optgroup label="fable">' + opt("fable", "Fable 5.1") + "</optgroup>"}</select>`;
   };
   const kinds = ["scout", "design", "code", "test", "document"];
@@ -1128,10 +1128,10 @@ Keep: argument lists, never shell strings; the prompt on stdin, never argv.
 Done when: 9 tests pass against the fake; one live codex exec returns a HANDOFF block.</textarea></div>
       <div class="pcard"><div class="ph"><span class="nm">Steps</span><span class="m">6 · rung per kind unless picked</span><button class="btn sm">+ step</button></div>
         ${step(1, "scout", "", "Read plan 5 Task 2 and claude_cli.py; cite the functions the adapter mirrors.")}
-        ${step(2, "design", "", "Decide the stream parsing and the resume command; write the test list.")}
+        ${step(2, "design", "", "Decide the stream parsing and the resume command; write the test list.", '<span class="r">opencode: not on design, verify or fix steps</span> · back to auto')}
         ${step(3, "code", "codex:gpt-6.1-sol", "console/harness/codex.py with run_command, summary, chat, stop; tests first.")}
         ${step(4, "test", "opencode:opencode-go/deepseek-v4.1-flash", "Run the suite on the real codex exe in a scratch folder.")}
-        ${step(5, "code", "", "Steps tab reads the Codex JSON events.", '<span class="r">opencode: read steps only (cheap tier)</span> · back to auto')}
+        ${step(5, "code", "opencode:opencode-go/deepseek-v4.1-flash", "Steps tab reads the Codex JSON events.")}
         <div class="step fixed" title="one tier above the step it checks, on any harness that is on"><span class="n">6</span><span class="v"><b>verify</b> · added after the last edit</span></div></div>
       <div class="pcard"><div class="ph"><span class="nm">One session</span><span class="m">for Run: the whole prompt on one rung</span></div>
         <div class="route"><span class="pick">${sel("codex:gpt-6.1-sol")}</span><span class="pick"><select aria-label="Effort"><option>low</option><option selected>medium</option><option>high</option></select></span><span class="m">kind code</span></div>
@@ -1139,7 +1139,7 @@ Done when: 9 tests pass against the fake; one live codex exec returns a HANDOFF 
           <span class="note" title="codex has no turn or spend cap: this run ends at step_timeout_s (1800 s) if it is still going">△ no turn cap: stops at 1800 s</span></div></div>
       <div class="pmeta">Prep $0.031 · 4 turns · haiku</div>
     </div>
-    <div class="levers"><div class="pact"><button class="btn go" title="Each step's rung comes from its kind's tier (auto) or the rung you pick on its row. Tiers: think / write / read; opencode and cmd rungs on read kinds only">Run as task</button><button class="btn" title="One session on the rung under One session">Run</button><span class="q"><button title="Send what you typed as is, without the enhanced prompt">Run raw</button><button>Edit</button><button>Cancel</button></span></div><div class="m runs-in">Runs in <b>CLAUDE-CONSOLE</b> · 6 steps</div></div><span class="rsz"></span></div>`;
+    <div class="levers"><div class="pact"><button class="btn go" title="Each step's rung comes from its kind's tier (auto) or the rung you pick on its row. Tiers: think / write / read; opencode and cmd rungs on read and write kinds, never design, verify or fix">Run as task</button><button class="btn" title="One session on the rung under One session">Run</button><span class="q"><button title="Send what you typed as is, without the enhanced prompt">Run raw</button><button>Edit</button><button>Cancel</button></span></div><div class="m runs-in">Runs in <b>CLAUDE-CONSOLE</b> · 6 steps</div></div><span class="rsz"></span></div>`;
 }
 function sessionHtml() {
   const s3 = T[0].steps[2];
@@ -1207,7 +1207,7 @@ const CAP = {
   list: "<b>Compact list.</b> The today strip as locked, its breakdown closed; under it one line only because models are over their pace: \"3 models over pace · fills\", which opens the breakdown (spend legend, model mix, the over-pace figures and the Usage button). Needs you then starts on the first screen: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working card says which step of how many; the rung is on its doing line. Project names are hidden while the scope is one project.",
   tpage: "<b>Compact Task page.</b> The steps list is the page: a finished step is two lines (name, rung, cost, Open; its goal), the failed step gives its sub line to the FAIL verdict whole, and the context gauge (15 cells and the figure; no in / out words, ID-5) stays open only on the current, failed and past-150K rows, a click opens it on the others. The page opens scrolled to the current step. The handoff for the next step folds to one line with its words and its Next; opened, it shows the six headings and the facts the service added, folded.",
   settings: "<b>Settings popover.</b> Under the project groups, one raised Settings band with a card per group. Harnesses is open here because cmd is on but not found (its closed line keeps \"△ cmd not found\" in red). One row per CLI: glyph, the name over its version (or what limits it), and one switch that is both the state word and the action; cmd's switch is red and the row says what to fix. Window runs (closed) holds the auto hand off switch (ID-2) with its one-line why. Click a switch or a card's head to try it.",
-  prep: "<b>Prep page.</b> What you typed is a quote with Fred's violet edge, Scouted folded under it. The prompt, the steps and the one-session route are cards with the Settings card head (name, one fact, an action). A step is two lines: its goal first, editable in place and never cut, then the kind and the rung as quiet pickers (auto dashed, a picked rung filled); the remove cross is faint until the row is hovered. Row 5 shows a refused pick: a red tint, the note in red, the rung back to auto. One primary action, Run as task; Run is the second button; Run raw, Edit and Cancel are quiet text buttons.",
+  prep: "<b>Prep page.</b> What you typed is a quote with Fred's violet edge, Scouted folded under it. The prompt, the steps and the one-session route are cards with the Settings card head (name, one fact, an action). A step is two lines: its goal first, editable in place and never cut, then the kind and the rung as quiet pickers (auto dashed, a picked rung filled); the remove cross is faint until the row is hovered. Row 5, a code step, runs on opencode · deepseek-v4.1-flash (cheap models may take write steps, Fred 2026-10-14); row 2, a design step, shows a refused pick: a red tint, the note in red, the rung back to auto. One primary action, Run as task; Run is the second button; Run raw, Edit and Cancel are quiet text buttons.",
   session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-6.1-sol · medium; the brief says context unknown in words with no cells; tabs Chat and Steps only. The chat starts with the folded Prompt row, then the same bubbles and folded tool rows as the Board (a failed exit first), the source line at the end. Continue resumes the thread; the levers that are off say \"claude only\" in one line.",
   usage: "<b>Usage page.</b> Models: one row per model, sorted over pace first, with one bar of 20 cells for the window that binds (day, week or month), the pace as an orange outline cell and the share of pace as the figure (orange over pace), the other two windows as text; a click opens the three bars. Days stays as locked. The Verify FAIL by hour heatmap folds to one line that carries its reading.",
 };

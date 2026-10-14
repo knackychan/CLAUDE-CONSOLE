@@ -141,7 +141,7 @@ line: `subtype == "error_max_turns"`, `exit_cap True`), `test_version_command_ha
 
 ## Drift guards
 
-- `TIERS == ("haiku",)` for both (Fred: cheap tier only); `models_of` drops anything else.
+- `TIERS == ("haiku",)` for both (Fred: cheap models only; they may still take write steps, README decision 11); `models_of` drops anything else.
 - `--yolo` appears nowhere in the code of this task.
 - The console writes nothing into OpenCode's or Command Code's config folders.
 - `cc_exit` is a line the service writes into the stream (Task 4), never something an adapter prints.

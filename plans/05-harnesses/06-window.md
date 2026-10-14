@@ -12,7 +12,7 @@
 - `modelOptions(value, withAuto, kind = "")` (today's signature plus `kind`): after Claude's ladder groups, one
   `<optgroup label="codex">` per harness in `cfg.harnesses` that is `on && found` and has models, one option per
   model with value `h:m` and text `h · m`. `opencode` and `cmd` groups only when `kind` is `""` (`#p-model`, the
-  Run route) or a kind whose rule tier is `haiku` (`cfg.kinds_tier`, a `{kind: tier}` map `/api/config` gains from
+  Run route) or a kind whose rule tier is `haiku` or `sonnet` (`cfg.kinds_tier`, a `{kind: tier}` map `/api/config` gains from
   `tasks.RULES`); README decision 11, D-2. A step row's select is redrawn when its kind changes (the existing
   `[data-skind]` change handler), and a pick the new kind cannot hold falls back to Auto.
 - `alias(model)`: returns `""` for a string whose prefix before the first colon is a harness name, as

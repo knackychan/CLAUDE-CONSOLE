@@ -106,13 +106,13 @@ hover, and only the card heads do.
 - **Harnesses**: closed line `Harnesses · 2 on · △ cmd not found ▾`, the not-found part red; it opens by
   itself while a harness is on but not found. Open: one row per name in `cfg.harnesses` order. Glyph `●`
   (green) on and found, `○` off, `△` (red) on but not found. The second line is the probed version
-  (`codex-cli 0.162.1`), `read steps only` for opencode and cmd while off, or, red, `not found · no cmdc.exe
+  (`codex-cli 0.162.1`), `cheap models` for opencode and cmd while off, or, red, `not found · no cmdc.exe
   on PATH`. `claude` shows `always on` in place of a switch, its title `Prep and the brief pass run on it; it
   cannot be turned off` (the service answers 400). A harness on but not found keeps its switch on, drawn red,
   and adds one line under the name: `Set "exe" in config.json, or turn it off.`, the full path and
   `under harnesses.cmd (not the .cmd shim)` in the title of `"exe"`. On a `POST /api/harness` error that
-  line carries the message in red. The card head's title holds `opencode and cmd rungs run read steps only
-  (cheap tier); rungs of a harness that is off never route; a step picked on one falls back to Claude's rung
+  line carries the message in red. The card head's title holds `opencode and cmd run cheap models, on read and
+  write steps; rungs of a harness that is off never route; a step picked on one falls back to Claude's rung
   of its tier`.
 - **Window runs**: closed line `Window runs · auto hand off: off ▾`. Open: `Auto hand off` over
   `at 300K · red zone`, its switch, and one line `Hands off a window run that ends its turn in the red zone
@@ -137,11 +137,11 @@ mono line. The levers: one primary `Run as task`, `Run` as the plain second butt
 
 - **Model selects** (`modelOptions`): tier groups `think`, `write`, `read` (and `fable` on the Run route),
   each holding rungs on any harness that is on and found, Claude's ladder first as `opus 4.8`, then
-  `codex · gpt-6-astra`, then the older Claude rungs. `opencode` and `cmd` rungs appear under `read` only, and
-  only on the Run route and on step rows whose kind's rule tier is read (`cfg.kinds_tier`). Plan 5 alone
+  `codex · gpt-6-astra`, then the older Claude rungs. `opencode` and `cmd` rungs appear under `read` (their models' tier), and
+  only on the Run route and on step rows whose kind's rule tier is read or write (`cfg.kinds_tier`; Fred, 2026-10-14). Plan 5 alone
   (before plan 18) draws the same select with the Claude ladder groups followed by one group per harness;
   the tier names arrive with plan 18.
-- **A refused pick** (decision 11): the row shows `opencode: read steps only (cheap tier) · back to auto` in
+- **A refused pick** (decision 11): the row shows `opencode: not on design, verify or fix steps · back to auto` in
   the row's say line and the select returns to auto. Changing a kind redraws its select; a pick the new kind
   cannot hold falls back to auto the same way.
 - **Route reason**: folded under the selects, closed line `why codex · balance ▾`; open: the rule, what
