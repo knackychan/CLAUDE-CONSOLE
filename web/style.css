@@ -314,6 +314,29 @@ textarea.in.m { font: 12px/1.45 var(--mono); }
 .hs .r { color: var(--bad); }
 .hs .btns { display: inline-flex; gap: 6px; }
 .hs .wide { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+/* the picker's settings band (plan 23): Window runs, one switch that is both the state word and the action */
+.pset { margin-top: 6px; padding: 8px 8px 2px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--raise) 45%, var(--win)); display: grid; gap: 8px; }
+.pop .pset .fold { gap: 0; background: var(--win); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.pop .pset .fold .fh { align-items: center; min-height: 34px; padding: 0 10px 0 12px; gap: 10px; }
+.pop .pset .fold .fh .lbl { font: 600 12.5px var(--ui); letter-spacing: 0; text-transform: none; color: var(--ink); }
+.pop .pset .fold .fh .fi { flex: 1; text-align: right; }
+.pop .pset .fold .fh:hover { background: var(--raise); }
+.pop .pset .fold .fh[aria-expanded="true"] { border-bottom: 1px solid var(--line); }
+.sr { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; padding: 7px 10px 7px 12px; }
+.sr .gl { grid-row: 1 / span 2; align-self: start; padding-top: 2px; font: 10px var(--mono); color: var(--mut); }
+.sr .gl.g { color: var(--ok); } .sr .gl.r { color: var(--bad); }
+.sr .nm { font: 500 13px var(--ui); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr .sub { grid-column: 2; font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr .sub.r { color: var(--bad); }
+.sr .ctl { grid-column: 3; grid-row: 1 / span 2; }
+.sr .why { grid-column: 2 / -1; margin-top: 4px; font: 11.5px/1.45 var(--ui); color: var(--mut); }
+.sw { position: relative; display: inline-flex; align-items: center; justify-content: flex-end; width: 50px; height: 22px; padding: 0 8px 0 0; border: 1px solid var(--line); border-radius: 11px; background: var(--off); color: var(--mut); font: 500 10.5px var(--mono); cursor: pointer; transition: background .15s, border-color .15s; }
+.sw::before { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--mut); transition: left .15s, background .15s; }
+.sw[aria-checked="true"] { justify-content: flex-start; padding: 0 0 0 8px; background: color-mix(in srgb, var(--ok) 16%, var(--win)); border-color: color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok); }
+.sw[aria-checked="true"]::before { left: 31px; background: var(--ok); }
+.sw[aria-busy="true"] { cursor: progress; opacity: .6; }
+.sw:hover { border-color: var(--ink); }
+.sw:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .pop .none { padding: 10px 12px; color: var(--mut); font-size: 13px; }
 .pop .foot { flex: none; border-top: 1px solid var(--line); padding: 6px 12px; display: flex; gap: 12px; font: 10.5px var(--mono); color: var(--mut); }
 .pop .foot span { white-space: nowrap; }
@@ -526,6 +549,21 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .hsec ol li { font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .hsec pre.text { background: var(--win); max-height: none; font-size: 11.5px; }
 .hsec .lbl .tg { margin-left: 2px; }
+/* the Handoff fold (plan 23): six headings, cut findings struck in place, the Facts fold, the HANDOFF chip */
+.fh .fi.r, .fh .fi .r { color: var(--bad); } .fh .fi.y, .fh .fi .y { color: var(--you); }
+.fh .fi b { color: var(--ink); font-weight: 400; }
+.fh:hover { color: var(--ink); }
+.fh[data-fold][aria-expanded="true"] .car { display: inline-block; transform: rotate(180deg); }
+.hb { display: grid; gap: 8px; }
+.hsec p { white-space: pre-wrap; }
+.hsec li.cut { color: var(--mut); }
+.hsec li.cut s { text-decoration-color: color-mix(in srgb, var(--mut) 55%, transparent); }
+.hsec li.cut .tag { display: inline-block; font: 500 9.5px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; vertical-align: 1px; }
+.fold.facts { background: transparent; border: 1px dashed var(--line); border-radius: 6px; padding: 4px 10px 6px; }
+.fold.facts .mono { font: 11.5px/1.45 var(--mono); margin: 0; color: var(--mut); overflow-wrap: anywhere; }
+.turn .hchip { display: inline-flex; gap: 6px; align-items: center; justify-self: start; font: 500 10.5px/16px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; margin: 2px 0; }
+.turn .hchip b { color: var(--ink); font-weight: 400; }
+.card .why { overflow-wrap: anywhere; }
 .parts { display: grid; gap: 1px; }
 .prt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 8px; align-items: baseline; font: 12.5px var(--ui);
   padding: 4px 0; border-top: 1px solid var(--line); }

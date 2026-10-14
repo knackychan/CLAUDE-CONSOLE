@@ -81,6 +81,9 @@ let taskData = null;     // GET /api/task for it: {task, levers, note, brief}
 let taskSig = "";
 let backTo = null;       // {page: "task", id} or {page: "session", id}: where the session or Task page's back arrow returns
 let rawOpen = false;     // the Task page shows the raw note instead of the brief
+const foldState = new Map(); // plan 23: fold label -> open, kept across redraws (Handoff, its headings, Facts, Window runs); closed on openTask
+let settingBusy = false; // POST /api/setting in flight (the Window runs switch)
+let settingErr = "";
 let planOpen = new Set(); // the Task page's open plan folds (plan 24); closed on openTask
 let planEdit = false;    // the plan askbox shows the editor
 let planEditPart = 0;    // which text the editor holds: 0 the index, k part k
@@ -150,7 +153,10 @@ function alias(model) {  // "" for a harness rung, as claude_cli.model_alias doe
   if (RUNG.test(String(model || ""))) return "";
   return (String(model || "").match(/fable|opus|sonnet|haiku/) || [model || ""])[0];
 }
-function label(s) { return s.state === "stop" ? "Asks you" : s.text; }
+function label(s) {
+  if (s.auto_handoff && s.handoff_by) return "Handed off";  // plan 23: the service handed it off at red
+  return s.state === "stop" ? "Asks you" : s.text;
+}
 function tone(s) {  // orange only for "needs you", red and green only for state
   if (s.state === "blocked" || s.state === "failed" || s.state === "verify_failed") return "r";
   if (s.group === "needs") return "y";
@@ -341,6 +347,7 @@ function peekId(s) { return `${s.id}|${s.state}|${s.turn_ts}`; }
 
 // What a session that needs Fred says, and the buttons that unblock it (the peek card and the list card).
 function needText(s) {
+  if (s.auto_handoff && s.handoff_by) return "";  // the card draws its own why
   if (s.state === "blocked" && s.denied) return `denied: ${s.denied.tool} ${s.denied.what}`;
   if (s.state === "failed" && s.failed) return `${s.failed.error} ${s.failed.details || ""}`.trim();
   if (s.state === "interrupted") return "The run stopped before it finished.";
@@ -388,6 +395,10 @@ async function unblock(button) {
   button.disabled = true;
   try {
     let r = null;
+    if (name === "next") {  // plan 23 (HANDED OFF card): the box is seeded with the handoff, the card leaves Needs you
+      seedBox(await api("/api/brief?session=" + encodeURIComponent(s.handoff_by) + "&kind=next"));
+      if (s.auto_handoff) await api("/api/done", { session: s.id });
+    }
     if (name === "send") r = await api("/api/continue", { session: s.id, text });
     if (name === "resume") await api("/api/continue", { session: s.id, text: RESUME_TEXT });
     if (name === "terminal") await api("/api/terminal", { session: s.id });
@@ -555,6 +566,11 @@ function cardHtml(s) {
   } else if (s.state === "stop") {
     third = `<div class="q">${esc(s.stop_question)}</div><div class="lr" data-stay><input id="ca-${esc(s.id)}" aria-label="Answer" placeholder="Type your answer">
       <button class="btn you sm" data-do="send" data-sid="${esc(s.id)}" data-where="card">Send</button></div>`;
+  } else if (s.auto_handoff && s.handoff_by) {  // README 3.7: the service handed it off at red; one task = one chat
+    third = `<div class="why m y">↻ ${s.window ? "" : "forked, then "}handed off by itself at ${kTokens(s.auto_handoff)}</div>
+      <div class="lr" data-stay><span class="hn ready">✓ handoff ready</span>
+      <button class="btn you sm" data-do="next" data-sid="${esc(s.id)}" data-where="card" title="Starts the next chat with the handoff in the task box: one task = one chat (auto hand off, D-5)">Start next chat</button>
+      <span class="link m" data-open="${esc(s.handoff_by)}">handoff</span></div>`;
   } else {
     const text = s.group === "needs" ? needText(s) : "", buttons = s.group === "needs" ? needButtons(s, "card", false) : "";
     const agent = s.agents.find((a) => a.text === "Running");
@@ -922,6 +938,14 @@ function harnessHtml() {  // the Harnesses group: state is a glyph plus a word, 
     ${mf.error ? `<span class="r wide">${esc(mf.error)}</span>` : hsErr.models ? `<span class="r wide">${esc(hsErr.models)}</span>` : ""}</div>`;
   return `<div class="grp lbl">Harnesses</div>${rows}${mrow}`;
 }
+function windowRunsFold() {  // interface 4, ID-2: config.json stays the truth; POST /api/setting writes it
+  const on = !!(cfg && cfg.handoff_auto), red = cfg && cfg.gauge ? cfg.gauge[1] : 300000;
+  const ctl = `<button class="sw" role="switch" data-setting="handoff_auto" aria-checked="${on}" aria-label="auto hand off" title="${on ? "Turn off" : "Turn on"}${settingBusy ? " (waiting for the service)" : ""}"${settingBusy ? ' aria-busy="true"' : ""}>${settingBusy ? "..." : on ? "on" : "off"}</button>`;
+  const row = `<div class="sr"><span class="gl ${on ? "g" : ""}">${on ? "●" : "○"}</span><span class="nm">Auto hand off</span><span class="ctl">${ctl}</span>
+    <span class="sub${settingErr ? " r" : ""}">${esc(settingErr || `at ${kTokens(red)} · red zone`)}</span>
+    <span class="why">Hands off a window run that ends its turn in the red zone and seeds the next chat; a VS Code chat is forked first.</span></div>`;
+  return fold("Window runs", `auto hand off: ${on ? "on" : "off"}`, row);
+}
 async function harnessAct(button) {
   const name = button.dataset.harness;
   hsBusy.add(name); delete hsErr[name]; pickRows();
@@ -958,7 +982,7 @@ function pickRows() {
   if (on.length) html += `<div class="grp lbl">Runs allowed · ${on.length}</div>${on.map(line).join("")}`;
   if (off.length) html += `<div class="grp lbl">Runs off · ${off.length}</div>${off.map(line).join("")}`;
   if (!match.length) html = `<div class="none">No project matches "${esc(q)}". Projects appear here once a Claude Code session runs in them.</div>`;
-  if (!q) html += harnessHtml();
+  if (!q) html += harnessHtml() + `<div class="pset">${windowRunsFold()}</div>`;
   $("prows").innerHTML = html;
   hi = 0;
   markHi();
@@ -1379,13 +1403,19 @@ function chatHtml(text) {
   return out.join("");
 }
 
+function claudeTurn(text) {  // a step's (or a skill's) final reply: the block folds to a chip and its Next line
+  const hb = handoffBlock(text);
+  if (!hb) return chatHtml(text);
+  const h = handoffSections(hb[1]), w = hb[1].split(/\s+/).filter(Boolean).length;
+  return (hb[0].trim() ? chatHtml(hb[0]) : "") + `<span class="hchip">HANDOFF block · <b>${w} w</b> · six headings</span><p>Next: ${esc(h.next.split("\n")[0])}</p>`;
+}
 function chatPane(chat, sid, source) {  // the Chat tab's markup: a window run's stream or a transcript's turns
   const turns = chat.items.filter((i) => i.role !== "tool");
   const foot = chat.source === "window"
     ? "Streamed from this window run." + (chat.start_commit ? ` start ${esc(chat.start_commit.slice(0, 7))} · ${chat.changed == null ? "?" : chat.changed} file(s) changed since.` : "")
     : `Read from the ${esc(source === "?" ? "chat" : source)} transcript, in words and files; tool output stays in Steps.`;
   return `<div class="chat">${turns.map((i) => `<div class="turn ${i.role}"><span class="lbl">${i.role === "you" ? "You" : i.role === "claude" ? "Claude" : esc(i.role)}${i.ts ? " · " + hhmm(i.ts) : ""}</span>
-    ${i.role === "claude" ? chatHtml(i.text) : i.text ? `<p>${esc(i.text)}</p>` : ""}${chatFiles(i.files, i.role, sid)}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
+    ${i.role === "claude" ? claudeTurn(i.text) : i.text ? `<p>${esc(i.text)}</p>` : ""}${chatFiles(i.files, i.role, sid)}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
     <p class="src">${foot}</p></div>`;
 }
 
@@ -1644,6 +1674,64 @@ function stepBody(text) {  // a ### Step N section or a sub-plan: Files, Actions
   }
   return bits.map((b) => (b.title ? `<span class="lbl s">${esc(b.title)}</span>` : "") + mdBlock(b.body.join("\n"))).join("");
 }
+// -- plan 23: the Handoff fold, its facts, the chip's block parser ---------------------------------
+function fold(label, info, body, o = {}) {  // a head button and a body; o.cls, o.tone ("r" | "y"), o.open, o.title; the open state outlives a redraw
+  const open = foldState.has(label) ? foldState.get(label) : !!o.open;
+  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold aria-expanded="${open}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="lbl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span><span class="car">▾</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
+}
+const HEADS = { "## Goal": "goal", "## Findings": "findings", "## Files touched": "files", "## Troubleshooting": "trouble",
+                "## Open questions": "questions", "## Next": "next" };  // tasks.HEADINGS
+const normItem = (line) => String(line).trim().replace(/^[-*]\s*/, "").split(/\s+/).join(" ");  // compact._item
+function handoffSections(text) {  // a note, a brief or a HANDOFF block -> its six headings; a four-heading note gives four
+  const h = { goal: "", findings: [], files: [], trouble: [], questions: [], next: "" };
+  const body = String(text || "").replace(/^[\s\S]*?\nHANDOFF\n/, "\n").replace(/\nEND HANDOFF[\s\S]*$/, "");
+  let key = null;
+  for (const line of body.split("\n")) {
+    if (HEADS[line.trim()]) { key = HEADS[line.trim()]; continue; }
+    const item = normItem(line);
+    if (!key || !item || /^\(?(none|n\/a|none recorded)\)?\.?$/i.test(item)) continue;
+    if (key === "goal" || key === "next") h[key] += (h[key] ? "\n" : "") + item;
+    else h[key].push(item);
+  }
+  return h;
+}
+function headingBlock(h, cut = [], open = ["goal", "findings", "questions", "next"], whole = false) {
+  // the six headings; `cut`: finding items the brief pass left out (brief_meta.cut), struck in place with a `cut` tag
+  const li = (x) => cut.includes(x) ? `<li class="cut"><span class="tag">cut</span> <s>${esc(x)}</s></li>` : `<li>${esc(x)}</li>`;
+  const ul = (items, mono = false) => `<ul${mono ? ' class="mono"' : ""}>${items.map(li).join("")}</ul>`;
+  const count = (items) => { const c = items.filter((x) => cut.includes(x)).length;
+    return c ? `${items.length - c} kept · ${c} cut` : `${items.length} ${items.length === 1 ? "line" : "lines"}${whole ? " · whole" : ""}`; };
+  const sec = (key, label, info, body) => open.includes(key) ? `<div class="hsec"><span class="lbl">${label}<span class="m">${info}</span></span>${body}</div>` : fold(label, info, body, { cls: "hf" });
+  const base = (p) => p.replace(/^.*\//, "").replace(/ \(.*$/, "");
+  return `<div class="hb">${sec("goal", "Goal", "", `<p>${esc(h.goal) || "(none)"}</p>`)}
+    ${sec("findings", "Findings", count(h.findings), ul(h.findings))}
+    ${sec("files", "Files touched", h.files.length ? `${h.files.length} · ${h.files.slice(0, 2).map(base).map(esc).join(", ")}${h.files.length > 2 ? " +" + (h.files.length - 2) : ""}` : "none", ul(h.files, true))}
+    ${sec("trouble", "Troubleshooting", h.trouble.length ? count(h.trouble) : "none", ul(h.trouble))}
+    ${h.questions.length ? sec("questions", "Open questions", `<span class="y">${h.questions.length} open</span>`, ul(h.questions)) : ""}
+    ${sec("next", "Next", "", `<p>${esc(h.next) || "(none)"}</p>`)}</div>`;
+}
+function handoffBlock(text) {  // the last HANDOFF ... END HANDOFF of a reply: [before, block] or null (runs.chat may cut a long reply)
+  const t = String(text || ""), a = t.lastIndexOf("\nHANDOFF\n"), b = t.lastIndexOf("\nEND HANDOFF");
+  return a >= 0 && b > a ? [t.slice(0, a), t.slice(a + 9, b)] : null;
+}
+function factsFold(f, text) {  // the facts the service read when the step ended: never compacted (README 3.4)
+  if (!f && !text) return "";
+  const fail = f && f.tests.startsWith("FAIL");
+  const info = f ? `${f.files} ${f.files === 1 ? "file" : "files"} +${f.plus} -${f.minus}${f.tests ? " · " + esc(f.tests) : ""}` : "read";
+  return fold("Facts", info, `<p class="mono">${esc(text || "").replace(/\n/g, "<br>")}</p>`,
+              { cls: "facts", tone: fail ? "r" : "", open: fail, title: "git diff --stat from the step's start to its end, and its last test command: code reads them, no model" });
+}
+function handoffFold(t, d, n, sn, meta, nextStep) {
+  const brief = (d.briefs || {})[String(n)] || "", raw = (d.notes || {})[String(n)] || "";
+  const sent = handoffSections(brief), wrote = handoffSections(raw), cut = (meta && meta.cut) || [];
+  const words = meta ? meta.sent_w : brief.split(/\s+/).filter(Boolean).length;
+  const label = nextStep ? `Handoff for ${two(nextStep.n)}` : "Last handoff";
+  const info = `${words} w${meta && meta.fallback ? ' · <span class="y">as written</span>' : ""} · Next: ${esc(sent.next.split("\n")[0])}`;
+  const head = meta ? `<div class="hd"><span class="m" title="${esc(meta.fallback ? "the brief pass failed: " + meta.fallback + "; code cut the note" : `by ${meta.by}, ${meta.turns} turns, $${money(meta.cost)}`)}">${meta.fallback ? "sent as written, cut by code" : `compacted from ${meta.raw_w} w`}</span>
+      <span class="link m" data-tact="raw">${rawOpen ? "as sent" : `as ${two(n)} wrote it`}</span></div>` : "";
+  const body = rawOpen ? headingBlock(wrote, cut, ["goal", "findings", "trouble", "questions", "next"]) : headingBlock(sent, [], undefined, true);
+  return `<div class="blk">${fold(label, info, head + body + factsFold(sn && sn.facts, (d.facts || {})[String(n)]))}</div>`;
+}
 function pfold(key, label, info, body, o = {}) {
   const open = planOpen.has(key);
   return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-tact="pfold" data-key="${esc(key)}" aria-expanded="${open}"><span class="lbl">${label}</span><span class="fi">${info}</span><span class="car">${open ? "▴" : "▾"}</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
@@ -1767,11 +1855,10 @@ function drawTask() {
   const chain = `<div class="blk"><span class="lbl">Steps · ${t.steps.length}</span><div class="chain">${t.steps.map((s) => chainRow(t, { ...s, note: notes.get(s.n) || "" })).join("")}</div>
     ${t.cleared ? '<p class="m mut" style="margin:0">cleared: notes and streams removed</p>' : ""}</div>`;
   const planRow = planRowHtml(t, d, cur);
-  const text = rawOpen ? d.note : d.brief;
-  const body = t.briefing ? `<span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Haiku is compacting the note</span>`
-    : text ? `<pre class="text">${esc(text)}</pre>` : `<p class="m mut" style="margin:0">${rawOpen ? "No raw note" : "No brief"} yet.</p>`;
-  const brief = `<div class="blk"><div class="hd"><span class="lbl">${rawOpen ? "Raw note of step " + t.last_good : t.state === "done" ? "Last brief" : "Brief for the next step"}</span>
-    ${d.note && !t.briefing ? `<button class="btn sm" data-tact="raw">${rawOpen ? "Show brief" : "Show raw note"}</button>` : ""}</div>${body}</div>`;
+  const n = t.last_good, sn = t.steps.find((x) => x.n === n), meta = (sn && sn.brief_meta) || null;
+  const nextStep = t.steps.find((x) => x.n === n + 1);
+  const brief = t.briefing ? `<div class="blk"><span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Compacting the handoff of ${two(t.briefing)}</span></div>`
+    : n ? handoffFold(t, d, n, sn, meta, nextStep) : "";
   setHtml($("tscroll"), head + why + chain + planRow + brief);
   const b = (name, cls, label) => `<button class="btn${cls}" data-tact="${name}">${label}</button>`;
   let buttons = "";
@@ -1808,6 +1895,7 @@ async function openTask(id) {
   taskId = id;
   taskData = null;
   rawOpen = false;
+  foldState.clear();
   planOpen = new Set();
   planEdit = false;
   planEditPart = 0;
@@ -2138,8 +2226,24 @@ async function rawRun() {
   saveDraft();
 }
 
-document.addEventListener("click", (e) => {
+document.addEventListener("click", async (e) => {
   if (!$("pop").hidden && !e.target.closest("#pop") && !e.target.closest("[data-pick]")) closePicker();
+  const fb = e.target.closest("[data-fold]");  // plan 23: a fold head toggles its body and remembers it
+  if (fb) {
+    const open = fb.getAttribute("aria-expanded") !== "true";
+    fb.setAttribute("aria-expanded", String(open));
+    fb.nextElementSibling.hidden = !open;
+    foldState.set(fb.querySelector(".lbl").textContent, open);
+    return;
+  }
+  const swb = e.target.closest("[data-setting]");
+  if (swb && !settingBusy) {
+    settingBusy = true; settingErr = ""; pickRows();
+    try { cfg.handoff_auto = (await api("/api/setting", { key: "handoff_auto", value: swb.getAttribute("aria-checked") !== "true" })).value; }
+    catch (err) { settingErr = err.message; }
+    settingBusy = false; pickRows();
+    return;
+  }
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
   const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today");
   if (!t) return;
