@@ -353,8 +353,13 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
 
 - **Kinds**: one row per kind, grouped in cards by tier (Read, Write, Think) in the Settings card grammar. The
   row: the kind's name over a quiet line (its tools and turn cap), a rung picker (`auto · read`, `auto · write`,
-  `auto · think`, or one fixed rung on any harness that is on) and an effort picker. Auto takes the tier's
-  ladder; a fixed rung pins it. The Prep card can still pick another rung for one step. `verify` (one tier above
+  `auto · think`, or one fixed rung on any harness that is on) and an effort picker (`auto`, `low`, `medium`,
+  `high`, `xhigh`). Both read `auto` by default (Fred, 2026-10-14): auto lets Prep and the router decide (the
+  tier's emptiest model; the effort from the kind's start in `tasks.RULES`, raised by Prep's demand, the floor
+  and the hint, capped per model), and the auto picker's title says where it starts. A picked rung or level
+  pins it as that kind's default: `step_route` then skips the demand, floor and hint for the effort, as the
+  composer's fixed effort does today (the model's cap still applies). Effort on a tier's rung works the same
+  way: `auto` unless pinned. The Prep card can still pick another rung for one step. `verify` (one tier above
   the rung that wrote the step) and `fix` (the failed step's tier, never opencode or cmd) sit in a Checks card,
   set by the rule, not editable. Writes `kinds: {kind: {rung, effort}}`; a kind absent from it keeps the code's
   rule.
