@@ -42,6 +42,15 @@ DEFAULTS = {
         "opus": ["opus", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
         "fable": ["fable"],
     },
+    # plan 05: harness adapters (the models of each live in models.json)
+    "harnesses": {
+        "claude": {"on": True, "exe": ""},
+        "codex": {"on": False, "exe": ""},
+        "opencode": {"on": False, "exe": ""},
+        "cmd": {"on": False, "exe": ""},
+    },
+    "step_timeout_s": 1800,  # ends a run of an adapter with no turn or spend cap
+    "effort_variant": {},  # OpenCode: {model: {effort: variant}}
     "storage_warn_mb": 500,
     "task_clear_on_done": True,
     "brief_on": True,  # the Haiku pass that compacts a step's note into the next step's brief
@@ -58,6 +67,22 @@ DEFAULTS = {
     },
 }
 
+HARNESSES = ("claude", "codex", "opencode", "cmd")  # equal to harness.NAMES (a test asserts it)
+
+# models.json (plan 05 3.2b): per CLI, model id -> tier, in the order the window lists them.
+MODELS_DEFAULT = {
+    "claude": {"opus": "opus", "sonnet": "sonnet", "haiku": "haiku", "fable": "fable",
+               "claude-opus-4-8": "opus", "claude-opus-4-7": "opus", "claude-sonnet-4-6": "sonnet",
+               "claude-haiku-4-5": "haiku"},
+    "codex": {"gpt-6-astra": "opus", "gpt-6.1-sol": "sonnet", "gpt-6-sol": "sonnet", "gpt-6-luna": "haiku"},
+    "opencode": {"opencode-go/deepseek-v4.1-flash": "haiku", "opencode-go/glm-5.3-flash": "haiku",
+                 "opencode-go/qwen3.8-flash": "haiku", "opencode-go/gpt-6-luna": "haiku",
+                 "opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"},
+    "cmd": {"deepseek/deepseek-v4.1-flash": "haiku", "z-ai/glm-5.3-flash": "haiku",
+            "Qwen/Qwen3.8-Flash": "haiku", "gpt-6-luna": "haiku"},
+}
+_LAST_GOOD = {}  # models.json path -> the last dict that parsed
+
 
 def home() -> Path:
     """The data folder: env CC_CONSOLE_HOME (tests), else ~/.claude/console."""
@@ -65,21 +90,94 @@ def home() -> Path:
     return Path(env) if env else Path.home() / ".claude" / "console"
 
 
+def load_models(write: bool = True) -> tuple:
+    """(models, error): models.json parsed and "", or the last good dict (the defaults at first) and the error
+    ("models.json line 12: Expecting ',' delimiter"). A missing file is written from MODELS_DEFAULT when
+    `write`. Never raises."""
+    path = home() / "models.json"
+    last = _LAST_GOOD.get(str(path)) or copy.deepcopy(MODELS_DEFAULT)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        if write:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(MODELS_DEFAULT, indent=2) + "\n", encoding="utf-8")
+            except OSError:
+                pass
+        _LAST_GOOD[str(path)] = copy.deepcopy(MODELS_DEFAULT)
+        return copy.deepcopy(MODELS_DEFAULT), ""
+    except OSError as exc:
+        return last, f"models.json: {exc.strerror or exc}"
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return last, f"models.json line {getattr(exc, 'lineno', 1)}: {getattr(exc, 'msg', exc)}"
+    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+        return last, "models.json: expected an object of objects"
+    _LAST_GOOD[str(path)] = copy.deepcopy(data)
+    return data, ""
+
+
+def _ladder_from(claude_models: dict, fallback: dict) -> dict:
+    """tier -> rungs in file order, the alias (the tier's own name) first."""
+    ladder = {tier: [] for tier in fallback}
+    for model, tier in claude_models.items():
+        if isinstance(tier, str) and tier:
+            ladder.setdefault(tier, []).append(model)
+    return {tier: sorted(rungs, key=lambda m: m != tier) for tier, rungs in ladder.items() if rungs}
+
+
 def load_config() -> dict:
-    """DEFAULTS overlaid with config.json; nested dicts merge one level deep."""
+    """DEFAULTS overlaid with config.json; nested dicts merge one level deep. Adds cfg["models"] (models.json)
+    and, when models.json exists, cfg["ladder"] built from its Claude list."""
     cfg = copy.deepcopy(DEFAULTS)
     try:
         user = json.loads((home() / "config.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return cfg
-    if not isinstance(user, dict):
-        return cfg
-    for key, value in user.items():
-        if isinstance(value, dict) and isinstance(cfg.get(key), dict):
-            cfg[key].update(value)
-        else:
-            cfg[key] = value
+        user = None
+    if isinstance(user, dict):
+        for key, value in user.items():
+            if isinstance(value, dict) and isinstance(cfg.get(key), dict):
+                cfg[key].update(value)
+            else:
+                cfg[key] = value
+    claude = cfg["harnesses"].get("claude")
+    if isinstance(claude, dict) and not claude.get("exe") and cfg.get("claude_exe"):
+        claude["exe"] = cfg["claude_exe"]
+    models, _ = load_models(write=False)
+    models = copy.deepcopy(models)
+    for name, section in cfg["harnesses"].items():  # an earlier build kept the lists in config.json
+        if name not in models and isinstance(section, dict) and isinstance(section.get("models"), dict):
+            models[name] = dict(section["models"])
+    cfg["models"] = models
+    if (home() / "models.json").exists() and isinstance(models.get("claude"), dict) and models["claude"]:
+        cfg["ladder"] = _ladder_from(models["claude"], cfg["ladder"])
     return cfg
+
+
+def set_harness(folder: Path, name: str, on: bool) -> None:
+    """Write harnesses.<name>.on into <folder>/config.json; every other key stays as written.
+    Raises ValueError for an unknown name or a config.json that cannot be read."""
+    if name not in HARNESSES:
+        raise ValueError(f"unknown harness: {name}")
+    path = Path(folder) / "config.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        raise ValueError(f"cannot read {path}: fix it by hand")
+    harnesses = data.get("harnesses")
+    if not isinstance(harnesses, dict):
+        harnesses = data["harnesses"] = {}
+    entry = harnesses.get(name)
+    if not isinstance(entry, dict):
+        entry = harnesses[name] = {"on": False, "exe": ""}
+    entry["on"] = bool(on)
+    tmp = path.with_name("config.json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def add_project(folder: Path, project: str) -> None:
@@ -136,4 +234,5 @@ def ensure_config() -> dict:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(DEFAULTS, indent=2) + "\n", encoding="utf-8")
+    load_models()  # writes models.json when missing
     return load_config()
