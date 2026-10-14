@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime
 from pathlib import Path
 
@@ -203,6 +204,40 @@ class OtherRunsTest(unittest.TestCase):
             seen = json.loads((Path(folder) / usage.DAYS_FILE).read_text(encoding="utf-8"))["seen"]
             self.assertEqual(seen, {"2026-10-14": ["new@1.0"]})
             self.assertEqual(usage.load_other(folder)["2026-10-10"]["kimi-k3"]["runs"], 1)  # the counts stay
+
+    def test_add_other_returns_what_it_wrote(self):
+        with tempfile.TemporaryDirectory() as folder:
+            wrote = usage.add_other(folder, "s4@1.0", "2026-10-14", "kimi-k3", None, 1.0)
+            self.assertEqual(wrote, usage.load_other(folder))
+            self.assertEqual(wrote["2026-10-14"]["kimi-k3"]["cost"], 1.0)
+            self.assertIsNone(usage.add_other(folder, "s4@1.0", "2026-10-14", "kimi-k3", None, 1.0))
+
+
+class UnreadableDaysFileTest(unittest.TestCase):
+    """Review K7: an unreadable usage-days.json is never overwritten; it is copied aside once."""
+
+    def test_writers_skip_an_unreadable_file_and_copy_it_aside_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path, bad = folder / usage.DAYS_FILE, folder / (usage.DAYS_FILE + ".bad")
+            path.write_text('{"days": {"2026-10-01": {"cost": 9.0}}, "seen"', encoding="utf-8")
+            self.assertFalse(usage.add_other(folder, "s5@1.0", "2026-10-14", "kimi-k3", None, 1.0))
+            self.assertFalse(usage.save_days(folder, {"2026-10-12": {"cost": 2.0}}, "2026-10-14"))
+            self.assertEqual(path.read_text(encoding="utf-8"), '{"days": {"2026-10-01": {"cost": 9.0}}, "seen"')
+            self.assertEqual(bad.read_text(encoding="utf-8"), path.read_text(encoding="utf-8"))
+            path.write_text("[]", encoding="utf-8")  # not an object: unreadable too; the first copy stays
+            self.assertFalse(usage.save_days(folder, {"2026-10-12": {"cost": 2.0}}, "2026-10-14"))
+            self.assertEqual((path.read_text(encoding="utf-8"), bad.read_text(encoding="utf-8")[:9]), ("[]", '{"days": '))
+            self.assertEqual((usage.load_days(folder), usage.load_other(folder)), ({}, {}))
+
+    def test_a_missing_file_is_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(usage.save_days(tmp, {"2026-10-12": {"cost": 2.0}}, "2026-10-14"))
+            self.assertFalse((Path(tmp) / (usage.DAYS_FILE + ".bad")).exists())
+
+    def test_save_days_returns_false_when_the_write_fails(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(usage, "_write", side_effect=OSError("disk full")):
+            self.assertFalse(usage.save_days(tmp, {"2026-10-12": {"cost": 2.0}}, "2026-10-14"))
 
 
 if __name__ == "__main__":

@@ -118,6 +118,9 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
             pick, from_pin = pin_rung, True
             notes.append(f"pin {kind}: {pin_rung}")
     picked = (fills.rank_of(pick, cfg) if cfg is not None else claude_cli.model_alias(pick)) if pick else ""
+    if pick and not picked and cfg is not None:  # review plan-18 nit: a pick no list knows balances, with a note
+        notes.append(f"pick: {pick}")
+        notes.append(f"pick refused: {(refuse(pick) if refuse else '') or 'unknown model'} -> balance")
     if picked:
         model = picked
         if not from_pin:  # a pin wrote its own note above
@@ -171,10 +174,10 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
             rung = model
             notes.append(f"balance: no usable {tier} rung -> {model}")
         model = fills.rank_of(rung, cfg) or model
-    elif cfg is not None:
-        share = ((budget or {}).get(fills.model_key(rung, cfg)) or {}).get("share")
     if not rung:
         rung = model
+    if cfg is not None and share is None:  # review B10: a pick, a pin or an empty pool reads its rung's own fill
+        share = ((budget or {}).get(fills.model_key(rung, cfg)) or {}).get("share")
     if kind == "verify" and cfg is not None and share is not None and share >= warn_at:
         hold = f"{fills.model_key(rung, cfg)} over its pace"
         notes.append(f"over pace: {rung} {round(share * 100)} % -> hold")

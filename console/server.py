@@ -103,6 +103,13 @@ class Hub:
                     self.cfg["ladder"] = paths._ladder_from(models["claude"], self.cfg.get("ladder") or {})
             self.version += 1
             self.changed.notify_all()
+        for name, listed in ({} if error else models).items():  # review G5: what the readers leave out, logged
+            held = harness.tiers_of(self.cfg, name) if name in harness.NAMES else claude_cli.MODELS
+            for model, tier in listed.items():
+                if tier not in claude_cli.MODELS:
+                    self._log(f"models.json: {name} {model} dropped: unknown tier {tier}")
+                elif tier not in held:
+                    self._log(f"models.json: {name} {model} dropped: {name} holds no {tier} model")
 
     def _config_mtime(self):
         try:
@@ -234,6 +241,8 @@ class Hub:
                 return f"{name} is off"
             if not self.found.get(name):
                 return f"{name}: not found on PATH"
+            if bare not in claude_cli._rung_models(self.cfg, name):  # review G5: README 3.2b of plan 5
+                return f"model gone from models.json: {rung}"
         if not isinstance(rung, str) or not claude_cli.known_model(self.cfg, rung):
             return "unknown model or effort"
         if name in ("opencode", "cmd") and kind:
@@ -254,8 +263,13 @@ class Hub:
                 self.changed.notify_all()
         for rec in new:  # plan 18: the fills count other harnesses' runs from their run_ended lines
             if rec.get("event") == "run_ended":
-                self.count_run(rec)
+                try:  # review K9: a malformed line never escapes into start_step or the hub loop
+                    self.count_run(rec)
+                except Exception as exc:
+                    self._log(f"count_run {rec.get('session_id')}: {type(exc).__name__}: {exc}")
         return len(new)
+
+    _count_lock = threading.Lock()  # review K8: one count_run at a time (request threads call poll_once too)
 
     def count_run(self, rec: dict) -> bool:
         """One ended run of a harness other than Claude (whose transcripts the history prices) into usage-days.json:
@@ -269,13 +283,14 @@ class Hub:
         if not isinstance(cost, (int, float)):
             cost = fills.price(rec.get("tokens"), (self.cfg.get("prices") or {}).get(key))  # D3: None = unknown
         ts = float(rec.get("ts") or time.time())
-        if not usage.add_other(self.folder, f"{rec['session_id']}@{ts}", usage.day_of(ts), key, rec.get("tokens"), cost):
-            return False
-        other = usage.load_other(self.folder)
-        with self.lock:
-            self.usage_other = other
-            self.version += 1
-            self.changed.notify_all()
+        with self._count_lock:  # review K8: the dict add_other wrote under FILE_LOCK, kept in the order written
+            other = usage.add_other(self.folder, f"{rec['session_id']}@{ts}", usage.day_of(ts), key, rec.get("tokens"), cost)
+            if other is None:
+                return False
+            with self.lock:
+                self.usage_other = other
+                self.version += 1
+                self.changed.notify_all()
         return True
 
     def read_costs(self) -> int:
@@ -857,6 +872,7 @@ class Hub:
     def start_step(self, task: dict, n: int) -> None:
         """Route step `n` and start its run; a hold waits for Fred, a run that cannot start makes the task stuck."""
         s, now, lines = tasks.step(task, n), time.time(), []
+        self.reload_models()  # review B12: a models.json edit reaches this step's route, not the next one
         route = self._route_for(task, s)
         if route["hold"] and task.get("hold_ok") != n:
             tasks._task_to(task, "waiting", route["hold"], now, s, lines)
@@ -864,7 +880,6 @@ class Hub:
         if route["hold"]:  # Fred's Run anyway, for this step only
             route = dict(route, notes=route["notes"] + ["budget: hold released by Fred"], hold="")
             task.pop("hold_ok", None)
-        self.reload_models()
         kind, tier, model = s["kind"], route["model"], route["rung"]  # plan 18: the route chose the rung
         if tier == "fable" and not task["fable_ok"]:  # a hard-only fable rung of the think tier bills credits too
             tasks._task_to(task, "waiting", "confirm Fable", now, s, lines)

@@ -237,7 +237,7 @@ def peak_add(cfg, rung, now: float) -> float:
     try:
         a, b = (int(x) for x in str(rule.get("hours", "")).split("-"))
         add = float(rule.get("add") or 0)
-    except ValueError:
+    except (ValueError, TypeError):  # review B11: a hand-edited "add": [1] must not break every route
         return 0.0
     hour = time.localtime(now).tm_hour
     inside = a <= hour < b if a <= b else (hour >= a or hour < b)

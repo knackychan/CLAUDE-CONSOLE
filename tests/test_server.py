@@ -1,4 +1,5 @@
 import base64
+import copy
 import http.client
 import json
 import os
@@ -1407,6 +1408,25 @@ class TaskServerTest(RunServerTest):
         today = self.hub.snapshot()["spend"]
         self.assertEqual(today["fills"]["over"], [])
 
+    def test_count_run_keeps_what_add_other_wrote(self):
+        sid, ts = "0000-codex", time.time()
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
+        self.hub.runs.meta_path(sid).write_text(json.dumps({"harness": "codex", "model": "gpt-6.1-sol"}), encoding="utf-8")
+        rec = {"event": "run_ended", "session_id": sid, "ts": ts, "cost": 0.5}
+        with mock.patch.object(usage, "load_other", side_effect=AssertionError("read after FILE_LOCK")):
+            self.assertTrue(self.hub.count_run(rec))
+        self.assertEqual(self.hub.usage_other[usage.day_of(ts)]["gpt-6.1-sol"]["cost"], 0.5)
+
+    def test_a_bad_run_ended_line_never_escapes_poll_once(self):
+        sid = "0000-codex"
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
+        self.hub.runs.meta_path(sid).write_text(json.dumps({"harness": "codex", "model": "gpt-6.1-sol"}), encoding="utf-8")
+        rec = {"event": "run_ended", "session_id": sid, "ts": time.time(), "tokens": {"input": "lots"}}
+        with mock.patch.object(self.hub.reader, "read_new", return_value=[rec]):
+            self.assertEqual(self.hub.poll_once(), 1)
+        log = (self.folder / "console.log").read_text(encoding="utf-8")
+        self.assertIn("count_run 0000-codex: ValueError", log)
+
     def test_models_page_saves_to_config_json(self):
         """Plan 26: POST /api/config/models writes the checked keys, keeps every other key, and the hub uses them."""
         cfg = self.call("/api/config")[1]
@@ -2119,7 +2139,7 @@ class HarnessServerTest(TaskServerTest):
         status, data = self.call("/api/run", body)
         self.assertEqual((status, data["error"]), (409, "cmd is off"))
         status, data = self.call("/api/run", dict(body, model="codex:nope"))
-        self.assertEqual((status, data["error"]), (400, "unknown model or effort"))
+        self.assertEqual((status, data["error"]), (409, "model gone from models.json: codex:nope"))
         self.hub.found["codex"] = False
         self.assertEqual(self.call("/api/run", dict(body, model="codex:gpt-6.1-sol"))[0], 409)
 
@@ -2192,6 +2212,45 @@ class HarnessServerTest(TaskServerTest):
         self.assertEqual((step["harness"], step["model"], step["tier"]), ("claude", "sonnet", "sonnet"))
         self.assertIn("pick refused: codex is off -> balance", step["notes"])
         self.assertEqual(self.hub.runs.meta(step["session"])["harness"], "claude")
+
+    def use_models_json(self, models):
+        """models.json under a data folder the test owns (the Hub reads paths.home()), written with a new mtime."""
+        patcher = mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(self.folder)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        path = self.folder / "models.json"
+        path.write_text(json.dumps(models), encoding="utf-8")
+        old = self.hub.models_mtime or 0
+        os.utime(path, ns=(old + 10**9, old + 10**9))
+
+    def test_rung_gone_from_models_json(self):
+        self.hub.cfg["models"]["codex"] = {"gpt-6-sol": "sonnet"}
+        self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol"), "model gone from models.json: codex:gpt-6.1-sol")
+        self.assertEqual(self.hub.rung_ok("codex:gpt-6-sol"), "")
+        self.hub.cfg["harnesses"]["codex"]["on"] = False
+        self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol"), "codex is off")
+
+    def test_models_json_is_reread_before_the_route(self):
+        steps = [{"kind": "scout", "goal": "look"}, {"kind": "scout", "goal": "again", "model": "codex:gpt-6.1-sol"}]
+        tid = self.make_task(steps=steps)
+        self.until(tid, self.at(1), "step 1 starts")
+        self.use_models_json(dict(copy.deepcopy(paths.MODELS_DEFAULT), codex={"gpt-6-sol": "sonnet"}))
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step = task["steps"][1]
+        self.assertEqual(step["harness"], "claude")
+        self.assertIn("pick refused: model gone from models.json: codex:gpt-6.1-sol -> balance", step["notes"])
+
+    def test_reload_models_logs_what_it_drops(self):
+        models = copy.deepcopy(paths.MODELS_DEFAULT)
+        models["claude"]["claude-x"] = "gpt"
+        models["opencode"] = {"opencode-go/kimi-k3": "opus", "opencode-go/sonnet-ish": "sonnet"}
+        self.use_models_json(models)
+        self.hub.reload_models()
+        log = (self.folder / "console.log").read_text(encoding="utf-8")
+        self.assertIn("models.json: claude claude-x dropped: unknown tier gpt", log)
+        self.assertIn("models.json: opencode opencode-go/sonnet-ish dropped: opencode holds no sonnet model", log)
+        self.assertNotIn("kimi-k3", log)
+        self.assertNotIn("gpt", self.hub.cfg["ladder"])
 
     def test_step_timeout_reaches_the_retry_reason(self):
         self.hub.cfg["step_timeout_s"] = 1

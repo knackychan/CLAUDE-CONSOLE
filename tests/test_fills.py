@@ -197,6 +197,8 @@ class BalanceTest(unittest.TestCase):
         self.assertEqual(fills.peak_add(cfg, "codex:gpt-6-astra", NOW), 0.0)
         self.assertEqual(fills.peak_add(cfg, "opus", datetime(2026, 10, 14, 9).timestamp()), 0.0)
         self.assertEqual(fills.peak_add(dict(CFG, peak_hours={"anthropic": {"hours": "x"}}), "opus", NOW), 0.0)
+        self.assertEqual(fills.peak_add(dict(CFG, peak_hours={"anthropic": {"hours": "14-19", "add": [1]}}), "opus", NOW), 0.0)
+        self.assertEqual(fills.peak_add(dict(CFG, peak_hours={"anthropic": {"hours": "14-19", "add": {}}}), "opus", NOW), 0.0)
         got = fills.balance(self.THINK, {"opus": at(0.25), "gpt-6-astra": at(0.31)}, cfg, now=NOW)
         self.assertEqual(got["rung"], "codex:gpt-6-astra")  # 0.25 + 0.2 > 0.31
 

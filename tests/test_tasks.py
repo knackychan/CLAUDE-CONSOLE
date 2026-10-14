@@ -1082,6 +1082,25 @@ class BalanceRouteTest(unittest.TestCase):
         self.assertEqual((route["model"], route["rung"], route["notes"][1]),
                          ("opus", "opencode:opencode-go/kimi-k3", "pick: opencode:opencode-go/kimi-k3"))
 
+    def test_an_empty_pool_verify_still_holds_over_pace(self):
+        route = self.route("verify", checked=("sonnet", "medium"), budget=shares({"opus": 0.9}),
+                           refuse=lambda rung: "off")
+        self.assertEqual((route["rung"], route["hold"]), ("opus", "opus over its pace"))
+        self.assertEqual(route["notes"][-1], "over pace: opus 90 % -> hold")
+        route = self.route("verify", checked=("sonnet", "medium"), budget=shares({"opus": 0.5}),
+                           refuse=lambda rung: "off")
+        self.assertEqual(route["hold"], "")
+
+    SPREAD = shares({"sonnet": 0.2, "gpt-6.1-sol": 0.5, "deepseek-v4.1-flash": 0.5})
+
+    def test_an_unknown_pick_balances_with_a_note(self):
+        route = self.route("code", pick="codex:gpt-9", budget=self.SPREAD)
+        self.assertEqual(route["rung"], "sonnet")
+        self.assertEqual(route["notes"][1:3], ["pick: codex:gpt-9", "pick refused: unknown model -> balance"])
+        gone = lambda rung: f"model gone from models.json: {rung}" if rung == "codex:gpt-9" else ""
+        route = self.route("code", pick="codex:gpt-9", budget=self.SPREAD, refuse=gone)
+        self.assertIn("pick refused: model gone from models.json: codex:gpt-9 -> balance", route["notes"])
+
 
 class PinRouteTest(unittest.TestCase):
     """Plan 26: config `kinds` pins a kind's rung and effort; a step's pick and the task's fixed effort come first."""

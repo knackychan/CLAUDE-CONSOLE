@@ -146,10 +146,12 @@ def load_models(write: bool = True) -> tuple:
 
 
 def _ladder_from(claude_models: dict, fallback: dict) -> dict:
-    """tier -> rungs in file order, the alias (the tier's own name) first."""
-    ladder = {tier: [] for tier in fallback}
+    """tier -> rungs in file order, the alias (the tier's own name) first; only the tiers of claude_cli.MODELS
+    (review G5: Hub.reload_models logs the others)."""
+    from .claude_cli import MODELS  # late, as claude_cli.known_model imports harness: paths stays import-free
+    ladder = {tier: [] for tier in fallback if tier in MODELS}
     for model, tier in claude_models.items():
-        if isinstance(tier, str) and tier:
+        if tier in MODELS:
             ladder.setdefault(tier, []).append(model)
     return {tier: sorted(rungs, key=lambda m: m != tier) for tier, rungs in ladder.items() if rungs}
 
