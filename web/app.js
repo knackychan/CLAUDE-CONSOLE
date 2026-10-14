@@ -140,7 +140,13 @@ function elapsed(sec) {  // minutes and seconds under an hour; the seconds fall 
 }
 function kb(bytes) { return (bytes / 1000).toFixed(1) + " KB"; }
 function baseName(p) { return String(p || "").split(/[\\/]/).filter(Boolean).pop() || p; }
-function alias(model) { return (String(model || "").match(/fable|opus|sonnet|haiku/) || [model || ""])[0]; }
+const RUNG = /^(claude|codex|opencode|cmd):/;  // a rung "harness:model"; a string with no such prefix is a Claude rung
+function splitRung(rung) { const m = String(rung || "").match(/^(claude|codex|opencode|cmd):(.*)$/s); return m ? [m[1], m[2]] : ["claude", String(rung || "")]; }
+function rungOf(harness, model) { return harness && harness !== "claude" && model && !RUNG.test(model) ? harness + ":" + model : model || ""; }
+function alias(model) {  // "" for a harness rung, as claude_cli.model_alias does: an OpenCode id may contain "sonnet"
+  if (RUNG.test(String(model || ""))) return "";
+  return (String(model || "").match(/fable|opus|sonnet|haiku/) || [model || ""])[0];
+}
 function label(s) { return s.state === "stop" ? "Asks you" : s.text; }
 function tone(s) {  // orange only for "needs you", red and green only for state
   if (s.state === "blocked" || s.state === "failed" || s.state === "verify_failed") return "r";
@@ -158,15 +164,17 @@ function liveSessions() { return snap ? snap.sessions.filter((s) => s.group !== 
   .sort((a, b) => (a.group === "needs" ? 0 : 1) - (b.group === "needs" ? 0 : 1)) : []; }
 function current() { return snap && snap.sessions.find((s) => s.id === openId); }
 function routeText(s) {
-  const run = [alias(s.model), s.effort].filter(Boolean).join(" ");
+  const run = [s.harness && s.harness !== "claude" ? s.harness + " · " + s.model : alias(s.model), s.effort].filter(Boolean).join(" ");
   if (s.route === "unrouted") return run ? "unrouted · " + run : "unrouted";
   return run ? s.route + " · " + run : s.route;
 }
-function version(model) {  // claude-opus-4-8 -> "4.8", claude-haiku-4-5-20251001 -> "4.5"; an alias or an unversioned name -> ""
+function version(model) {  // claude-opus-4-8 -> "4.8", claude-haiku-4-5-20251001 -> "4.5"; an alias, an unversioned name or a harness rung -> ""
+  if (RUNG.test(String(model || ""))) return "";
   const m = String(model || "").match(/(?:fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?=[-[]|$)/);  // a date or [1m] may follow
   return m ? m[1] + (m[2] ? "." + m[2] : "") : "";
 }
 function modelText(model, effort) {  // an alias shows the newest version the service has seen (snap.versions)
+  if (RUNG.test(String(model || ""))) { const [h, m] = splitRung(model); return [h, m, effort].filter(Boolean).join(" · "); }
   const fam = alias(model), v = version(model) || (fam === model && snap && snap.versions ? snap.versions[fam] || "" : "");
   return [v ? fam + " " + v : fam, effort].filter(Boolean).join(" ");
 }
@@ -527,7 +535,7 @@ function taskCard(t) {
   return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
     <div class="l1"><span class="st ${tn}">${taskMark({ ...t, state: taskShown(t) })}${word}</span><span class="t">${esc(t.title)}</span>
     <span class="age m" title="since the last change">${ago(snap.now - t.updated)}</span></div>
-    <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(cur.model, cur.effort))}</span>` : ""}</span>
+    <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(rungOf(cur.harness, cur.model), cur.effort))}</span>` : ""}</span>
     <span class="cost">${money(t.cost)}</span><span class="ctx"><span class="cells" style="--n:${cells.length}">${cellsHtml(cells)}</span></span></div>${third}</div>`;
 }
 
@@ -594,6 +602,7 @@ function renderListPage() {
 }
 
 // -- compose -----------------------------------------------------------------------------
+function otherHarness() { return Object.entries((cfg && cfg.harnesses) || {}).some(([h, i]) => h !== "claude" && i.on && i.found); }
 function runnable() { return !!cfg && cfg.claude && cfg.projects.includes(project); }
 
 function renderCompose() {
@@ -606,7 +615,9 @@ function renderCompose() {
   const chipHtml = `<button class="tgt${moved ? " moved" : ""}" data-pick title="Change project (Ctrl+P)">${esc(projectName(project))}<span class="car">&#9662;</span></button>`;
   let html;
   if (busy) html = `<span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>${esc(busy)}</span>`;
-  else if (cfg && !cfg.claude) html = '<span class="r">claude.exe not found: set "claude_exe" in config.json</span>';
+  else if (cfg && !cfg.claude) html = otherHarness()
+    ? '<span class="r">claude.exe not found: Prep needs it; set "exe" under harnesses.claude</span>'
+    : '<span class="r">claude.exe not found: set "claude_exe" in config.json</span>';
   else if (!project) html = "To run: start a Claude Code session in a project first";
   else if (!runnable()) html = `<span>Runs are off in ${chipHtml}: a run would use this repo's hooks and settings without asking.</span>
     <button class="btn sm" data-go="allow">Allow runs</button>`;
@@ -883,6 +894,46 @@ function projectRows() {  // allowed folders and every folder a session ran in, 
   return [...by.values()];
 }
 
+const hsErr = {};  // harness name -> the last error from POST /api/harness; "models" -> from the models.json row
+const hsBusy = new Set();
+function harnessHtml() {  // the Harnesses group: state is a glyph plus a word, never colour alone
+  const hs = (cfg && cfg.harnesses) || {};
+  const names = Object.keys(hs);
+  if (!names.length) return "";
+  const rows = names.map((name) => {
+    const i = hs[name], st = !i.on ? ["–", "off"] : !i.found ? ["×", "not found"] : ["✓", "on"];
+    const btn = name === "claude" ? '<span class="m mut">always on</span>'
+      : `<button class="btn sm" data-harness="${esc(name)}" data-on="${i.on ? "false" : "true"}"${hsBusy.has(name) ? " disabled" : ""}>${hsBusy.has(name) ? "..." : i.on ? "Turn off" : "Turn on"}</button>`;
+    const extra = hsErr[name] ? `<span class="r">${esc(hsErr[name])}</span>`
+      : i.on && !i.found ? `<span class="m mut">set "exe" under harnesses.${esc(name)} in ${esc(cfg.config_path || "config.json")}</span>` : "";
+    return `<div class="hs" data-hname="${esc(name)}"><span class="nm">${esc(name)} <span class="st m">${st[0]} ${st[1]}</span></span>${btn}
+      ${i.version ? `<span class="m mut wide">${esc(i.version)}</span>` : ""}${extra ? `<span class="wide">${extra}</span>` : ""}</div>`;
+  }).join("");
+  const mf = cfg.models_file || {};
+  const mrow = `<div class="hs" data-hname="models"><span class="nm">Models <span class="m mut">· models.json · ${mf.count || 0} models</span></span>
+    <span class="btns"><button class="btn sm" data-models="open"${hsBusy.has("models") ? " disabled" : ""}>Open</button><button class="btn sm" data-models="reload"${hsBusy.has("models") ? " disabled" : ""}>Reload</button></span>
+    ${mf.error ? `<span class="r wide">${esc(mf.error)}</span>` : hsErr.models ? `<span class="r wide">${esc(hsErr.models)}</span>` : ""}</div>`;
+  return `<div class="grp lbl">Harnesses</div>${rows}${mrow}`;
+}
+async function harnessAct(button) {
+  const name = button.dataset.harness;
+  hsBusy.add(name); delete hsErr[name]; pickRows();
+  try { cfg.harnesses = (await api("/api/harness", { name, on: button.dataset.on === "true" })).harnesses; }
+  catch (err) { hsErr[name] = err.message; }
+  hsBusy.delete(name);
+  if (!$("pop").hidden) pickRows();
+}
+async function modelsAct(button) {
+  const what = button.dataset.models;
+  hsBusy.add("models"); delete hsErr.models; pickRows();
+  try {
+    if (what === "open") await api("/api/models/open", {});
+    else { const r = await api("/api/models/reload", {}); cfg.models_file = r.models_file; cfg.harnesses = r.harnesses; cfg = Object.assign(cfg, await api("/api/config")); }
+  } catch (err) { hsErr.models = err.message; }
+  hsBusy.delete("models");
+  if (!$("pop").hidden) pickRows();
+}
+
 function pickRows() {
   const q = $("pfind").value.trim().toLowerCase();
   const recent = (p) => p.last || -Infinity;
@@ -900,6 +951,7 @@ function pickRows() {
   if (on.length) html += `<div class="grp lbl">Runs allowed · ${on.length}</div>${on.map(line).join("")}`;
   if (off.length) html += `<div class="grp lbl">Runs off · ${off.length}</div>${off.map(line).join("")}`;
   if (!match.length) html = `<div class="none">No project matches "${esc(q)}". Projects appear here once a Claude Code session runs in them.</div>`;
+  if (!q) html += harnessHtml();
   $("prows").innerHTML = html;
   hi = 0;
   markHi();
@@ -966,10 +1018,22 @@ function options(list, value) { return list.map((v) => `<option${v === value ? "
 
 // every tier with its rungs from config.json "ladder", newest first, so a rung can be picked by hand;
 // `auto` is a step's "let the rules pick"
-function modelOptions(value, withAuto) {
+function kindAllows(h, tier, kind) {  // README decision 11: what an opencode / cmd model may run; codex any kind
+  if (h === "codex" || !kind) return true;
+  const rt = (cfg.kinds_tier || {})[kind];
+  if (!rt) return false;  // verify, fix and an unknown kind
+  return tier === "opus" ? true : rt === "haiku" || rt === "sonnet";
+}
+function modelOptions(value, withAuto, kind = "") {
   const opt = (v, text) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(text)}</option>`;
   const rungs = (tier) => (cfg.ladder && cfg.ladder[tier] && cfg.ladder[tier].length ? cfg.ladder[tier] : [tier]);
-  return (withAuto ? opt("", "auto") : "") + cfg.models.map((tier) => rungs(tier).map((r) => opt(r, modelText(r))).join("")).join("");
+  let html = (withAuto ? opt("", "auto") : "") + cfg.models.map((tier) => rungs(tier).map((r) => opt(r, modelText(r))).join("")).join("");
+  for (const [h, info] of Object.entries(cfg.harnesses || {})) {
+    if (h === "claude" || !info.on || !info.found) continue;
+    const ms = Object.entries(info.models || {}).filter(([, tier]) => kindAllows(h, tier, kind));
+    if (ms.length) html += `<optgroup label="${esc(h)}">${ms.map(([m]) => opt(h + ":" + m, h + " · " + m)).join("")}</optgroup>`;
+  }
+  return html;
 }
 
 // Run as task: one row per step. A verify row is fixed text (the service adds it after the last editing step).
@@ -979,7 +1043,7 @@ function stepRowHtml(st) {
   }
   return `<div class="srow" data-row><span class="n m"></span>
     <select data-skind aria-label="Kind">${options(cfg.kinds, st.kind)}</select>
-    <select data-smodel aria-label="Model">${modelOptions(st.pick || "", true)}</select>
+    <select data-smodel aria-label="Model">${modelOptions(st.pick || "", true, st.kind)}</select>
     <button class="rb" data-pact="rmstep" aria-label="Remove step" title="Remove step">&#10005;</button>
     <input data-sgoal aria-label="Goal" value="${esc(st.goal)}" spellcheck="false" placeholder="Goal of this step"></div>`;
 }
@@ -991,7 +1055,7 @@ function stepsChanged() {  // the verify row, numbers, the Fable note and Run as
   if (!edits && fixed) fixed.remove();
   const rows = [...document.querySelectorAll("#p-steps .srow")];
   rows.forEach((r, k) => { r.querySelector(".n").textContent = k + 1; });
-  const fable = [...document.querySelectorAll("#p-model, #p-steps [data-smodel]")].some((s) => s.value.includes("fable"));
+  const fable = [...document.querySelectorAll("#p-model, #p-steps [data-smodel]")].some((s) => alias(s.value) === "fable");
   const kinds = [...new Set([...rows].map((r) => (r.querySelector("[data-skind]") || { value: "verify" }).value))];
   if ($("p-floors")) $("p-floors").innerHTML = kinds.map((k) => floorText(k, "steps")).filter(Boolean).map(esc).join("<br>");
   const note = $("p-fable"), run = document.querySelector('#pbar [data-pact="task"]');
@@ -1194,7 +1258,8 @@ function renderBrief(s) {
   const [yellow, red] = cfg ? cfg.gauge : [150000, 300000];
   const end = BUSY.has(s.state) ? snap.now : s.last_ts;
   const spent = s.spent == null ? "&ndash;" : (s.spent_exact ? "" : '<span class="est" title="estimated">~</span>') + money(s.spent);
-  const word = t === "r" ? "hand off now" : t === "y" ? "hand off soon" : "context";
+  const unk = s.ctx_tokens == null && s.harness && s.harness !== "claude";
+  const word = unk ? "context unknown" : t === "r" ? "hand off now" : t === "y" ? "hand off soon" : "context";
   const rows = agentRows(s, []);
   return `<div class="bwrap">
     <button class="brief" id="brief" aria-expanded="${briefOpen}" aria-controls="more" title="Context, agents and activity (click or Space)">
@@ -1203,7 +1268,7 @@ function renderBrief(s) {
         <span><small>spent</small><b class="usd">${spent}</b></span>
         <span><small>$ / min</small><b>${money(s.burn)}</b></span>
         <span><small class="${t}">${word}</small><span class="cx"><span class="cells">${cellsHtml(ctxClasses(s.ctx_tokens))}</span>
-          <b class="${t}">${s.ctx_tokens == null ? "?" : kTokens(s.ctx_tokens)}</b></span></span>
+          <b class="${t}">${unk ? "" : s.ctx_tokens == null ? "?" : kTokens(s.ctx_tokens)}</b></span></span>
         <span><small title="since the chat started">session</small><b>${elapsed(end - s.started_ts)}</b></span>
         <span><small>steps</small><b>${steps}</b></span>
       </span>
@@ -1263,7 +1328,7 @@ function renderSession() {
   const src = s.source === "?" ? "" : s.source + " / ";
   setHtml($("sbody"), `<div class="head"><span class="st ${t}">${sessionMark(s, s.symbol, t)}${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>${taskLink(s)}
     <div class="where"><span class="m" title="${esc(s.route_reason || "")}">${esc(s.project)} / ${esc(src)}${esc(s.route)}</span>
-    ${s.model ? `<span class="mdl" title="${esc(s.model)}">${esc(modelText(s.model, s.effort))}</span>` : ""}
+    ${s.model ? `<span class="mdl" title="${esc(s.model)}">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}
     ${s.project_dir ? `<button class="btn sm" data-here="${esc(s.project_dir)}">New task here</button>` : ""}</div></div>
     ${noteLine(s)}${askBlock(s)}${renderBrief(s)}`);
   renderProc(s).catch(() => {});
@@ -1508,7 +1573,7 @@ function chainRow(t, s) {
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
   const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), esc(s.goal)].filter(Boolean).join(" · ");
   return `<div class="row${s.n === t.current ? " cur" : ""}${fresh("c", "t" + t.id + "." + s.n, s.state, 300) && s.state === "done" ? " adv" : ""}${s.note ? " n-" + s.note : ""}"><span class="cells">${cells}</span>
-    <span class="nm m">${two(s.n)} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(modelText(s.model, s.effort))}</span>` : ""}</span>
+    <span class="nm m">${two(s.n)} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}</span>
     <span class="m c">${s.cost ? money(s.cost) : ""}</span>
     ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
     ${noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
@@ -1890,7 +1955,7 @@ async function rawRun() {
 document.addEventListener("click", (e) => {
   if (!$("pop").hidden && !e.target.closest("#pop") && !e.target.closest("[data-pick]")) closePicker();
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
   if (t.dataset.open || t.dataset.task) {  // a session opened from a task returns to it, a task opened from a session too
@@ -1912,6 +1977,8 @@ document.addEventListener("click", (e) => {
   else if (t.dataset.act) act(t.dataset.act, t);
   else if (t.dataset.pact) prepAct(t.dataset.pact, t);
   else if (t.dataset.here !== undefined) { pick(t.dataset.here); showPage("list"); $("c-prompt").focus(); }
+  else if (t.dataset.harness) harnessAct(t);
+  else if (t.dataset.models) modelsAct(t);
   else if (t.dataset.proj !== undefined) pick(t.dataset.proj);
   else if (t.dataset.step) step(Number(t.dataset.step));
   else if (t.hasAttribute("data-pick")) { if ($("pop").hidden) openPicker(t); else closePicker(); }
@@ -1951,7 +2018,14 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "c-prompt") { draft = e.target.value; draftKept = false; fail = null; saveDraft(); renderCompose(); }
 });
 
-document.addEventListener("change", (e) => { if (e.target.matches("#p-model, [data-smodel], [data-skind]")) stepsChanged(); });
+document.addEventListener("change", (e) => {
+  if (e.target.matches("[data-skind]")) {  // the kind decides which harness rungs the row may hold; a pick it cannot hold falls back to Auto
+    const sel = e.target.closest("[data-row]").querySelector("[data-smodel]"), cur = sel.value;
+    sel.innerHTML = modelOptions(cur, true, e.target.value);
+    if (sel.value !== cur) sel.value = "";
+  }
+  if (e.target.matches("#p-model, [data-smodel], [data-skind]")) stepsChanged();
+});
 
 $("popen").addEventListener("click", openFolder);
 $("pfind").addEventListener("input", pickRows);

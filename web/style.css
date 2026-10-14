@@ -308,6 +308,12 @@ textarea.in.m { font: 12px/1.45 var(--mono); }
 .prow .meta.y { color: var(--you); }
 .prow .c { font: 11px var(--mono); text-align: right; color: var(--mut); }
 .prow.off .nm { color: var(--mut); }
+.hs { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 5px 12px; font: 13px var(--ui); }
+.hs .nm { min-width: 0; overflow-wrap: anywhere; }
+.hs .st { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--mut); }
+.hs .r { color: var(--bad); }
+.hs .btns { display: inline-flex; gap: 6px; }
+.hs .wide { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
 .pop .none { padding: 10px 12px; color: var(--mut); font-size: 13px; }
 .pop .foot { flex: none; border-top: 1px solid var(--line); padding: 6px 12px; display: flex; gap: 12px; font: 10.5px var(--mono); color: var(--mut); }
 .pop .foot span { white-space: nowrap; }
