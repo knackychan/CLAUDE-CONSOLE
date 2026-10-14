@@ -123,9 +123,10 @@ def fallback(prev_brief: str, raw: str) -> str:
         "## Next", nxt]))
 
 
-def _ask(cfg: dict, exe: list, project_dir: str, prompt: str):
-    """One `claude -p` pass; (fields, cost) or BriefError with the reason."""
-    cmd = claude_cli.brief_command(exe, cfg["brief_model"], BRIEF_SCHEMA)
+def _ask(cfg: dict, exe: list, project_dir: str, prompt: str, schema: dict = BRIEF_SCHEMA):
+    """One `claude -p` pass on brief_model with no tools, the answer shaped by `schema`; (answer dict, cost) or
+    BriefError with the reason. The replan pass (replan.py) uses it with its own schema."""
+    cmd = claude_cli.brief_command(exe, cfg["brief_model"], schema)
     try:
         out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"), capture_output=True,
                              timeout=cfg["brief_timeout_s"], env=claude_cli.child_env(),
@@ -145,11 +146,15 @@ def _ask(cfg: dict, exe: list, project_dir: str, prompt: str):
         detail = data.get("subtype") or data.get("terminal_reason") or "no reason given"
         raise BriefError("the brief failed: " + redact.clip(str(detail), 200))
     fields = data.get("structured_output")
-    lists = ("findings", "files", "questions")
-    if not isinstance(fields, dict) or not all(isinstance(fields.get(k), list) for k in lists) \
-            or not isinstance(fields.get("next"), str):
+    if not isinstance(fields, dict):
         raise BriefError("the brief returned no structured output")
     return fields, data.get("total_cost_usd") or 0
+
+
+def _fields_ok(fields: dict) -> bool:
+    """The brief answer has its three lists and the next line."""
+    return all(isinstance(fields.get(k), list) for k in ("findings", "files", "questions")) \
+        and isinstance(fields.get("next"), str)
 
 
 def run_brief(cfg: dict, exe: list, task: dict, step: dict, next_step, prev_brief: str, raw: str) -> dict:
@@ -160,6 +165,8 @@ def run_brief(cfg: dict, exe: list, task: dict, step: dict, next_step, prev_brie
     try:
         prompt = build_prompt(task, step, next_step, prev_brief, raw, budget(cfg, raw, prev_brief))
         fields, cost = _ask(cfg, exe, task["project_dir"], prompt)
+        if not _fields_ok(fields):
+            raise BriefError("the brief returned no structured output")
         text = render(fields)
         why = check(text, cfg["brief_max_words"], raw, prev_brief)
         if why.startswith(("over ", "not shorter")):
