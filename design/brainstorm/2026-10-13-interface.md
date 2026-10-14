@@ -221,7 +221,9 @@ Everywhere a chat shows (the session page's Chat tab, the Board's Chat tab, the 
   compacted; a failing test line puts FAIL in red in the closed line and opens it).
 - **Plan** (brainstorm 8b, Fred 2026-10-14): a task with a design step has a folded `plan.md` row under the
   Steps, closed line `Plan · from 02 design · 2,140 w · never cut ▾`; open, its six headings folded except
-  the current step's `### Step N`. A `Plan gap:` question waits in the askbox like a replan: the question,
+  the current step's `### Step N`. With sub-plans the row reads `Plan · from 02 design · 3 sub-plans ·
+  4,870 w ▾` and lists the parts, each with its step and state (`1 harness module · 03 code · done`), the
+  current one open; the split shows on the step list as the new rows with `from plan` muted. A `Plan gap:` question waits in the askbox like a replan: the question,
   the step that raised it, Answer (orange; the answer joins Decisions), Redo design, Stop. With `plan_hold`
   on, the askbox after the design step reads `Plan ready · 2,140 w`, Confirm plan (orange), Edit, Stop.
 - **Auto hand off**: a handed-off task reads as today (plan 13); a window run handed off by the service
@@ -296,7 +298,7 @@ one received, its words in the inspector`).
     pace` in orange (nothing was left to leave), the `balance:` note muted (the router already acted);
     **Attempts** with each try's reason.
   - **Plan** (a design step, and every step after it): `plan.md` rendered by heading, the picked step's
-    `### Step N` open and marked `this step`, the others folded; on the design step it is editable in place
+    `### Step N` (or its sub-plan) open and marked `this step`, the others folded; on the design step it is editable in place
     while the next step has not started (`edited` in `--wip` blue, Save writes the file through the
     service). The tab reads `Plan 2,140 w`, no arrow: a plan is never cut. The connector chip after a
     design step says `handoff · plan`.
@@ -479,3 +481,4 @@ not Fred's taste), port and paths.
 - 2026-10-14 - Fred: a page to set the model for each kind and tune the numbers without a rebuild: section
   9b, the Models view in the mock, linked from the Settings band.
 - 2026-10-14 - Fred: the design step writes `plan.md` in the task folder, never cut, read whole by the later steps (brainstorm 8b, D-9): a Plan row on the Task page with the `Plan gap:` and `plan_hold` askboxes, a Plan tab in the step inspector.
+- 2026-10-14 - Fred: the designer may split the plan into sub-plans, one write step each: the Plan row lists the parts with their step and state.
