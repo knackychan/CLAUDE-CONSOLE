@@ -19,6 +19,9 @@
   and `self.runs.exes[name] = [exe]` (dropped when not found). Never raises: a failure is `found False`, version `""`,
   one line in the service log. Returns `self.harnesses()`. With `self.lock` held for the dict writes; the version
   bump and `changed.notify_all()` so the page redraws.
+- models.json (README 3.2b): `Hub` rereads it when its mtime changed, at each `/api/config` and before each step
+  starts; `/api/config` gains `models_file: {"path", "count", "error"}`; `POST /api/models/reload` forces it; `POST /api/models/open` opens
+  that one fixed path with `os.startfile` (no path from the caller).
 - `Hub.harnesses() -> dict`: `{name: {"on", "found", "version", "models": harness.models_of(cfg, name), "tiers": list(TIERS)}}`
   for every name in `harness.NAMES`; `claude` has `models {}` and `tiers` the full list.
 - `Hub.set_harness(name, on) -> dict`: `name == "claude" and not on` -> `ValueError("Prep and the brief pass run on Claude")`;

@@ -7,7 +7,7 @@
 - Create: `console/harness/__init__.py`, `console/harness/claude.py`
 - Modify: `console/claude_cli.py` (`split_rung`, `model_alias` refuses prefixed rungs, `tier_of(model, cfg=None)`, `known_model(cfg, model)`)
 - Modify: `CLAUDE.md` (the two Rules lines on window-run commands and Stop, step 0 below)
-- Modify: `console/paths.py` (`DEFAULTS["harnesses"]`, `["step_timeout_s"]`, `["effort_variant"]`, `set_harness`, the `claude_exe` fallback in `load_config`)
+- Modify: `console/paths.py` (`DEFAULTS["harnesses"]`, `["step_timeout_s"]`, `["effort_variant"]`, `set_harness`, the `claude_exe` fallback in `load_config`, `MODELS_DEFAULT`, `load_models` and `cfg["models"]`, `cfg["ladder"]` built from `models["claude"]`; README 3.2b)
 - Create: `tests/test_harness.py`
 
 **Imports allowed in `console/harness/__init__.py`**: `importlib`, `shutil`, `pathlib.Path`, and from the package
@@ -26,7 +26,7 @@ split_rung(rung) -> (harness, model)        "codex:gpt-6.1-sol" -> ("codex", "gp
 rung(harness, model) -> str                 the inverse; a Claude rung has no prefix
 section(cfg, name) -> dict                  cfg["harnesses"].get(name) or {"on": name == "claude", "exe": ""}
 tiers_of(cfg, name) -> tuple                get(name).TIERS
-models_of(cfg, name) -> dict                the section's "models" filtered to tiers_of (Claude: {} ; its rungs come from the ladder)
+models_of(cfg, name) -> dict                cfg["models"][name] (models.json, README 3.2b) filtered to tiers_of (Claude: its ladder)
 is_on(cfg, name) -> bool                    section(cfg, name).get("on") is True
 find_exe(cfg, name) -> str | None           get(name).find_exe(cfg)
 which(names, exe="") -> str | None          exe when given and it exists; else the first of names shutil.which finds
@@ -100,6 +100,10 @@ attachments) that only Claude has; `runs.start` passes them only to this adapter
 - `test_claude_adapter_wraps_claude_cli`: `run_command([fake], "sonnet", "medium", cwd, sid, prompt="hi")` returns the same list as `claude_cli.run_command([fake], "sonnet", "medium", sid)` and stdin bytes equal to `claude_cli.user_message("hi" + STOP_FOOTER)`; a `/skill` prompt gets no footer; `is_result({"type": "result"})`; `summary` on three recorded lines (init, assistant with text, result) gives `final`, `cost`, `session_id`, `exit_cap False`; `exit_cap True` for `error_max_turns`.
 - `test_model_alias_ignores_harness_rungs`: `model_alias("opencode:openrouter/anthropic/claude-sonnet-4-6") == ""`, `model_alias("codex:gpt-6.1-sol") == ""`, `model_alias("claude-sonnet-4-6") == "sonnet"` (unchanged), and a Claude id with a colon in it, if any, is not split (`split_rung` splits only on a name in `NAMES`).
 - `test_set_harness_writes_one_key`: on a temp folder with a config.json holding `{"projects": ["x"]}`, `set_harness(folder, "codex", True)` leaves `projects` and gives `harnesses.codex.on == True`; an unknown name raises ValueError; an unreadable file raises ValueError.
+- `test_models_json`: a missing models.json is written from `MODELS_DEFAULT`; an edited file is read on the next
+  `load_models` with no restart; a broken file returns the last good dict and an error naming the line; the
+  ladder follows `models["claude"]` order; config.json's old `harnesses.codex.models` is used when models.json has
+  no `codex` key.
 - `test_defaults_and_claude_exe_fallback`: `DEFAULTS["harnesses"]["claude"]["on"] is True`, the other three `False`; `load_config` with `claude_exe` set and the harness exe empty copies it; `paths.HARNESSES == harness.NAMES`.
 
 ## Steps

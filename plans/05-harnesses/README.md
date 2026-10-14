@@ -46,6 +46,7 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 | 11 | What OpenCode and Command Code may run (D-2) | Command Code lists cheap models only (tier `haiku`). OpenCode lists cheap models (tier `haiku`) and two think models, `opencode-go/kimi-k3` and `opencode-go/glm-5.3` (tier `opus`; Fred, 2026-10-14). A rung of either is offered and accepted by its model's tier: a `haiku` model on kinds whose rule tier is `haiku` or `sonnet` (scout, search, draft, proofread, edit, test, code, document, explain, debug; Fred, 2026-10-14: well-designed code can be written by a cheap model), an `opus` model on any kind, and any of them on a plain Run; never on `verify` or `fix`. Verify stays one tier above the rung, so a cheap rung's code is checked by a `sonnet` rung. A refused pick says `opencode: deepseek-v4.1-flash is not a think model` or `cmd: not on verify or fix steps` |
 | 12 | A pick whose harness went off | A task step whose pick names a harness that is off or not found when the step starts runs on Claude's rung of the pick's tier, with the route note `harness: codex off -> sonnet` (brainstorm 3.1: off rungs never route, the tier falls back to Claude). A plain Run Fred points at such a rung is refused (409), never moved |
 | 13 | Which harness a later turn uses | The run meta's `harness`, always: Continue, a STOP answer, a retry and Stop read it from the meta; only a new run takes `harness` from its caller |
+| 14 | Where the model lists live (Fred, 2026-10-14) | In their own file, `~/.claude/console/models.json` (3.2b), one list per CLI including Claude's, edited by hand and reread when it changes: adding or dropping a model never needs a rebuild or a restart |
 
 ## 3. The contract (what every task must keep)
 
@@ -70,22 +71,21 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 ```json
 "harnesses": {
   "claude":   {"on": true,  "exe": ""},
-  "codex":    {"on": false, "exe": "", "models": {"gpt-6-astra": "opus", "gpt-6.1-sol": "sonnet", "gpt-6-sol": "sonnet",
-                                                  "gpt-6-luna": "haiku"}},
-  "opencode": {"on": false, "exe": "", "models": {"opencode-go/deepseek-v4.1-flash": "haiku", "opencode-go/glm-5.3-flash": "haiku",
-                                                  "opencode-go/qwen3.8-flash": "haiku", "opencode-go/gpt-6-luna": "haiku",
-                                                  "opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"}},
-  "cmd":      {"on": false, "exe": "", "models": {"deepseek/deepseek-v4.1-flash": "haiku", "z-ai/glm-5.3-flash": "haiku",
-                                                  "Qwen/Qwen3.8-Flash": "haiku", "gpt-6-luna": "haiku"}}
+  "codex":    {"on": false, "exe": ""},
+  "opencode": {"on": false, "exe": ""},
+  "cmd":      {"on": false, "exe": ""}
 },
 "step_timeout_s": 1800
 ```
 
 - `exe` empty: found on PATH (`shutil.which` over the adapter's `EXE_NAMES`); else the path as given.
-- `models`: model id -> tier. The ids above were checked against the providers' docs on 2026-10-14 (table below);
+- The models of each harness are not in config.json: they live in models.json (3.2b, decision 14). A
+  `harnesses.<name>.models` left in config.json by an earlier build is still read for a harness models.json does
+  not list.
+- Model ids. The ids in 3.2b were checked against the providers' docs on 2026-10-14 (table below);
   Fred trims them to what his plans hold (`cmd --list-models`, `opencode models`, Codex `/model`); the adapter never checks a model name up front (a wrong one fails
   on the first request, as Claude's does). `harness.tiers_of(cfg, name)` returns the tiers the adapter may hold:
-  `("haiku",)` for `opencode` and `cmd`, every tier for `codex`; a `models` entry outside that is dropped at load
+  `("haiku", "opus")` for `opencode`, `("haiku",)` for `cmd`, every tier for `codex` (decision 11); a `models` entry outside that is dropped at load
   with a line in `hook-errors.log`-style `console.log` (the service's own log), never raised.
 - Models per harness, checked 2026-10-14. Codex: `gpt-6-astra` (most capable, think), `gpt-6.1-sol` (recommended
   for coding, write), `gpt-6-sol` (write), `gpt-6-luna` (focused, repeatable work, read; cheapest); `gpt-5.5`
@@ -101,6 +101,40 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 - `claude.exe` (the old key) keeps working: `harnesses.claude.exe` empty falls back to it (`paths.load_config`
   copies it in). `paths.set_harness(folder, name, on) -> None` writes `on` for one harness into config.json as
   `add_project` does (every other key as written; `ValueError` when the file cannot be read).
+
+### 3.2b models.json (decision 14)
+
+`~/.claude/console/models.json` (or under `CC_CONSOLE_HOME`), next to config.json: per CLI, model id -> tier,
+in the order the window lists them. Written from `paths.MODELS_DEFAULT` (the table below) when missing, as
+`ensure_config` writes config.json; Fred edits it by hand (one model per line, a comment-free JSON file).
+
+```json
+{
+  "claude":   {"opus": "opus", "sonnet": "sonnet", "haiku": "haiku", "fable": "fable",
+               "claude-opus-4-8": "opus", "claude-opus-4-7": "opus", "claude-sonnet-4-6": "sonnet", "claude-haiku-4-5": "haiku"},
+  "codex":    {"gpt-6-astra": "opus", "gpt-6.1-sol": "sonnet", "gpt-6-sol": "sonnet", "gpt-6-luna": "haiku"},
+  "opencode": {"opencode-go/deepseek-v4.1-flash": "haiku", "opencode-go/glm-5.3-flash": "haiku",
+               "opencode-go/qwen3.8-flash": "haiku", "opencode-go/gpt-6-luna": "haiku",
+               "opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"},
+  "cmd":      {"deepseek/deepseek-v4.1-flash": "haiku", "z-ai/glm-5.3-flash": "haiku",
+               "Qwen/Qwen3.8-Flash": "haiku", "gpt-6-luna": "haiku"}
+}
+```
+
+- `paths.load_models() -> (dict, str)`: the parsed file and `""`, or the last good dict (the defaults on a first
+  failure) and the error (`models.json line 12: Expecting ',' delimiter`); never raises. `load_config` puts the
+  dict in `cfg["models"]`; `harness.models_of(cfg, name)` reads `cfg["models"][name]` filtered by `tiers_of`
+  (an entry outside is dropped with a line in the service's `console.log`).
+- Claude's list is the ladder: `cfg["ladder"][tier]` is built from `models["claude"]` (the ids of that tier in
+  file order, the alias first); a `ladder` in config.json is still read when models.json has no `claude` key.
+- Reread without a restart: `Hub` keeps the file's mtime and reloads it at each `/api/config` and before each
+  step starts; a changed file is used from the next step (a running step keeps its rung). A rung whose model was
+  removed routes as auto with the note `model gone from models.json: <rung>`.
+- The window: the Harnesses card ends with one row, `Models · models.json · 22 models`, with `Open` (`POST /api/models/open`:
+  `os.startfile` on that one fixed path, no path from the caller, through `guard.py`) and `Reload`; an error
+  turns the row red with the message and the window keeps the last good list.
+- Ranks are only `haiku`, `sonnet`, `opus`, `fable`: a model's tier is its rank (decision 2); a tier name the
+  console does not know is dropped with a log line.
 
 ### 3.3 The adapter contract (`console/harness/__init__.py`)
 

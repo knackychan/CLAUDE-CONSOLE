@@ -369,7 +369,8 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
   (Fred, 2026-10-14); one muted line per card counts them (`1 hidden · cmd not found`), and Turn on brings
   them back with their order and efforts (config.json keeps them). A kind pinned to a hidden model routes as
   auto and its row says `pinned model hidden · cmd not found`. `+ rung` lists the
-  models of the harnesses that are on; think accepts Claude, Codex and OpenCode's Kimi K3 and GLM 5.3 (decision 11). A last card holds the
+  models of the harnesses that are on, as models.json lists them (plan 5 README 3.2b; Fred, 2026-10-14: the
+  lists are edited in that file, reread on save, never a rebuild); think accepts Claude, Codex and OpenCode's Kimi K3 and GLM 5.3 (decision 11). A last card holds the
   console's own passes: Prep, the handoff pass, the rules review and the composer's Run default
   (`prep_model`, `brief_model`, `review_model`, `default_model`). Writes `tiers` (brainstorm section 4).
 - A model ranked above its tier (opus in Write, Fable in Think) shows `hard only` on its row: the spread mixes the

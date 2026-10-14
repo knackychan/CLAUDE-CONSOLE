@@ -9,6 +9,8 @@
 
 - `alias(model)` / `modelText(model, effort)`: a rung with a colon splits into `(h, m)` and shows `${h} · ${m}` plus
   ` · ${effort}` as today, with no version lookup; `version()` returns `""` for it. `fableName` unchanged.
+- The Harnesses block ends with the models.json row (README 3.2b): `Models · models.json · n models`, Open
+  (`POST /api/models/open`) and Reload (`POST /api/models/reload`); `models_file.error` turns it red with the message.
 - `modelOptions(value, withAuto, kind = "")` (today's signature plus `kind`): after Claude's ladder groups, one
   `<optgroup label="codex">` per harness in `cfg.harnesses` that is `on && found` and has models, one option per
   model with value `h:m` and text `h · m`. `opencode` and `cmd` options only when `kind` is `""` (`#p-model`, the
