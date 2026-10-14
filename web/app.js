@@ -1798,21 +1798,23 @@ function handoffBlock(text) {  // the last HANDOFF ... END HANDOFF of a reply: [
 }
 function factsFold(s, text) {  // the facts the service gathered when the step ended (plan 23): diff stat and the test line
   const f = (s && s.facts) || null;
-  if (!f || !text) return "";
-  const fail = String(f.tests || "").startsWith("FAIL");  // plan 23: "" (no test run), "23 OK" or "FAIL <first failing line>"
-  const info = `${f.files} ${f.files === 1 ? "file" : "files"} +${f.plus}${f.minus ? " -" + f.minus : ""} · ${esc(f.tests || "no test run")}`;
-  return fold("Facts", info, `<pre class="text mono">${esc(text)}</pre>`, { cls: "facts", tone: fail ? "r" : "", open: fail, force: fail, key: "facts",
+  if (!f && !text) return "";  // plan 27: either one is worth showing
+  const fail = !!f && String(f.tests || "").startsWith("FAIL");  // plan 23: "" (no test run), "23 OK" or "FAIL <first failing line>"
+  const info = f ? `${f.files} ${f.files === 1 ? "file" : "files"} +${f.plus}${f.minus ? " -" + f.minus : ""} · ${esc(f.tests || "no test run")}` : "read";
+  return fold("Facts", info, `<pre class="text mono">${esc(text || "")}</pre>`, { cls: "facts", tone: fail ? "r" : "", open: fail, key: "facts",
     title: "git diff --stat from the step's start to its end, and its last test command: code reads them, no model" });
 }
 function handoffFold(t, d, n, sn, meta, nextStep) {
   const brief = (d.briefs || {})[String(n)] || "", raw = (d.notes || {})[String(n)] || "";
-  const sent = handoffSections(brief), wrote = handoffSections(raw), cut = (meta && meta.cut) || [];
+  const sent = handoffSections(brief), wrote = handoffSections(raw), cut = ((meta && meta.cut) || []).map(normItem);
+  const all = [].concat(sent.findings, sent.files, sent.trouble, sent.questions);
+  for (const c of cut) if (!all.includes(c)) sent.findings.push(c);  // plan 27 (G2): the cut lines, struck under Findings, as inspConn does
   const words = meta ? meta.sent_w : brief.split(/\s+/).filter(Boolean).length;
   const label = nextStep ? `Handoff for ${two(nextStep.n)}` : "Last handoff";
   const info = `${words} w${meta && meta.fallback ? ' · <span class="y">as written</span>' : ""} · Next: ${esc(sent.next.split("\n")[0])}`;
   const head = meta ? `<div class="hd"><span class="m" title="${esc(meta.fallback ? "the brief pass failed: " + meta.fallback + "; code cut the note" : `by ${meta.by}, ${meta.turns} turns, $${money(meta.cost)}`)}">${meta.fallback ? "sent as written, cut by code" : `compacted from ${meta.raw_w} w`}</span>
       <span class="link m" data-tact="raw">${rawOpen ? "as sent" : `as ${two(n)} wrote it`}</span></div>` : "";
-  const body = rawOpen ? headingBlock(wrote, cut, ["goal", "findings", "trouble", "questions", "next"]) : headingBlock(sent, [], undefined, true);
+  const body = rawOpen ? headingBlock(wrote, cut, ["goal", "findings", "trouble", "questions", "next"]) : headingBlock(sent, cut, undefined, true);
   return `<div class="blk">${fold(label, info, head + body + factsFold(sn || {}, (d.facts || {})[String(n)]))}</div>`;
 }
 function pfold(key, label, info, body, o = {}) {

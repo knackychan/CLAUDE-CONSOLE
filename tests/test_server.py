@@ -608,6 +608,24 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.hub.auto_steps(), [(sid, "handoff")])  # red: the handoff, not an Escalate
         self.wait_idle(sid)
 
+    def test_refused_auto_handoff_still_escalates_and_is_tried_once_per_turn(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",  # no session-handoff skill
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.red(sid)
+        self.verdict(sid, "FAIL", "test_add - 3 != 4")
+        self.hub.cfg["handoff_auto"] = True
+        self.assertNotEqual(self.hub.pull(sid, "handoff")[0], 200)  # refused: the pull answers 409
+        calls = []
+        real = self.hub.pull
+        self.hub.pull = lambda s, lever, **kw: calls.append(lever) or real(s, lever, **kw)
+        self.assertEqual(self.hub.auto_steps(), [(sid, "escalate")])  # the FAIL verdict still takes its step
+        self.wait_idle(sid)
+        self.hub.auto_steps()
+        self.hub.auto_steps()
+        self.assertEqual(calls.count("handoff"), 2)  # once for the FAIL turn, once for the escalated turn, not every pass
+        self.assertNotIn(sid, self.hub.auto_handed)  # never handed off
+
     def test_handoff_marks_the_session_done(self):
         skill = self.project / ".claude" / "skills" / "session-handoff"
         skill.mkdir(parents=True)
@@ -943,6 +961,38 @@ class TaskServerTest(RunServerTest):
         self.assertIn("calc.py", tasks.read_facts(self.folder, task, 1))
         self.assertEqual(self.task(tid)[1]["task"]["steps"][0]["facts"], step1["facts"])
 
+    def test_task_route_sends_no_git_base(self):  # plan 27 (K6): the snapshots stay in the service
+        tid = self.make_task()
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("git_base", task["steps"][0])
+        sent = self.task(tid)[1]["task"]
+        self.assertEqual([s for s in sent["steps"] if "git_base" in s or "touched" in s], [])
+        self.assertEqual(sent["steps"][0]["session"], task["steps"][0]["session"])  # the rest of the step is sent
+        self.assertIn("git_base", self.hub.tasks[tid]["steps"][0])  # a copy was trimmed, not the hub's task
+
+    def test_brief_check_reads_every_path_a_step_touched(self):  # plan 27 (23 nit): not the facts text's 30 lines
+        try:
+            self.git("init", "-q")
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("no git")
+        self.git("commit", "-q", "--allow-empty", "-m", "base")
+        tid = self.make_task()
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step1 = task["steps"][0]
+        for k in range(35):
+            (self.project / f"f{k:02d}.py").write_text("x = 1\n", encoding="utf-8")
+        with self.hub.tlock:
+            self.hub._facts(task, step1, step1["session"])
+        self.assertIn(" ... and 5 more", tasks.read_facts(self.folder, task, 1))  # the text stays short
+        seen = []
+        self.hub._brief_job = lambda t, s, nxt, prev, raw, touched=(): seen.append(sorted(touched))
+        with self.hub.tlock:
+            self.hub.start_brief(task, 1)
+        end = time.time() + 5
+        while not seen and time.time() < end:
+            time.sleep(0.05)
+        self.assertEqual(seen, [[f"f{k:02d}.py" for k in range(35)]])
+
     def test_brief_meta_and_the_carried_troubleshooting(self):
         tid = self.make_task(words="HANDOFF-OK TROUBLE", steps=[{"kind": "scout", "goal": "look"},
                                                                {"kind": "explain", "goal": "say"}])
@@ -967,6 +1017,15 @@ class TaskServerTest(RunServerTest):
         self.assertIn("read calc.py before tests", first)
         self.assertNotIn("run the suite twice", first)
         self.assertNotIn("a chat lesson", first)
+        self.settled(tid)
+
+    def test_a_kinds_lesson_outlives_many_of_other_kinds(self):  # plan 27 (23 nit): the kind filter comes first
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "scout", "read calc.py before tests"))
+        for k in range(levers.LESSONS_SHOWN + 5):  # newer lessons of another kind, more than the Review page shows
+            levers.add_lesson(self.folder, levers.lesson_line("proj", "code", f"code lesson {k}"))
+        tid = self.make_task(steps=self.TWO)
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("read calc.py before tests", self.prompt_of(task["steps"][0]["session"]))
         self.settled(tid)
 
     def over(self, key):

@@ -45,6 +45,7 @@ OLD_HEADINGS = ("## Findings", "## Files touched", "## Open questions", "## Next
 READ_CAPPED = ("scout", "search")  # kinds whose run gets --max-turns read_max_turns (plan 23)
 PROMPT_GOAL_MAX = 600  # the goal in a step prompt after step 1: every handoff carries its Goal heading (plan 23)
 LESSONS_IN_PROMPT = 5  # the newest lessons of the step's own kind that ride in its prompt (plan 23)
+LESSONS_READ = 1000  # the project's lessons.md lines lessons_for picks the step's kind from (plan 27: filter, then cut)
 FIRST_STEP = "This is the first step: there is no handoff note yet."
 MARK_START, MARK_END = "HANDOFF", "END HANDOFF"
 NOTE_MAX = 20 * 1024

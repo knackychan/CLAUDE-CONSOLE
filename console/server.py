@@ -74,6 +74,7 @@ class Hub:
         self.version = 0
         self.auto_since = time.time()  # older verdicts never trigger an automatic step
         self.auto_handed = set()  # plan 23: sessions handoff_auto handed off once (never twice)
+        self.auto_refused = {}  # plan 27: session id -> the turn end whose auto handoff was refused (tried once per turn)
         self._stop = threading.Event()
         self.models_mtime = self._models_mtime()  # models.json as cfg["models"] was read
         self.config_mtime = self._config_mtime()  # config.json as the tuning keys were read
@@ -652,20 +653,27 @@ class Hub:
                 if s.task:  # a step's verdict and context are its chain's
                     continue
                 st = self.state.state_of(s, now)
+                turn = (s.turns[-1][1] or 0) if s.turns else 0
+                step = ("escalate" if st == "verify_failed" else "deescalate") if (
+                    s.window and s.verdict_ts >= self.auto_since and st in ("verify_failed", "verified")) else ""
                 if (auto and (s.ctx_tokens or 0) >= red
                         and st in AUTO_HANDOFF_STATES and not s.handoff and s.id not in self.auto_handed
-                        and s.turns and (s.turns[-1][1] or 0) >= self.auto_since):
-                    hand.append((s.id, s.ctx_tokens))  # plan 23: a red turn hands off; no route step
-                elif s.window and s.verdict_ts >= self.auto_since and st in ("verify_failed", "verified"):
-                    due.append((s.id, "escalate" if st == "verify_failed" else "deescalate"))
+                        and s.turns and turn >= self.auto_since and self.auto_refused.get(s.id) != turn):
+                    hand.append((s.id, s.ctx_tokens, turn, step))  # plan 23: a red turn hands off; no route step
+                elif step:
+                    due.append((s.id, step))
         pulled = []
-        for sid, tokens in hand:  # pull forks a VS Code chat first: it is never resumed in place
+        for sid, tokens, turn, step in hand:  # pull forks a VS Code chat first: it is never resumed in place
             try:
                 if self.pull(sid, "handoff", auto=tokens)[0] == 200:
                     self.auto_handed.add(sid)
                     pulled.append((sid, "handoff"))
+                    continue
             except (runs.RunError, OSError):
-                continue
+                pass
+            self.auto_refused[sid] = turn  # plan 27: refused, so not again before this session's next turn end
+            if step:  # and the verdict still takes its route step
+                due.append((sid, step))
         for sid, lever in due:
             try:
                 if self.pull(sid, lever)[0] == 200:
@@ -905,7 +913,7 @@ class Hub:
             elif part_text:
                 read.append(f"step {n} section")
         last = task["last_good"]
-        lessons = tasks.lessons_for(levers.read_lessons(self.folder, task["project"]), kind)
+        lessons = tasks.lessons_for(levers.read_lessons(self.folder, task["project"], tasks.LESSONS_READ), kind)
         prompt = tasks.step_prompt(task, s, prev, retry, special=special, plan=plan_text, part=part_text,
                                    facts=tasks.read_facts(self.folder, task, last), lessons=lessons)
         route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
@@ -1127,6 +1135,7 @@ class Hub:
         harness_name = (self.runs.meta(sid) or {}).get("harness") or "claude"
         test = facts.last_test(lines) if harness_name == "claude" else None
         cs["facts"] = facts.facts(changed, test)
+        cs["touched"] = list(changed)  # plan 27: every path for the brief's D5 check (the facts text lists 30)
         try:
             tasks.write_facts(self.folder, task, cs, facts.text(base.get("commit", ""), cs["end_commit"], changed,
                                                                 test, git=after is not None,
@@ -1141,7 +1150,10 @@ class Hub:
         nxt = tasks.step(task, n + 1) if n < len(task["steps"]) else None
         raw = tasks.read_note(self.folder, task, n)
         prev = tasks.read_brief(self.folder, task, n - 1)
-        touched = [p for k in range(1, n + 1) for p in facts.files_in(tasks.read_facts(self.folder, task, k))]
+        done = {x["n"]: x for x in task["steps"]}
+        touched = [p for k in range(1, n + 1)  # plan 27: every path; a step from before plan 27 has its facts text only
+                   for p in (done[k]["touched"] if "touched" in done.get(k, {}) else
+                             facts.files_in(tasks.read_facts(self.folder, task, k)))]
         task["briefing"] = n
         base = self._base(task)  # plan 27: no pass in a folder taken off the list; the code fallback stands in
         if not self.cfg["brief_on"] or base:
@@ -1865,7 +1877,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "unknown task")
         last, cs = task["last_good"], tasks.current_step(task)
         texts = self._step_texts(task)
-        return self._json({"task": task, "levers": self.hub.task_levers(task_id),
+        sent = dict(task, steps=[{k: v for k, v in s.items() if k not in ("git_base", "touched")}  # plan 27 K6
+                                 for s in task["steps"]])
+        return self._json({"task": sent, "levers": self.hub.task_levers(task_id),
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
