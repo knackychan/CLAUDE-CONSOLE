@@ -12,6 +12,11 @@ GOOD = ("## Findings\nadd() is in calc.py:2\n## Files touched\n- calc.py (fixed 
 
 
 class RulesTest(unittest.TestCase):
+    def test_rules_name_the_replan_kind(self):
+        self.assertEqual(tasks.RULES["replan"], ("haiku", "low", ""))
+        self.assertIn("replan", tasks.PREP_KINDS)
+        self.assertNotIn("replan", tasks.EDIT_KINDS)
+
     def rule(self, kind, model, effort, tools):
         route = tasks.step_route(kind)
         self.assertEqual((route["model"], route["effort"]), (model, effort), kind)
@@ -743,6 +748,19 @@ class ChainTest(unittest.TestCase):
             tasks.clear(home, task, keep_last=True)
             files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
             self.assertEqual(files, ["steps/02-explain.brief.md", "steps/02-explain.md", "task.json"])
+
+    def test_step_prompt_carries_the_plan_and_the_part(self):
+        task = make(("scout", "code"))
+        step = tasks.step(task, 2)
+        bare = tasks.step_prompt(task, step, "NOTE")
+        self.assertNotIn("$", bare)
+        self.assertIn("\nHandoff note of the previous step:\nNOTE\n\nRules for this step:", bare)
+        text = tasks.step_prompt(task, step, "NOTE", plan="PLAN TEXT", part="PART TEXT")
+        self.assertLess(text.index("PLAN TEXT"), text.index("Handoff note of the previous step"))
+        self.assertIn("PART TEXT\n\nRules for this step:", text)
+        self.assertNotIn("$", text)
+        special = tasks.step_prompt(task, step, "NOTE", special="SPECIAL")
+        self.assertIn("SPECIAL", special)
 
     def test_step_prompt_text(self):
         task = make(("scout", "code"))

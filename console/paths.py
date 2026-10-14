@@ -34,7 +34,11 @@ DEFAULTS = {
     "task_retention_days": 90,
     "task_step_budget_usd": 3,
     "task_max_steps": 6,
-    "opus_max_turns": 12,
+    "design_max_turns": 30,  # plan 24 D2: --max-turns of a design step on any rung
+    "plan_max_kb": 100,  # the plan files together; over it the task waits, nothing is cut
+    "plan_max_parts": 6,
+    "plan_hold": False,  # the task waits after the design step for Confirm
+    "replan_auto": False,  # a replan proposal applies without Confirm
     "budget_warn_at": 0.8,  # share of a model's pace at which a step moves one model down
     "ladder": {  # newest rung first per tier, the alias first
         "haiku": ["haiku", "claude-haiku-4-5"],
@@ -142,6 +146,9 @@ def load_config() -> dict:
                 cfg[key].update(value)
             else:
                 cfg[key] = value
+    if isinstance(user, dict) and "design_max_turns" not in user and "opus_max_turns" in user:
+        cfg["design_max_turns"] = user["opus_max_turns"]  # plan 24 D2: the old key counts once
+    cfg.pop("opus_max_turns", None)
     claude = cfg["harnesses"].get("claude")
     if isinstance(claude, dict) and not claude.get("exe") and cfg.get("claude_exe"):
         claude["exe"] = cfg["claude_exe"]

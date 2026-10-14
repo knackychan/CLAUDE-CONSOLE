@@ -594,7 +594,7 @@ class Hub:
             else self.model_id(tier)
         retry = task["why"] if s["retries"] == 1 and s["state"] == "planned" else ""
         prompt = tasks.step_prompt(task, s, tasks.read_brief(self.folder, task, task["last_good"]), retry)
-        max_turns = self.cfg["opus_max_turns"] if kind == "design" and tier == "opus" else 0
+        max_turns = self.cfg["design_max_turns"] if kind == "design" else 0
         try:
             sid = self.runs.start(
                 task["project_dir"], prompt, model, route["effort"],

@@ -7,10 +7,10 @@ $goal
 Step $n of $m: $kind. $step_goal
 $special
 $retry
-Handoff note of the previous step:
+${plan}Handoff note of the previous step:
 $prev
 
-Rules for this step:
+${part}Rules for this step:
 - Do only this step. Do not start the next one, and do not run /session-handoff.
 - The Agent tool is not available here: read what you need yourself, as little as the step needs.
 - Do not edit files unless the step is edit, code, debug, document, draft or fix.

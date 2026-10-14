@@ -43,6 +43,7 @@ scout step and the writing in a later one. Kinds and their models:
 | debug | a failing test or a bug with no known cause | sonnet | high |
 | test | run the checks and report, no edits | haiku | low |
 | design | architecture, a novel problem, a critical decision, deep research | opus | high |
+| replan | after a scout or a design: re-plan the steps that follow, from what it found | haiku | low |
 
 Do not add a verify step: the Console adds one after the last step that edits.
 

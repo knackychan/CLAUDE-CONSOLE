@@ -30,6 +30,7 @@ RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify
     "debug": ("sonnet", "high", ""),
     "test": ("haiku", "low", "Bash,Read,Grep,Glob"),
     "design": ("opus", "high", "Read,Grep,Glob,WebFetch,WebSearch"),
+    "replan": ("haiku", "low", ""),
     "verify": ("", "", "Bash,Read,Grep,Glob"),
     "fix": ("", "", ""),
 }
@@ -687,13 +688,15 @@ def _fix_text(task: dict, s: dict) -> str:
     return levers.escalate_text(before["verdict_detail"] if before else "", *route)
 
 
-def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "") -> str:
+def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", special: str = "",
+                plan: str = "", part: str = "") -> str:
     kind = step["kind"]
-    special = (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1) if kind == "verify"
-               else _fix_text(task, step) if kind == "fix" else "")
+    special = special or (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1)
+                          if kind == "verify" else _fix_text(task, step) if kind == "fix" else "")
     retry = (f"Your earlier attempt at this step ended without a handoff: {retry_reason}. "
              "Start again from the note above.") if retry_reason else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
         title=task["title"], goal=str(task.get("goal", ""))[:GOAL_MAX], n=step["n"], m=len(task["steps"]),
         kind=kind, step_goal=step["goal"], special=special, retry=retry,
+        plan=plan + "\n\n" if plan else "", part=part + "\n\n" if part else "",
         prev=prev_note or "This is the first step: there is no handoff note yet.")
