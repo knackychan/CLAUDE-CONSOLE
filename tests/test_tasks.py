@@ -1021,5 +1021,52 @@ class BalanceRouteTest(unittest.TestCase):
                          ("opus", "opencode:opencode-go/kimi-k3", "pick: opencode:opencode-go/kimi-k3"))
 
 
+class PinRouteTest(unittest.TestCase):
+    """Plan 26: config `kinds` pins a kind's rung and effort; a step's pick and the task's fixed effort come first."""
+
+    def route(self, kind, **kw):
+        return tasks.step_route(kind, cfg=BALANCE_CFG, warn_at=0.8, **kw)
+
+    def test_a_pinned_rung_runs_as_a_pick(self):
+        route = self.route("code", pin={"rung": "codex:gpt-6.1-sol", "effort": "auto"},
+                           budget=shares({"gpt-6.1-sol": 0.95, "sonnet": 0.1}))
+        self.assertEqual((route["model"], route["rung"]), ("sonnet", "codex:gpt-6.1-sol"))  # never balanced
+        self.assertIn("pin code: codex:gpt-6.1-sol", route["notes"])
+        self.assertFalse(any(n.startswith("pick:") or n.startswith("balance") for n in route["notes"]))
+
+    def test_a_pinned_rung_that_cannot_run_routes_as_auto(self):
+        refuse = lambda rung: "codex is off" if rung.startswith("codex:") else ""
+        route = self.route("code", pin={"rung": "codex:gpt-6.1-sol"}, refuse=refuse)
+        self.assertEqual(route["rung"], "sonnet")
+        self.assertIn("pin code: codex:gpt-6.1-sol refused: codex is off -> auto", route["notes"])
+        route = self.route("code", pin={"rung": "codex:gone"})
+        self.assertIn("pin code: codex:gone refused: unknown model -> auto", route["notes"])
+
+    def test_the_step_pick_beats_the_pin(self):
+        route = self.route("code", pick="opus", pin={"rung": "codex:gpt-6.1-sol"})
+        self.assertEqual(route["rung"], "opus")
+        self.assertIn("pick: opus", route["notes"])
+        self.assertFalse(any(n.startswith("pin ") for n in route["notes"]))
+
+    def test_a_pinned_effort_is_fixed_and_capped(self):
+        route = self.route("scout", pin={"rung": "auto", "effort": "high"}, demand={"reasoning": "high"})
+        self.assertEqual((route["rung"], route["effort"]), ("haiku", "high"))
+        self.assertIn("pin effort: high", route["notes"])
+        route = self.route("scout", pin={"effort": "max"})  # haiku's cap still applies
+        self.assertEqual(route["effort"], tasks.EFFORT_CAP.get("haiku", "max"))
+        route = self.route("scout", pin={"effort": "high"}, effort="low")  # the task's fixed effort comes first
+        self.assertEqual(route["effort"], "low")
+        self.assertIn("fixed effort: low", route["notes"])
+
+    def test_verify_and_fix_are_never_pinned(self):
+        for kind in ("verify", "fix"):
+            route = self.route(kind, checked=("sonnet", "medium"), pin={"rung": "haiku", "effort": "low"})
+            self.assertFalse(any(n.startswith("pin") for n in route["notes"]), kind)
+
+    def test_without_cfg_a_pinned_rung_is_ignored(self):
+        route = tasks.step_route("code", pin={"rung": "codex:gpt-6.1-sol", "effort": "high"})
+        self.assertEqual((route["rung"], route["effort"]), ("sonnet", "high"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,7 @@ DEFAULTS = {
                  {"rung": "opencode:opencode-go/deepseek-v4.1-flash", "effort": "auto"},
                  {"rung": "cmd:deepseek/deepseek-v4.1-flash", "effort": "auto"}],
     },
+    "kinds": {},  # plan 26: kind -> {"rung": "auto" | rung, "effort": "auto" | effort}; absent keeps the code's rule
     "allowances": {},  # model key -> {"day_usd", "week_usd", "month_usd"}; a key without one has no allowance
     "balance_margin": 0.1,  # the previous step's rung stays while its share is this close to the lowest
     "cache_bonus": 0.1,  # taken off the previous rung's share while its prompt cache is warm (5 minutes)

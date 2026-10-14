@@ -83,14 +83,21 @@ def kind_tier(kind: str) -> str:
 
 def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(), prev: str = "",
                budget=None, warn_at: float = 0.8, effort: str = "auto", cfg=None, prev_rung: str = "",
-               prev_age=None, hard: bool = False, refuse=None, now: float = None) -> dict:
+               prev_age=None, hard: bool = False, refuse=None, now: float = None, pin=None) -> dict:
     """The route of one step: rule, pick, demand, floor, hint, cap, balance, fixed effort (README 3.5 of plan 17,
     step 7 rewritten by plan 18), in that order, each one appending a note. A pick keeps its model against the floor
     and the hint (they may still raise the effort) and is never balanced. `budget` is Hub.budget() (fills per model
     key); `cfg` gives the tiers, the balance keys and models.json; `refuse(rung)` a reason a rung cannot run now.
     Returns {"model": the rank of the rung, "rung", "effort", "notes", "hold"}; without `cfg` the rung is the rank
-    alias (plan 17's behaviour). `hold` non-empty means the task waits for Fred."""
+    alias (plan 17's behaviour). `hold` non-empty means the task waits for Fred. `pin` is config `kinds[kind]`
+    (plan 26): a pinned rung acts as a pick when the step has none, a pinned effort as the task's fixed effort
+    when the task has none; verify and fix are never pinned."""
     efforts = claude_cli.EFFORTS
+    pin = pin if isinstance(pin, dict) and kind not in ("verify", "fix") else {}
+    pin_rung = pin.get("rung") if cfg is not None and pin.get("rung") not in (None, "", "auto") else ""
+    pinned = effort == "auto" and pin.get("effort") in efforts
+    if pinned:
+        effort = pin["effort"]
     fixed = effort != "auto"
     notes, hold, rung = [], "", ""
     if kind == "verify":
@@ -101,11 +108,20 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
     else:
         model, level = RULES[kind][:2]
     notes.append(f"rule {kind}: {model}/{level}")
+    from_pin = False
+    if pin_rung and not pick:  # plan 26: the kind's pinned rung, unless it cannot run now (then auto)
+        why = (refuse(pin_rung) if refuse else "") or ("" if fills.rank_of(pin_rung, cfg) else "unknown model")
+        if why:
+            notes.append(f"pin {kind}: {pin_rung} refused: {why} -> auto")
+        else:
+            pick, from_pin = pin_rung, True
+            notes.append(f"pin {kind}: {pin_rung}")
     picked = (fills.rank_of(pick, cfg) if cfg is not None else claude_cli.model_alias(pick)) if pick else ""
     if picked:
         model = picked
-        notes.append(f"pick: {pick if cfg is not None else picked}")
-        why = refuse(pick) if refuse and cfg is not None else ""
+        if not from_pin:  # a pin wrote its own note above
+            notes.append(f"pick: {pick if cfg is not None else picked}")
+        why = refuse(pick) if refuse and cfg is not None and not from_pin else ""
         if why:
             notes.append(f"pick refused: {why} -> balance")
         else:
@@ -163,7 +179,7 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
         notes.append(f"over pace: {rung} {round(share * 100)} % -> hold")
     if fixed:
         level = effort
-        notes.append(f"fixed effort: {effort}")
+        notes.append(f"pin effort: {effort}" if pinned else f"fixed effort: {effort}")
     cap = EFFORT_CAP.get(model, efforts[-1])
     if efforts.index(level) > efforts.index(cap):
         level = cap
