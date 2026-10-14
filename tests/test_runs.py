@@ -126,11 +126,11 @@ class RunsTest(unittest.TestCase):
 
     def test_run_started_carries_task_and_step(self):
         sid = self.mgr.start(str(self.project), "step", "haiku", "low", extra={"task": "t1", "step": 2},
-                             disallow=tasks.DISALLOW, tools="Read,Grep,Glob", budget=3)
+                             disallow=tasks.DISALLOW, tools="Read,Grep,Glob", budget=3, strict_mcp=True)
         self.assertTrue(wait_for(lambda: self.ended(sid)))
         started = [r for r in self.log() if r["event"] == "run_started"][0]
         self.assertEqual((started["task"], started["step"]), ("t1", 2))
-        limits = {"disallow": ["Agent"], "tools": "Read,Grep,Glob", "budget": 3, "max_turns": 0}
+        limits = {"disallow": ["Agent"], "tools": "Read,Grep,Glob", "budget": 3, "max_turns": 0, "strict_mcp": True}
         self.assertEqual(self.mgr.meta(sid)["limits"], limits)
         self.assertEqual(len(self.ended(sid)), 1)  # the fake claude ran, whatever the flags
         with mock.patch.object(runs.claude_cli, "run_command", wraps=runs.claude_cli.run_command) as cmd:
@@ -138,12 +138,12 @@ class RunsTest(unittest.TestCase):
             self.assertTrue(wait_for(lambda: len(self.ended(sid)) == 2))
         self.assertEqual(self.mgr.meta(sid)["limits"], limits)
         kwargs = cmd.call_args.kwargs
-        self.assertEqual((kwargs["disallow"], kwargs["tools"], kwargs["budget"], kwargs["max_turns"]),
-                         (("Agent",), "Read,Grep,Glob", 3, 0))
+        self.assertEqual((kwargs["disallow"], kwargs["tools"], kwargs["budget"], kwargs["max_turns"],
+                          kwargs["strict_mcp"]), (("Agent",), "Read,Grep,Glob", 3, 0, True))  # a retry keeps them
         plain = self.mgr.start(str(self.project), "plain", "sonnet", "low")  # no limits given: none kept
         self.assertTrue(wait_for(lambda: self.ended(plain)))
         self.assertEqual(self.mgr.meta(plain)["limits"],
-                         {"disallow": [], "tools": "", "budget": 0.0, "max_turns": 0})
+                         {"disallow": [], "tools": "", "budget": 0.0, "max_turns": 0, "strict_mcp": False})
 
     def test_forget_deletes_an_ended_run_only(self):
         sid = self.mgr.start(str(self.project), "first", "sonnet", "low")

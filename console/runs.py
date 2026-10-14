@@ -132,12 +132,13 @@ class RunManager:
               title: str = "", route: str = "", reason: str = "", prep: str = "",
               fork: str = "", kind: str = "run", extra: dict = None, files: list = (),
               disallow: tuple = (), tools: str = "", budget: float = 0.0, max_turns: int = 0,
-              harness: str = "claude", read_only: bool = False) -> str:
+              harness: str = "claude", read_only: bool = False, strict_mcp: bool = False) -> str:
         """A new run, a new turn of a window run (`resume`), or a window copy of another chat (`fork`).
         `kind` (run, continue, verify, handoff, escalate) and `extra` go into the run_started line.
         `files` (attach.parse) go inline after the prompt (Claude only); the stream file keeps their summary only.
         The step limits (`disallow`, `tools` where "" is the default set, `budget`, `max_turns`) are kept in the
         run meta; a resumed turn given none reuses them, so a retry or a STOP answer keeps its restrictions.
+        `strict_mcp` (plan 23, Claude only): the run loads no MCP server; kept in the same limits.
         `harness` is taken by a new run only: a resume reads it from the run's meta, a fork from the forked run's."""
         sid = resume or str(uuid.uuid4())
         old = self.meta(sid) or {}
@@ -167,8 +168,9 @@ class RunManager:
             if (resume or fork) and not (harness_sid and adapter.RESUME):
                 raise RunError("this session cannot be resumed: no harness session id")
         self.runs.mkdir(parents=True, exist_ok=True)
-        limits = {"disallow": list(disallow), "tools": tools or "", "budget": budget, "max_turns": max_turns}
-        if resume and not (disallow or tools or budget or max_turns) and old.get("limits"):
+        limits = {"disallow": list(disallow), "tools": tools or "", "budget": budget, "max_turns": max_turns,
+                  "strict_mcp": bool(strict_mcp)}
+        if resume and not (disallow or tools or budget or max_turns or strict_mcp) and old.get("limits"):
             limits = old["limits"]
         if not adapter.CAPS:
             limits["timeout_s"] = int(self.cfg.get("step_timeout_s") or 0)
@@ -183,7 +185,7 @@ class RunManager:
                       name=redact.clip(title, 60))
         if harness == "claude":
             common.update(fork=fork, tools=limits["tools"] or None, disallow=tuple(limits["disallow"]),
-                          blocks=attach.blocks(files))
+                          blocks=attach.blocks(files), strict_mcp=bool(limits.get("strict_mcp")))
         elif harness == "opencode":
             pfile = self.runs / f"{sid}.prompt.md"
             pfile.write_text(model_prompt if prompt.startswith("/") else model_prompt + claude_cli.STOP_FOOTER,

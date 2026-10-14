@@ -62,10 +62,11 @@ def brief_command(exe: list, model: str, schema: dict) -> list:
 
 def run_command(exe: list, model: str, effort: str, session_id: str, resume: bool = False,
                 name: str = "", fork: str = "", disallow: tuple = (), tools: str = None,
-                budget: float = 0.0, max_turns: int = 0) -> list:
+                budget: float = 0.0, max_turns: int = 0, strict_mcp: bool = False) -> list:
     """D5: auto mode, nobody answers prompts (a denial ends up in the result). Prompts go in on stdin.
     `fork`: start `session_id` as a copy of that chat (its context, a new id; the original is not touched).
-    Step limits (plan 17): `disallow` tool names, `tools` (the --tools list), a spend cap, a turn cap."""
+    Step limits (plan 17): `disallow` tool names, `tools` (the --tools list), a spend cap, a turn cap; plan 23:
+    `strict_mcp` loads no MCP server (--strict-mcp-config with no --mcp-config, as Prep runs)."""
     cmd = exe + ["-p", "--model", model, "--effort", effort, "--permission-mode", "auto",
                  "--permission-prompts", "none", "--input-format", "stream-json",
                  "--output-format", "stream-json", "--verbose"]
@@ -73,6 +74,8 @@ def run_command(exe: list, model: str, effort: str, session_id: str, resume: boo
         cmd += ["--disallowedTools", ",".join(disallow)]
     if tools is not None:
         cmd += ["--tools", tools]
+    if strict_mcp:
+        cmd += ["--strict-mcp-config"]
     if budget and budget > 0:
         cmd += ["--max-budget-usd", f"{budget:.2f}"]
     if max_turns and max_turns > 0:

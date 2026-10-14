@@ -35,6 +35,8 @@ DEFAULTS = {
     "task_step_budget_usd": 3,
     "task_max_steps": 6,
     "design_max_turns": 30,  # plan 24 D2: --max-turns of a design step on any rung
+    "read_max_turns": 15,  # plan 23: --max-turns of a scout or search step
+    "handoff_auto": False,  # plan 23 (D-5): hand off a window run whose turn ends in the red zone
     "plan_max_kb": 100,  # the plan files together; over it the task waits, nothing is cut
     "plan_max_parts": 6,
     "plan_hold": False,  # the task waits after the design step for Confirm
@@ -230,6 +232,33 @@ def set_config(folder: Path, values: dict, merge=("tiers",)) -> None:
             data[key] = {**data[key], **value}
         else:
             data[key] = value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name("config.json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+SETTINGS = ("handoff_auto",)  # plan 23: the booleans the window may flip through POST /api/setting
+
+
+def set_setting(folder: Path, key: str, value: bool) -> None:
+    """Write one whitelisted boolean into <folder>/config.json; every other key stays as written. ValueError for a key
+    that is not in SETTINGS, a value that is not a bool, or a config.json that cannot be read."""
+    if key not in SETTINGS:
+        raise ValueError(f"not a setting: {key}")
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} takes true or false")
+    path = Path(folder) / "config.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            raise ValueError(f"cannot read {path}: fix it by hand")
+    else:
+        data = copy.deepcopy(DEFAULTS)
+    data[key] = value
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name("config.json.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

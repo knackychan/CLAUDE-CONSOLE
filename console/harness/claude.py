@@ -23,11 +23,13 @@ def version_command(exe: list) -> list:
 
 def run_command(exe: list, model: str, effort: str, cwd: str, session_id: str, *, prompt: str,
                 resume: bool = False, fork: str = "", read_only: bool = False, budget: float = 0.0,
-                max_turns: int = 0, name: str = "", tools=None, disallow: tuple = (), blocks: tuple = ()):
+                max_turns: int = 0, name: str = "", tools=None, disallow: tuple = (), blocks: tuple = (),
+                strict_mcp: bool = False):
     """(the argument list, the stdin bytes). `cwd` and `read_only` are unused: the service sets the process cwd
     and a Claude step limits its tools through `tools` / `disallow`."""
     cmd = claude_cli.run_command(exe, model, effort, session_id, resume=resume, name=name, fork=fork,
-                                 disallow=disallow, tools=tools, budget=budget, max_turns=max_turns)
+                                 disallow=disallow, tools=tools, budget=budget, max_turns=max_turns,
+                                 strict_mcp=strict_mcp)
     footer = "" if prompt.startswith("/") else claude_cli.STOP_FOOTER
     return cmd, claude_cli.user_message(prompt + footer, blocks)
 
