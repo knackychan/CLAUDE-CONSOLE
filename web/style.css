@@ -704,3 +704,73 @@ html:not(.native) .native-only { display: none; }
   .mfill .rest { grid-column: 2; text-align: left; }
   .heat { grid-template-columns: 84px repeat(24, minmax(0, 1fr)); }
 }
+
+/* plan 26: the card and the compact select of the mock (lines 262 to 266, 274 to 278), when no earlier plan ported them */
+.pcard { display: grid; background: var(--win); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.pcard > .ph { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--line); }
+.pcard > .ph .nm { font: 600 12.5px var(--ui); color: var(--ink); }
+.pcard > .ph .m { flex: 1; min-width: 0; text-align: right; color: var(--mut); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard > .ph .btn.sm { min-height: 24px; }
+.pick { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+.pick select { appearance: none; -webkit-appearance: none; min-width: 0; max-width: 100%; height: 24px; padding: 0 18px 0 7px; border: 1px solid transparent; border-radius: 5px; background: var(--raise); color: var(--ink); font: 11.5px var(--mono); cursor: pointer; text-overflow: ellipsis; }
+.pick select:hover { border-color: var(--line); }
+.pick::after { content: "▾"; position: absolute; right: 6px; font-size: 9px; color: var(--mut); pointer-events: none; }
+.pick.auto select { color: var(--mut); background: transparent; border-color: var(--line); border-style: dashed; }
+
+/* plan 26: the Models and tuning page (mock: modelsHtml and its CSS, 2026-10-14). Tabs Kinds / Tiers / Tuning in the
+   Settings card grammar; an edited value carries the blue edge and a reset, a value at its default carries nothing */
+.mp .pane { padding: 10px 12px 14px; display: grid; gap: 10px; align-content: start; }
+.mp .hint { margin: 0; font: 11.5px/1.45 var(--ui); color: var(--mut); text-wrap: pretty; }
+.mp .hint.pad { padding: 12px; }
+.pcard > .ph .q { flex: none; width: 16px; height: 16px; margin-left: -4px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--mut); font: 600 10px/14px var(--ui); cursor: help; }
+.pcard > .ph .q:hover, .pcard > .ph .q[aria-expanded="true"] { color: var(--ink); border-color: var(--ink); }
+.pcard > .qh { margin: 0; padding: 7px 12px 8px; border-bottom: 1px solid var(--line); background: var(--raise); font: 12px/1.45 var(--ui); color: var(--mut); text-wrap: pretty; }
+.pcard > .qh[hidden] { display: none; }
+.krow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1px 6px; align-items: center; padding: 7px 8px 7px 12px; }
+.krow + .krow { border-top: 1px solid var(--line); }
+.krow .nm { grid-column: 1; grid-row: 1; font: 500 13px var(--ui); color: var(--ink); }
+.krow .pick { grid-row: 1; }
+.krow .pick.r { grid-column: 2; } .krow .pick.e { grid-column: 3; }
+.krow .pick.r select { max-width: 190px; }
+.krow .sub { grid-column: 1 / -1; grid-row: 2; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.krow .sub .r { color: var(--bad); }
+.krow.fixed .nm { color: var(--mut); }
+.krow.fixed .lock { grid-column: 2 / -1; grid-row: 1 / span 2; font: 11px var(--mono); color: var(--mut); text-align: right; }
+.ed { box-shadow: inset 2px 0 0 var(--wip); }
+.ed .rs, .tf .rs { padding: 0; border: 0; background: transparent; font: inherit; color: var(--wip); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.rrow { display: grid; grid-template-columns: 14px 16px minmax(0, 1fr) auto 24px; gap: 6px; align-items: center; padding: 6px 6px 6px 10px; }
+.rrow + .rrow { border-top: 1px solid var(--line); }
+.rrow:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.rrow .gr { color: var(--mut); font-size: 11px; letter-spacing: -2px; cursor: grab; }
+.rrow .o { font: 10.5px var(--mono); color: var(--mut); }
+.rrow .nm { font: 12px var(--mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rrow .nm .h { color: var(--mut); }
+.rrow .x { width: 24px; height: 24px; border: 0; border-radius: 5px; background: transparent; color: var(--mut); cursor: pointer; font-size: 11px; }
+.rrow .x:hover { background: var(--raise); color: var(--ink); }
+.rhid { padding: 5px 12px; border-top: 1px solid var(--line); font: 11px var(--mono); color: var(--mut); }
+.radd { display: flex; gap: 6px; align-items: center; padding: 6px 10px 8px; border-top: 1px solid var(--line); }
+.radd .m { color: var(--mut); font-size: 11px; margin-left: auto; }
+.tf { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; padding: 7px 10px 7px 12px; }
+.tf + .tf { border-top: 1px solid var(--line); }
+.tf .nm { font: 500 13px var(--ui); color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf .sub { grid-column: 1; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf .v { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; align-items: center; gap: 5px; font: 11px var(--mono); color: var(--mut); }
+.tf .v input { width: 70px; height: 26px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--raise); color: var(--ink); font: 12px var(--mono); text-align: right; }
+.tf .v input:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
+.tf.bad .v input { border-color: var(--bad); }
+.tf.bad .sub { color: var(--bad); }
+.tf.al .v input { width: 54px; }
+.tf .sw { min-width: 44px; height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 11px; background: var(--off); color: var(--mut); font: 11px var(--mono); cursor: pointer; }
+.tf .sw.on { background: color-mix(in srgb, var(--ok) 18%, var(--win)); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); color: var(--ink); }
+.mp .pcard .fold .fh { padding: 0 10px 0 12px; min-height: 32px; align-items: center; }
+.msave { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.msave .m { flex: 1; min-width: 0; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msave .m b { color: var(--wip); font-weight: 400; } .msave .m .r { color: var(--bad); }
+.pset > .lbl.row { display: flex; justify-content: space-between; align-items: baseline; }
+.pset > .lbl.row .link { padding: 0; border: 0; background: transparent; text-transform: none; letter-spacing: 0; font: 11.5px var(--ui); color: var(--ink); }
+@media (max-width: 372px) {
+  .krow { grid-template-columns: minmax(0, 1fr) auto; }
+  .krow .pick.r { grid-column: 1 / -1; grid-row: 3; } .krow .pick.r select { max-width: 100%; }
+  .krow .pick.e { grid-column: 2; }
+  .tf.al .v input { width: 46px; }
+}

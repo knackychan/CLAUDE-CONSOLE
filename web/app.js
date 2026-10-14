@@ -434,6 +434,7 @@ function showPage(name) {
   clearInterval(usageTimer);
   usageTimer = null;
   if (name === "usage") { $("uscroll").scrollTop = 0; loadUsage(); usageTimer = setInterval(loadUsage, 60000); }
+  if (name === "models") { $("mscroll").scrollTop = 0; loadModels(); }  // plan 26: config.json as it is now
   render();
 }
 
@@ -988,7 +989,7 @@ function pickRows() {
   if (on.length) html += `<div class="grp lbl">Runs allowed · ${on.length}</div>${on.map(line).join("")}`;
   if (off.length) html += `<div class="grp lbl">Runs off · ${off.length}</div>${off.map(line).join("")}`;
   if (!match.length) html = `<div class="none">No project matches "${esc(q)}". Projects appear here once a Claude Code session runs in them.</div>`;
-  if (!q) html += harnessHtml() + `<div class="pset">${windowRunsFold()}</div>`;
+  if (!q) html += `<div class="pset"><span class="lbl row">Settings<button class="link" data-go="models" title="Which model does each kind of step, the tiers' rungs, and the tuning numbers">Models and tuning &#8250;</button></span></div>` + harnessHtml() + `<div class="pset">${windowRunsFold()}</div>`;
   $("prows").innerHTML = html;
   hi = 0;
   markHi();
@@ -2208,6 +2209,294 @@ function usageFails() {
     <div class="legend"><span><i></i>no FAIL</span><span><i class="hl1"></i>1</span><span><i class="hl4"></i>4 or more</span><span>rows: the model that wrote the checked step</span></div>
     <p class="note m">Evidence for peak_hours (off): counted over the verify verdicts of the tasks kept.</p>`)}</div>`;
 }
+// -- Models and tuning page (plan 26, interface 9b) ----------------------------------------
+// The page edits a working copy of what /api/config carries (kind_pins, tiers, tuning); Save posts the changed keys
+// to /api/config/models, the service checks them, writes config.json and reloads them: nothing is rebuilt.
+let mtab = "kinds";        // kinds | tiers | tuning
+let medit = null;          // the working copy: {values: {key: value}, kinds: {kind: {rung, effort}}, tiers: {tier: [{rung, effort}]}}
+let mmsg = "";             // the last Save's refusal, shown in the levers row
+let mbusy = false;         // a Save is on its way
+const mqOpen = new Set();  // the cards whose ? line is open
+const PASSES = [["prep_model", "Prep", "enhances the prompt, plans the steps"], ["brief_model", "Handoff pass", "compacts a step's handoff"],
+  ["review_model", "Rules review", "read only"], ["default_model", "Run default", "the composer's Run"]];
+const TUNE = {  // key -> [label, unit word, scale from the config value to the shown one]; the service sends value, default, range
+  task_max_steps: ["Steps per task", "", 1], task_step_budget_usd: ["Spend per step", "$", 1],
+  step_timeout_s: ["Step timeout", "s", 1], design_max_turns: ["Turns on design", "", 1],
+  read_max_turns: ["Turns on read kinds", "", 1], plan_max_kb: ["Plan size at most", "KB", 1],
+  plan_max_parts: ["Sub-plans at most", "", 1], plan_hold: ["Hold each plan for me", "", 1],
+  replan_auto: ["Replan without asking", "", 1], brief_max_words: ["Handoff words", "w", 1],
+  brief_timeout_s: ["Pass timeout", "s", 1], balance_margin: ["Spread margin", "points", 100],
+  cache_bonus: ["Warm cache bonus", "points", 100], budget_warn_at: ["Over pace at", "% of pace", 100],
+  daily_budget_usd: ["Daily budget", "$", 1], gauge_yellow_tokens: ["Yellow from", "K", 0.001],
+  gauge_red_tokens: ["Red from", "K", 0.001],
+};
+const MGROUP = {  // Tuning cards: [name, the one fact, the ? sentence]
+  steps: ["Steps", "limits per step and task", "Limits for one step and one task: how many steps, how much one step may spend, how long it may run and how many turns it may take."],
+  plan: ["Plan", "the design step's plan", "The plan a design step writes: its size, how many sub-plans it may split into, and whether you confirm it and its replans."],
+  handoff: ["Handoff", "between steps", "What passes between steps: the word limit of a handoff and how long the pass that compacts it may take."],
+  balancing: ["Balancing", "spread across models", "How work is spread across models: each step takes the least-used model of its tier; the margin lets the same model run again while usage is close; over pace marks a model that is ahead of its allowance."],
+  gauge: ["Context gauge", "the cells' colours", "When the context cells turn yellow and red. Red is also where auto hand off starts."],
+};
+const KCARD = {  // Kinds and Tiers cards per tier: [name, the one fact on Kinds, the ? sentence on Kinds, on Tiers]
+  read: ["Read", "look, search, small edits", "Kinds that look things up or make small changes. Their models come from the read tier, the cheap and fast ones.",
+    "The cheap, fast models, for looking things up, small edits and tests."],
+  write: ["Write", "code and prose", "Kinds that write code or prose, such as implementing a feature or fixing a bug. Their models come from the write tier.",
+    "The everyday coding models, for writing code and prose. A model ranked above this tier runs only on steps Prep judges hard."],
+  think: ["Think", "plans and decisions", "Kinds that plan and decide. Their models come from the think tier, the strongest ones.",
+    "The strongest models, for design and hard decisions. Fable, ranked above opus, runs only on design steps Prep judges hard."],
+};
+const RANKS = ["haiku", "sonnet", "opus", "fable"];
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+async function loadModels() {
+  try { cfg = await api("/api/config"); mmsg = ""; } catch (e) { mmsg = e.message; }
+  resetModels();
+  renderModels();
+}
+function resetModels() {
+  if (!cfg || !cfg.tuning) { medit = null; return; }
+  medit = { values: Object.fromEntries(Object.entries(cfg.tuning).map(([k, t]) => [k, clone(t.value)])),
+    kinds: clone(cfg.kind_pins || {}),
+    tiers: Object.fromEntries(Object.entries(cfg.tiers || {}).map(([t, rows]) => [t, rows.map((r) => ({ rung: r.rung, effort: r.effort }))])) };
+}
+function savedTiers() { return Object.fromEntries(Object.entries(cfg.tiers || {}).map(([t, rows]) => [t, rows.map((r) => ({ rung: r.rung, effort: r.effort }))])); }
+function pinOf(pins, k) { const p = pins[k] || {}; return { rung: p.rung || "auto", effort: p.effort || "auto" }; }
+function cleanPins(pins) {  // a kind on auto and auto is the code's rule: nothing to keep (the service drops it too)
+  return Object.fromEntries(Object.entries(pins).map(([k, p]) => [k, pinOf(pins, k)]).filter(([, p]) => p.rung !== "auto" || p.effort !== "auto"));
+}
+function modelChanges() {  // the keys a Save would post, with their values (D1 a: only what differs from the page's load)
+  if (!medit) return {};
+  const out = {};
+  for (const [k, t] of Object.entries(cfg.tuning)) if (!same(medit.values[k], t.value)) out[k] = medit.values[k];
+  if (!same(cleanPins(medit.kinds), cleanPins(cfg.kind_pins || {}))) out.kinds = cleanPins(medit.kinds);
+  if (!same(medit.tiers, savedTiers())) out.tiers = medit.tiers;
+  return out;
+}
+function tabEdits(tab) {
+  const ch = modelChanges(), passes = PASSES.map(([k]) => k);
+  if (tab === "kinds") {
+    const a = cleanPins(medit.kinds), b = cleanPins(cfg.kind_pins || {});
+    return new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => !same(a[k], b[k]))).size;
+  }
+  if (tab === "tiers") return Object.keys(medit.tiers).filter((t) => !same(medit.tiers[t], savedTiers()[t])).length + passes.filter((k) => k in ch).length;
+  return Object.keys(ch).filter((k) => cfg.tuning[k] && !passes.includes(k)).length;
+}
+function rankOf(rung) {  // what /api/config says, else models.json through the Harnesses card (plan 5), else a Claude alias
+  for (const rows of Object.values(cfg.tiers || {})) { const x = rows.find((r) => r.rung === rung); if (x && x.rank) return x.rank; }
+  if (rung.includes(":")) { const [h, ...m] = rung.split(":"); return (((cfg.harnesses || {})[h] || {}).models || {})[m.join(":")] || ""; }
+  const a = alias(rung);
+  return RANKS.includes(a) ? a : "";
+}
+function whyHidden(rung) {
+  for (const rows of Object.values(cfg.tiers || {})) { const x = rows.find((r) => r.rung === rung); if (x) return x.why; }
+  return "";
+}
+function cardHead(id, name, fact, help) {
+  const open = mqOpen.has(id);
+  return `<div class="ph"><span class="nm">${esc(name)}</span><button class="q" data-q="${esc(id)}" aria-expanded="${open}" aria-label="What is ${esc(name)}?" title="${esc(help)}">?</button><span class="m">${fact}</span></div><p class="qh"${open ? "" : " hidden"}>${esc(help)}</p>`;
+}
+function effSel(value, label, attrs, start = "") {
+  const auto = value === "auto";
+  return `<span class="pick e${auto ? " auto" : ""}"${auto && start ? ` title="auto: starts at ${esc(start)}; Prep and the router may raise it"` : ""}><select ${attrs} aria-label="${esc(label)} effort">${["auto", ...cfg.efforts].map((e) => `<option${e === value ? " selected" : ""}>${e}</option>`).join("")}</select></span>`;
+}
+
+// Kinds: one row per kind, in cards by tier; verify and fix in a Checks card, set by the rule
+function kindRow(k) {
+  const tier = cfg.kinds_tier[k], rule = (cfg.kind_rules || {})[k] || {}, p = pinOf(medit.kinds, k), was = pinOf(cfg.kind_pins || {}, k);
+  let opts = modelOptions(p.rung === "auto" ? "" : p.rung, false, k);
+  const listed = p.rung === "auto" || opts.includes(`value="${esc(p.rung)}"`);
+  if (!listed) opts = `<option value="${esc(p.rung)}" selected>${esc(modelText(p.rung))} (hidden)</option>` + opts;
+  const turns = k === "design" ? medit.values.design_max_turns : ["scout", "search"].includes(k) ? medit.values.read_max_turns : 0;
+  const sub = [rule.tools ? "tools " + rule.tools.replaceAll(",", ", ") : "default tools", turns ? turns + " turns" : ""].filter(Boolean).join(" · ");
+  const ed = !same(p, was), why = listed ? "" : whyHidden(p.rung);
+  return `<div class="krow${ed ? " ed" : ""}"><span class="nm">${esc(k)}</span>
+    <span class="pick r${p.rung === "auto" ? " auto" : ""}"><select data-mkind="${esc(k)}" data-mf="rung" aria-label="${esc(k)} model"><option value="auto"${p.rung === "auto" ? " selected" : ""}>auto · ${tier}</option>${opts}</select></span>
+    ${effSel(p.effort, k, `data-mkind="${esc(k)}" data-mf="effort"`, rule.effort)}
+    <span class="sub">${listed ? esc(sub) : `<span class="r">pinned model hidden${why ? " · " + esc(why) : ""}</span>`}${p.effort !== "auto" ? " · effort pinned" : ""}${ed ? ` · <button class="rs" data-mreset="kind:${esc(k)}">reset</button>` : ""}</span></div>`;
+}
+function kindsTab() {
+  const byTier = { read: [], write: [], think: [] };
+  for (const k of cfg.kinds) if (byTier[cfg.kinds_tier[k]]) byTier[cfg.kinds_tier[k]].push(k);
+  const fixed = (k, why, sub) => `<div class="krow fixed"><span class="nm">${k}</span><span class="lock">${why}</span><span class="sub">${sub}</span></div>`;
+  return `<p class="hint">Which model and effort each kind of step takes. Auto lets Prep and the router decide (the tier's emptiest model; the effort from the kind's start, raised when Prep judges the step hard); a picked model or effort pins it as this kind's default. The Prep card can still change one step.</p>
+    ${["read", "write", "think"].map((t) => `<div class="pcard">${cardHead("k" + t, KCARD[t][0], KCARD[t][1], KCARD[t][2] + " Kinds: " + byTier[t].join(", ") + ".")}${byTier[t].map(kindRow).join("")}</div>`).join("")}
+    <div class="pcard">${cardHead("kchecks", "Checks", "set by the rule, not here", "Verify and fix are set by a rule: verify runs one rank above the model that wrote the step; fix takes the failed step's tier. They cannot be changed here.")}
+      ${fixed("verify", "one rank above", "the rung that wrote the step; never opencode or cmd")}${fixed("fix", "the failed step's tier", "after a FAIL; never opencode or cmd")}</div>`;
+}
+
+// Tiers: each tier's rungs in order (drag, or Alt+Up / Alt+Down on a row); hidden rungs keep their place
+function addOptions(tier) {
+  const have = new Set(medit.tiers[tier].map((r) => r.rung)), out = [];
+  for (const t of cfg.models) for (const r of ((cfg.ladder || {})[t] || [t])) out.push(r);
+  for (const [h, x] of Object.entries(cfg.harnesses || {})) {
+    if (h === "claude" || !x.on || !x.found) continue;
+    for (const m of Object.keys(x.models || {})) out.push(`${h}:${m}`);
+  }
+  return [...new Set(out)].filter((r) => !have.has(r) && rankOf(r)
+    && !(tier === "think" && /^(opencode|cmd):/.test(r) && rankOf(r) !== "opus"));
+}
+function tierCard(tier) {
+  const rows = medit.tiers[tier] || [], base = { read: "haiku", write: "sonnet", think: "opus" }[tier];
+  let n = 0;
+  const hidden = rows.filter((r) => whyHidden(r.rung));
+  const body = rows.map((r, i) => {
+    if (whyHidden(r.rung)) return "";
+    n += 1;
+    const rank = rankOf(r.rung), hard = rank && RANKS.indexOf(rank) > RANKS.indexOf(base);
+    const [h, m] = r.rung.includes(":") ? [r.rung.split(":")[0], r.rung.slice(r.rung.indexOf(":") + 1)] : ["claude", r.rung];
+    return `<div class="rrow" draggable="true" tabindex="0" data-mrow="${tier}:${i}"${hard ? ` title="ranks above the ${tier} tier: used only when Prep judges the step hard"` : ""}>
+      <span class="gr" aria-hidden="true">&#8942;&#8942;</span><span class="o">${n}</span><span class="nm"><span class="h">${esc(h)} · </span>${esc(m)}${hard ? '<span class="h"> · hard only</span>' : ""}</span>
+      ${effSel(r.effort, m, `data-meff="${tier}:${i}"`)}<button class="x" data-mrm="${tier}:${i}" aria-label="Remove ${esc(m)}" title="Remove from ${tier}">&#10005;</button></div>`;
+  }).join("");
+  const hid = hidden.length ? `<div class="rhid" title="Turn the CLI on in Settings and its models come back">${hidden.length} hidden · ${esc(whyHidden(hidden[0].rung))}</div>` : "";
+  const add = addOptions(tier);
+  return `<div class="pcard">${cardHead("t" + tier, KCARD[tier][0], `${n} ${n === 1 ? "rung" : "rungs"}`, KCARD[tier][3])}${body}${hid}
+    <div class="radd"><span class="pick auto"><select data-madd="${tier}" aria-label="Add a rung to ${tier}"><option value="">+ rung</option>${add.map((r) => `<option value="${esc(r)}">${esc(modelText(r))}</option>`).join("")}</select></span><span class="m">${tier === "think" ? "no cheap models" : "cheap models allowed"}</span></div></div>`;
+}
+function tiersTab() {
+  const claude = [];
+  for (const t of cfg.models) for (const r of ((cfg.ladder || {})[t] || [t])) claude.push(r);
+  const pass = ([k, name, sub]) => {
+    const v = medit.values[k], ed = !same(v, cfg.tuning[k].value);
+    const opts = k === "default_model" ? modelOptions(v, false)
+      : [...new Set(claude)].map((r) => `<option value="${esc(r)}"${r === v ? " selected" : ""}>${esc(modelText(r))}</option>`).join("");
+    return `<div class="krow${ed ? " ed" : ""}"><span class="nm">${name}</span><span class="pick r"><select data-mval="${k}" aria-label="${name} model">${opts}</select></span><span></span>
+      <span class="sub">${k} · ${esc(sub)}${ed ? ` · <button class="rs" data-mreset="val:${k}">reset</button>` : ""}</span></div>`;
+  };
+  return `<p class="hint">Each step takes the emptiest model of its tier, so the load spreads from the first step; the order breaks ties and is used while usage is unknown. Drag to reorder. Models of a CLI that is off or not found are hidden; one line says how many. The models come from models.json (Settings, Harnesses, Open).</p>
+    ${["think", "write", "read"].map(tierCard).join("")}
+    <div class="pcard">${cardHead("tpasses", "Console's own passes", "not steps", "Jobs the console runs for itself, not task steps: Prep enhances your prompt and plans the steps, the handoff pass compacts what a step hands to the next, the rules review checks CLAUDE.md, Run default is the composer's plain Run.")}${PASSES.map(pass).join("")}</div>`;
+}
+
+// Tuning: the numbers; a value off its default has the blue edge and a reset; out of range turns red and blocks Save
+function shown(k, v) { const s = TUNE[k] ? TUNE[k][2] : 1; return v == null ? "" : String(Math.round(v * s * 1000) / 1000); }
+function tuneBad(k) {
+  const t = cfg.tuning[k], v = medit.values[k];
+  if (t.unit === "bool" || t.unit === "rung" || k === "allowances") return "";
+  const whole = ["steps", "s", "turns", "kb", "parts", "words", "tokens"].includes(t.unit);
+  if (typeof v !== "number" || !isFinite(v) || v < t.min || v > t.max || (whole && !Number.isInteger(v)))
+    return `${whole ? "a whole number " : ""}between ${shown(k, t.min)} and ${shown(k, t.max)} (default ${shown(k, t.default)})`;
+  if (k === "gauge_yellow_tokens" && v >= medit.values.gauge_red_tokens) return "yellow must start under red";
+  return "";
+}
+function tuneRow(k) {
+  const t = cfg.tuning[k], [label, unit] = TUNE[k], v = medit.values[k], ed = !same(v, t.default), bad = tuneBad(k);
+  const reset = ed ? ` · <button class="rs" data-mreset="def:${k}">reset</button>` : "";
+  if (t.unit === "bool") {
+    return `<div class="tf${ed ? " ed" : ""}"><span class="nm">${label}</span><span class="v"><button class="sw${v ? " on" : ""}" role="switch" aria-checked="${!!v}" data-mbool="${k}" title="${v ? "Turn off" : "Turn on"}">${v ? "on" : "off"}</button></span><span class="sub">${k} · default ${t.default ? "on" : "off"}${reset}</span></div>`;
+  }
+  const pre = unit === "$" ? "$" : "", post = unit === "$" ? "" : unit;
+  return `<div class="tf${ed ? " ed" : ""}${bad ? " bad" : ""}"><span class="nm">${label}</span><span class="v">${pre}<input inputmode="decimal" data-mnum="${k}" aria-label="${esc(label)}" value="${esc(shown(k, v))}">${post}</span>
+    <span class="sub">${bad ? esc(bad) : `${k} · default ${shown(k, t.default)}${reset}`}</span></div>`;
+}
+function allowanceFold() {  // D2 a: a row per usable tier rung's model key and per key already set; empty = none
+  const al = medit.values.allowances || {}, keys = [...new Set([...Object.values(cfg.tiers || {}).flat().filter((r) => !r.why).map((r) => r.key), ...Object.keys(al)])];
+  const set = Object.keys(al).filter((k) => Object.keys(al[k] || {}).length).length;
+  const rows = keys.map((key) => `<div class="tf al"><span class="nm">${esc(key)}</span><span class="v">${["day_usd", "week_usd", "month_usd"].map((w) =>
+    `<input inputmode="decimal" data-mal="${esc(key)}:${w}" aria-label="${esc(key)} ${w.split("_")[0]} USD" placeholder="${w[0]}" value="${(al[key] || {})[w] ?? ""}">`).join("")}</span><span class="sub">day · week · month, USD; empty: no allowance</span></div>`).join("");
+  return fold("Allowances", `${set} of ${keys.length} models · day / week / month`, rows, { cls: "alw" });
+}
+function tuningTab() {
+  const groups = {};
+  for (const [k, t] of Object.entries(cfg.tuning)) if (TUNE[k]) (groups[t.group] = groups[t.group] || []).push(k);
+  return `<p class="hint">Numbers the service reads at each step. Saved to config.json; a hand edit of the file shows here after Reload.</p>
+    ${Object.entries(MGROUP).filter(([g]) => groups[g]).map(([g, [name, fact, help]]) => `<div class="pcard">${cardHead("g" + g, name, fact, help)}${groups[g].map(tuneRow).join("")}${g === "balancing" ? allowanceFold() : ""}</div>`).join("")}`;
+}
+
+function renderModels() {
+  if (page !== "models") return;
+  if (!medit) { setHtml($("mscroll"), `<p class="hint pad">${esc(mmsg || "Loading...")}</p>`); setHtml($("mtabs"), ""); setHtml($("mbar"), ""); return; }
+  const tabs = [["kinds", "Kinds"], ["tiers", "Tiers"], ["tuning", "Tuning"]];
+  setHtml($("mtabs"), tabs.map(([k, l]) => { const n = tabEdits(k); return `<button role="tab" data-mtab="${k}" aria-selected="${mtab === k}">${l}${n ? ` <span class="n">${n} edited</span>` : ""}</button>`; }).join(""));
+  setHtml($("mscroll"), `<div class="pane">${mtab === "tiers" ? tiersTab() : mtab === "tuning" ? tuningTab() : kindsTab()}</div>`);
+  const n = Object.keys(modelChanges()).length, bad = Object.keys(cfg.tuning).some((k) => tuneBad(k));
+  const say = mmsg ? `<span class="r">${esc(mmsg)}</span>` : bad ? '<span class="r">a value is out of range</span>'
+    : n ? `<b>${n} ${n === 1 ? "change" : "changes"}</b> · used from the next step` : "config.json · as saved";
+  setHtml($("mbar"), `<div class="msave"><span class="m" title="Save writes config.json; the service reloads it and uses it from the next step">${say}</span>
+    ${n ? `<button class="btn" data-mact="discard">Discard</button><button class="btn go" data-mact="save"${bad || mbusy ? " disabled" : ""}>${mbusy ? "..." : "Save"}</button>`
+    : '<button class="btn" data-mact="reload" title="Read config.json again">Reload</button>'}</div>`);
+}
+
+async function saveModels() {
+  const changes = modelChanges();
+  if (!Object.keys(changes).length) return;
+  mbusy = true; mmsg = ""; renderModels();
+  try { cfg = await api("/api/config/models", { changes }); resetModels(); } catch (e) { mmsg = e.message; }
+  mbusy = false;
+  renderModels();
+}
+function moveRung(tier, from, to) {
+  const rows = medit.tiers[tier];
+  if (to < 0 || to >= rows.length || from === to) return;
+  const [r] = rows.splice(from, 1);
+  rows.splice(to, 0, r);
+  renderModels();
+}
+let mdrag = null;  // "tier:index" of the row being dragged
+$("mscroll").addEventListener("dragstart", (e) => { const r = e.target.closest("[data-mrow]"); if (r) { mdrag = r.dataset.mrow; e.dataTransfer.effectAllowed = "move"; } });
+$("mscroll").addEventListener("dragover", (e) => { const r = e.target.closest("[data-mrow]"); if (r && mdrag && r.dataset.mrow.split(":")[0] === mdrag.split(":")[0]) e.preventDefault(); });
+$("mscroll").addEventListener("drop", (e) => {
+  const r = e.target.closest("[data-mrow]");
+  if (!r || !mdrag) return;
+  e.preventDefault();
+  const [tier, from] = mdrag.split(":"), to = Number(r.dataset.mrow.split(":")[1]);
+  mdrag = null;
+  if (r.dataset.mrow.split(":")[0] === tier) moveRung(tier, Number(from), to);
+});
+$("mscroll").addEventListener("keydown", (e) => {
+  const r = e.target.closest("[data-mrow]");
+  if (!r || !e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+  e.preventDefault();
+  const [tier, i] = r.dataset.mrow.split(":"), rows = medit.tiers[tier];
+  let j = Number(i);
+  do { j += e.key === "ArrowUp" ? -1 : 1; } while (j >= 0 && j < rows.length && whyHidden(rows[j].rung));  // over hidden rungs
+  moveRung(tier, Number(i), j);
+  const moved = $("mscroll").querySelector(`[data-mrow="${tier}:${j}"]`);
+  if (moved) moved.focus();
+});
+$("mscroll").addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset.mkind) { const p = pinOf(medit.kinds, t.dataset.mkind); p[t.dataset.mf] = t.value; medit.kinds[t.dataset.mkind] = p; }
+  else if (t.dataset.meff) { const [tier, i] = t.dataset.meff.split(":"); medit.tiers[tier][Number(i)].effort = t.value; }
+  else if (t.dataset.madd) { if (t.value) medit.tiers[t.dataset.madd].push({ rung: t.value, effort: "auto" }); }
+  else if (t.dataset.mval) medit.values[t.dataset.mval] = t.value;
+  else if (t.dataset.mnum) {
+    const k = t.dataset.mnum, n = Number(t.value.trim().replace(",", "."));
+    medit.values[k] = t.value.trim() === "" || !isFinite(n) ? NaN : Math.round(n / TUNE[k][2] * 1e6) / 1e6;
+  } else if (t.dataset.mal) {
+    const [key, w] = t.dataset.mal.split(":"), al = clone(medit.values.allowances || {}), row = al[key] || {};
+    if (t.value.trim() === "") delete row[w]; else row[w] = Number(t.value.trim().replace(",", "."));
+    if (Object.keys(row).length) al[key] = row; else delete al[key];
+    medit.values.allowances = al;
+  } else return;
+  mmsg = "";
+  renderModels();
+});
+$("mscroll").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-q],[data-mreset],[data-mrm],[data-mbool]");
+  if (!t) return;
+  if (t.dataset.q) { if (!mqOpen.delete(t.dataset.q)) mqOpen.add(t.dataset.q); }
+  else if (t.dataset.mrm) { const [tier, i] = t.dataset.mrm.split(":"); medit.tiers[tier].splice(Number(i), 1); }
+  else if (t.dataset.mbool) medit.values[t.dataset.mbool] = !medit.values[t.dataset.mbool];
+  else {
+    const [what, k] = t.dataset.mreset.split(":");
+    if (what === "kind") { if (cfg.kind_pins && cfg.kind_pins[k]) medit.kinds[k] = clone(cfg.kind_pins[k]); else delete medit.kinds[k]; }
+    else if (what === "val") medit.values[k] = clone(cfg.tuning[k].value);
+    else medit.values[k] = clone(cfg.tuning[k].default);
+  }
+  mmsg = "";
+  renderModels();
+});
+$("mtabs").addEventListener("click", (e) => { const t = e.target.closest("[data-mtab]"); if (t) { mtab = t.dataset.mtab; renderModels(); $("mscroll").scrollTop = 0; } });
+$("mbar").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-mact]");
+  if (!t || t.disabled) return;
+  if (t.dataset.mact === "save") saveModels();
+  else if (t.dataset.mact === "discard") { resetModels(); mmsg = ""; renderModels(); }
+  else loadModels();
+});
+
 function storageLine() {  // the data folder's size by subfolder; orange over storage_warn_mb
   const st = usage.storage;
   if (!st || !st.total) return "";
@@ -2271,6 +2560,7 @@ async function go(name, button) {
   if (name === "cleardraft") { draft = ""; $("c-prompt").value = ""; draftKept = false; saveDraft(); renderCompose(); $("c-prompt").focus(); }
   if (name === "empties") { emptyOpen = !emptyOpen; render(); }
   if (name === "usage") showPage("usage");
+  if (name === "models") showPage("models");  // plan 26: the Settings band's Models and tuning link
   if (name === "fold") await setForm("pill");
   if (name === "unfold") await setForm("open");
   if (name === "allow") allowRuns(button);
@@ -2435,6 +2725,7 @@ document.addEventListener("keydown", (e) => {
     else if (page === "prep") prepAct("back");
     else if (page === "session" || page === "task") goBack();
     else if (page === "usage") showPage("list");
+    else if (page === "models" && !inField && !Object.keys(modelChanges()).length) showPage("list");  // edits stay until Save or Discard
     return;
   }
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
