@@ -71,7 +71,7 @@ Open for Fred (written for (a); a different answer changes only the lines named)
 
 | # | Question | Options | Written for |
 |---|---|---|---|
-| Q1 | A pick whose harness is off when the step starts (review G6) | (a) keep plan 18's behaviour: balance inside the pick's rank, note `pick refused: <harness> is off -> balance`; plan 5 decision 12 amended (Task 7, 7.2 item 1); (b) restore decision 12: run Claude's rung of the same tier (a code change in `tasks.step_route`'s refused-pick branch: the pool becomes the tier's Claude rungs) || (a); Fred, 2026-10-14: (a) |
+| Q1 | A pick whose harness is off when the step starts (review G6) | (a) keep plan 18's behaviour: balance inside the pick's rank, note `pick refused: <harness> is off -> balance`; plan 5 decision 12 amended (Task 7, 7.2 item 1); (b) restore decision 12: run Claude's rung of the same tier (a code change in `tasks.step_route`'s refused-pick branch: the pool becomes the tier's Claude rungs) | (a); Fred, 2026-10-14: (a) |
 | Q2 | When Task 6 lands | (a) after Fred's plan 5 live check, on what it shows; (b) now, on the expected behaviour (the fakes) | (a) |
 
 ## 3. Behaviour that changes for Fred
