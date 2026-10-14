@@ -1130,5 +1130,84 @@ class PinRouteTest(unittest.TestCase):
         self.assertEqual((route["rung"], route["effort"]), ("sonnet", "high"))
 
 
+def brief(*questions):
+    """A brief as compact.render writes it, with these Open questions."""
+    qs = "\n".join(f"- {q}" for q in questions) or "- (none)"
+    return f"## Findings\n- x\n## Files touched\n- a.py\n## Open questions\n{qs}\n## Next\nGo on"
+
+
+class BoardTest(unittest.TestCase):
+    """Plan 25 Task 1: open questions from the briefs, the chain log, the measure table."""
+
+    def test_open_questions_open_and_close(self):
+        task = make(("scout", "code", "document"))  # scout, code, verify, document
+        briefs = {1: brief("Which exe is the real one?"), 2: brief("Which exe is the real one?", "Week or 7 days?"),
+                  3: brief("Week or 7 days?")}
+        self.assertEqual(tasks.open_questions(task, briefs), [
+            {"q": "Which exe is the real one?", "opened": 1, "closed": 3},
+            {"q": "Week or 7 days?", "opened": 2, "closed": 0}])
+
+    def test_open_questions_ignore_none_spelling_and_missing_briefs(self):
+        task = make(("scout", "code", "document"))
+        briefs = {"1": brief(), "2": brief("Which  exe is the REAL one"), "3": "", "4": brief("which exe is the real one?")}
+        self.assertEqual(tasks.open_questions(task, briefs), [{"q": "Which  exe is the REAL one", "opened": 2, "closed": 0}])
+        self.assertEqual(tasks.open_questions(task, {}), [])
+        self.assertEqual(tasks.section_items(brief("a", "b"), tasks.QUESTIONS_HEAD), ["a", "b"])
+
+    def test_read_chain_skips_broken_lines(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = make()
+            self.assertEqual(tasks.read_chain(home, task), [])
+            line = {"ts": 1.0, "step": 1, "from": "planned", "to": "running", "why": "", "session": "s1"}
+            tasks.log(home, task["id"], [line, dict(line, step=2)])
+            with open(tasks.folder(home, task["id"]) / "chain.jsonl", "a", encoding="utf-8") as fh:
+                fh.write("{broken\n[1, 2]\n")
+            tasks.log(home, task["id"], [dict(line, step=3)])
+            self.assertEqual([r["step"] for r in tasks.read_chain(home, task)], [1, 2, 3])
+            self.assertEqual([r["step"] for r in tasks.read_chain(home, task, limit=2)], [3])
+
+    def done_task(self, home, project, created, ctx, meta=True):
+        """scout, code, verify, all done; ctx = the three ctx_tokens; brief_meta words or files only."""
+        task = make(("scout", "code"))
+        task.update(project_dir=project, created=created)
+        for s, tokens, (raw, sent) in zip(task["steps"], ctx, ((200, 160), (400, 300), (180, 0))):
+            s.update(state="done", model="haiku", effort="low", session=f"s{s['n']}", ctx_tokens=tokens)
+            if meta:
+                s["brief_meta"] = {"raw_w": raw, "sent_w": sent, "cut": [], "checks": [], "by": "haiku",
+                                   "cost": 0.004, "turns": 2, "fallback": ""}
+            else:
+                tasks.write_note(home, task, s, " ".join(["w"] * raw))
+                tasks.write_brief(home, task, s, " ".join(["w"] * sent))
+        tasks.save(home, task)
+        return task
+
+    def test_measure_medians_per_kind(self):
+        with tempfile.TemporaryDirectory() as home:
+            for k, ctx in enumerate(((30000, 90000, 50000), (40000, 110000, 70000), (50000, None, 60000))):
+                self.done_task(home, "D:\\WORK\\APP", NOW + k, ctx)
+            self.done_task(home, "D:\\WORK\\OTHER", NOW + 9, (1, 2, 3))  # another project
+            planned = make(("scout",))
+            planned.update(project_dir="D:\\WORK\\APP", created=NOW + 5)
+            tasks.save(home, planned)  # its steps are planned: they add nothing but count as a task
+            m = tasks.measure(home, "D:\\WORK\\APP", 10)
+            self.assertEqual((m["project"], m["tasks"]), ("D:\\WORK\\APP", 4))
+            self.assertEqual(m["kinds"], [
+                {"kind": "scout", "steps": 3, "received": None, "context": 40000, "handoff": 200},
+                {"kind": "code", "steps": 3, "received": 160, "context": 100000, "handoff": 400},
+                {"kind": "verify", "steps": 3, "received": 300, "context": 60000, "handoff": 180}])
+            self.assertEqual(m["hot"], "code")  # 100K from 160 words beats 60K from 300
+            self.assertEqual(tasks.measure(home, "D:\\WORK\\APP", 1)["tasks"], 1)  # the newest only
+            self.assertEqual(tasks.measure(home, "D:\\WORK\\NONE", 10), {"project": "D:\\WORK\\NONE", "tasks": 0,
+                                                                         "kinds": [], "hot": ""})
+
+    def test_measure_reads_the_files_without_brief_meta(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.done_task(home, "D:\\WORK\\APP", NOW, (None, None, None), meta=False)
+            m = tasks.measure(home, "D:\\WORK\\APP")
+            self.assertEqual([(r["kind"], r["received"], r["context"], r["handoff"]) for r in m["kinds"]],
+                             [("scout", None, None, 200), ("code", 160, None, 400), ("verify", 300, None, 180)])
+            self.assertEqual(m["hot"], "")  # no context reading: nothing to name
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,7 @@ starts, stops and resumes window runs (phase 2), and pulls the levers (phase 3).
 import copy
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -28,7 +29,16 @@ MAX_BODY = 256 * 1024
 MAX_FILES_BODY = attach.MAX_TOTAL * 4 // 3 + MAX_BODY  # /api/prep, /api/run and /api/continue carry base64 files
 FILE_ROUTES = ("/api/prep", "/api/run", "/api/continue")
 MAX_PROMPT = 20000
+BOARD_TABS = ("chat", "recv", "hand", "route", "plan")  # the Board's step inspector tabs (window.json board_tab)
+FOLD_KEY = re.compile(r"[a-z][a-z0-9.]{0,39}")
+FOLDS_MAX = 64
 BUSY = {"running", "quiet", "stall"}
+
+
+def folds_ok(folds) -> bool:
+    """window.json `folds`: {fold key: open} with at most FOLDS_MAX keys of the FOLD_KEY shape."""
+    return (isinstance(folds, dict) and len(folds) <= FOLDS_MAX
+            and all(isinstance(k, str) and FOLD_KEY.fullmatch(k) and isinstance(v, bool) for k, v in folds.items()))
 AUTO_HANDOFF_STATES = ("replied", "idle", "verified", "verify_failed")  # plan 23: a turn that ended
 PROBE_S = 20
 READ_ONLY_TOOLS = "Read,Grep,Glob"  # a kind whose tools are exactly these is read only
@@ -960,6 +970,7 @@ class Hub:
             return ""
         if task["state"] == "waiting" and "asked" in cs and cs["asked"] == meta.get("started"):
             return ""  # no answer yet: the turn that asked is still the last one
+        cs["ctx_tokens"] = s["ctx_tokens"]  # plan 25: the context the step reached (None: unknown, plan 5 3.6)
         text, subtype = self.final_message(sid)
         question = s["stop_question"] or tasks.reply_question(text)
         if question:
@@ -1384,7 +1395,8 @@ class Handler(BaseHTTPRequestHandler):
                 "kinds_tier": {k: tasks.kind_tier(k) for k in tasks.PREP_KINDS},
                 "handoff_auto": bool(cfg["handoff_auto"]),
             "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
-            "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()}}
+            "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()},
+            "board_tab": window.get("board_tab", "chat"), "folds": window.get("folds") or {}}
 
     def do_GET(self):
         if not guard.host_ok(self.headers.get("Host"), self._port()):
@@ -1416,6 +1428,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(data) if data else self._error(404, "unknown session")
         if url.path == "/api/task":
             return self._task(query.get("id", [""])[0])
+        if url.path == "/api/measure":
+            return self._measure(query)
         if url.path == "/api/draft":
             try:
                 text = (self.hub.folder / "draft.txt").read_text(encoding="utf-8")
@@ -1670,7 +1684,7 @@ class Handler(BaseHTTPRequestHandler):
         """The unsent prompt (draft.txt) and, when given, the compose project and whether the session
         page keeps its brief open (window.json)."""
         text, project, brief = body.get("text"), body.get("project"), body.get("brief")
-        effort = body.get("effort")
+        effort, board_tab, folds = body.get("effort"), body.get("board_tab"), body.get("folds")
         if not isinstance(text, str) or len(text) > MAX_PROMPT:
             return self._error(400, "bad draft")
         if project is not None and (not isinstance(project, str) or len(project) > 1000):
@@ -1679,9 +1693,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "bad brief")
         if effort is not None and effort != "auto" and effort not in claude_cli.EFFORTS:
             return self._error(400, "bad effort")
+        if board_tab is not None and board_tab not in BOARD_TABS:
+            return self._error(400, "bad board_tab")
+        if folds is not None and not folds_ok(folds):
+            return self._error(400, "bad folds")
         self.hub.folder.mkdir(parents=True, exist_ok=True)
         (self.hub.folder / "draft.txt").write_text(text, encoding="utf-8")
-        fields = {k: v for k, v in (("project", project), ("brief", brief), ("effort", effort)) if v is not None}
+        fields = {k: v for k, v in (("project", project), ("brief", brief), ("effort", effort),
+                                    ("board_tab", board_tab), ("folds", folds)) if v is not None}
         if fields:
             paths.save_window(self.hub.folder, **fields)
         return self._json({"ok": True})
@@ -1755,17 +1774,27 @@ class Handler(BaseHTTPRequestHandler):
         if task is None:
             return self._error(404, "unknown task")
         last, cs = task["last_good"], tasks.current_step(task)
+        texts = self._step_texts(task)
         return self._json({"task": task, "levers": self.hub.task_levers(task_id),
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
                            "handoff": tasks.read_handoff(self.hub.folder, task),
-                           **self._step_texts(task),
+                           **texts,
                            "plan": plan.read(self.hub.folder, task),
                            "parts": {p["n"]: plan.read_part(self.hub.folder, task, p["n"])
                                      for p in (task.get("plan") or {}).get("parts", [])},
                            "replan_note": tasks.read_note(self.hub.folder, task, cs["n"])
-                           if cs and cs["kind"] == "replan" else ""})
+                           if cs and cs["kind"] == "replan" else "",
+                           "questions": tasks.open_questions(task, texts["briefs"]),
+                           "chain": tasks.read_chain(self.hub.folder, task)})
+
+    def _measure(self, query):
+        """GET /api/measure?project=<folder>&n=10: the Board's measure table (tasks.measure)."""
+        project, n = query.get("project", [""])[0], query.get("n", ["10"])[0]
+        if not project or len(project) > 1000 or not n.isdigit():
+            return self._error(400, "bad measure query")
+        return self._json(tasks.measure(self.hub.folder, project, int(n)))
 
     def _step_texts(self, task: dict) -> dict:
         """Plan 23: every step's raw note, brief and facts, keyed by the step number as a string (absent: none)."""

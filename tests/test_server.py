@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from urllib.parse import quote
 from pathlib import Path
 from unittest import mock
 
@@ -1496,6 +1497,16 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(sorted(data["storage"]), ["events", "other", "preps", "runs", "tasks", "total"])
         self.assertEqual(data["storage_warn_mb"], 500)
 
+    def test_draft_keeps_board_tab_and_folds(self):
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["board_tab"], cfg["folds"]), ("chat", {}))
+        self.assertEqual(self.call("/api/draft", {"text": "", "board_tab": "hand", "folds": {"b.facts": True}})[0], 200)
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["board_tab"], cfg["folds"]), ("hand", {"b.facts": True}))
+        for bad in ({"board_tab": "notes"}, {"folds": {"B.X": True}}, {"folds": {"b.x": "yes"}}, {"folds": [1]},
+                    {"folds": {f"k{i}": True for i in range(65)}}):
+            self.assertEqual(self.call("/api/draft", dict(bad, text=""))[0], 400, bad)
+
     def test_draft_keeps_the_effort(self):
         self.assertEqual(self.call("/api/config")[1]["effort"], "auto")
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "max"}), (200, {"ok": True}))
@@ -1831,6 +1842,28 @@ class TaskServerTest(RunServerTest):
         self.assertTrue((folder / "plan.md").is_file())
         self.assertTrue(any((folder / "plan").glob("*.md")))
         self.assertTrue((folder / "task.json").is_file())
+
+    # -- plan 25: the Board ---------------------------------------------------------------------------------
+    def test_task_carries_questions_chain_and_ctx(self):
+        tid = self.make_task()
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("ctx_tokens", task["steps"][0])  # stored when step 1 ended (None: the fake reports none)
+        tasks.write_brief(self.folder, task, task["steps"][0], "## Findings\n- x\n## Open questions\n- Week or 7 days?\n## Next\ngo")
+        data = self.task(tid)[1]
+        self.assertEqual(data["questions"], [{"q": "Week or 7 days?", "opened": 1, "closed": 0}])
+        moves = [(c["step"], c["from"], c["to"]) for c in data["chain"]]
+        self.assertIn((1, "running", "done"), moves)
+        self.assertEqual(data["chain"], self.chain(tid)[-200:])
+
+    def test_measure_route(self):
+        self.assertEqual(self.call("/api/measure")[0], 400)
+        self.assertEqual(self.call("/api/measure?project=x&n=ten")[0], 400)
+        tid = self.make_task()
+        self.until(tid, self.at(2), "step 2 starts")
+        status, data = self.call(f"/api/measure?project={quote(str(self.project))}&n=10")
+        self.assertEqual(status, 200)
+        self.assertEqual((data["tasks"], [r["kind"] for r in data["kinds"]]), (1, ["scout"]))
+        self.assertEqual(self.call(f"/api/measure?project={quote(str(self.project))}&n=0")[1]["tasks"], 1)  # n >= 1
 
 
 for _name in dir(RunServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parent

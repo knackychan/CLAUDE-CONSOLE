@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import statistics
 import time
 from pathlib import Path
 from string import Template
@@ -791,6 +792,132 @@ def clear(home, task: dict, keep_last: bool = True) -> list:
         shutil.rmtree(root, ignore_errors=True)
     task["cleared"] = True
     return sessions
+
+
+# -- the Board (plan 25): open questions, the chain log, the measure table ------------------------------------
+
+QUESTIONS_HEAD = "## Open questions"
+NO_ITEM = ("(none)", "none", "n/a", "-", "")
+MEASURE_MAX = 50  # tasks at most in one measure table
+
+
+def section_items(text: str, heading: str) -> list:
+    """The `- ` items under `heading` in a note or a brief, without the dash, in order; "(none)" items dropped."""
+    out, inside = [], False
+    for line in str(text or "").splitlines():
+        if line.startswith("## "):
+            inside = line.strip() == heading
+            continue
+        item = line.strip()
+        if inside and item.startswith(("- ", "* ")):
+            item = item[2:].strip()
+            if item.lower().rstrip(".") not in NO_ITEM:
+                out.append(item)
+    return out
+
+
+def question_key(text: str) -> str:
+    """Two spellings of one question compare equal: whitespace, case and a trailing `?` or `.` do not count."""
+    return " ".join(str(text).split()).lower().rstrip(" ?.")
+
+
+def open_questions(task: dict, briefs: dict) -> list:
+    """[{q, opened, closed}] from the Open questions of each step's brief, in step order (D2 a): a question opens at
+    the first brief that carries it and closes at the first later brief that no longer does; closed 0 = still open.
+    `briefs` maps step numbers (int or the str of an int, as GET /api/task keys them) to the brief text."""
+    texts = {int(k): v for k, v in (briefs or {}).items() if str(k).isdigit() and v}
+    found, order = {}, []
+    for s in task.get("steps") or []:
+        n = s["n"]
+        if n not in texts:
+            continue
+        here = {question_key(q): q for q in section_items(texts[n], QUESTIONS_HEAD)}
+        for key, q in here.items():
+            if key not in found:
+                found[key] = {"q": q, "opened": n, "closed": 0}
+                order.append(key)
+        for key in order:
+            if key not in here and not found[key]["closed"]:
+                found[key]["closed"] = n
+    return [found[k] for k in order]
+
+
+def read_chain(home, task: dict, limit: int = 200) -> list:
+    """The last `limit` lines of the task's chain.jsonl as dicts, oldest first; a broken line is skipped."""
+    try:
+        lines = (folder(home, task["id"]) / "chain.jsonl").read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError):
+        return []
+    out = []
+    for line in lines[-limit:]:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
+def _words(text) -> int:
+    return len(str(text or "").split())
+
+
+def note_words(text: str) -> int:
+    """A note file's words without its `# Step NN: ...` head line."""
+    lines = str(text or "").splitlines()
+    return _words("\n".join(lines[1:] if lines and lines[0].startswith("# Step ") else lines))
+
+
+def _median(values):
+    return round(statistics.median(values)) if values else None
+
+
+def same_dir(a, b) -> bool:
+    norm = lambda p: os.path.normcase(os.path.normpath(str(p)))
+    return bool(a) and bool(b) and norm(a) == norm(b)
+
+
+def _count(value):
+    """A stored count (brief_meta words, ctx_tokens), or None for anything that is not a whole number."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def measure(home, project: str, n: int = 10) -> dict:
+    """The Board's measure table (brainstorm 5.1 item 6): medians per step kind over the project's last `n` tasks,
+    newest by `created`. received: the words a step got (the previous step's handoff after the brief pass,
+    brief_meta.sent_w, else the brief file's words); context: the step's ctx_tokens; handoff: the words it wrote
+    (brief_meta.raw_w, else the note file's words). Done steps only; a zero or unknown value is left out.
+    hot: the kind with the most context per received word (D3 a), "" when no kind has both."""
+    n = max(1, min(int(n), MEASURE_MAX))
+    mine = sorted((t for t in load_all(home).values() if same_dir(t.get("project_dir"), project)),
+                  key=lambda t: t.get("created") or 0, reverse=True)[:n]
+    got, ctx, wrote, steps = {}, {}, {}, {}
+    for t in mine:
+        by_n = {s["n"]: s for s in t["steps"]}
+        for s in t["steps"]:
+            if s["state"] != "done":
+                continue
+            kind = s["kind"]
+            steps[kind] = steps.get(kind, 0) + 1
+            raw = _count((s.get("brief_meta") or {}).get("raw_w"))
+            raw = raw if raw is not None else note_words(read_note(home, t, s["n"]))
+            if raw:
+                wrote.setdefault(kind, []).append(raw)
+            prev = by_n.get(s["n"] - 1)
+            if prev is not None:
+                sent = _count((prev.get("brief_meta") or {}).get("sent_w"))
+                sent = sent if sent is not None else _words(read_brief(home, t, prev["n"]))
+                if sent:
+                    got.setdefault(kind, []).append(sent)
+            tokens = _count(s.get("ctx_tokens"))
+            if tokens:
+                ctx.setdefault(kind, []).append(tokens)
+    rows = [{"kind": k, "steps": steps[k], "received": _median(got.get(k)), "context": _median(ctx.get(k)),
+             "handoff": _median(wrote.get(k))} for k in KINDS if k in steps]
+    both = [r for r in rows if r["received"] and r["context"]]
+    hot = max(both, key=lambda r: r["context"] / r["received"])["kind"] if both else ""
+    return {"project": project, "tasks": len(mine), "kinds": rows, "hot": hot}
 
 
 # -- prompts ----------------------------------------------------------------------------------------------

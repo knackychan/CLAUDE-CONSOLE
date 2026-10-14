@@ -13,6 +13,8 @@ PILL_W, PILL_H = 380, 48
 OPEN_W, OPEN_H = 400, 760  # css px, the default open size; the grip's size replaces it
 OPEN_MIN_W, OPEN_MIN_H = 340, 420  # css px: 340 is the narrowest layout in style.css; the form takes it times `scale`
 OPEN_MAX_W, OPEN_MAX_H = 900, 1600
+BOARD_W, BOARD_H = 900, 680  # css px, the Board's first size (plan 25, ID-4); the grip on the Board replaces it
+BOARD_MIN_W = 700  # under it the Board's two columns do not fit
 PEEK_MAX_H = 360  # the pill plus one card, never taller
 TITLE = "ContextCompanion"  # the product name (temporary, Fred 2026-10-11): window title, tray tooltip and menu
 BACKGROUND = "#121315"  # --win in style.css: what the window shows outside the page's own corners
@@ -55,6 +57,15 @@ def clamp_size(w, h) -> tuple:
     except (TypeError, ValueError, OverflowError):
         return OPEN_W, OPEN_H
     return max(OPEN_MIN_W, min(w, OPEN_MAX_W)), max(OPEN_MIN_H, min(h, OPEN_MAX_H))
+
+
+def clamp_board(w, h) -> tuple:
+    """(w, h) for the Board: the open limits, but never narrower than BOARD_MIN_W; junk is the Board default."""
+    try:
+        w, h = int(w), int(h)
+    except (TypeError, ValueError, OverflowError):
+        return BOARD_W, BOARD_H
+    return max(BOARD_MIN_W, min(w, OPEN_MAX_W)), max(OPEN_MIN_H, min(h, OPEN_MAX_H))
 
 
 def scale_of(form_w, css_w) -> float:
@@ -128,6 +139,7 @@ class WindowApi:
         self._scale = scale_of(saved.get("scale"), 1)  # form px per css px, measured by the page (`fit`)
         self._peek = PILL_H  # the pill's last css height
         self._drag = None
+        self._board = False  # the Board page is open: the window has the Board's size (never kept across starts)
 
     def _attach(self, window) -> None:
         self._window = window
@@ -160,11 +172,12 @@ class WindowApi:
     def form(self, name: str, height: int = 0) -> str:
         """"pill" (with `height` > 48 css px while a peek card shows) or "open"."""
         if name == "pill":
+            self._board = False
             self._peek = max(PILL_H, min(int(height or PILL_H), PEEK_MAX_H))
             self._window.resize(round(PILL_W * self._scale), round(self._peek * self._scale))
         else:
             name = "open"
-            self._window.resize(*self.open_size())
+            self._window.resize(*(self.board_size() if self._board else self.open_size()))
         self._form = name
         paths.save_window(self._folder, form=name)
         return name
@@ -178,6 +191,24 @@ class WindowApi:
         before the grip was ever used."""
         w, h = self._css_size()
         return round(w * self._scale), round(h * self._scale)
+
+    def _board_css(self) -> tuple:
+        saved = paths.load_window(self._folder).get("board")
+        return clamp_board(*saved) if isinstance(saved, list) and len(saved) == 2 else (BOARD_W, BOARD_H)
+
+    def board_size(self) -> tuple:
+        """The Board's remembered size in form px (window.json `board`, 900 x 680 the first time)."""
+        w, h = self._board_css()
+        return round(w * self._scale), round(h * self._scale)
+
+    def board(self, on: bool):
+        """The Board button (on) and the Board's Back or Esc (off): the open window takes the Board's size or its
+        compact size again. Returns [w, h] in css px as applied, None unless the window is open."""
+        if self._form != "open":
+            return None
+        self._board = bool(on)
+        self._window.resize(*(self.board_size() if self._board else self.open_size()))
+        return list(self._board_css() if self._board else self._css_size())
 
     def fit(self, css_w) -> float:
         """The page's width in css px: the form's width over it is the text-size scale. When it changed, the
@@ -194,10 +225,10 @@ class WindowApi:
         ended) write it to window.json. Returns [w, h] as applied, None unless the window is open."""
         if self._form != "open":
             return None
-        w, h = clamp_size(w, h)
+        w, h = clamp_board(w, h) if self._board else clamp_size(w, h)
         self._window.resize(round(w * self._scale), round(h * self._scale))
-        if keep:
-            paths.save_window(self._folder, size=[w, h])
+        if keep:  # on the Board the grip sets the Board's size, never the compact one
+            paths.save_window(self._folder, **({"board": [w, h]} if self._board else {"size": [w, h]}))
         return [w, h]
 
     def drag_start(self) -> None:
