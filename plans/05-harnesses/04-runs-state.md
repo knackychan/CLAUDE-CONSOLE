@@ -96,6 +96,6 @@
 
 ## Drift guards
 
-- A Claude run's command, stdin, interrupt and `run_ended` line are byte-for-byte what they were (the Claude adapter is a move, not a change): `test_runs`'s earlier tests pin it.
+- A Claude run's command, stdin, interrupt and `run_ended` line are byte-for-byte what they were (the Claude adapter is a move, not a change): `test_runs`'s earlier tests pin it. Since plan 5 Task 4 every stream, Claude's too, ends with the `cc_exit` line; the Claude adapter's chat and summary skip it.
 - `stopping` is set by Fred's Stop only; a timeout is `error_step_timeout`, never `stopped`.
 - `cost` and `tokens` are absent, never `0`, when unknown.

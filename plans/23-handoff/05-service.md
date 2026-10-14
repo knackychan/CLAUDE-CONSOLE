@@ -554,5 +554,5 @@ index 60de90e..fdfc4c3 100644
   still working, cold cache, a task step) holds.
 - `auto_handed` is in memory only: after a service restart `auto_since` keeps old turns out.
 - `_facts` runs inside `tlock` like the rest of `_ended` (two git commands, 10 s timeout each at worst).
-- `git_base` is never sent to the window; `task_row` lists the three fields of README 3.8 only.
+- `git_base` is never sent to the window; `task_row` lists the three fields of README 3.8 only. Nor `touched`, the full changed-path list the D5 check reads (plan 27 Task 4).
 - `/api/setting` goes through `do_POST`'s guard like every route; it writes config.json only.

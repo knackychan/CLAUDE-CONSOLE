@@ -358,7 +358,7 @@ else the remaining steps unchanged with why `no change`.
 A task of steps `scout, design, code, test, verify` through `self.call("/api/task", ...)` with the fake claude; the
 prompt words go in the task goal so every step's prompt carries them (`PLAN-OK` and `HANDOFF-OK` together: the
 scout answers with the handoff, the design step with the plan and the handoff; the fake adds the plan only when the
-prompt is a design step's, that is when it contains "You are the design step").
+prompt is a design step's, that is when it contains "You are the design step"). After the split the steps read `scout, design, code, code, verify, test`: `plan.rebuild` places the verify right after the last edit kind (the tests follow the code; plan 27 review nit).
 
 - `test_design_step_saves_the_plan_and_the_next_step_reads_it`: after the design step, `tasks/<id>/plan.md` exists
   with `## Goal`; `task["plan"]["from"] == 2`, `words > 0`; the chain has `plan saved: `; the code step's prompt

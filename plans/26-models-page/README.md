@@ -165,6 +165,7 @@ high, xhigh, max`, `<key> <window>: between 0 and 100000`, `changes: an object o
 - The route passes `guard.py` like every POST; the service still binds 127.0.0.1 only.
 - A running step keeps its rung and effort; the next step reads the saved values (`Hub.cfg` in place).
 - No emojis or em-dashes in any text of the page or the reasons.
+- Reload: a page key deleted from config.json returns to its default on Reload; a value `tuning.validate` refuses keeps the live value and writes a console.log line (plan 27 Task 1). A Save posts only the tiers that changed; hidden rows sit behind a show button with their own remove button (plan 27 Task 5).
 
 ### 3.7 Drift guards
 

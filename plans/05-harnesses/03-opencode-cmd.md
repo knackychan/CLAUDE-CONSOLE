@@ -11,7 +11,7 @@
 ## `console/harness/opencode.py`
 
 ```text
-NAME = "opencode"; EXE_NAMES = ("opencode.exe", "opencode.cmd", "opencode"); TIERS = ("haiku",)
+NAME = "opencode"; EXE_NAMES = ("opencode.exe", "opencode.cmd", "opencode"); TIERS = ("haiku", "opus")
 CAPS = False; INTERRUPT = False; RESUME = True; HOOKS = False
 
 run_command(exe, model, effort, cwd, session_id, *, prompt, resume=False, fork="", read_only=False, budget=0.0,

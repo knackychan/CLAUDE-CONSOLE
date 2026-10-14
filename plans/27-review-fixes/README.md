@@ -9,7 +9,7 @@
 > Start state: plans 5, 24, 23, 18, 26 and 25 placed (PR #1, branch `claude/implement-orchestration-plans-1y4bic`,
 > head `cf69a48` or later). Where the head has moved, anchor by the quoted lines, never by line numbers.
 
-Status: written 2026-10-14, not placed. Every code task (1 to 6) was written tests first in its own scratch copy of
+Status: written 2026-10-14; Tasks 1-5 and 7 placed 2026-10-14 on `claude/project-thread-dm31a2` (for PR #1), Task 6 after plan 5's live check. Every code task (1 to 6) was written tests first in its own scratch copy of
 `cf69a48`: each new test was run and seen failing for the reason in the review (the task files quote the messages),
 then the fix, then the whole suite. Then the six patches were applied together in order 1, 2, 3, 4, 5, 6 on one more
 copy of `cf69a48` with no conflict: **570 tests, only the four Linux baseline failures** (test_tray import,

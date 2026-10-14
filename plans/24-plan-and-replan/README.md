@@ -43,7 +43,7 @@ the split applied without a confirm) is not reopened here. Three points it does 
 | # | Question | Options | Plan written for |
 |---|---|---|---|
 | D1 | What the design step reads from the steps before it. The brief is capped at `brief_max_words` (400) and compacted by Haiku; a plan built from a compacted scout loses the file paths and line numbers the plan must cite. | (a) the raw handoff notes of every earlier step, whole (`plan.design_input`; a scout note is at most `NOTE_MAX` 20 KB, so a design step reads at most a few notes); the brief pass still runs after the scout for the chain log and the window; (b) the previous step's brief, as every other step | (a), Fred 2026-10-14 |
-| D2 | The design step's turn cap. Today `opus_max_turns` 12 caps a design step on opus only; a plan with final code for every change needs more reading than a 400-word handoff did, and the think tier has rungs on other harnesses (plan 5). | (a) one key `design_max_turns` 30 for a design step on any rung, replacing `opus_max_turns` (the old key is read as a fallback once, then dropped from config.json); (b) keep `opus_max_turns` 12 and cap only opus | (a), Fred 2026-10-14 |
+| D2 | The design step's turn cap. Today `opus_max_turns` 12 caps a design step on opus only; a plan with final code for every change needs more reading than a 400-word handoff did, and the think tier has rungs on other harnesses (plan 5). | (a) one key `design_max_turns` 30 for a design step on any rung, replacing `opus_max_turns` (the old key is read as a fallback once, then dropped from config.json); (b) keep `opus_max_turns` 12 and cap only opus. Placed by plan 27 Task 1 in `paths.ensure_config` at service start. | (a), Fred 2026-10-14 |
 | D3 | How the handover from step to step is packaged. | (a) the task folder is the package: the service composes each step's prompt from `prompt.md`, the previous brief, `plan.md` and the step's own part (plan 23 adds the facts), and the chain line that starts a step says what it was given (`read: brief 02 · plan 12.4 KB · part 2`); no per-step folder, no copies; (b) a folder per step, `steps/NN/` with a copy of what that step received | (a), Fred 2026-10-14 |
 
 A different answer changes only the lines the task files mark `D1`, `D2` or `D3`.
@@ -146,6 +146,8 @@ Checks, in this order, the first failure is the reason (one retry with it, then 
 
 Size is not a check: `plan.kb` over `plan_max_kb` makes the task wait (3.6), nothing is cut.
 
+A `Replan:` line from the design step itself is refused (`replan refused: design step`); the design prompt asks for a search step before the design instead (plan 27 Task 2).
+
 ### 3.5 What the prompts carry
 
 - `console/step_prompt.md` gains two slots: `$plan` after the `$retry` line (before "Handoff note of the previous
@@ -198,7 +200,7 @@ Resume, as today.
 - `POST /api/task/plan {task, text, part}`: Fred's in-place edit of the index (`part` 0 or absent) or of part k; 409
   unless the task waits on the hold, the size or a Plan gap, or is paused with the next step not started; the text is
   checked with `plan.check` on the edited plan (409 with the reason) and written with `plan.write`; chain `plan edited
-  by Fred[: part k]`; `task["plan"]["words"]` and `kb` recounted.
+  by Fred[: part k]`; `task["plan"]["words"]` and `kb` recounted. Only while the task is running or waiting (plan 27 Task 2); the Answer lever needs a plan.md.
 - `GET /api/task?id=`: adds `"plan": <plan.md text or "">`, `"parts": {n: text}` and `"replan_note"` (the replan
   step's note, when one exists) next to `note`, `brief` and `handoff`.
 - `task_row` adds `"plan": t.get("plan") or None` and each step's `part` and `hard` (`.get`, default 0 / false).
@@ -244,7 +246,7 @@ Resume, as today.
 - Fred's answer to a Plan gap joins Decisions as a line; the plan is otherwise never rewritten by code. The window edits
   it only through `POST /api/task/plan`, only while nothing after the design step runs.
 - A split never adds a kind the plan 17 rules table does not know and never exceeds `task_max_steps` (one check in
-  `plan.check`, one in `replan.check`; the service trusts them and re-checks nothing).
+  `plan.check`, one in `replan.check`; the service trusts them and re-checks nothing). Room is `tasks.room_after(task, n, cfg)`: `task_max_steps - n` less the done steps a redo keeps after n; a verify or fix is never counted, in `_ended` and `replan.check` alike (plan 27 Task 2).
 - Window runs, VS Code chats and terminal chats have no plan: `prompt_parts` returns `("", "")` for a step before the
   design step and for a task without `plan`; `Hub.levers` does not change.
 - No emojis or em-dashes in any prompt or plan text; the prompts say `Fred` where plan 17's do.
@@ -271,7 +273,7 @@ Resume, as today.
 | `PLAN-SPLIT` | a valid split plan with two parts (`Calc module`, `Report module`, the second depends on the first) and the HANDOFF block |
 | `PLAN-BAD` | a plan without `## Acceptance` and the HANDOFF block |
 | `PLAN-GAP` | the HANDOFF block with `- Plan gap: which file holds the ladder?` under Open questions and `STOP: Plan gap: which file holds the ladder?` after it |
-| `REPLAN` | the HANDOFF block whose Next line ends with `Replan: a search step is needed first` |
+| `REPLAN-ASK` | the HANDOFF block whose Next line ends with `Replan: a search step is needed first` |
 | `REPLAN-ADD` (in the task goal, read by the brief-mode fake) | the replan schema answer: the remaining steps plus one `search` step first, why `search first` |
 
 ## 4. Verification at the end of every task
@@ -279,8 +281,8 @@ Resume, as today.
 - `py -m unittest discover -s tests` all OK; the count is written in the task's commit message.
 - Task 1 and 2: the module's tests fail as written before the code and pass after it.
 - Task 3: `tests/test_server.py` runs a task `scout, design, code, test, verify` through the fake claude with
-  `PLAN-OK`, `PLAN-SPLIT`, `PLAN-BAD` (retry then stuck), `PLAN-GAP` (Answer, Redo design) and `REPLAN` (Confirm, Keep
-  old plan) on a `CC_CONSOLE_HOME` temp folder; the plan files land in the task folder and nowhere else.
+  `PLAN-OK`, `PLAN-SPLIT`, `PLAN-BAD` (retry then stuck), `PLAN-GAP` (Answer, Redo design) and `REPLAN-ASK` (Confirm, Keep
+  old plan) on a `CC_CONSOLE_HOME` temp folder; the plan files land in the task folder and nowhere else. After the split the steps read `scout, design, code, code, verify, test`: `plan.rebuild` places the verify right after the last edit kind (the tests follow the code; plan 27 review nit).
 - Task 4: `node --check web/app.js`; headless Edge at 400 and 340 px on the same fake runs: the Plan row closed line,
   the open row, the parts list, every askbox, no console errors.
 - Task 5: Fred's live run in a real project (05-live-check.md).

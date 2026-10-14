@@ -46,7 +46,7 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 | 9 | Self-updates | Command Code updated itself during a `--help` call: every `cmd` command gets `--no-auto-update`, and the probe records each harness's version at every service start |
 | 10 | What a non-Claude session shows | Chat from the adapter's stream (final text, tool events where the adapter knows them), no Steps from hooks (the hooks are Claude Code's), gauge from the adapter's usage or none, levers Continue (where the adapter resumes) and Stop only; Verify, Handoff, Escalate and Open in terminal are off with the reason `claude only` |
 | 11 | What OpenCode and Command Code may run (D-2) | Command Code lists cheap models only (tier `haiku`). OpenCode lists cheap models (tier `haiku`) and two think models, `opencode-go/kimi-k3` and `opencode-go/glm-5.3` (tier `opus`; Fred, 2026-10-14). A rung of either is offered and accepted by its model's tier: a `haiku` model on kinds whose rule tier is `haiku` or `sonnet` (scout, search, draft, proofread, edit, test, code, document, explain, debug; Fred, 2026-10-14: well-designed code can be written by a cheap model), an `opus` model on any kind, and any of them on a plain Run; never on `verify` or `fix`. Verify stays one tier above the rung, so a cheap rung's code is checked by a `sonnet` rung. A refused pick says `opencode: deepseek-v4.1-flash is not a think model` or `cmd: not on verify or fix steps` |
-| 12 | A pick whose harness went off | A task step whose pick names a harness that is off or not found when the step starts runs on Claude's rung of the pick's tier, with the route note `harness: codex off -> sonnet` (brainstorm 3.1: off rungs never route, the tier falls back to Claude). A plain Run Fred points at such a rung is refused (409), never moved |
+| 12 | A pick whose harness went off | A task step whose pick names a harness that is off or not found when the step starts is balanced inside the pick's rank, with the route note `pick refused: <harness> is off -> balance` (plan 18 decision 10; Fred, Q1 (a) of plan 27, 2026-10-14). A plain Run Fred points at such a rung is refused (409), never moved |
 | 13 | Which harness a later turn uses | The run meta's `harness`, always: Continue, a STOP answer, a retry and Stop read it from the meta; only a new run takes `harness` from its caller |
 | 14 | Where the model lists live (Fred, 2026-10-14) | In their own file, `~/.claude/console/models.json` (3.2b), one list per CLI including Claude's, edited by hand and reread when it changes: adding or dropping a model never needs a rebuild or a restart |
 
@@ -131,7 +131,7 @@ in the order the window lists them. Written from `paths.MODELS_DEFAULT` (the tab
   file order, the alias first); a `ladder` in config.json is still read when models.json has no `claude` key.
 - Reread without a restart: `Hub` keeps the file's mtime and reloads it at each `/api/config` and before each
   step starts; a changed file is used from the next step (a running step keeps its rung). A rung whose model was
-  removed routes as auto with the note `model gone from models.json: <rung>`.
+  removed routes as auto with the note `model gone from models.json: <rung>`. The route note reads `model gone from models.json: <rung>`, and `Hub.reload_models` writes one console.log line per dropped entry (plan 27 Task 3).
 - The window: the Harnesses card ends with one row, `Models · models.json · 22 models`, with `Open` (`POST /api/models/open`:
   `os.startfile` on that one fixed path, no path from the caller, through `guard.py`) and `Reload`; an error
   turns the row red with the message and the window keeps the last good list.
@@ -243,7 +243,7 @@ from one recorded run in `tests/fixtures/<harness>-run.jsonl`.
 - Cost: `Session.cost` is a float that `run_ended` adds to. A run_ended with no `cost` key sets
   `Session.cost_unknown`; the row's `cost` and `spent` are `None` when it is set and nothing priced was added
   (D-3). `tasks.step_cost` already reads `None` as 0 for the sum; the Task page shows a step whose attempts are
-  all unpriced as `cost unknown`.
+  all unpriced as `cost unknown`. On the Task page the words sit in the row's sub line, the Board and the inspector show them in place of the figure (plan 27 Task 5).
 - An error subtype on `run_ended` of a non-Claude session sets `failed` (`{"error": subtype, "details": ""}`), so
   the row is Failed; a Claude row keeps getting `failed` from its hook only, as today.
 - `Hub.levers(sid)` returns `claude only` for `verify`, `handoff`, `escalate`, `terminal` on a non-Claude session;

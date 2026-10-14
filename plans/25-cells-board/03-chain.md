@@ -22,7 +22,7 @@
 |---|---|
 | state word and sprite | `stepShown(t, s, row)`: `"waiting"` when `s.n === t.current` and the task waits (`row.state === "waiting"` or `row.asks`); `"failed"` when `s.verdict === "FAIL"` or `s.state === "failed"`; else `s.state` (`running`, `done`, `planned`, `handed`). `BWORD` maps it to `[word, tone, sprite]`: `running ["Running", "n", "running"]`, `done ["Done", "g", "done"]`, `failed ["Fail", "r", "stuck"]`, `planned ["Planned", "q", "planned"]`, `waiting ["Waiting", "y", "waiting"]`, `handed ["Handed", "y", "done"]` |
 | `NN kind` | `two(s.n)` and `s.kind` (D1 a: the service numbers, the insert shows by the bracket); `· from plan` muted when `s.part` |
-| cost | `stepCost(s)`: `? cost` (muted `.unk`) when `s.cost == null` (plan 5: a harness that reports no cost); `money(s.cost)` otherwise (the service's step cost is the sum of its attempts, exact for a Claude run); nothing on a planned step |
+| cost | `stepCost(s)`: `cost unknown` (muted `.unk`) when `s.cost == null` (plan 5: a harness that reports no cost); `money(s.cost)` otherwise (the service's step cost is the sum of its attempts, exact for a Claude run); nothing on a planned step |
 | rung and time | `rungTime(s)`: `modelText(s.model, s.effort)` (with plan 5: the harness first), then ` · ` and `elapsed(s.ended - s.started)` for a finished step or `elapsed(snap.now - s.started)` for a running one; a planned step has neither |
 | context | `stepCtx(s)`: the live session row's `ctx_tokens` for a running step (`snap.sessions.find(x => x.id === s.session)`), else `s.ctx_tokens`; `undefined` and `null` both mean unknown |
 | tries | `triesHtml(s)`: one 7 px square per attempt (`s.attempts`), red for a try with a `why` (it failed), green for the last one when the step is done, ink live for a running one; shown when there are 2 or more attempts or a failed one |
@@ -141,6 +141,6 @@ Expected count: unchanged.
 ## 3.12 Drift guards
 
 - Context is cells of 10K up to the red threshold (`ctxClasses`); a handoff's words are figures only.
-- Unknown is a word, never `0K` and never an estimate; cost unknown is `? cost`, never `0.00`.
+- Unknown is a word, never `0K` and never an estimate; cost unknown is `cost unknown`, never `0.00`.
 - Orange only on the waiting block's border and its why; a cut, a fallback, a hint are ink or muted.
 - The chain reads `d.task` and the snapshot row; it fetches nothing of its own.
