@@ -103,7 +103,7 @@ right) or `off` (grey, knob left); it is a `role="switch"` button whose title is
 reads `...` (busy, disabled) until the service answers. Settings are not projects: rows do not highlight on
 hover, and only the card heads do.
 
-- **Harnesses**: closed line `Harnesses · 2 on · △ cmd not found ▾`, the not-found part red; it opens by
+- **Harnesses**: closed line `Harnesses · 3 on · △ cmd not found ▾`, the not-found part red; it opens by
   itself while a harness is on but not found. Open: one row per name in `cfg.harnesses` order. Glyph `●`
   (green) on and found, `○` off, `△` (red) on but not found. The second line is the probed version
   (`codex-cli 0.162.1`), `cheap models` for cmd and `cheap models · kimi-k3, glm-5.3 for design` for opencode while off, or, red, `not found · no cmdc.exe
@@ -365,7 +365,10 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
   rule.
 - **Tiers**: one card per tier with its rungs (each step takes the emptiest of them, the order breaks ties
   and is used while usage is unknown): drag handle, order, `harness · model`, effort, remove.
-  A rung on a harness that is off or not found is struck and skipped (its title says why). `+ rung` lists the
+  A CLI that is off or not found has its models hidden here, in the Kinds pickers and in the Prep selects
+  (Fred, 2026-10-14); one muted line per card counts them (`1 hidden · cmd not found`), and Turn on brings
+  them back with their order and efforts (config.json keeps them). A kind pinned to a hidden model routes as
+  auto and its row says `pinned model hidden · cmd not found`. `+ rung` lists the
   models of the harnesses that are on; think accepts Claude, Codex and OpenCode's Kimi K3 and GLM 5.3 (decision 11). A last card holds the
   console's own passes: Prep, the handoff pass, the rules review and the composer's Run default
   (`prep_model`, `brief_model`, `review_model`, `default_model`). Writes `tiers` (brainstorm section 4).
