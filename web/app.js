@@ -81,6 +81,9 @@ let taskData = null;     // GET /api/task for it: {task, levers, note, brief}
 let taskSig = "";
 let backTo = null;       // {page: "task", id} or {page: "session", id}: where the session or Task page's back arrow returns
 let rawOpen = false;     // the Task page shows the raw note instead of the brief
+let planOpen = new Set(); // the Task page's open plan folds (plan 24); closed on openTask
+let planEdit = false;    // the plan askbox shows the editor
+let planEditPart = 0;    // which text the editor holds: 0 the index, k part k
 let tab = "chat";       // chat | steps | agents | timeline
 let tlMin = -1;          // the Timeline's selected minute (minutes since 1970; -1: the last busy one)
 let scope = "";          // the project folder the list shows ("" = all projects)
@@ -524,18 +527,22 @@ function taskCard(t) {
   const live = t.steps.find((x) => x.note === "writing" || x.note === "unchecked" || x.note === "ready");
   const next = t.state === "handed" && t.handoff_note;  // a pending handoff: the next task and the note, one click each
   const ask = (t.asks || t.hand_off) && cur && cur.session;
+  const gap = (t.asks || "").startsWith("Plan gap:"), planWhy = /^plan ready: confirm$|^plan .* KB, over /.test(t.why || "");
   const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.asks || next ? "" : t.why;
   const third = (why ? `<div class="why m mut">${esc(why)}</div>` : "")
     + (t.asks ? `<div class="q">${esc(t.asks)}</div>` : "") + (t.hand_off ? `<div class="why m y">${esc(handText(t.hand_off))}</div>` : "")
     + (t.briefing ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>Haiku is compacting the note</span></div>' : "")
     + (live ? noteChip(live, t) : "")
-    + (ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "")
+    + (gap ? `<div class="lr"><button class="btn you sm" data-task="${esc(t.id)}">Answer</button>
+      <button class="btn sm" data-tact="redo" data-tid="${esc(t.id)}" title="Runs the design step again with this question">Redo design</button></div>`
+      : planWhy ? `<div class="lr"><button class="btn you sm" data-task="${esc(t.id)}">${t.why.startsWith("plan ready") ? "Confirm" : "Accept"}</button></div>`
+      : ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "")
     + (next ? `<div class="lr"><button class="btn you sm" data-tact="next" data-tid="${esc(t.id)}" title="A new task seeded with the handoff note">Start next task</button>
       <span class="link m" data-task="${esc(t.id)}" title="${esc(t.handoff_note)}">handoff note</span></div>` : "");
   return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
     <div class="l1"><span class="st ${tn}">${taskMark({ ...t, state: taskShown(t) })}${word}</span><span class="t">${esc(t.title)}</span>
     <span class="age m" title="since the last change">${ago(snap.now - t.updated)}</span></div>
-    <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(rungOf(cur.harness, cur.model), cur.effort))}</span>` : ""}</span>
+    <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.part ? " · from plan" : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(rungOf(cur.harness, cur.model), cur.effort))}</span>` : ""}</span>
     <span class="cost">${money(t.cost)}</span><span class="ctx"><span class="cells" style="--n:${cells.length}">${cellsHtml(cells)}</span></span></div>${third}</div>`;
 }
 
@@ -1571,9 +1578,11 @@ function chainRow(t, s) {
   const tn = s.state === "handed" ? stepCell(t, s) : s.state === "failed" || s.verdict === "FAIL" ? "r" : s.note === "unchecked" ? "w" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
   const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
-  const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), esc(s.goal)].filter(Boolean).join(" · ");
+  const waits = t.state === "waiting" && s.n === t.current && /^(plan |replanned:|asks: Plan gap:)/.test(t.why || "");  // a plan wait: the reason, in orange
+  const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), waits ? `<span class="y">${esc(t.why)}</span>` : esc(s.goal)].filter(Boolean).join(" · ");
+  const from = s.part ? `<span class="tg" title="a write step the design step made: sub-plan ${s.part} of ${((t.plan || {}).parts || []).length}">from plan</span>` : "";
   return `<div class="row${s.n === t.current ? " cur" : ""}${fresh("c", "t" + t.id + "." + s.n, s.state, 300) && s.state === "done" ? " adv" : ""}${s.note ? " n-" + s.note : ""}"><span class="cells">${cells}</span>
-    <span class="nm m">${two(s.n)} ${esc(s.kind)}${s.model ? ` <span class="mdl">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}</span>
+    <span class="nm m">${two(s.n)} ${esc(s.kind)}${from}${s.model ? ` <span class="mdl">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}</span>
     <span class="m c">${s.cost ? money(s.cost) : ""}</span>
     ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
     ${noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
@@ -1587,6 +1596,139 @@ function handedBox(d, t, cur, shown) {  // Fred handed the task off: the skill's
   return `<div class="askbox${tn === "y" ? "" : " ho"}"><span class="st ${tn}">${taskMark({ ...t, state: shown })}${word} <span class="lc">· step ${cur.n}</span></span>
     ${body}<div class="lr">${d.handoff ? '<button class="btn you" data-tact="next" title="A new task seeded with the handoff note">Start next task</button>' : ""}
     ${cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button>` : ""}</div><div id="ta-msg" class="say"></div></div>`;
+}
+
+// -- the plan (plan 24): plan.md by heading, one fold each; the plan is words and folds, never cells ---------------
+function splitHeads(text, lead) {  // [{title, body}] split on lines that start with `lead`; a fenced block never splits
+  const out = [{ title: "", body: [] }];
+  let fence = false;
+  for (const line of String(text || "").split("\n")) {
+    if (/^\s*```/.test(line)) fence = !fence;
+    if (!fence && line.startsWith(lead)) out.push({ title: line.slice(lead.length).trim(), body: [] });
+    else out[out.length - 1].body.push(line);
+  }
+  return out;
+}
+function planSections(text) { return splitHeads(text, "## ").filter((x) => x.title).map((x) => ({ title: x.title, body: x.body.join("\n").trim() })); }
+function mdBlock(text) {  // lists, code blocks as written (pre.text, never re-flowed), lines as paragraphs
+  let out = "", list = "", fence = null;
+  const shut = () => { if (list) out += `</${list}>`; list = ""; };
+  for (const line of String(text || "").split("\n")) {
+    if (/^\s*```/.test(line)) {
+      if (fence === null) { shut(); fence = []; } else { out += `<pre class="text">${esc(fence.join("\n"))}</pre>`; fence = null; }
+      continue;
+    }
+    if (fence) { fence.push(line); continue; }
+    const li = /^\s*(?:([-*])|\d+[.)])\s+(.*)$/.exec(line);
+    if (li) {
+      const k = li[1] ? "ul" : "ol";
+      if (list !== k) { shut(); out += `<${k}${k === "ul" ? ' class="mono"' : ""}>`; list = k; }
+      out += `<li>${esc(li[2])}</li>`;
+      continue;
+    }
+    shut();
+    if (line.trim()) out += `<p>${esc(line.trim())}</p>`;
+  }
+  if (fence) out += `<pre class="text">${esc(fence.join("\n"))}</pre>`;
+  shut();
+  return out;
+}
+function stepBody(text) {  // a ### Step N section or a sub-plan: Files, Actions, Tests, Done check as labelled blocks
+  const bits = [];
+  let fence = false;
+  for (const line of String(text || "").split("\n")) {
+    if (/^\s*```/.test(line)) fence = !fence;
+    const m = !fence && /^#{2,4} (.*)$/.exec(line);
+    if (m) bits.push({ title: m[1].trim(), body: [] });
+    else (bits.length ? bits[bits.length - 1] : bits[bits.push({ title: "", body: [] }) - 1]).body.push(line);
+  }
+  return bits.map((b) => (b.title ? `<span class="lbl s">${esc(b.title)}</span>` : "") + mdBlock(b.body.join("\n"))).join("");
+}
+function pfold(key, label, info, body, o = {}) {
+  const open = planOpen.has(key);
+  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-tact="pfold" data-key="${esc(key)}" aria-expanded="${open}"><span class="lbl">${label}</span><span class="fi">${info}</span><span class="car">${open ? "▴" : "▾"}</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
+}
+const partText = (d, n) => String((d.parts || {})[n] || "").replace(/^# Part [^\n]*\n+/, "");
+function planRowHtml(t, d, cur) {  // after the chain: closed it is one line; open, the plan by heading and the current step's section
+  const p = t.plan;
+  if (!p) return "";
+  const parts = p.parts || [], split = parts.length > 0, words = Number(p.words || 0).toLocaleString("en"), curN = cur ? cur.n : 0;
+  const closed = `from ${two(p.from)} design · ` + (split ? `${parts.length} sub-plans · ${words} w` : `${words} w · never cut`);
+  let body = "";
+  for (const sc of planSections(d.plan)) {
+    if (split && sc.title === "Sub-plans") continue;
+    if (!split && sc.title === "Steps") {
+      const subs = splitHeads(sc.body, "### ").filter((x) => x.title);
+      body += `<span class="lbl">Steps · ${subs.length}</span>` + subs.map((x) => {
+        const mine = Number((/^Step (\d+)/.exec(x.title) || [])[1]) === curN, text = x.body.join("\n").trim();
+        return mine ? `<div class="hsec"><span class="lbl">${esc(x.title)} <span class="tg n">this step</span></span>${stepBody(text)}</div>`
+          : pfold("st:" + x.title, esc(x.title), "", stepBody(text), { cls: "hf" });
+      }).join("");
+      continue;
+    }
+    body += pfold("s:" + sc.title, esc(sc.title), "", mdBlock(sc.body), { cls: "hf" });
+  }
+  if (split) {
+    const stepOf = (n) => t.steps.find((s) => s.part === n);
+    const rows = parts.map((x) => {
+      const st = stepOf(x.n), mine = st && st.n === curN;
+      const [word, tn] = !st ? ["planned", "q"] : st.state === "done" ? ["done", "g"] : st.state === "waiting" || st.state === "failed" ? [st.state, "y"] : st.state === "running" ? ["running", ""] : ["planned", "q"];
+      const sub = [x.hard ? '<span class="tg" title="the designer judged this part hard: a stronger rung for this step alone">hard</span>' : "", (x.depends || []).length ? `depends on ${esc(x.depends.join(", "))}` : "", `owns ${esc((x.owns || []).join(", "))}`].filter(Boolean).join(" · ");
+      return `<div class="prt${mine ? " cur" : ""}"><span class="o">${x.n}</span><span class="tt">${esc(x.title)}</span><span class="m mut">${st ? two(st.n) + " " : ""}${esc(x.kind)} · <span class="${tn}">${word}</span></span><span class="sub">${sub}</span></div>`;
+    }).join("");
+    const mine = parts.find((x) => { const st = stepOf(x.n); return st && st.n === curN; });
+    body += `<span class="lbl">Sub-plans · ${parts.length}</span><div class="parts">${rows}</div>`
+      + (mine ? `<div class="hsec"><span class="lbl">Part ${mine.n} · ${esc(mine.title)} <span class="tg n">this step</span></span>${stepBody(partText(d, mine.n))}</div>` : "");
+  }
+  return `<div class="blk">${pfold("plan", "Plan", esc(closed), `<div class="blk">${body || '<p class="m mut" style="margin:0">plan.md is empty.</p>'}</div>`)}</div>`;
+}
+function confirmLabel(t, row) {  // the one button that answers the wait: the same words in the askbox and the bar
+  const why = t.why || "";
+  return why.startsWith("replanned:") || why === "plan ready: confirm" ? "Confirm plan" : /^plan .* KB, over /.test(why) ? "Accept"
+    : row && row.hold ? "Run anyway" : `Confirm to use ${fableName()}`;
+}
+function planAsk(t, d, cur, lv, row) {  // the four plan waits (askbox html), or "" when the task waits on something else
+  const why = t.why || "", p = t.plan || {}, parts = p.parts || [], n = cur ? cur.n : t.current;
+  const b = (lvName, name, cls, label, extra = "") => (lv[lvName] === "" ? `<button class="btn${cls}" data-tact="${name}"${extra}>${label}</button>` : "");
+  const stop = b("stop", "stop", " stop", "Stop"), head = (word, sub) => `<span class="st y">${sprite("waiting")}${word} <span class="lc">· ${sub}</span></span>`;
+  const sizeText = `${parts.length ? parts.length + " sub-plans · " : ""}${Number(p.words || 0).toLocaleString("en")} w`;
+  if (t.state !== "waiting") return "";
+  if (why.startsWith("asks: Plan gap:")) {
+    const q = why.slice("asks: Plan gap:".length).trim();
+    return `<div class="askbox">${head("Plan gap", `step ${two(n)} stopped, nothing chosen`)}<div class="q">${esc(q)}</div>
+      <textarea class="in" id="t-answer" rows="3" aria-label="Answer" placeholder="Your answer joins the plan's Decisions and continues step ${two(n)}."></textarea>
+      <div class="lr">${b("answer", "gapanswer", " you", "Send answer")}${b("redo", "redo", "", "Redo design", ' title="Runs the design step again with this question; the steps still planned are rebuilt, the done ones stay"')}
+      ${cur && cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${n}</button>` : ""}</div>
+      <div class="say">A writer never decides for the plan: your answer is written under Decisions as "Fred, ${new Date().toISOString().slice(0, 10)}: ...".</div><div id="ta-msg" class="say"></div></div>`;
+  }
+  if (why === "plan ready: confirm") {
+    const sel = parts.length ? `<select id="t-editpart" aria-label="Which text">${[`<option value="0">index</option>`, ...parts.map((x) => `<option value="${x.n}"${x.n === planEditPart ? " selected" : ""}>part ${x.n}: ${esc(x.title)}</option>`)].join("")}</select>` : "";
+    const text = planEditPart ? partText(d, planEditPart) : d.plan;
+    const ed = planEdit ? `<div class="edbox">${sel}<textarea class="in" id="t-edit" rows="9" aria-label="plan.md" spellcheck="false">${esc(text)}</textarea>
+      <div class="lr"><button class="btn go sm" data-tact="saveplan" title="Writes the plan through the service; the task folder stays the service's">Save</button></div></div>` : "";
+    return `<div class="askbox">${head("Plan ready", sizeText)}
+      <div class="lr">${b("confirm", "confirm", " you", confirmLabel(t, row))}<button class="btn" data-tact="edit" aria-expanded="${planEdit}">Edit</button>${stop}</div>${ed}
+      <div class="say">plan_hold is on: the plan waits for you before any step runs.</div><div id="ta-msg" class="say"></div></div>`;
+  }
+  if (/^plan .* KB, over /.test(why)) {
+    const kb = (/^plan ([\d.,]+) KB/.exec(why) || [])[1] || "";
+    return `<div class="askbox">${head("Plan is large", kb + " KB")}<div class="q">${esc(why)}</div>
+      <div class="lr">${b("confirm", "confirm", " you", confirmLabel(t, row))}${b("redo", "redo", "", "Redo design")}${stop}</div>
+      <div class="say">Nothing is cut: the whole plan goes to every later step.</div><div id="ta-msg" class="say"></div></div>`;
+  }
+  if (why.startsWith("replanned:")) {
+    const r = t.replan || { before: [], after: [], added: [], dropped: [] };
+    const line = (x) => `${esc(x.kind)}: ${esc(x.goal)}`;
+    const dropped = (r.dropped || []).map((i) => r.before[i]).filter(Boolean);
+    return `<div class="askbox">${head("Replanned", `after step ${two(r.step || n)}`)}
+      ${r.why ? `<div class="q">${esc(r.why)}</div>` : ""}
+      <div class="plan1"><span class="lbl">New plan · ${r.after.length} steps <span class="m">(was ${r.before.length})</span></span>
+        <ol>${r.after.map((x, k) => `<li class="${(r.added || []).includes(k) ? "add" : "old"}">${line(x)}</li>`).join("")}</ol></div>
+      ${dropped.length ? `<div class="plan1"><span class="lbl">Dropped · ${dropped.length}</span><ol>${dropped.map((x) => `<li class="drop">${line(x)}</li>`).join("")}</ol></div>` : ""}
+      <div class="lr">${b("confirm", "confirm", " you", confirmLabel(t, row))}${b("keep", "keep", "", "Keep old plan")}${stop}</div>
+      <div class="say">replan_auto is off: a changed plan waits for you.</div><div id="ta-msg" class="say"></div></div>`;
+  }
+  return "";
 }
 
 function drawTask() {
@@ -1607,7 +1749,9 @@ function drawTask() {
     ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>${row.paused_after
     ? `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>` : ""}`;
   const sl = d.step_levers || {}, ask = cur && cur.session ? row.asks : "", hand = cur && cur.session ? row.hand_off : "";
+  const planBox = planAsk(t, d, cur, lv, row);
   const why = t.state === "handed" && cur ? handedBox(d, t, cur, shown)
+    : planBox ? planBox
     : ask || hand  // the step's question or hand-off hint, answered here; Hub.levers says when (step_levers)
     ? `<div class="askbox"><span class="st y">${sprite("waiting")}${ask ? "Asks you" : "Hand off"} <span class="lc">· step ${cur.n}</span></span>
        ${ask ? `<div class="q">${esc(ask)}</div>
@@ -1622,19 +1766,21 @@ function drawTask() {
   const notes = new Map((row.steps || []).map((x) => [x.n, x.note]));  // the note state is in the snapshot row, not task.json
   const chain = `<div class="blk"><span class="lbl">Steps · ${t.steps.length}</span><div class="chain">${t.steps.map((s) => chainRow(t, { ...s, note: notes.get(s.n) || "" })).join("")}</div>
     ${t.cleared ? '<p class="m mut" style="margin:0">cleared: notes and streams removed</p>' : ""}</div>`;
+  const planRow = planRowHtml(t, d, cur);
   const text = rawOpen ? d.note : d.brief;
   const body = t.briefing ? `<span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Haiku is compacting the note</span>`
     : text ? `<pre class="text">${esc(text)}</pre>` : `<p class="m mut" style="margin:0">${rawOpen ? "No raw note" : "No brief"} yet.</p>`;
   const brief = `<div class="blk"><div class="hd"><span class="lbl">${rawOpen ? "Raw note of step " + t.last_good : t.state === "done" ? "Last brief" : "Brief for the next step"}</span>
     ${d.note && !t.briefing ? `<button class="btn sm" data-tact="raw">${rawOpen ? "Show brief" : "Show raw note"}</button>` : ""}</div>${body}</div>`;
-  setHtml($("tscroll"), head + why + chain + brief);
+  setHtml($("tscroll"), head + why + chain + planRow + brief);
   const b = (name, cls, label) => `<button class="btn${cls}" data-tact="${name}">${label}</button>`;
   let buttons = "";
   if (lv.stop === "") buttons += b("stop", " stop", "Stop");
   if (lv.pause === "") buttons += b("pause", "", "Pause");
   if (lv.resume === "") buttons += b("resume", " go", "Resume");
   if (lv.retry === "") buttons += b("retry", " go", "Retry");
-  if (lv.confirm === "") buttons += b("confirm", " you", row.hold ? "Run anyway" : `Confirm to use ${fableName()}`);
+  if (t.state === "stuck" && lv.redo === "") buttons += b("redo", "", "Redo design");  // a bad plan twice: plan again
+  if (lv.confirm === "" && !planBox) buttons += b("confirm", " you", confirmLabel(t, row));  // the plan waits have it in the askbox
   if (lv.done === "") buttons += b("done", "", "Mark done");
   if (lv.clear === "") buttons += b("clear", "", "Clear");
   const off = new Map();  // the reasons, one line each: "Retry, Clear off: task is running"
@@ -1647,7 +1793,7 @@ function drawTask() {
 async function renderTaskPage() {  // GET /api/task when the task's row changed; the drawing follows every snapshot
   const row = (snap.tasks || []).find((x) => x.id === taskId), at = row && row.steps.find((x) => x.n === row.current);
   const run = at && snap.sessions.find((x) => x.id === at.session);
-  const sig = row ? [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, row.steps.map((x) => x.note).join(), row.asks, row.hand_off, run ? run.state + run.run_live : ""].join("|") : "gone";
+  const sig = row ? [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, row.steps.map((x) => x.note + x.part).join(), row.plan ? row.plan.words : "", row.asks, row.hand_off, run ? run.state + run.run_live : ""].join("|") : "gone";
   if (sig !== taskSig) {
     taskSig = sig;
     const id = taskId, data = await api("/api/task?id=" + encodeURIComponent(id)).catch(() => false);
@@ -1662,6 +1808,9 @@ async function openTask(id) {
   taskId = id;
   taskData = null;
   rawOpen = false;
+  planOpen = new Set();
+  planEdit = false;
+  planEditPart = 0;
   showPage("task");
 }
 
@@ -1669,7 +1818,11 @@ let tArmTimer = null;
 async function taskAct(name, button) {
   if (name === "raw") { rawOpen = !rawOpen; drawTask(); return; }  // page only: the brief or the raw note
   if (name === "next") return startNext(button.dataset.tid || taskId, button);  // the card's button too
-  if (!taskId) return;
+  if (name === "pfold") { const k = button.dataset.key; if (planOpen.has(k)) planOpen.delete(k); else planOpen.add(k); drawTask(); return; }
+  if (name === "edit") { planEdit = !planEdit; drawTask(); return; }
+  if (name === "saveplan") return savePlan(button);
+  if (name === "gapanswer") return gapAnswer(button);
+  if (!taskId && !button.dataset.tid) return;
   const arm = { stop: "Stop the task? Click again", clear: "Delete its notes and streams? Click again",
     handoff: "Hand off ends the task? Click again", done: "Mark the task done? Click again" }[name];
   if (arm && !button.dataset.armed) {  // two clicks: a stop loses the running step, a clear deletes the notes
@@ -1683,13 +1836,46 @@ async function taskAct(name, button) {
   if (name === "answer" || name === "handoff") return stepAct(name, button);  // session levers on the step's chat
   button.disabled = true;
   try {
-    await api("/api/task/" + name, { task: taskId });
+    await api("/api/task/" + name, { task: button.dataset.tid || taskId });
     if (name === "clear") { taskId = null; showPage("list"); return; }
     taskSig = "";  // redraw now, not at the next snapshot
+    if (page === "task") renderTaskPage();
+  } catch (e) {
+    button.disabled = false;
+    const msg = page === "task" ? $("ta-msg") || $("t-msg") : null;
+    if (!msg) button.textContent = "Failed: " + e.message;
+    else msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
+  }
+}
+
+async function gapAnswer(button) {  // a Plan gap: the answer joins the plan's Decisions and continues the step (POST /api/task/answer)
+  const box = $("t-answer"), text = box ? box.value.trim() : "";
+  if (!text) return;
+  button.disabled = true;
+  try {
+    await api("/api/task/answer", { task: taskId, text });
+    box.value = "";
+    taskSig = "";
     renderTaskPage();
   } catch (e) {
     button.disabled = false;
-    const msg = $("t-msg");
+    const msg = $("ta-msg");
+    if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
+  }
+}
+
+async function savePlan(button) {  // Fred's edit of the index or of a part, through the service only
+  const box = $("t-edit");
+  if (!box) return;
+  button.disabled = true;
+  try {
+    await api("/api/task/plan", { task: taskId, text: box.value, part: planEditPart });
+    planEdit = false;
+    taskSig = "";
+    renderTaskPage();
+  } catch (e) {
+    button.disabled = false;
+    const msg = $("ta-msg");
     if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
 }
@@ -2019,6 +2205,12 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("change", (e) => {
+  if (e.target.id === "t-editpart") {  // the plan editor switches between the index and a part
+    planEditPart = Number(e.target.value) || 0;
+    const d = taskData, box = $("t-edit");
+    if (d && box) box.value = planEditPart ? partText(d, planEditPart) : d.plan;
+    return;
+  }
   if (e.target.matches("[data-skind]")) {  // the kind decides which harness rungs the row may hold; a pick it cannot hold falls back to Auto
     const sel = e.target.closest("[data-row]").querySelector("[data-smodel]"), cur = sel.value;
     sel.innerHTML = modelOptions(cur, true, e.target.value);

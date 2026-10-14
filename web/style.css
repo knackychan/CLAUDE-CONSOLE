@@ -502,6 +502,53 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; border-radius: 6px; background: var(--raise);
   font: 12px/1.45 var(--mono); scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
 .tpath { color: var(--mut); font-size: 11px; overflow-wrap: anywhere; }
+/* the Plan row (plan 24): plan.md by heading, one fold each; the current step's section open and tagged; sub-plans one row each */
+.fold { display: grid; gap: 6px; min-width: 0; }
+.fh { display: flex; gap: 8px; align-items: center; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent;
+  color: var(--mut); font: 11px var(--mono); cursor: pointer; text-align: left; min-height: 24px; }
+.fh .lbl { flex: none; }
+.fh .fi { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fh .car { font-size: 9px; flex: none; }
+.fold.hf { gap: 0; padding: 3px 10px; border-radius: 6px; background: var(--raise); }
+.fold.hf .fb { padding: 4px 0 4px; }
+.hsec { display: grid; gap: 2px; padding: 6px 10px 7px; border-radius: 6px; background: var(--raise); }
+.hsec .lbl { display: flex; justify-content: space-between; gap: 8px; }
+.hsec .lbl .m { text-transform: none; letter-spacing: 0; }
+.hsec p, .hsec li { margin: 0; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.hsec ul { margin: 0; padding-left: 16px; }
+.hsec .mono { font: 11.5px/1.45 var(--mono); }
+.tg { display: inline-block; font: 500 9.5px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--line);
+  border-radius: 3px; padding: 0 4px; vertical-align: 1px; color: var(--mut); }
+.tg.n { color: var(--ink); border-color: var(--ink); }
+.tg.w { color: var(--wip); border-color: color-mix(in srgb, var(--wip) 55%, transparent); }
+.hsec .lbl.s { margin-top: 6px; }
+.hsec ol { margin: 0; padding-left: 18px; }
+.hsec ol li { font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.hsec pre.text { background: var(--win); max-height: none; font-size: 11.5px; }
+.hsec .lbl .tg { margin-left: 2px; }
+.parts { display: grid; gap: 1px; }
+.prt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 2px 8px; align-items: baseline; font: 12.5px var(--ui);
+  padding: 4px 0; border-top: 1px solid var(--line); }
+.prt:first-child { border-top: 0; }
+.prt .o { font: 11px var(--mono); color: var(--mut); }
+.prt .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prt.cur .tt { font-weight: 600; }
+.prt .m { white-space: nowrap; }
+.prt .m .g { color: var(--ok); } .prt .m .y { color: var(--you); } .prt .m .q { color: var(--mut); }
+.prt .sub { grid-column: 2 / -1; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain .row .nm .tg { margin-left: 4px; vertical-align: 0; }
+.chain .row .sub .y { color: var(--you); }
+.plan1 { display: grid; gap: 4px; }
+.plan1 ol { margin: 0; padding-left: 20px; font: 12.5px/1.5 var(--ui); }
+.plan1 li.add { color: var(--ink); font-weight: 600; }
+.plan1 li.add::after { content: " added"; font: 10.5px var(--mono); color: var(--you); font-weight: 400; }
+.plan1 li.old { color: var(--mut); }
+.plan1 li.drop { color: var(--mut); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--mut) 55%, transparent); }
+.plan1 .lbl .m { text-transform: none; letter-spacing: 0; }
+.askbox .plan1 { padding: 2px 0; }
+.askbox .edbox { flex-basis: 100%; display: grid; gap: 6px; min-width: 0; }
+.askbox .edbox textarea { font: 11.5px/1.45 var(--mono); }
+.edbox select { font: 12px var(--mono); background: var(--raise); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px; max-width: 100%; }
 
 /* window buttons only exist in the pywebview window */
 html:not(.native) .native-only { display: none; }
