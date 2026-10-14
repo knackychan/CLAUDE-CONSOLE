@@ -93,6 +93,8 @@ class Session:
     interrupted: bool = False
     stopped: bool = False
     cost: float = 0.0
+    cost_unknown: bool = False  # a run ended with no cost key (a harness that does not report one)
+    harness: str = "claude"
     route_reason: str = ""
     prep: str = ""
     prep_model: str = ""       # the Prep that wrote the prompt: its model, cost and turns (Route block)
@@ -267,6 +269,7 @@ class State:
             s.ended = not s.window  # a window run's process ends after every turn; it can resume
         elif event == "run_started":
             s.window, s.run_live, s.source = True, True, "window"
+            s.harness = rec.get("harness") or "claude"
             s.in_turn, s.ended = True, False
             self._turn_open(s, ts)
             s.interrupted = s.stopped = s.handed_off = False
@@ -313,8 +316,16 @@ class State:
             self._turn_close(s, ts)
             s.cost += float(rec.get("cost") or 0)
             s.run_costs.append([ts, float(rec.get("cost") or 0)])
+            if "cost" not in rec and s.harness != "claude":
+                s.cost_unknown = True
+            tokens = rec.get("tokens")
+            if isinstance(tokens, dict) and isinstance(tokens.get("context"), (int, float)):
+                s.ctx_tokens = int(tokens["context"])
             s.stopped = bool(rec.get("stopped"))
             s.interrupted = bool(rec.get("interrupted"))
+            subtype = rec.get("subtype")
+            if s.harness != "claude" and subtype and subtype != "success" and not (s.stopped or s.interrupted):
+                s.failed = {"error": subtype, "details": ""}  # no hook reports a failure for another CLI
             if rec.get("subtype") == "success" and not (s.stopped or s.interrupted):
                 s.replied_ts = ts
             if s.handoff and rec.get("subtype") == "success":
@@ -482,6 +493,7 @@ class State:
             follow_ups = max(0, s.prompts - 1)
             files = self.files(s)
             exact = s.window and not s.run_live  # a live window run has no result line yet: estimate
+            unpriced = s.cost_unknown and s.cost == 0
             rows.append({
                 "id": s.id, "project": s.project, "project_dir": s.project_dir,
                 "title": s.title or ("Empty chat, nothing sent" if state == "empty" else f"(prompt not seen) {s.id[:8]}"), "source": s.source or "?",
@@ -494,7 +506,8 @@ class State:
                 "denials": s.denials,
                 "two_writers": s.id in writer_ids,
                 "window": s.window, "run_live": s.run_live, "stopped": s.stopped,
-                "cost": round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,
+                "harness": s.harness,
+                "cost": None if unpriced else round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,
                 "start_commit": s.start_commit, "cwd": s.cwd,
                 "started_ts": s.started_ts, "last_ts": s.last_ts,
                 "turn_ts": s.turns[-1][0] if s.turns else s.started_ts,
@@ -512,7 +525,7 @@ class State:
                 "rules_warn": self.rules_warn(s.rules),
                 "reads": s.reads,
                 "delegate_hint": state not in DONE and s.reads >= self.cfg["delegate_after_reads"],
-                "spent": round(s.cost if exact else cost(files), 4) if exact or files else None,
+                "spent": None if unpriced else round(s.cost if exact else cost(files), 4) if exact or files else None,
                 "spent_exact": exact,
                 "burn": round(cost(files, now - BURN_S) / (BURN_S / 60), 4),
                 "activity": self.activity(s, now),

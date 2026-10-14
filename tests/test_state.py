@@ -132,6 +132,35 @@ class StateTest(unittest.TestCase):
                          (True, False, 0.25, "p1", "abc"))
         self.assertEqual(row["model"], "claude-sonnet-5-5")
 
+    def test_session_from_run_lines_only(self):
+        self.feed(ev("run_started", T0, sid="c1", harness="codex", model="gpt-6.1-sol", effort="medium",
+                     title="Add retry"),
+                  ev("run_ended", T0 + 5, sid="c1", subtype="success",
+                     tokens={"input": 10, "output": 5, "cache_read": 0, "context": None}))
+        row = self.row(T0 + 6, "c1")
+        self.assertEqual((row["harness"], row["title"], row["model"], row["window"]),
+                         ("codex", "Add retry", "gpt-6.1-sol", True))
+        self.assertEqual((row["ctx_tokens"], row["state"], row["cost"], row["spent"]), (None, "replied", None, None))
+        self.assertEqual(self.row(T0 + 700, "c1")["state"], "idle")
+        self.feed(ev("run_started", T0 + 10, sid="c2", harness="codex"))
+        self.assertEqual(self.row(T0 + 11, "c2")["state"], "running")
+        self.feed(ev("run_ended", T0 + 12, sid="c2", subtype="error"))
+        row = self.row(T0 + 13, "c2")
+        self.assertEqual((row["state"], row["failed"]), ("failed", {"error": "error", "details": ""}))
+        self.feed(ev("run_started", T0 + 20, sid="c3", harness="codex"),
+                  ev("run_ended", T0 + 21, sid="c3", stopped=True))
+        self.assertEqual(self.row(T0 + 22, "c3")["state"], "idle")
+        self.feed(ev("run_started", T0 + 30, sid="c4", harness="codex", model="m"),
+                  ev("run_ended", T0 + 31, sid="c4", subtype="success", tokens={"context": 5000}))
+        self.assertEqual(self.row(T0 + 32, "c4")["ctx_tokens"], 5000)
+
+    def test_hook_sessions_are_claude(self):
+        self.feed(ev("UserPromptSubmit", T0, prompt="hello"))
+        self.assertEqual(self.row(T0 + 1)["harness"], "claude")
+        self.feed(ev("run_started", T0 + 2, sid="w"), ev("run_ended", T0 + 3, sid="w", cost=0.1, subtype="success"))
+        row = self.row(T0 + 4, "w")
+        self.assertEqual((row["harness"], row["cost"]), ("claude", 0.1))
+
     def test_task_and_step_on_the_row(self):
         self.feed(ev("run_started", T0, sid="s2", task="20261012-101500-3f2a", step=2),
                   ev("run_ended", T0 + 5, sid="s2", subtype="success"))

@@ -2,16 +2,20 @@ import base64
 import copy
 import json
 import os
+import signal
 import sys
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import attach, events, paths, runs, tasks
+from console import attach, claude_cli, events, harness, paths, runs, tasks
 
 FAKE = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
+FAKE_CODEX = [sys.executable, str(Path(__file__).resolve().parent / "fake_codex.py")]
+FAKE_CMD = [sys.executable, str(Path(__file__).resolve().parent / "fake_cmd.py")]
 
 
 def wait_for(check, timeout=15.0):
@@ -185,10 +189,13 @@ class RunsTest(unittest.TestCase):
         self.assertIsNone(self.mgr.meta("working")["ended"])
 
     def test_result_record_lists_denials(self):
-        rec = runs.result_record("s", {"subtype": "success", "total_cost_usd": 0.2, "permission_denials": [
-            {"tool_name": "Bash", "tool_input": {"command": "git push --force"}}]}, 0, False)
+        summary = harness.get("claude").summary([{"type": "result", "subtype": "success", "total_cost_usd": 0.2,
+                                                  "permission_denials": [
+            {"tool_name": "Bash", "tool_input": {"command": "git push --force"}}]}])
+        rec = runs.result_record("s", summary, 0, False, False)
         self.assertEqual(rec["denials"], [{"tool": "Bash", "what": "git push --force"}])
-        self.assertTrue(runs.result_record("s", None, None, False)["interrupted"])
+        self.assertEqual(rec["cost"], 0.2)
+        self.assertTrue(runs.result_record("s", harness.get("claude").summary([]), None, False, False)["interrupted"])
 
     def test_prune_old_run_files(self):
         self.mgr.runs.mkdir(parents=True)
@@ -197,6 +204,130 @@ class RunsTest(unittest.TestCase):
         os.utime(old, (1, 1))
         self.mgr.stream_path("new").write_text("", encoding="utf-8")
         self.assertEqual(runs.prune(self.folder, 14), ["runs/old.jsonl"])
+
+
+class HarnessRunsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = Path(self.tmp.name) / "home"
+        self.project = Path(self.tmp.name) / "proj"
+        self.project.mkdir()
+        self.mgr = runs.RunManager(copy.deepcopy(paths.DEFAULTS), self.folder, FAKE,
+                                   exes={"codex": FAKE_CODEX, "cmd": FAKE_CMD})
+        killer = mock.patch.object(claude_cli, "kill_tree", lambda pid: os.kill(int(pid), signal.SIGTERM))
+        killer.start()  # taskkill is Windows' tree kill; the fakes have no children
+        self.addCleanup(killer.stop)
+
+    def tearDown(self):
+        for proc in list(self.mgr.live.values()):
+            proc.kill()
+        end = time.time() + 10
+        while self.mgr.live and time.time() < end:
+            time.sleep(0.05)
+        self.tmp.cleanup()
+
+    def log(self):
+        return events.LogReader(self.folder).read_new()
+
+    def ended(self, sid):
+        return [r for r in self.log() if r["event"] == "run_ended" and r["session_id"] == sid]
+
+    def codex_run(self, prompt="hi", **kw):
+        sid = self.mgr.start(str(self.project), prompt, "gpt-6.1-sol", "medium", harness="codex", **kw)
+        self.assertTrue(wait_for(lambda: self.ended(sid)))
+        return sid
+
+    def test_start_codex_writes_prompt_on_stdin_and_closes_it(self):
+        sid = self.codex_run()
+        types = [d.get("type") for d in runs.read_lines(self.mgr.stream_path(sid), 0)[1]]
+        self.assertEqual(types, ["cc_prompt", "thread.started", "turn.started", "item.completed",
+                                 "item.completed", "turn.completed", "cc_exit"])
+        self.assertEqual(runs.read_lines(self.mgr.stream_path(sid), 0)[1][-1]["code"], 0)
+        meta = self.mgr.meta(sid)
+        self.assertEqual((meta["harness"], meta["harness_session"], meta["read_only"], meta["timed_out"]),
+                         ("codex", "th_fake", False, False))
+        self.assertEqual([r["harness"] for r in self.log() if r["event"] == "run_started"], ["codex"])
+        end = self.ended(sid)[0]
+        self.assertNotIn("cost", end)
+        self.assertEqual(end["tokens"], {"input": 1200, "output": 300, "cache_read": 800, "context": None})
+        self.assertEqual((end["subtype"], end["stopped"], end["interrupted"]), ("success", False, False))
+        self.assertIn("STOP: <question>", runs.chat(self.mgr.stream_path(sid), harness="codex")[2]["text"])
+
+    def test_resume_codex_uses_the_thread_id(self):
+        sid = self.codex_run()
+        with mock.patch.object(self.mgr, "_spawn", wraps=self.mgr._spawn) as spawn:
+            self.assertEqual(self.mgr.start(str(self.project), "more", "gpt-6.1-sol", "medium", resume=sid,
+                                            harness="codex"), sid)
+            self.assertTrue(wait_for(lambda: len(self.ended(sid)) == 2))
+        cmd = spawn.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("resume"):cmd.index("resume") + 2], ["resume", "th_fake"])
+
+    def test_resume_takes_the_harness_from_the_meta(self):
+        sid = self.codex_run()
+        with mock.patch.object(self.mgr, "_spawn", wraps=self.mgr._spawn) as spawn:
+            self.mgr.start(str(self.project), "go on", "gpt-6.1-sol", "medium", resume=sid)
+            self.assertTrue(wait_for(lambda: len(self.ended(sid)) == 2))
+        cmd = spawn.call_args.args[0]
+        self.assertEqual(cmd[:len(FAKE_CODEX)], FAKE_CODEX)
+        self.assertIn("th_fake", cmd)
+        self.assertNotIn("--resume", cmd)
+        self.assertEqual(self.mgr.meta(sid)["harness"], "codex")
+
+    def test_step_timeout_stops_a_capless_run(self):
+        self.mgr.cfg["step_timeout_s"] = 1
+        sid = self.mgr.start(str(self.project), "SLOW task", "gpt-6.1-sol", "medium", harness="codex")
+        self.assertTrue(wait_for(lambda: self.ended(sid), 20))
+        end = self.ended(sid)[0]
+        self.assertEqual((end["subtype"], end["stopped"], end["interrupted"]), ("error_step_timeout", False, False))
+        self.assertNotIn("turn.completed", self.mgr.stream_path(sid).read_text(encoding="utf-8"))  # killed
+        meta = self.mgr.meta(sid)
+        self.assertTrue(meta["timed_out"])
+        self.assertEqual(meta["limits"]["timeout_s"], 1)
+        self.assertEqual(tasks.cap_reason(end["subtype"], meta["limits"]), "it hit the step timeout (1 s)")
+
+    def test_stdin_closed_for_argv_adapters(self):
+        script = 'import sys; sys.stdin.read(); print(\'{"type": "result"}\', flush=True)'
+        stub = types.SimpleNamespace(
+            NAME="stub", CAPS=False, INTERRUPT=False, RESUME=True, HOOKS=False,
+            run_command=lambda exe, *a, **kw: ([sys.executable, "-c", script], None),
+            is_result=lambda d: d.get("type") == "result",
+            summary=lambda lines: {"final": "", "subtype": "success", "cost": None, "tokens": None,
+                                   "session_id": "", "denials": [], "exit_cap": False},
+            chat=lambda lines, cwd: [], stop=lambda proc: "kill", terminal_command=lambda *a: None,
+            env=lambda read_only: {})
+        mgr = runs.RunManager(copy.deepcopy(paths.DEFAULTS), self.folder, FAKE, exes={"stub": ["stub"]})
+        with mock.patch.dict(harness.REGISTRY, {"stub": stub}):
+            sid = mgr.start(str(self.project), "hi", "m", "low", harness="stub")
+            self.assertTrue(wait_for(lambda: self.ended(sid), 5))
+        self.assertEqual(self.ended(sid)[0]["subtype"], "success")
+
+    def test_prompt_too_long_for_cmd(self):
+        with self.assertRaises(runs.RunError) as ctx:
+            self.mgr.start(str(self.project), "x" * 40000, "gpt-6-luna", "low", harness="cmd")
+        self.assertIn("prompt too long for cmd (40000 chars)", str(ctx.exception))
+        self.assertEqual([r for r in self.log() if r["event"] == "run_started"], [])
+
+    def test_a_harness_without_an_exe_is_refused(self):
+        with self.assertRaises(runs.RunError) as ctx:
+            self.mgr.start(str(self.project), "hi", "m", "low", harness="opencode")
+        self.assertEqual(str(ctx.exception), "opencode: not found")
+
+    def test_chat_dispatches_on_harness(self):
+        sid = self.codex_run()
+        self.assertEqual([i["role"] for i in self.mgr.chat_of(sid)], ["you", "tool", "claude", "result"])
+
+    def test_stop_kills_a_codex_run(self):
+        sid = self.mgr.start(str(self.project), "SLOW task", "gpt-6.1-sol", "medium", harness="codex")
+        self.assertTrue(wait_for(lambda: self.mgr.is_live(sid)))
+        self.assertEqual(self.mgr.stop(sid), "kill")
+        self.assertTrue(wait_for(lambda: self.ended(sid), 20))
+        self.assertTrue(self.ended(sid)[0]["stopped"])
+
+    def test_open_terminal_refused_for_codex(self):
+        sid = self.codex_run()
+        with self.assertRaises(runs.RunError) as ctx:
+            self.mgr.open_terminal(sid)
+        self.assertEqual(str(ctx.exception), "claude only")
 
 
 if __name__ == "__main__":

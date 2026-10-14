@@ -393,6 +393,11 @@ class ChainTest(unittest.TestCase):
         action, _ = end(task)  # Fred answered, the step ended well
         self.assertEqual((action, task["state"], task["why"]), ("next", "running", ""))
 
+    def test_cap_reason_timeout(self):
+        self.assertEqual(tasks.cap_reason("error_step_timeout", {"timeout_s": 1800}),
+                         "it hit the step timeout (1800 s)")
+        self.assertEqual(tasks.cap_reason("error_step_timeout", None), "it hit the step timeout (? s)")
+
     def test_cap_reason_names_the_cap(self):
         self.assertEqual(tasks.cap_reason("error_max_turns", {"max_turns": 12}), "it hit the turn cap (12 turns)")
         self.assertEqual(tasks.cap_reason("error_max_budget_usd", {"budget": 3}), "it hit the step budget (3.00 USD)")

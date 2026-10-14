@@ -420,6 +420,8 @@ def cap_reason(subtype: str, limits) -> str:
         return f"it hit the turn cap ({limits.get('max_turns') or '?'} turns)"
     if subtype == "error_max_budget_usd":
         return f"it hit the step budget ({float(limits.get('budget') or 0):.2f} USD)"
+    if subtype == "error_step_timeout":
+        return f"it hit the step timeout ({limits.get('timeout_s') or '?'} s)"
     return ""
 
 
