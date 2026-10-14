@@ -577,6 +577,49 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .now > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .now .m { color: var(--mut); margin-left: auto; white-space: nowrap; }
 .ublk .fold .fh { padding: 2px 0; }
+/* Models page (2026-10-14): the routing table and the tuning numbers, edited here and saved to config.json; the
+   service reloads them, so nothing is rebuilt. Tabs Kinds / Tiers / Tuning; Settings card grammar; an edited value
+   carries a blue edge and a reset, a value at its default carries nothing */
+.mp .tabs { padding: 0 12px; }
+.mp .pane { padding: 10px 12px 14px; display: grid; gap: 10px; align-content: start; }
+.mp .hint { margin: 0; font: 11.5px/1.45 var(--ui); color: var(--mut); text-wrap: pretty; }
+.krow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1px 6px; align-items: center; padding: 7px 8px 7px 12px; }
+.krow + .krow { border-top: 1px solid var(--line); }
+.krow .nm { grid-column: 1; grid-row: 1; font: 500 13px var(--ui); color: var(--ink); }
+.krow .pick.r { grid-column: 2; } .krow .pick.e { grid-column: 3; }
+.krow .pick.r select { max-width: 190px; }
+.krow .sub { grid-column: 1 / -1; grid-row: 2; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.krow .pick { grid-row: 1; }
+.krow.fixed .nm { color: var(--mut); }
+.krow.fixed .lock { grid-column: 2 / -1; grid-row: 1 / span 2; font: 11px var(--mono); color: var(--mut); text-align: right; }
+.ed { box-shadow: inset 2px 0 0 var(--wip); }
+.ed .rs { color: var(--wip); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.rrow { display: grid; grid-template-columns: 14px 16px minmax(0, 1fr) auto 24px; gap: 6px; align-items: center; padding: 6px 6px 6px 10px; }
+.rrow + .rrow { border-top: 1px solid var(--line); }
+.rrow .gr { color: var(--mut); font-size: 11px; letter-spacing: -2px; cursor: grab; }
+.rrow .o { font: 10.5px var(--mono); color: var(--mut); }
+.rrow .nm { font: 12px var(--mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rrow .nm .h { color: var(--mut); }
+.rrow.off .nm { color: var(--mut); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--mut) 60%, transparent); }
+.rrow .x { width: 24px; height: 24px; border: 0; border-radius: 5px; background: transparent; color: var(--mut); cursor: pointer; font-size: 11px; }
+.rrow .x:hover { background: var(--raise); color: var(--ink); }
+.radd { display: flex; gap: 6px; align-items: center; padding: 6px 10px 8px; border-top: 1px solid var(--line); }
+.radd .m { color: var(--mut); font-size: 11px; margin-left: auto; }
+.tf { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; padding: 7px 10px 7px 12px; }
+.tf + .tf { border-top: 1px solid var(--line); }
+.tf .nm { font: 500 13px var(--ui); color: var(--ink); }
+.tf .sub { grid-column: 1; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf .v { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; align-items: center; gap: 5px; font: 11px var(--mono); color: var(--mut); }
+.tf .v input { width: 70px; height: 26px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--raise); color: var(--ink); font: 12px var(--mono); text-align: right; }
+.tf .v input:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
+.tf.bad .v input { border-color: var(--bad); }
+.tf.bad .sub { color: var(--bad); }
+.mp .pcard .fold .fh { padding: 0 10px 0 12px; min-height: 32px; align-items: center; }
+.msave { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.msave .m { flex: 1; min-width: 0; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msave .m b { color: var(--wip); font-weight: 400; }
+.pset > .lbl.row { display: flex; justify-content: space-between; align-items: baseline; }
+.pset > .lbl.row .link { text-transform: none; letter-spacing: 0; font: 11.5px var(--ui); color: var(--ink); }
 /* 340 px compact: nothing scrolls sideways */
 @container (max-width: 372px) {
   .top .grip { display: none; }
@@ -610,6 +653,7 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
     <button data-v="prep" aria-pressed="false">Prep</button>
     <button data-v="session" aria-pressed="false">Codex session</button>
     <button data-v="usage" aria-pressed="false">Usage</button>
+    <button data-v="models" aria-pressed="false">Models</button>
   </div>
   <p class="sample">Every task, step, figure and cost on this page is sample data. Sprites show their still frame.</p>
 
@@ -1094,7 +1138,7 @@ function settingsHtml() {
         <button class="prow" role="option"><span class="ck"></span><span class="nm">content-manager</span><span class="meta">1 live</span><span class="c">0.51</span></button>
         <div class="grp lbl">Runs off · 1</div>
         <button class="prow off" role="option"><span class="ck"></span><span class="nm">fashion_packshots_ai</span><span class="meta">runs off</span><span class="c">-</span></button>
-        <div class="pset"><span class="lbl">Settings</span>
+        <div class="pset"><span class="lbl row">Settings<span class="link" data-go="models" title="Which model does each kind of step, the tiers' rungs, and the tuning numbers">Models and tuning ›</span></span>
           ${fold("Harnesses", '2 on · <span class="r">△ cmd not found</span>', harness, { open: true, title: "opencode and cmd run cheap models, on read and write steps, never design, verify or fix; rungs of a harness that is off never route; a step picked on one falls back to Claude's rung of its tier" })}
           ${fold("Window runs", "auto hand off: off", windowRuns)}
         </div>
@@ -1166,6 +1210,52 @@ function sessionHtml() {
       <div class="lr"><button class="btn">Mark done</button><button class="btn">Brief a new task</button></div>
       <div class="say">claude only: Verify, Hand off, Escalate</div></div><span class="rsz"></span></div>`;
 }
+let mtab = "kinds";  // the Models page's tab: kinds | tiers | tuning
+function modelsHtml() {
+  const rungs = [["auto · read", "auto: the read tier"], ["auto · write", "auto: the write tier"], ["auto · think", "auto: the think tier"],
+    ["haiku", "claude haiku"], ["sonnet", "claude sonnet"], ["opus", "claude opus"], ["codex · gpt-6-luna"], ["codex · gpt-6.1-sol"], ["codex · gpt-6-astra"],
+    ["opencode · deepseek-v4.1-flash"], ["opencode · glm-5.3-flash"], ["cmd · deepseek-v4.1-flash"]];
+  const rsel = (v, label) => `<span class="pick r${v.startsWith("auto") ? " auto" : ""}"><select aria-label="${esc(label)} model">${rungs.map(([r, t]) => `<option${r === v ? " selected" : ""}${t ? ` title="${t}"` : ""}>${r}</option>`).join("")}</select></span>`;
+  const esel = (v, label) => `<span class="pick e"><select aria-label="${esc(label)} effort">${["low", "medium", "high", "xhigh"].map((e) => `<option${e === v ? " selected" : ""}>${e}</option>`).join("")}</select></span>`;
+  const kind = (k, rung, eff, sub, o = {}) => `<div class="krow${o.ed ? " ed" : ""}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="nm">${k}</span>${rsel(rung, k)}${esel(eff, k)}<span class="sub">${sub}${o.ed ? ` · <span class="rs">reset to ${o.ed}</span>` : ""}</span></div>`;
+  const fixed = (k, why, sub) => `<div class="krow fixed"><span class="nm">${k}</span><span class="lock">${why}</span><span class="sub">${sub}</span></div>`;
+  const kinds = `<p class="hint">Which model takes each kind of step. Auto takes the tier's first rung with room (the Tiers tab); a picked rung pins it. The Prep card can still pick another rung for one step.</p>
+    <div class="pcard"><div class="ph"><span class="nm">Read</span><span class="m">look, search, small edits</span></div>
+      ${kind("scout", "auto · read", "low", "tools Read, Grep, Glob · 15 turns")}${kind("search", "auto · read", "low", "tools + WebFetch, WebSearch · 15 turns")}${kind("draft", "auto · read", "low", "default tools")}${kind("proofread", "auto · read", "low", "default tools")}${kind("edit", "auto · read", "low", "default tools")}
+      ${kind("test", "opencode · deepseek-v4.1-flash", "low", "tools Bash, Read, Grep, Glob", { ed: "auto · read" })}${kind("replan", "auto · read", "low", "Fred confirms the new plan")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Write</span><span class="m">code and prose</span></div>
+      ${kind("code", "auto · write", "medium", "default tools")}${kind("document", "auto · read", "low", "default tools", { ed: "auto · write, medium" })}${kind("explain", "auto · write", "medium", "tools Read, Grep, Glob")}${kind("debug", "auto · write", "high", "default tools")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Think</span><span class="m">plans and decisions</span></div>
+      ${kind("design", "auto · think", "high", "tools Read, Grep, Glob, WebFetch, WebSearch · 12 turns")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Checks</span><span class="m">set by the rule, not here</span></div>
+      ${fixed("verify", "one tier above", "the rung that wrote the step")}${fixed("fix", "the failed step's tier", "after a FAIL; never opencode or cmd")}</div>`;
+  const rung = (n, h, m, eff, o = {}) => `<div class="rrow${o.off ? " off" : ""}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="gr" aria-hidden="true">⋮⋮</span><span class="o">${n}</span><span class="nm"><span class="h">${h} · </span>${m}</span>${eff === "-" ? '<span class="o">-</span>' : esel(eff, m)}<button class="x" aria-label="Remove ${esc(m)}">✕</button></div>`;
+  const add = (tier, note) => `<div class="radd"><span class="pick auto"><select aria-label="Add a rung to ${tier}"><option>+ rung</option><option>codex · gpt-6-sol</option><option>opencode · qwen3.8-flash</option><option>cmd · glm-5.3-flash</option></select></span><span class="m">${note}</span></div>`;
+  const job = (nm, v, sub) => `<div class="krow"><span class="nm">${nm}</span>${rsel(v, nm)}<span></span><span class="sub">${sub}</span></div>`;
+  const tiers = `<p class="hint">Each tier is a ladder, tried top down; balancing skips a rung whose model is over its pace. Drag to reorder. A rung on a harness that is off is struck and skipped.</p>
+    <div class="pcard"><div class="ph"><span class="nm">Think</span><span class="m">3 rungs</span></div>${rung(1, "claude", "opus", "high")}${rung(2, "codex", "gpt-6-astra", "high")}${rung(3, "claude", "claude-opus-4-8", "high")}${add("think", "Claude and Codex only")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Write</span><span class="m">5 rungs</span></div>${rung(1, "claude", "sonnet", "medium")}${rung(2, "codex", "gpt-6.1-sol", "medium")}${rung(3, "codex", "gpt-6-sol", "medium")}${rung(4, "opencode", "deepseek-v4.1-flash", "-", { off: true, title: "opencode is off" })}${rung(5, "cmd", "deepseek-v4.1-flash", "-", { off: true, title: "cmd is not found" })}${add("write", "cheap models allowed")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Read</span><span class="m">4 rungs</span></div>${rung(1, "claude", "haiku", "low")}${rung(2, "codex", "gpt-6-luna", "high", { title: "Codex suggests starting Luna at high" })}${rung(3, "opencode", "deepseek-v4.1-flash", "-", { off: true, title: "opencode is off" })}${rung(4, "cmd", "deepseek-v4.1-flash", "-", { off: true, title: "cmd is not found" })}${add("read", "cheap models allowed")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Console's own passes</span><span class="m">not steps</span></div>
+      ${job("Prep", "haiku", "prep_model · enhances the prompt, plans the steps")}${job("Handoff pass", "haiku", "brief_model · compacts a step's handoff")}${job("Rules review", "haiku", "review_model · read only")}${job("Run default", "sonnet", "default_model · the composer's Run")}</div>`;
+  const tf = (nm, key, v, unit, o = {}) => `<div class="tf${o.ed ? " ed" : ""}${o.bad ? " bad" : ""}"><span class="nm">${nm}</span><span class="v">${o.prefix || ""}<input inputmode="decimal" aria-label="${esc(nm)}" value="${v}">${unit}</span><span class="sub">${o.bad || `${key} · default ${o.def ?? v}${o.ed ? ` · <span class="rs">reset</span>` : ""}`}</span></div>`;
+  const tuning = `<p class="hint">Numbers the service reads at each step. Saved to config.json; a hand edit of the file shows here after Reload.</p>
+    <div class="pcard"><div class="ph"><span class="nm">Steps</span><span class="m">limits per step and task</span></div>
+      ${tf("Steps per task", "task_max_steps", 8, "", { ed: true, def: 6 })}${tf("Spend per step", "task_step_budget_usd", 3, "", { prefix: "$" })}${tf("Step timeout", "step_timeout_s", 1800, "s")}${tf("Turns on opus", "opus_max_turns", 12, "")}${tf("Turns on read kinds", "read_max_turns", 15, "")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Handoff</span><span class="m">between steps</span></div>
+      ${tf("Handoff words", "brief_max_words", 500, "w")}${tf("Pass timeout", "brief_timeout_s", 60, "s")}${tf("Auto hand off at", "gauge_red_tokens", 300, "K")}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Balancing</span><span class="m">usage fills</span></div>
+      ${tf("Move down at", "budget_warn_at", 80, "% of pace")}${tf("Switch back below", "balance_hysteresis", 15, "points", { bad: "between 0 and 50" })}${tf("Daily budget", "daily_budget_usd", 15, "", { prefix: "$" })}
+      ${fold("Allowances", "6 models · day / week / month", `<div class="m mut" style="padding:0 2px 6px">opus 40 / 220 / 800 · sonnet 60 / 330 / 1200 · haiku 200 / 1100 / 4000 · gpt-6.1-sol 50 / 280 / 1000 · gpt-6-luna 300 / 1600 / 6000 · deepseek-v4.1-flash 400 / 2200 / 8000 (K tokens)</div>`)}</div>
+    <div class="pcard"><div class="ph"><span class="nm">Context gauge</span><span class="m">the cells' colours</span></div>
+      ${tf("Yellow from", "gauge_yellow_tokens", 150, "K")}${tf("Red from", "gauge_red_tokens", 300, "K")}</div>`;
+  const tabs = [["kinds", "Kinds"], ["tiers", "Tiers"], ["tuning", "Tuning"]];
+  return `<div class="win mp" data-view="models">
+    ${topBar(back, "Models and tuning")}
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-mtab="${k}" aria-selected="${mtab === k}">${l}${k === "kinds" ? ' <span class="n">2 edited</span>' : k === "tuning" ? ' <span class="n">1 edited</span>' : ""}</button>`).join("")}</div>
+    <div class="scroll"><div class="pane">${mtab === "tiers" ? tiers : mtab === "tuning" ? tuning : kinds}</div></div>
+    <div class="levers"><div class="msave"><span class="m" title="Save writes config.json; the service reloads it and uses it from the next step"><b>3 changes</b> · used from the next step</span><button class="btn">Discard</button><button class="btn go">Save</button></div></div><span class="rsz"></span></div>`;
+}
 function usageHtml() {
   const share = (f, w) => f[w][0] / f[w][1];
   const bind = (f) => ["day", "week", "month"].reduce((a, w) => (share(f, w) > share(f, a) ? w : a), "day");
@@ -1209,12 +1299,13 @@ const CAP = {
   settings: "<b>Settings popover.</b> Under the project groups, one raised Settings band with a card per group. Harnesses is open here because cmd is on but not found (its closed line keeps \"△ cmd not found\" in red). One row per CLI: glyph, the name over its version (or what limits it), and one switch that is both the state word and the action; cmd's switch is red and the row says what to fix. Window runs (closed) holds the auto hand off switch (ID-2) with its one-line why. Click a switch or a card's head to try it.",
   prep: "<b>Prep page.</b> What you typed is a quote with Fred's violet edge, Scouted folded under it. The prompt, the steps and the one-session route are cards with the Settings card head (name, one fact, an action). A step is two lines: its goal first, editable in place and never cut, then the kind and the rung as quiet pickers (auto dashed, a picked rung filled); the remove cross is faint until the row is hovered. Row 5, a code step, runs on opencode · deepseek-v4.1-flash (cheap models may take write steps, Fred 2026-10-14); row 2, a design step, shows a refused pick: a red tint, the note in red, the rung back to auto. One primary action, Run as task; Run is the second button; Run raw, Edit and Cancel are quiet text buttons.",
   session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-6.1-sol · medium; the brief says context unknown in words with no cells; tabs Chat and Steps only. The chat starts with the folded Prompt row, then the same bubbles and folded tool rows as the Board (a failed exit first), the source line at the end. Continue resumes the thread; the levers that are off say \"claude only\" in one line.",
+  models: "<b>Models and tuning page.</b> Opened from Settings (Models and tuning ›) or the view bar. Kinds: one row per step kind, grouped by tier, with its rung (auto takes the tier ladder; a picked rung pins it) and effort; verify and fix stay set by the rule. Tiers: each ladder top down with drag handles, rungs on a harness that is off struck, and the console's own passes (Prep, handoff pass, rules review, Run default). Tuning: the numbers, each with its config key and default. An edited value has a blue edge and a reset; Save writes config.json and the service reloads it, so nothing is rebuilt. Click the tabs.",
   usage: "<b>Usage page.</b> Models: one row per model, sorted over pace first, with one bar of 20 cells for the window that binds (day, week or month), the pace as an orange outline cell and the share of pace as the figure (orange over pace), the other two windows as text; a click opens the three bars. Days stays as locked. The Verify FAIL by hour heatmap folds to one line that carries its reading.",
 };
 function show(v) {
   document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
   const html = ["step", "live", "conn", "task", "replan", "measure", "bempty"].includes(v) ? boardHtml(v)
-    : v === "list" ? listHtml() : v === "tpage" ? taskPageHtml() : v === "settings" ? settingsHtml() : v === "prep" ? prepHtml() : v === "session" ? sessionHtml() : usageHtml();
+    : v === "list" ? listHtml() : v === "tpage" ? taskPageHtml() : v === "settings" ? settingsHtml() : v === "prep" ? prepHtml() : v === "session" ? sessionHtml() : v === "models" ? modelsHtml() : usageHtml();
   document.getElementById("stage").innerHTML = html;
   document.getElementById("cap").innerHTML = CAP[v] || "";
   const sc = document.querySelector(".win .scroll"), cur = document.querySelector(".chain .row.cur");
@@ -1243,6 +1334,11 @@ document.addEventListener("click", (e) => {  // a settings switch flips in this 
   b.setAttribute("aria-checked", String(on));
   b.textContent = on ? "on" : "off";
   b.title = on ? "Turn off" : "Turn on";
+});
+document.addEventListener("click", (e) => {  // the Models page's tabs, and the Settings link to it
+  const t = e.target.closest("[data-mtab]"), g = e.target.closest("[data-go]");
+  if (t) { mtab = t.dataset.mtab; show("models"); }
+  else if (g) show(g.dataset.go);
 });
 let curView = "step";
 document.addEventListener("click", (e) => {  // the inspector's tabs

@@ -343,6 +343,41 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 - Footer: `Codex usage x its price row; OpenCode and Command Code runs without usage count as unknown,
   never as zero`.
 
+## 9b. Models and tuning page (Fred, 2026-10-14)
+
+Fred: a page to choose the model for each thing and tune the numbers, without rebuilding the app for every
+change. Today the kind rules live in `tasks.RULES` and the defaults in `paths.DEFAULTS` (code); this page puts
+them in config.json and edits them there. A compact page, opened from the Settings band's `Models and tuning ›`
+link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` when it has changes.
+
+- **Kinds**: one row per kind, grouped in cards by tier (Read, Write, Think) in the Settings card grammar. The
+  row: the kind's name over a quiet line (its tools and turn cap), a rung picker (`auto · read`, `auto · write`,
+  `auto · think`, or one fixed rung on any harness that is on) and an effort picker. Auto takes the tier's
+  ladder; a fixed rung pins it. The Prep card can still pick another rung for one step. `verify` (one tier above
+  the rung that wrote the step) and `fix` (the failed step's tier, never opencode or cmd) sit in a Checks card,
+  set by the rule, not editable. Writes `kinds: {kind: {rung, effort}}`; a kind absent from it keeps the code's
+  rule.
+- **Tiers**: one card per tier with its ladder top down: drag handle, order, `harness · model`, effort, remove.
+  A rung on a harness that is off or not found is struck and skipped (its title says why). `+ rung` lists the
+  models of the harnesses that are on; think accepts Claude and Codex only (decision 11). A last card holds the
+  console's own passes: Prep, the handoff pass, the rules review and the composer's Run default
+  (`prep_model`, `brief_model`, `review_model`, `default_model`). Writes `tiers` (brainstorm section 4).
+- **Tuning**: the numbers, one card per subject (Steps, Handoff, Balancing, Context gauge). A row: the label
+  in words over its config key and default; the value in a small mono field with its unit. A value off its
+  default has the blue `--wip` edge and a `reset` link; a value out of range turns the field red and its line
+  says the range, and Save stays off until it is fixed. The allowances per model fold to one line.
+  Keys: `task_max_steps`, `task_step_budget_usd`, `step_timeout_s`, `opus_max_turns`, `read_max_turns`,
+  `brief_max_words` (500), `brief_timeout_s`, `gauge_red_tokens`, `gauge_yellow_tokens`, `budget_warn_at`,
+  `balance_hysteresis`, `daily_budget_usd`, `allowances`.
+- **Save**: the levers row reads `3 changes · used from the next step`, Discard and Save. Save posts the
+  changed keys only (`POST /api/config/models`, through `guard.py`, a whitelist of the keys above, each
+  validated); the service writes config.json as `set_harness` does (every other key as written) and reloads
+  them, so a running step keeps its rung and the next step uses the new values. config.json stays the source
+  of truth: a hand edit shows after the page's Reload. No rebuild, no restart.
+
+Not here: the harness switches and auto hand off (the Settings popover), prices (they follow the providers,
+not Fred's taste), port and paths.
+
 ## 10. States and words
 
 | Thing | States shown | Word and mark |
@@ -370,6 +405,7 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
 | Board measure | medians per kind over the project's tasks (from task.json and the notes) | 25 |
 | Usage, list | fills per model (day / week / month: used, allowance, pace), FAIL counts per rung per hour | 18 |
 | Window | `window.json board: [w, h]`; `WindowApi.resize` to open and close the Board | 25 |
+| Models and tuning | `/api/config` with `kinds`, `tiers`, the tuning keys and their defaults and ranges; `POST /api/config/models` (whitelisted keys, validated, writes config.json, reloads) | proposed plan 26 |
 
 ## 12. Decisions (taken by Fred, 2026-10-13: all as proposed except ID-5)
 
@@ -412,3 +448,5 @@ leaves the Board to the page it came from. The pick is an ink outline, like a fo
   only, the measure table shows words as figures). `brief_max_words` stays 500. Mockup moved to
   `design/rework/locked/cells-board.html`; BRAINSTORM 7.5 and the README name it. Next: plan 25 from
   sections 8 and 11.
+- 2026-10-14 - Fred: a page to set the model for each kind and tune the numbers without a rebuild: section
+  9b, the Models view in the mock, linked from the Settings band.
