@@ -385,6 +385,10 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
   them, so a running step keeps its rung and the next step uses the new values. config.json stays the source
   of truth: a hand edit shows after the page's Reload. No rebuild, no restart.
 
+Every card head carries a small `?` after its name (Fred, 2026-10-14): its title holds one plain sentence on
+what the card is for (`Write: kinds that write code or prose: code, document, explain, debug`), and a click opens
+the same sentence on a raised line under the head.
+
 Not here: the harness switches and auto hand off (the Settings popover), prices (they follow the providers,
 not Fred's taste), port and paths.
 
