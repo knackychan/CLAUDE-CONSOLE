@@ -100,7 +100,7 @@ Design points:
 - **Verify stays one tier up, across harnesses**: a step written by `opencode · deepseek` is checked by the next tier's rung, which may be `claude · sonnet`. The tier order comes from the ladder (section 4), not from a model name list, so `claude_cli.MODELS` ordering stops being the ranking.
 - **Cost**: the console prices Claude transcripts at list prices. For other harnesses, usage x a price row in `config.json` `prices` when the adapter reports usage, else an estimate. The Usage page shows them as rungs in the model mix.
 
-**D-2** Order of adapters: Codex, then OpenCode, then Command Code after its flags and models are checked. **Fred, 2026-10-13: yes. OpenCode and Command Code run cheap-tier rungs only** (their subscriptions allow less than Claude's and Codex's): their rungs may appear in the `read` tier and nowhere else, and a pick of one of them on the Prep card is refused above `read` with a note. Only Claude and Codex carry `write` and `think` rungs. **Fred, 2026-10-14: they may take write steps too** (well-designed code can be written by a cheap model such as haiku, DeepSeek or Luna): their cheap rungs also sit in the `write` tier, after Claude's and Codex's; never `think`, `verify` or `fix`. Verify stays one tier above the rung, so their code is checked by a `write` rung of Claude or Codex.
+**D-2** Order of adapters: Codex, then OpenCode, then Command Code after its flags and models are checked. **Fred, 2026-10-13: yes. OpenCode and Command Code run cheap-tier rungs only** (their subscriptions allow less than Claude's and Codex's): their rungs may appear in the `read` tier and nowhere else, and a pick of one of them on the Prep card is refused above `read` with a note. Only Claude and Codex carry `write` and `think` rungs. **Fred, 2026-10-14: they may take write steps too** (well-designed code can be written by a cheap model such as haiku, DeepSeek or Luna): their cheap rungs also sit in the `write` tier, after Claude's and Codex's; never `verify` or `fix`. **Fred, 2026-10-14: OpenCode also brings Kimi K3 and GLM 5.3 for design and thinking**: they sit in `think` (rank opus) next to opus and gpt-6-astra; Command Code stays cheap only. Verify stays one tier above the rung, so their code is checked by a `write` rung of Claude or Codex.
 
 **D-3** An adapter's unknowns are shown as unknown, not as zero (Square's "no false zero"): a step with no usage shows "cost unknown" and no gauge. (Recommended.)
 
@@ -116,7 +116,7 @@ Proposal: the three tiers are named by their job, not by a Claude model, and eac
 
 ```json
 "tiers": {
-  "think": ["claude:opus/high", "codex:gpt-6-astra/high", "claude:claude-opus-4-8/high", "claude:fable/high"],
+  "think": ["claude:opus/high", "codex:gpt-6-astra/high", "opencode:opencode-go/kimi-k3/-", "opencode:opencode-go/glm-5.3/-", "claude:claude-opus-4-8/high", "claude:fable/high"],
   "write": ["claude:sonnet/medium", "codex:gpt-6.1-sol/medium", "codex:gpt-6-sol/medium", "opencode:opencode-go/deepseek-v4.1-flash/-", "cmd:deepseek/deepseek-v4.1-flash/-"],
   "read":  ["claude:haiku/low", "opencode:opencode-go/deepseek-v4.1-flash/-", "cmd:deepseek/deepseek-v4.1-flash/-", "codex:gpt-6-luna/low"]
 }

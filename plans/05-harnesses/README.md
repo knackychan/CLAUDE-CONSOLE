@@ -43,7 +43,7 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 | 8 | Stop (Fred confirmed after the review, 2026-10-13) | An adapter without an interrupt is stopped with `claude_cli.kill_tree` (the tree, so the model's child commands end too); the rule "Stop is the stream-json interrupt, never a kill of a run this service owns" holds for Claude runs, and this is the one documented exception for harnesses that have no interrupt |
 | 9 | Self-updates | Command Code updated itself during a `--help` call: every `cmd` command gets `--no-auto-update`, and the probe records each harness's version at every service start |
 | 10 | What a non-Claude session shows | Chat from the adapter's stream (final text, tool events where the adapter knows them), no Steps from hooks (the hooks are Claude Code's), gauge from the adapter's usage or none, levers Continue (where the adapter resumes) and Stop only; Verify, Handoff, Escalate and Open in terminal are off with the reason `claude only` |
-| 11 | Cheap models, read and write steps (D-2) | OpenCode and Command Code list cheap models only (their tier stays `haiku`). Their rungs are offered and accepted where the step's rule tier is `haiku` or `sonnet` (`tasks.RULES[kind][0] in ("haiku", "sonnet")`: scout, search, draft, proofread, edit, test, and code, document, explain, debug) and on a plain Run; never on `design` (an `opus` kind), `verify` or `fix`. Fred, 2026-10-14: well-designed code can be written by a cheap model, so they may take write steps; verify stays one tier above the rung, so a cheap rung's code is checked by a `sonnet` rung. A refused pick says `opencode: not on design, verify or fix steps` |
+| 11 | What OpenCode and Command Code may run (D-2) | Command Code lists cheap models only (tier `haiku`). OpenCode lists cheap models (tier `haiku`) and two think models, `opencode-go/kimi-k3` and `opencode-go/glm-5.3` (tier `opus`; Fred, 2026-10-14). A rung of either is offered and accepted by its model's tier: a `haiku` model on kinds whose rule tier is `haiku` or `sonnet` (scout, search, draft, proofread, edit, test, code, document, explain, debug; Fred, 2026-10-14: well-designed code can be written by a cheap model), an `opus` model on any kind, and any of them on a plain Run; never on `verify` or `fix`. Verify stays one tier above the rung, so a cheap rung's code is checked by a `sonnet` rung. A refused pick says `opencode: deepseek-v4.1-flash is not a think model` or `cmd: not on verify or fix steps` |
 | 12 | A pick whose harness went off | A task step whose pick names a harness that is off or not found when the step starts runs on Claude's rung of the pick's tier, with the route note `harness: codex off -> sonnet` (brainstorm 3.1: off rungs never route, the tier falls back to Claude). A plain Run Fred points at such a rung is refused (409), never moved |
 | 13 | Which harness a later turn uses | The run meta's `harness`, always: Continue, a STOP answer, a retry and Stop read it from the meta; only a new run takes `harness` from its caller |
 
@@ -73,7 +73,8 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
   "codex":    {"on": false, "exe": "", "models": {"gpt-6-astra": "opus", "gpt-6.1-sol": "sonnet", "gpt-6-sol": "sonnet",
                                                   "gpt-6-luna": "haiku"}},
   "opencode": {"on": false, "exe": "", "models": {"opencode-go/deepseek-v4.1-flash": "haiku", "opencode-go/glm-5.3-flash": "haiku",
-                                                  "opencode-go/qwen3.8-flash": "haiku", "opencode-go/gpt-6-luna": "haiku"}},
+                                                  "opencode-go/qwen3.8-flash": "haiku", "opencode-go/gpt-6-luna": "haiku",
+                                                  "opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"}},
   "cmd":      {"on": false, "exe": "", "models": {"deepseek/deepseek-v4.1-flash": "haiku", "z-ai/glm-5.3-flash": "haiku",
                                                   "Qwen/Qwen3.8-Flash": "haiku", "gpt-6-luna": "haiku"}}
 },
@@ -91,11 +92,12 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
   retires from Codex on 2026-10-14 and `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex` are gone, so none is listed
   ([Codex models](https://learn.chatgpt.com/docs/models)). OpenCode, through OpenCode Go (`opencode-go/` prefix,
   per-model monthly limits): `deepseek-v4.1-flash` (largest allowance), `glm-5.3-flash`, `qwen3.8-flash`,
-  `gpt-6-luna` ([OpenCode Go](https://opencode.ai/docs/go/)). Command Code (`--model` takes the full id or the part
+  `gpt-6-luna`, and for design `kimi-k3` and `glm-5.3` (tier `opus`, Fred 2026-10-14; each with a $15 monthly limit on Go, which the spread respects through its allowance) ([OpenCode Go](https://opencode.ai/docs/go/)). Command Code (`--model` takes the full id or the part
   after `/`, case-insensitive; default `deepseek/deepseek-v4-flash`): `deepseek/deepseek-v4.1-flash`,
   `z-ai/glm-5.3-flash`, `Qwen/Qwen3.8-Flash`, `gpt-6-luna`, all on its Go plan
-  ([Command Code models](https://commandcode.ai/docs/reference/cli/models)). OpenCode and Command Code list only
-  cheap read-tier models (D-2): their premium entries (`gpt-6-sol`, `kimi-k3`, `deepseek-v4-pro`, Claude) stay out.
+  ([Command Code models](https://commandcode.ai/docs/reference/cli/models)). Command Code lists only cheap
+  models; OpenCode adds Kimi K3 and GLM 5.3 for design (decision 11); other premium entries (`gpt-6-sol`,
+  `deepseek-v4-pro`, Claude) stay out.
 - `claude.exe` (the old key) keeps working: `harnesses.claude.exe` empty falls back to it (`paths.load_config`
   copies it in). `paths.set_harness(folder, name, on) -> None` writes `on` for one harness into config.json as
   `add_project` does (every other key as written; `ValueError` when the file cannot be read).

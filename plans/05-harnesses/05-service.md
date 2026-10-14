@@ -25,9 +25,10 @@
   `paths.set_harness(self.folder, name, on)`; `self.cfg = paths.load_config()`-style reload of that key only
   (`self.cfg["harnesses"][name]["on"] = on`; the file is the truth, the dict follows); `self.probe([name])`.
 - `Hub.rung_ok(rung, kind="") -> str`: `""` when `claude_cli.known_model(cfg, rung)` and (Claude rung, or
-  `self.found[harness]`) and, for `opencode` / `cmd`, `kind` is `""` (a plain Run) or a kind whose
-  `tasks.RULES[kind][0] in ("haiku", "sonnet")` (README decision 11, D-2); else the reason: `unknown model or effort`,
-  `codex is off`, `codex: not found on PATH`, `opencode: not on design, verify or fix steps`.
+  `self.found[harness]`) and, for `opencode` / `cmd`, `kind` is `""` (a plain Run) or, never `verify` or `fix`, a kind the model's
+  tier covers: an `opus` model any kind, a `haiku` model a kind whose `tasks.RULES[kind][0] in ("haiku", "sonnet")`
+  (README decision 11, D-2); else the reason: `unknown model or effort`, `codex is off`, `codex: not found on PATH`,
+  `opencode: deepseek-v4.1-flash is not a think model`, `cmd: not on verify or fix steps`.
 - `Hub.levers(sid)`: for a session with `harness != "claude"`: `verify`, `handoff`, `escalate`, `terminal` carry
   `"claude only"`; `continue` is on when the adapter's `RESUME` and the run is not live (the cold-cache guard applies
   as today); `stop` as today; Brief a new task / Verify in a new task stay on (they start Claude sessions from facts).
@@ -74,7 +75,7 @@
 - `test_run_refuses_off_or_unknown_rung`: `cmd:deepseek-v4.1-flash` with cmd off -> 409 with `cmd is off`; `codex:nope` -> 400.
 - `test_task_step_pick_on_codex`: `POST /api/task` with a scout step whose `model` is `codex:gpt-6.1-sol`: the step runs on codex (`run_started.harness`), `read_only` in the meta, the step dict has `harness == "codex"`, its notes contain `harness: codex`; a HANDOFF-OK echo from the fake completes the step and the chain goes on (the next step on Claude's fake).
 - `test_chat_and_final_message_for_codex`: `/api/chat?session=` gives the fake's items; `Hub.final_message` returns the agent text and `success`.
-- `test_cheap_rung_refused_on_a_design_step`: with `cmd` on and found (the fake) and `models {"deepseek-v4.1-flash": "haiku"}`: `POST /api/task` with a `design` step on `cmd:deepseek-v4.1-flash` is 400 `not on design, verify or fix steps`; a `scout` step and a `code` step on it are accepted.
+- `test_cheap_rung_refused_on_a_design_step`: with `cmd` on and found (the fake) and `models {"deepseek-v4.1-flash": "haiku"}`: `POST /api/task` with a `design` step on `cmd:deepseek-v4.1-flash` is 400 `is not a think model`; a `scout` step and a `code` step on it are accepted; with `opencode` on and found and `models {"kimi-k3": "opus"}`, a `design` step on `opencode:kimi-k3` is accepted and a `verify` on it is 400 `not on verify or fix steps`.
 - `test_step_pick_falls_back_when_harness_off`: a task whose scout step picked `codex:gpt-6.1-sol`, then `POST /api/harness` codex off before the step starts: the step runs on Claude's haiku rung, its tier stays the pick's (`sonnet` in the test cfg) and it runs on Claude's sonnet rung with the note `harness: codex off -> sonnet`.
 - `test_step_timeout_reaches_the_retry_reason`: `step_timeout_s` 1, a scout step on codex with `SLOW` in its goal: the task's `why` names the step timeout.
 - `test_probe_never_raises`: a harness `on` with an `exe` path that does not exist: `found False`, `version ""`, no exception, the service keeps serving.

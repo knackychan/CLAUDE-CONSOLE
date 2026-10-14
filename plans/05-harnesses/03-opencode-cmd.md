@@ -121,7 +121,7 @@ message last; no prompt text in argv; `--session id` on resume; `--session id --
 `env(True)` has both variables, `env(False)` only the update one), `test_summary_defensive`
 (the fake's lines plus `cc_exit 0` give the echo as `final`, `subtype success`, `session_id oc_fake`, `tokens None`;
 `cc_exit 1` gives `error`), `test_chat_items` (`[tool, claude, result]`), `test_fake_end_to_end`,
-`test_tiers_and_flags` (`TIERS == ("haiku",)`, `CAPS False`).
+`test_tiers_and_flags` (`TIERS == ("haiku", "opus")`, `CAPS False`).
 
 `CmdTest`: `test_command_shape` (`-p <query>` first, `--output-format json`, `--no-auto-update`,
 `--skip-onboarding`, `--no-skills`, `-m`, `--effort high` for `max`, `--permission-mode plan` when read only else
@@ -141,7 +141,7 @@ line: `subtype == "error_max_turns"`, `exit_cap True`), `test_version_command_ha
 
 ## Drift guards
 
-- `TIERS == ("haiku",)` for both (Fred: cheap models only; they may still take write steps, README decision 11); `models_of` drops anything else.
+- `TIERS == ("haiku", "opus")` for opencode (cheap models, plus Kimi K3 and GLM 5.3 for design) and `("haiku",)` for cmd (README decision 11); `models_of` drops anything else.
 - `--yolo` appears nowhere in the code of this task.
 - The console writes nothing into OpenCode's or Command Code's config folders.
 - `cc_exit` is a line the service writes into the stream (Task 4), never something an adapter prints.

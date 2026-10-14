@@ -106,13 +106,13 @@ hover, and only the card heads do.
 - **Harnesses**: closed line `Harnesses · 2 on · △ cmd not found ▾`, the not-found part red; it opens by
   itself while a harness is on but not found. Open: one row per name in `cfg.harnesses` order. Glyph `●`
   (green) on and found, `○` off, `△` (red) on but not found. The second line is the probed version
-  (`codex-cli 0.162.1`), `cheap models` for opencode and cmd while off, or, red, `not found · no cmdc.exe
+  (`codex-cli 0.162.1`), `cheap models` for cmd and `cheap models · kimi-k3, glm-5.3 for design` for opencode while off, or, red, `not found · no cmdc.exe
   on PATH`. `claude` shows `always on` in place of a switch, its title `Prep and the brief pass run on it; it
   cannot be turned off` (the service answers 400). A harness on but not found keeps its switch on, drawn red,
   and adds one line under the name: `Set "exe" in config.json, or turn it off.`, the full path and
   `under harnesses.cmd (not the .cmd shim)` in the title of `"exe"`. On a `POST /api/harness` error that
-  line carries the message in red. The card head's title holds `opencode and cmd run cheap models, on read and
-  write steps; rungs of a harness that is off never route; a step picked on one falls back to Claude's rung
+  line carries the message in red. The card head's title holds `opencode and cmd run cheap models on read and
+  write steps, and opencode's Kimi K3 and GLM 5.3 on design steps; never verify or fix; rungs of a harness that is off never route; a step picked on one falls back to Claude's rung
   of its tier`.
 - **Window runs**: closed line `Window runs · auto hand off: off ▾`. Open: `Auto hand off` over
   `at 300K · red zone`, its switch, and one line `Hands off a window run that ends its turn in the red zone
@@ -366,7 +366,7 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
 - **Tiers**: one card per tier with its rungs (each step takes the emptiest of them, the order breaks ties
   and is used while usage is unknown): drag handle, order, `harness · model`, effort, remove.
   A rung on a harness that is off or not found is struck and skipped (its title says why). `+ rung` lists the
-  models of the harnesses that are on; think accepts Claude and Codex only (decision 11). A last card holds the
+  models of the harnesses that are on; think accepts Claude, Codex and OpenCode's Kimi K3 and GLM 5.3 (decision 11). A last card holds the
   console's own passes: Prep, the handoff pass, the rules review and the composer's Run default
   (`prep_model`, `brief_model`, `review_model`, `default_model`). Writes `tiers` (brainstorm section 4).
 - A model ranked above its tier (opus in Write, Fable in Think) shows `hard only` on its row: the spread mixes the
