@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import (attach, brief, claude_cli, compact, events, facts, fills, guard, harness, levers, paths, plan, prep, redact, replan,
-               review, routing, runs, tasks, transcript, usage)
+               review, routing, runs, tasks, transcript, tuning, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -161,6 +161,21 @@ class Hub:
             section = self.cfg.setdefault("harnesses", {}).setdefault(name, {"on": False, "exe": ""})
             section["on"] = bool(on)
         return self.probe([name])
+
+    def save_models(self, changes) -> dict:
+        """POST /api/config/models (plan 26): check the changes (tuning.validate), write the ones kept to config.json
+        with every other key as written, and put them in the live config, so the next step reads them (a running
+        step keeps its rung). Returns the refusals {key: reason}, {} when saved. ValueError: config.json unreadable."""
+        clean, errors = tuning.validate(changes, self.cfg)
+        if errors:
+            return errors
+        paths.set_config(self.folder, clean)
+        with self.lock:
+            for key, value in clean.items():
+                self.cfg[key] = {**self.cfg.get(key, {}), **value} if key == "tiers" else value
+            self.version += 1
+            self.changed.notify_all()
+        return {}
 
     def rung_ok(self, rung, kind: str = "") -> str:
         """"" when `rung` may run a step of `kind` ("" = a plain Run), else the reason (README 3.6)."""
@@ -684,7 +699,7 @@ class Hub:
             budget=self.budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"], cfg=self.cfg,
             prev_rung=last["model"] if last else "", prev_age=time.time() - ended if ended else None,
             hard=(task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard")),
-            refuse=lambda rung: self.rung_ok(rung, s["kind"]))
+            refuse=lambda rung: self.rung_ok(rung, s["kind"]), pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
 
     def task_levers(self, task_id) -> dict:
         """What each task lever would do and why one is off ("" = allowed); None for an unknown id. The one
@@ -1352,6 +1367,25 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, code: int, message: str) -> None:
         self._json({"error": message}, code)
 
+    def _config(self) -> dict:
+        """GET /api/config, and the answer of a Models page Save (plan 26)."""
+        cfg, window = self.hub.cfg, paths.load_window(self.hub.folder)
+        found = self.hub.harnesses()
+        return {"projects": project_list(cfg), "models": claude_cli.MODELS,
+                "efforts": claude_cli.EFFORTS, "default_model": cfg["default_model"],
+                "default_effort": cfg["default_effort"], "claude": found["claude"]["found"],
+                "harnesses": found, "models_file": self.hub.models_file(),
+                "config_path": str(self.hub.folder / "config.json"),
+                "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
+                "project": window.get("project", ""), "brief": window.get("brief") is True,
+                "ladder": cfg["ladder"], "effort": window.get("effort", "auto"),
+                "kinds": tasks.PREP_KINDS, "edit_kinds": sorted(tasks.EDIT_KINDS),
+                "tiers": self.hub.tier_view(),
+                "kinds_tier": {k: tasks.kind_tier(k) for k in tasks.PREP_KINDS},
+                "handoff_auto": bool(cfg["handoff_auto"]),
+            "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
+            "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()}}
+
     def do_GET(self):
         if not guard.host_ok(self.headers.get("Host"), self._port()):
             return self._send(403, b"forbidden", "text/plain")
@@ -1368,20 +1402,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.hub.steps(query.get("session", [""])[0]))
         if url.path == "/api/config":
             self.hub.reload_models()
-            cfg, window = self.hub.cfg, paths.load_window(self.hub.folder)
-            found = self.hub.harnesses()
-            return self._json({"projects": project_list(cfg), "models": claude_cli.MODELS,
-                               "efforts": claude_cli.EFFORTS, "default_model": cfg["default_model"],
-                               "default_effort": cfg["default_effort"], "claude": found["claude"]["found"],
-                               "harnesses": found, "models_file": self.hub.models_file(),
-                               "config_path": str(self.hub.folder / "config.json"),
-                               "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
-                               "project": window.get("project", ""), "brief": window.get("brief") is True,
-                               "ladder": cfg["ladder"], "effort": window.get("effort", "auto"),
-                               "kinds": tasks.PREP_KINDS, "edit_kinds": sorted(tasks.EDIT_KINDS),
-                               "tiers": self.hub.tier_view(),
-                               "kinds_tier": {k: tasks.kind_tier(k) for k in tasks.PREP_KINDS},
-                               "handoff_auto": bool(cfg["handoff_auto"])})
+            return self._json(self._config())
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())
         if url.path == "/api/image":
@@ -1412,7 +1433,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
                   "/api/open_folder": lambda body: self._allow(body, sessions_only=False),
                   "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review,
-                  "/api/setting": self._setting,
+                  "/api/config/models": self._config_models, "/api/setting": self._setting,
                   "/api/harness": self._harness, "/api/models/reload": self._models_reload,
                   "/api/models/open": self._models_open}
         for lever in ("continue", "verify", "handoff", "escalate"):
@@ -1632,6 +1653,18 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self._error(409, str(exc))
         return self._json({"projects": project_list(self.hub.cfg)})
+
+    def _config_models(self, body):
+        """Plan 26: the Models and tuning page's Save. Only the whitelisted keys of tuning.KEYS, each checked; 400
+        with every reason ({"error": all of them on one line, "errors": {key: reason}}), else the new config."""
+        try:
+            errors = self.hub.save_models(body.get("changes"))
+        except ValueError as exc:
+            return self._error(409, str(exc))
+        if errors:
+            text = "; ".join(f"{k}: {v}" if k else v for k, v in errors.items())
+            return self._json({"error": text, "errors": errors}, 400)
+        return self._json(self._config())
 
     def _draft(self, body):
         """The unsent prompt (draft.txt) and, when given, the compose project and whether the session

@@ -1406,6 +1406,77 @@ class TaskServerTest(RunServerTest):
         today = self.hub.snapshot()["spend"]
         self.assertEqual(today["fills"]["over"], [])
 
+    def test_models_page_saves_to_config_json(self):
+        """Plan 26: POST /api/config/models writes the checked keys, keeps every other key, and the hub uses them."""
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["kind_pins"], cfg["tuning"]["task_max_steps"]["value"]), ({}, 6))
+        self.assertEqual(cfg["tuning"]["balance_margin"], {"value": 0.1, "default": 0.1, "min": 0, "max": 0.5,
+                                                           "unit": "share", "group": "balancing"})
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)], "port": 47770,
+                                                             "tiers": {"write": ["sonnet"]}}), encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {
+            "task_max_steps": 8, "balance_margin": 0.15, "tiers": {"read": ["haiku", "claude-haiku-4-5"]},
+            "kinds": {"test": {"rung": "auto", "effort": "medium"}}, "allowances": {"opus": {"day_usd": 12}}}})
+        self.assertEqual(status, 200, data)
+        self.assertEqual((data["tuning"]["task_max_steps"]["value"], data["kind_pins"]),
+                         (8, {"test": {"rung": "auto", "effort": "medium"}}))
+        written = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual((written["projects"], written["port"], written["task_max_steps"]), ([str(self.project)], 47770, 8))
+        self.assertEqual(written["tiers"], {"write": ["sonnet"], "read": [{"rung": "haiku", "effort": "auto"},
+                                                                         {"rung": "claude-haiku-4-5", "effort": "auto"}]})
+        self.assertEqual((self.hub.cfg["task_max_steps"], self.hub.cfg["balance_margin"]), (8, 0.15))
+        self.assertEqual([r["rung"] for r in data["tiers"]["read"]], ["haiku", "claude-haiku-4-5"])
+        self.assertEqual(len(self.hub.cfg["tiers"]["think"]), len(paths.DEFAULTS["tiers"]["think"]))  # untouched tier
+        self.assertEqual(self.hub.cfg["allowances"], {"opus": {"day_usd": 12}})
+
+    def test_models_page_refuses_with_reasons(self):
+        before = self.hub.cfg["task_max_steps"]
+        status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 99, "port": 1}})
+        self.assertEqual(status, 400)
+        self.assertEqual(data["errors"], {"task_max_steps": "between 1 and 12", "port": "not a setting this page changes"})
+        self.assertIn("task_max_steps: between 1 and 12", data["error"])
+        self.assertEqual(self.hub.cfg["task_max_steps"], before)
+        self.assertFalse((self.folder / "config.json").exists() and
+                         "task_max_steps" in json.loads((self.folder / "config.json").read_text(encoding="utf-8")))
+        self.assertEqual(self.call("/api/config/models", {"changes": []})[0], 400)
+        self.assertEqual(self.call("/api/config/models", {"other": 1})[0], 400)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text("{ broken", encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 7}})
+        self.assertEqual(status, 409)
+        self.assertIn("fix it by hand", data["error"])
+        self.assertEqual((self.folder / "config.json").read_text(encoding="utf-8"), "{ broken")  # never overwritten
+
+    def test_a_pinned_kind_routes_its_steps(self):
+        status, data = self.call("/api/config/models", {"changes": {"kinds": {"code": {"rung": "claude-haiku-4-5",
+                                                                                         "effort": "low"}}}})
+        self.assertEqual(status, 200, data)
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
+        step = self.hub.tasks[tid]["steps"][0]
+        self.assertEqual((step["model"], step["tier"], step["effort"]), ("claude-haiku-4-5", "haiku", "low"))
+        self.assertIn("pin code: claude-haiku-4-5", step["notes"])
+        self.assertIn("pin effort: low", step["notes"])
+
+    def test_get_task_carries_plan_parts_and_step_part(self):
+        """The window contract (plan 24 Task 4): GET /api/task has the plan text, the parts by number and the
+        step's part and hard; the snapshot row (task_row) has the plan meta and each step's part and hard."""
+        self.hub.cfg["plan_hold"] = True
+        tid = self.make_task(words="HANDOFF-OK PLAN-SPLIT",
+                             steps=[{"kind": "scout", "goal": "look"}, {"kind": "design", "goal": "plan it"},
+                                    {"kind": "code", "goal": "write"}, {"kind": "verify", "goal": "check"}])
+        self.until(tid, lambda t: t["state"] == "waiting" and t["why"] == "plan ready: confirm", "the plan waits")
+        data = self.task(tid)[1]
+        self.assertIn("## Sub-plans", data["plan"])
+        self.assertEqual(sorted(data["parts"]), ["1", "2"])
+        self.assertIn("calc.py", data["parts"]["1"])
+        meta = data["task"]["plan"]
+        self.assertEqual([p["n"] for p in meta["parts"]], [1, 2])
+        self.assertEqual([s.get("part", 0) for s in data["task"]["steps"] if s["kind"] == "code"], [1, 2])
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual(row["plan"]["from"], meta["from"])
+        self.assertEqual([(s["part"], s["hard"]) for s in row["steps"] if s["kind"] == "code"], [(1, False), (2, True)])
+
     def test_a_rung_can_be_run_by_hand(self):
         run = {"project_dir": str(self.project), "prompt": "fix add", "effort": "low"}
         status, data = self.call("/api/run", dict(run, model="claude-haiku-4-5"))
