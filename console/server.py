@@ -76,6 +76,7 @@ class Hub:
         self.auto_handed = set()  # plan 23: sessions handoff_auto handed off once (never twice)
         self._stop = threading.Event()
         self.models_mtime = self._models_mtime()  # models.json as cfg["models"] was read
+        self.config_mtime = self._config_mtime()  # config.json as the tuning keys were read
         self.models_error = ""
         self.probing = threading.Thread(target=self.probe, name="probe", daemon=True)
         self.probing.start()
@@ -100,6 +101,36 @@ class Hub:
                 self.cfg["models"] = models
                 if isinstance(models.get("claude"), dict) and models["claude"]:
                     self.cfg["ladder"] = paths._ladder_from(models["claude"], self.cfg.get("ladder") or {})
+            self.version += 1
+            self.changed.notify_all()
+
+    def _config_mtime(self):
+        try:
+            return (self.folder / "config.json").stat().st_mtime
+        except OSError:
+            return None
+
+    def reload_tuning(self) -> None:
+        """Reread the Models page keys (tuning.KEYS) from config.json when its mtime changed, so a hand edit shows
+        after Reload (plan 26 README 3.1); every other key keeps its value from the service start."""
+        mtime = self._config_mtime()
+        if mtime is None or mtime == self.config_mtime:
+            return
+        self.config_mtime = mtime
+        path = self.folder / "config.json"
+        try:
+            user = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(user, dict):
+            return
+        with self.lock:
+            for key in tuning.KEYS:
+                if key in user:
+                    default = paths.DEFAULTS.get(key)
+                    value = user[key]
+                    self.cfg[key] = {**default, **value} if isinstance(default, dict) and isinstance(value, dict) \
+                        else value
             self.version += 1
             self.changed.notify_all()
 
@@ -1414,6 +1445,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.hub.steps(query.get("session", [""])[0]))
         if url.path == "/api/config":
             self.hub.reload_models()
+            self.hub.reload_tuning()
             return self._json(self._config())
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())

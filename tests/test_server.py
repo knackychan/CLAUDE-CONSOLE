@@ -1431,6 +1431,19 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(len(self.hub.cfg["tiers"]["think"]), len(paths.DEFAULTS["tiers"]["think"]))  # untouched tier
         self.assertEqual(self.hub.cfg["allowances"], {"opus": {"day_usd": 12}})
 
+    def test_models_page_reload_shows_a_hand_edit(self):
+        """Plan 26 README 3.1: a hand edit of config.json shows on the page after Reload (GET /api/config)."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        path = self.folder / "config.json"
+        path.write_text(json.dumps({"projects": [str(self.project)], "port": 47770}), encoding="utf-8")
+        self.call("/api/config")
+        path.write_text(json.dumps({"projects": [str(self.project)], "port": 1, "brief_max_words": 450}),
+                        encoding="utf-8")
+        os.utime(path, (time.time() + 5, time.time() + 5))
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["tuning"]["brief_max_words"]["value"], self.hub.cfg["brief_max_words"]), (450, 450))
+        self.assertNotEqual(self.hub.cfg["port"], 1)  # only the page's keys are reread
+
     def test_models_page_refuses_with_reasons(self):
         before = self.hub.cfg["task_max_steps"]
         status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 99, "port": 1}})
