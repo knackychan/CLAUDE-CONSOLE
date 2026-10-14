@@ -369,7 +369,7 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
   models of the harnesses that are on; think accepts Claude and Codex only (decision 11). A last card holds the
   console's own passes: Prep, the handoff pass, the rules review and the composer's Run default
   (`prep_model`, `brief_model`, `review_model`, `default_model`). Writes `tiers` (brainstorm section 4).
-- A model ranked above its tier (opus in Write) shows `hard steps only` on its row: the spread mixes the
+- A model ranked above its tier (opus in Write, Fable in Think) shows `hard only` on its row: the spread mixes the
   tier's own-rank models and uses it only when Prep judges the step hard (Fred, 2026-10-14).
 - **Tuning**: the numbers, one card per subject (Steps, Handoff, Balancing, Context gauge). A row: the label
   in words over its config key and default; the value in a small mono field with its unit. A value off its
