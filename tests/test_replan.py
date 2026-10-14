@@ -88,6 +88,30 @@ class ReplanTest(unittest.TestCase):
         self.assertEqual(lines[0]["why"], "plan changed: 5 steps follow 02")
         self.assertEqual(replan.apply(t, 8.0), [])
 
+    def test_check_keeps_the_verify_of_a_done_edit_step(self):
+        t = make_task(kinds=("scout", "code", "replan", "test", "verify"))  # the verify checks step 2
+        t["steps"][1]["state"] = t["steps"][2]["state"] = "done"
+        steps, why = replan.check(t, 3, {"why": "w", "steps": [{"kind": "test", "goal": "run it"}]}, 8)
+        self.assertEqual(why, "")
+        self.assertEqual([(s["n"], s["kind"], s["checked"], s["goal"]) for s in steps],
+                         [(4, "test", 0, "run it"), (5, "verify", 2, "Check step 2")])
+        replan.propose(t, 3, steps, "w", 6.0)
+        replan.apply(t, 7.0)
+        self.assertEqual([s["kind"] for s in t["steps"]], ["scout", "code", "replan", "test", "verify"])
+        done = make_task(kinds=("scout", "code", "verify", "replan", "test"))  # already verified: none added
+        for s in done["steps"][:4]:
+            s["state"] = "done"
+        steps, _ = replan.check(done, 4, {"why": "w", "steps": [{"kind": "test", "goal": "run it"}]}, 8)
+        self.assertEqual([s["kind"] for s in steps], ["test"])
+
+    def test_room_counts_the_done_steps_kept_after_n(self):
+        t = make_task(kinds=("scout", "replan", "code", "code", "verify"))  # a redo kept step 3 done
+        t["steps"][1]["state"] = t["steps"][2]["state"] = "done"
+        self.assertEqual(tasks.room_after(t, 2, 6), 3)  # 6 - 2 - the done code step; the verify is not counted
+        three = {"why": "", "steps": [{"kind": "code", "goal": "g"}] * 3}
+        self.assertEqual(replan.check(t, 2, three, 5)[1], "6 steps in all, over task_max_steps 5")
+        self.assertEqual(replan.check(t, 2, three, 6)[1], "")
+
 
 if __name__ == "__main__":
     unittest.main()

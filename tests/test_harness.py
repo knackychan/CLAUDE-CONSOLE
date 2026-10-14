@@ -159,6 +159,11 @@ class HarnessTest(unittest.TestCase):
             json.dumps({"harnesses": {"codex": {"models": {"old-model": "sonnet"}}}}), encoding="utf-8")
         self.assertEqual(paths.load_config()["models"]["codex"], {"old-model": "sonnet"})
 
+    def test_ladder_keeps_only_known_tiers(self):
+        got = paths._ladder_from({"opus": "opus", "claude-opus-4-8": "opus", "gpt-x": "gpt", "y": "", "z": 3},
+                                 {"sonnet": ["sonnet"], "mythos": ["m"]})
+        self.assertEqual(got, {"opus": ["opus", "claude-opus-4-8"]})
+
     def test_defaults_and_claude_exe_fallback(self):
         h = paths.DEFAULTS["harnesses"]
         self.assertIs(h["claude"]["on"], True)

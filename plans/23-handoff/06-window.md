@@ -200,6 +200,8 @@ focused switch is a click (it is a button). CSS: `.pset`, `.pop .pset .fold .fh*
    no horizontal scroll.
 4. Commit: `Plan 23 Task 6: Handoff fold with facts, HANDOFF chip, HANDED OFF card, Window runs switch (N tests OK)`.
 
+The "as sent" view also lists `meta.cut` struck under Findings, so a LONG cut shows `N kept · M cut` (plan 27 Task 4); `factsFold` opens red without `force`, so it can be closed.
+
 **Drift guards**
 - The window never parses a facts text: it shows it as written (`.mono`, `<br>` lines) and reads `s.facts` for the
   closed line.

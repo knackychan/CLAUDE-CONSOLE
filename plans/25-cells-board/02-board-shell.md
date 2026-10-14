@@ -170,7 +170,7 @@ function saveFolds() { saveDraft(); }  // the draft save carries folds and board
   hides (CSS `@container` on `.top` if the stylesheet has one, else `@media (max-width: 371px)`).
 - The Task page head's button is Task 7's.
 - `boardKey(e)` in the keydown handler, before the `Escape` branch: `if (page === "board" && form === "open" &&
-  BOARD_KEYS.has(e.key) && !inField && !e.target.closest(".tabs")) return boardKey(e);`.
+  BOARD_KEYS.has(e.key) && !inField && !e.target.closest(".tabs")) return boardKey(e);`. Plan 27 Task 5 also skips a focused button or select inside the Board, so Enter presses it; and `showPage` leaving the Board (Ctrl+N, Ctrl+P, any page but a session opened from it) calls `board(false)`.
 
 ```js
 function boardKey(e) {

@@ -273,7 +273,8 @@ def git_changed(cwd: str, commit: str):
     return len(names)
 
 
-UNTRACKED_READ_MAX = 1024 * 1024  # an untracked file larger than this counts 0 lines (plan 23 facts)
+UNTRACKED_READ_MAX = 256 * 1024  # an untracked file larger than this counts 0 lines (plan 23 facts, plan 27 K4)
+UNTRACKED_MAX = 100  # untracked files a snapshot reads; later ones are left out (plan 27 K4: an unignored venv)
 
 
 def git_snapshot(cwd: str, commit: str):
@@ -284,7 +285,8 @@ def git_snapshot(cwd: str, commit: str):
     if not commit:
         return None
     outs = []
-    for cmd in (["git", "diff", "--numstat", commit], ["git", "ls-files", "--others", "--exclude-standard"]):
+    for cmd in (["git", "-c", "core.quotePath=false", "diff", "--numstat", commit],  # plan 27 K5: paths as written
+                ["git", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard"]):
         try:
             out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
                                  encoding="utf-8", errors="replace")
@@ -294,7 +296,7 @@ def git_snapshot(cwd: str, commit: str):
             return None
         outs.append(out.stdout)
     untracked = {}
-    for name in outs[1].splitlines()[:facts.SNAPSHOT_MAX]:
+    for name in outs[1].splitlines()[:UNTRACKED_MAX]:
         path = Path(cwd) / name
         try:
             untracked[name] = path.read_bytes().count(b"\n") if path.stat().st_size <= UNTRACKED_READ_MAX else 0

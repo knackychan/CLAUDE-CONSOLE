@@ -435,6 +435,11 @@ function renderOnTop() {
 
 // -- pages -------------------------------------------------------------------------------
 function showPage(name) {
+  if (boardFrom && name !== "board" && !(name === "session" && backTo && backTo.page === "board")) {  // plan 27 B9: the Board left by any other way than closeBoard
+    boardFrom = null;
+    if (backTo && backTo.page === "board") backTo = null;
+    if (native()) window.pywebview.api.board(false).catch(() => {});  // the compact size again; the service drops _board
+  }
   page = name;
   closePicker();
   document.querySelectorAll("[data-page]").forEach((p) => { p.hidden = p.dataset.page !== name; });
@@ -1691,11 +1696,12 @@ function chainRow(t, s) {
   const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
   const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
   const waits = t.state === "waiting" && s.n === t.current && /^(plan |replanned:|asks: Plan gap:)/.test(t.why || "");  // a plan wait: the reason, in orange
-  const sub = [verdict, s.retries ? "retry " + s.retries : "", stepTries(s), waits ? `<span class="y">${esc(t.why)}</span>` : esc(s.goal)].filter(Boolean).join(" · ");
+  const unpriced = ran && costUnknown(s) ? '<span title="no attempt of this step reported a cost">cost unknown</span>' : "";  // plan 27 G7: the words, in the sub line (the cost column is 38 px)
+  const sub = [verdict, unpriced, s.retries ? "retry " + s.retries : "", stepTries(s), waits ? `<span class="y">${esc(t.why)}</span>` : esc(s.goal)].filter(Boolean).join(" · ");
   const from = s.part ? `<span class="tg" title="a write step the design step made: sub-plan ${s.part} of ${((t.plan || {}).parts || []).length}">from plan</span>` : "";
   return `<div class="row${s.n === t.current ? " cur" : ""}${short ? " short" : ""}${fresh("c", "t" + t.id + "." + s.n, s.state, 300) && s.state === "done" ? " adv" : ""}${s.note ? " n-" + s.note : ""}"${ran && !auto ? ` data-grow="${s.n}"` : ""}><span class="cells">${cells}</span>
     <span class="nm m">${two(s.n)} ${esc(s.kind)}${from}${s.model ? ` <span class="mdl">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}${triesHtml(s)}</span>
-    <span class="m c">${!ran ? "" : s.cost == null ? "?" : s.cost ? money(s.cost) : ""}</span>
+    <span class="m c">${!ran || costUnknown(s) ? "" : s.cost ? money(s.cost) : ""}</span>
     ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
     ${gauge ? stepGauge(t, s) : ""}${short && (s.note === "sent" || s.note === "checked") ? "" : noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
 }
@@ -1798,21 +1804,23 @@ function handoffBlock(text) {  // the last HANDOFF ... END HANDOFF of a reply: [
 }
 function factsFold(s, text) {  // the facts the service gathered when the step ended (plan 23): diff stat and the test line
   const f = (s && s.facts) || null;
-  if (!f || !text) return "";
-  const fail = String(f.tests || "").startsWith("FAIL");  // plan 23: "" (no test run), "23 OK" or "FAIL <first failing line>"
-  const info = `${f.files} ${f.files === 1 ? "file" : "files"} +${f.plus}${f.minus ? " -" + f.minus : ""} · ${esc(f.tests || "no test run")}`;
-  return fold("Facts", info, `<pre class="text mono">${esc(text)}</pre>`, { cls: "facts", tone: fail ? "r" : "", open: fail, force: fail, key: "facts",
+  if (!f && !text) return "";  // plan 27: either one is worth showing
+  const fail = !!f && String(f.tests || "").startsWith("FAIL");  // plan 23: "" (no test run), "23 OK" or "FAIL <first failing line>"
+  const info = f ? `${f.files} ${f.files === 1 ? "file" : "files"} +${f.plus}${f.minus ? " -" + f.minus : ""} · ${esc(f.tests || "no test run")}` : "read";
+  return fold("Facts", info, `<pre class="text mono">${esc(text || "")}</pre>`, { cls: "facts", tone: fail ? "r" : "", open: fail, key: "facts",
     title: "git diff --stat from the step's start to its end, and its last test command: code reads them, no model" });
 }
 function handoffFold(t, d, n, sn, meta, nextStep) {
   const brief = (d.briefs || {})[String(n)] || "", raw = (d.notes || {})[String(n)] || "";
-  const sent = handoffSections(brief), wrote = handoffSections(raw), cut = (meta && meta.cut) || [];
+  const sent = handoffSections(brief), wrote = handoffSections(raw), cut = ((meta && meta.cut) || []).map(normItem);
+  const all = [].concat(sent.findings, sent.files, sent.trouble, sent.questions);
+  for (const c of cut) if (!all.includes(c)) sent.findings.push(c);  // plan 27 (G2): the cut lines, struck under Findings, as inspConn does
   const words = meta ? meta.sent_w : brief.split(/\s+/).filter(Boolean).length;
   const label = nextStep ? `Handoff for ${two(nextStep.n)}` : "Last handoff";
   const info = `${words} w${meta && meta.fallback ? ' · <span class="y">as written</span>' : ""} · Next: ${esc(sent.next.split("\n")[0])}`;
   const head = meta ? `<div class="hd"><span class="m" title="${esc(meta.fallback ? "the brief pass failed: " + meta.fallback + "; code cut the note" : `by ${meta.by}, ${meta.turns} turns, $${money(meta.cost)}`)}">${meta.fallback ? "sent as written, cut by code" : `compacted from ${meta.raw_w} w`}</span>
       <span class="link m" data-tact="raw">${rawOpen ? "as sent" : `as ${two(n)} wrote it`}</span></div>` : "";
-  const body = rawOpen ? headingBlock(wrote, cut, ["goal", "findings", "trouble", "questions", "next"]) : headingBlock(sent, [], undefined, true);
+  const body = rawOpen ? headingBlock(wrote, cut, ["goal", "findings", "trouble", "questions", "next"]) : headingBlock(sent, cut, undefined, true);
   return `<div class="blk">${fold(label, info, head + body + factsFold(sn || {}, (d.facts || {})[String(n)]))}</div>`;
 }
 function pfold(key, label, info, body, o = {}) {
@@ -1820,11 +1828,16 @@ function pfold(key, label, info, body, o = {}) {
   return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-tact="pfold" data-key="${esc(key)}" aria-expanded="${open}"><span class="lbl">${label}</span><span class="fi">${info}</span><span class="car">${open ? "▴" : "▾"}</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
 }
 const partText = (d, n) => String((d.parts || {})[n] || "").replace(/^# Part [^\n]*\n+/, "");
+const PLAN_FOLDS = { goal: "goal", decisions: "dec", "out of scope": "out", files: "files", steps: "steps", acceptance: "acc" };
+function planFoldKey(key) {  // plan 27 G3: the six pinned keys of plan 25 5.6; every ### Step N shares plan.steps; any other heading is not kept
+  const k = key.startsWith("st:") ? "steps" : PLAN_FOLDS[key.slice(key.indexOf(":") + 1).trim().toLowerCase()];
+  return k ? "plan." + k : "";
+}
 function planOpenHtml(t, d, cur, o = {}) {  // the open plan by heading and the current step's section; o.board: keyed folds for the inspector, o.design / o.verify open Goal + Decisions / Acceptance
   const p = t.plan;
   if (!p) return "";
   const parts = p.parts || [], split = parts.length > 0, curN = cur ? cur.n : 0;
-  const mk = (key, label, info, inner, open) => o.board ? fold(label, info, inner, { cls: "hf", key: "plan." + key.replace(/[^a-z0-9]+/gi, "").toLowerCase().slice(0, 30), open })
+  const mk = (key, label, info, inner, open) => o.board ? fold(label, info, inner, { cls: "hf", key: planFoldKey(key), open })
     : pfold(key, label, info, inner, { cls: "hf" });
   let body = "";
   for (const sc of planSections(d.plan)) {
@@ -1976,8 +1989,7 @@ function taskRowSig(row) {  // what changed in a task's row: the Task page and t
   return [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, row.steps.map((x) => x.note + x.part).join(), row.plan ? row.plan.words : "", row.asks, row.hand_off, run ? run.state + run.run_live : ""].join("|");
 }
 async function renderTaskPage() {  // GET /api/task when the task's row changed; the drawing follows every snapshot
-  const row = (snap.tasks || []).find((x) => x.id === taskId), at = row && row.steps.find((x) => x.n === row.current);
-  const run = at && snap.sessions.find((x) => x.id === at.session);
+  const row = (snap.tasks || []).find((x) => x.id === taskId);
   const sig = row ? taskRowSig(row) : "gone";
   if (sig !== taskSig) {
     taskSig = sig;
@@ -2360,10 +2372,11 @@ function cleanPins(pins) {  // a kind on auto and auto is the code's rule: nothi
 }
 function modelChanges() {  // the keys a Save would post, with their values (D1 a: only what differs from the page's load)
   if (!medit) return {};
-  const out = {};
+  const out = {}, saved = savedTiers();
   for (const [k, t] of Object.entries(cfg.tuning)) if (!same(medit.values[k], t.value)) out[k] = medit.values[k];
   if (!same(cleanPins(medit.kinds), cleanPins(cfg.kind_pins || {}))) out.kinds = cleanPins(medit.kinds);
-  if (!same(medit.tiers, savedTiers())) out.tiers = medit.tiers;
+  const tiers = Object.fromEntries(Object.entries(medit.tiers).filter(([t, rows]) => !same(rows, saved[t])));  // plan 27 B6: only the tiers that changed; the service merges per tier
+  if (Object.keys(tiers).length) out.tiers = tiers;
   return out;
 }
 function tabEdits(tab) {
@@ -2442,9 +2455,15 @@ function tierCard(tier) {
       <span class="gr" aria-hidden="true">&#8942;&#8942;</span><span class="o">${n}</span><span class="nm"><span class="h">${esc(h)} · </span>${esc(m)}${hard ? '<span class="h"> · hard only</span>' : ""}</span>
       ${effSel(r.effort, m, `data-meff="${tier}:${i}"`)}<button class="x" data-mrm="${tier}:${i}" aria-label="Remove ${esc(m)}" title="Remove from ${tier}">&#10005;</button></div>`;
   }).join("");
-  const hid = hidden.length ? `<div class="rhid" title="Turn the CLI on in Settings and its models come back">${hidden.length} hidden · ${esc(whyHidden(hidden[0].rung))}</div>` : "";
+  const open = mqOpen.has("h" + tier);  // plan 27 B6: the hidden rungs listed on demand, each with its remove button (a model gone from models.json blocks its tier's Save)
+  const hid = hidden.length ? `<div class="rhid" title="Turn the CLI on in Settings and its models come back">${hidden.length} hidden · ${esc(whyHidden(hidden[0].rung))} · <button class="rs" data-q="h${tier}" aria-expanded="${open}">${open ? "hide" : "show"}</button></div>` : "";
+  const gone = rows.map((r, i) => {
+    if (!open || !whyHidden(r.rung)) return "";
+    const m = r.rung.includes(":") ? r.rung.slice(r.rung.indexOf(":") + 1) : r.rung;
+    return `<div class="rhid one"><span class="nm">${esc(modelText(r.rung))} · ${esc(whyHidden(r.rung))}</span><button class="x" data-mrm="${tier}:${i}" aria-label="Remove ${esc(m)}" title="Remove from ${tier}">&#10005;</button></div>`;
+  }).join("");
   const add = addOptions(tier);
-  return `<div class="pcard">${cardHead("t" + tier, KCARD[tier][0], `${n} ${n === 1 ? "rung" : "rungs"}`, KCARD[tier][3])}${body}${hid}
+  return `<div class="pcard">${cardHead("t" + tier, KCARD[tier][0], `${n} ${n === 1 ? "rung" : "rungs"}`, KCARD[tier][3])}${body}${hid}${gone}
     <div class="radd"><span class="pick auto"><select data-madd="${tier}" aria-label="Add a rung to ${tier}"><option value="">+ rung</option>${add.map((r) => `<option value="${esc(r)}">${esc(modelText(r))}</option>`).join("")}</select></span><span class="m">${tier === "think" ? "no cheap models" : "cheap models allowed"}</span></div></div>`;
 }
 function tiersTab() {
@@ -2464,9 +2483,14 @@ function tiersTab() {
 
 // Tuning: the numbers; a value off its default has the blue edge and a reset; out of range turns red and blocks Save
 function shown(k, v) { const s = TUNE[k] ? TUNE[k][2] : 1; return v == null ? "" : String(Math.round(v * s * 1000) / 1000); }
+function allowBad(key) {  // plan 27 G9: every window of a model key a finite number in tuning's allowance range
+  const t = cfg.tuning.allowances, row = (medit.values.allowances || {})[key] || {};
+  return Object.values(row).some((n) => typeof n !== "number" || !isFinite(n) || n < t.min || n > t.max) ? `a number between ${t.min} and ${t.max}` : "";
+}
 function tuneBad(k) {
   const t = cfg.tuning[k], v = medit.values[k];
-  if (t.unit === "bool" || t.unit === "rung" || k === "allowances") return "";
+  if (k === "allowances") { const key = Object.keys(v || {}).find(allowBad); return key ? `${key}: ${allowBad(key)}` : ""; }
+  if (t.unit === "bool" || t.unit === "rung") return "";
   const whole = ["steps", "s", "turns", "kb", "parts", "words", "tokens"].includes(t.unit);
   if (typeof v !== "number" || !isFinite(v) || v < t.min || v > t.max || (whole && !Number.isInteger(v)))
     return `${whole ? "a whole number " : ""}between ${shown(k, t.min)} and ${shown(k, t.max)} (default ${shown(k, t.default)})`;
@@ -2486,8 +2510,8 @@ function tuneRow(k) {
 function allowanceFold() {  // D2 a: a row per usable tier rung's model key and per key already set; empty = none
   const al = medit.values.allowances || {}, keys = [...new Set([...Object.values(cfg.tiers || {}).flat().filter((r) => !r.why).map((r) => r.key), ...Object.keys(al)])];
   const set = Object.keys(al).filter((k) => Object.keys(al[k] || {}).length).length;
-  const rows = keys.map((key) => `<div class="tf al"><span class="nm">${esc(key)}</span><span class="v">${["day_usd", "week_usd", "month_usd"].map((w) =>
-    `<input inputmode="decimal" data-mal="${esc(key)}:${w}" aria-label="${esc(key)} ${w.split("_")[0]} USD" placeholder="${w[0]}" value="${(al[key] || {})[w] ?? ""}">`).join("")}</span><span class="sub">day · week · month, USD; empty: no allowance</span></div>`).join("");
+  const rows = keys.map((key) => { const bad = allowBad(key); return `<div class="tf al${bad ? " bad" : ""}"><span class="nm">${esc(key)}</span><span class="v">${["day_usd", "week_usd", "month_usd"].map((w) =>
+    `<input inputmode="decimal" data-mal="${esc(key)}:${w}" aria-label="${esc(key)} ${w.split("_")[0]} USD" placeholder="${w[0]}" value="${(al[key] || {})[w] ?? ""}">`).join("")}</span><span class="sub">${bad ? esc(bad) : "day · week · month, USD; empty: no allowance"}</span></div>`; }).join("");
   return fold("Allowances", `${set} of ${keys.length} models · day / week / month`, rows, { cls: "alw" });
 }
 function tuningTab() {
@@ -2793,10 +2817,13 @@ function ctxRowHtml(s, live) {  // a full block: 30 cells and the figure, or the
   if (live && last >= 0) cls[last] += " live";
   return `<span class="cx"><span>ctx</span><span class="cells">${cellsHtml(cls)}</span><b class="${ctxFigTone(tok)}">${kTokens(tok)}</b></span>`;
 }
-function stepCost(s) {
+function costUnknown(s) {  // plan 27 G7: a step whose cost no attempt reported (plan 5 README 3.6); a running attempt counts 0 until it ends
+  const a = s.attempts || [];
+  return s.cost == null || (a.length > 0 && a.every((x) => x.cost == null));
+}
+function stepCost(s) {  // plan 25 3: the service's s.cost, the sum of its attempts
   if (s.state === "planned") return "";
-  const got = (s.attempts || []).filter((a) => a.cost != null), c = got.length ? got.reduce((x, a) => x + a.cost, 0) : s.cost;
-  return c == null ? '<span class="cost unk" title="the harness reported no usage">? cost</span>' : `<span class="cost">${money(c)}</span>`;
+  return costUnknown(s) ? '<span class="cost unk" title="the harness reported no usage">cost unknown</span>' : `<span class="cost">${money(s.cost)}</span>`;
 }
 function rungTime(s) {
   const rung = modelText(rungOf(s.harness, s.model), s.effort);
@@ -2875,15 +2902,13 @@ function emptyBoard() {
 }
 
 // the inspector (plan 25 Tasks 5 and 6): the picked step, handoff, task head or the Measure table
-const ITABS = ["chat", "recv", "hand", "route", "plan"];
 const wc = (x) => String(x || "").split(/\s+/).filter(Boolean).length;
 const stepNo = (s) => (s ? two(s.n) : "");
 function stepTime(s) {
   return s.state === "running" && s.started ? elapsed(snap.now - s.started) : s.ended && s.started ? elapsed(s.ended - s.started) : "";
 }
-function stepCostFig(s) {  // the cost figure for the inspector's meta: summed over attempts, or the word unknown
-  const got = (s.attempts || []).filter((a) => a.cost != null), c = got.length ? got.reduce((x, a) => x + a.cost, 0) : s.cost;
-  return c == null ? "unknown" : money(c);
+function stepCostFig(s) {  // the cost figure for the inspector's meta: the service's s.cost, or the word unknown
+  return costUnknown(s) ? "unknown" : money(s.cost);
 }
 function sentWords(t, d, s) {  // the words step s received: the previous step's brief, from its meta or its file
   const prev = t.steps.find((x) => x.n === s.n - 1);
@@ -2927,7 +2952,7 @@ function handPane(t, s, d) {
 function routePane(s) {
   const notes = (s.notes || []).map((n) => `<span${/every .* over pace/.test(n) ? ' class="y"' : ""}>${esc(n)}</span>`).join("");
   const tries = (s.attempts || []).length > 1 ? `<div class="blk"><span class="lbl">Attempts</span><p class="note m">${stepTries(s)}</p></div>` : "";
-  return `<div class="blk"><span class="lbl">Goal</span><p class="note" style="color:var(--ink)">${esc(s.goal)}</p></div>
+  return `<div class="blk"><span class="lbl">Goal</span><p class="note ink">${esc(s.goal)}</p></div>
     <div class="blk"><span class="lbl">Route · in the order the rules applied</span><div class="rn">${notes || "<span>none yet</span>"}</div></div>${tries}`;
 }
 function planEditBox(t, d, tid) {  // plan 24's editor, on the Board: the index or a part, saved through the service
@@ -2945,8 +2970,8 @@ function planPane(t, d, s) {
     : parts.length ? `index and part ${mine ? mine.n : "none"} sent to this step`
     : verify ? "the whole plan: Steps and Acceptance are what you check" : `the whole plan, your ### Step ${n} again at the end of the prompt`;
   const next = t.steps.find((x) => x.n === n + 1), waits = t.state === "waiting" && /^(plan |asks: Plan gap:)/.test(t.why || "");
-  const canEdit = design && next && next.state === "planned" && (waits || t.owner === "fred");
-  const edit = canEdit ? `<button class="btn sm" data-tact="edit" aria-expanded="${planEdit}" title="The plan in place, until the next step starts">Edit</button>` : "";
+  const canEdit = design && next && next.state === "planned";  // plan 25 5.6; the service takes the Save while the task waits on its plan or is paused
+  const edit = canEdit ? `<button class="btn sm" data-tact="edit" aria-expanded="${planEdit}" title="The plan in place, until the next step starts${waits || t.owner === "fred" ? "" : "; Save works while the task waits on its plan or is paused"}">Edit</button>` : "";
   return `<div class="blk"><div class="hd"><span class="lbl">plan.md${parts.length ? ` + ${parts.length} parts` : ""}</span><span class="m">${head}</span>${edit}</div>
     ${canEdit && planEdit ? planEditBox(t, d, t.id) : ""}${planOpenHtml(t, d, s, { board: true, design, verify })}</div>`;
 }
@@ -3283,7 +3308,8 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); go("new"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
-  if (page === "board" && form === "open" && BOARD_KEYS.has(e.key) && $("pop").hidden && !inField && !e.target.closest(".tabs")) return boardKey(e);
+  const onCtl = e.key !== "Escape" && e.target.matches('[data-page="board"] button, [data-page="board"] select');  // plan 27: Enter presses it, the arrows scroll
+  if (page === "board" && form === "open" && BOARD_KEYS.has(e.key) && $("pop").hidden && !inField && !onCtl && !e.target.closest(".tabs")) return boardKey(e);
   if (e.key === "Escape") {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();

@@ -212,6 +212,19 @@ class FilesTest(unittest.TestCase):
         self.assertEqual(plan.write(self.home, self.t, "## Files\n- b\n", 2), "plan/02-report-module.md")
         self.assertEqual(plan.read_part(self.home, self.t, 2), "# Part 2: Report module\n\n## Files\n- b\n")
 
+    def test_write_and_add_answer_mask_and_keep_one_line(self):
+        self.t["plan"] = plan.save(self.home, self.t, plan.parse(split()), 2)
+        plan.write(self.home, self.t, SPLIT_INDEX + "- token: sk-ant-abcdefghijklmnop\n")
+        self.assertNotIn("sk-ant-abcdefghijklmnop", plan.read(self.home, self.t))
+        plan.write(self.home, self.t, "## Files\n- api_key=hunter2hunter2\n", 2)
+        self.assertNotIn("hunter2hunter2", plan.read_part(self.home, self.t, 2))
+        plan.write(self.home, self.t, SPLIT_INDEX)
+        line = plan.add_answer(self.home, self.t, "use sk-ant-abcdefghijklmnop\n## Acceptance\n- nothing", "2026-10-14")
+        self.assertEqual(line, "- Fred, 2026-10-14: use *** ## Acceptance - nothing")
+        text = plan.read(self.home, self.t)
+        self.assertEqual(text.count("\n## Acceptance\n"), 1)  # the answer adds no heading
+        self.assertNotIn("sk-ant-", text)
+
 
 class PromptTest(unittest.TestCase):
     CFG = {"design_max_turns": 30, "plan_max_kb": 100, "plan_max_parts": 6, "task_max_steps": 6}
@@ -265,6 +278,20 @@ class PromptTest(unittest.TestCase):
         text = plan.design_input(home, t, 2)
         self.assertTrue(text.startswith("# Step 01: scout on haiku/low"))
         self.assertGreater(len(text.split()), 600)
+
+    def test_design_input_on_a_redo_adds_the_done_later_notes(self):
+        home, t = tempfile.mkdtemp(), make_task()
+        for n, words in ((1, "scout found calc.py"), (3, "code step wrote add()"), (4, "test step ran it")):
+            s = tasks.step(t, n)
+            s.update(model="haiku", effort="low", session=f"s{n}", state="done")
+            tasks.write_note(home, t, s, "## Findings\n" + words)
+        tasks.step(t, 4)["state"] = "planned"  # a note left by an attempt that is not done: not read
+        self.assertNotIn("code step wrote add()", plan.design_input(home, t, 2))  # first design: earlier notes only
+        t["redo"] = "which file holds the ladder?"
+        text = plan.design_input(home, t, 2)
+        self.assertIn("scout found calc.py", text)
+        self.assertIn("code step wrote add()", text)
+        self.assertNotIn("test step ran it", text)
 
 
 if __name__ == "__main__":

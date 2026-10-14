@@ -45,6 +45,7 @@ OLD_HEADINGS = ("## Findings", "## Files touched", "## Open questions", "## Next
 READ_CAPPED = ("scout", "search")  # kinds whose run gets --max-turns read_max_turns (plan 23)
 PROMPT_GOAL_MAX = 600  # the goal in a step prompt after step 1: every handoff carries its Goal heading (plan 23)
 LESSONS_IN_PROMPT = 5  # the newest lessons of the step's own kind that ride in its prompt (plan 23)
+LESSONS_READ = 1000  # the project's lessons.md lines lessons_for picks the step's kind from (plan 27: filter, then cut)
 FIRST_STEP = "This is the first step: there is no handoff note yet."
 MARK_START, MARK_END = "HANDOFF", "END HANDOFF"
 NOTE_MAX = 20 * 1024
@@ -118,6 +119,9 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
             pick, from_pin = pin_rung, True
             notes.append(f"pin {kind}: {pin_rung}")
     picked = (fills.rank_of(pick, cfg) if cfg is not None else claude_cli.model_alias(pick)) if pick else ""
+    if pick and not picked and cfg is not None:  # review plan-18 nit: a pick no list knows balances, with a note
+        notes.append(f"pick: {pick}")
+        notes.append(f"pick refused: {(refuse(pick) if refuse else '') or 'unknown model'} -> balance")
     if picked:
         model = picked
         if not from_pin:  # a pin wrote its own note above
@@ -171,10 +175,10 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
             rung = model
             notes.append(f"balance: no usable {tier} rung -> {model}")
         model = fills.rank_of(rung, cfg) or model
-    elif cfg is not None:
-        share = ((budget or {}).get(fills.model_key(rung, cfg)) or {}).get("share")
     if not rung:
         rung = model
+    if cfg is not None and share is None:  # review B10: a pick, a pin or an empty pool reads its rung's own fill
+        share = ((budget or {}).get(fills.model_key(rung, cfg)) or {}).get("share")
     if kind == "verify" and cfg is not None and share is not None and share >= warn_at:
         hold = f"{fills.model_key(rung, cfg)} over its pace"
         notes.append(f"over pace: {rung} {round(share * 100)} % -> hold")
@@ -368,6 +372,14 @@ def plan_steps(proposed, max_steps: int) -> list:
         for i, s in enumerate(steps):
             s["n"] = i + 1
     return steps
+
+
+def room_after(task: dict, n: int, max_steps: int) -> int:
+    """How many steps may still follow step `n` (plan 27): task_max_steps minus n minus the done steps a redo kept
+    after n. A verify or fix is never counted (the service re-places it), here and in what the callers count:
+    plan.check (a split), replan.check (a replan answer) and Hub._ended (a `Replan:` line)."""
+    kept = sum(1 for s in task["steps"] if s["n"] > n and s["state"] == "done" and s["kind"] not in ("verify", "fix"))
+    return max_steps - n - kept
 
 
 def new_task(project_dir: str, project: str, title: str, goal: str, steps: list, type_: str, demand,

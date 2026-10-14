@@ -64,7 +64,7 @@ Taken, with their source (not reopened here):
 | 3 | Three windows (day, week from Monday, month from `month_start_day`), linear pace, the highest share binds | D-4, ID-6 |
 | 4 | Balance: the lowest share of pace wins inside the tier from the first step; the previous step's rung stays while it is within `balance_margin` (0.1), less `cache_bonus` (0.1) while its cache is warm (5 minutes) | Fred 2026-10-14, brainstorm 5.1 item 2 |
 | 5 | A rung ranked above its tier (opus in write, fable in think) runs only on a hard step: `demand.reasoning == "high"` or a sub-plan part marked hard (plan 24) | Fred 2026-10-14 |
-| 6 | `budget_warn_at` 0.8 marks over pace (the today line, the Usage bar) and holds a verify whose rung is over it; it never moves a step | Fred 2026-10-14 |
+| 6 | `budget_warn_at` 0.8 marks over pace (the today line, the Usage bar) and holds a verify whose rung is over it; it never moves a step. A verify whose pool is empty still holds when its own rung is over `budget_warn_at` (plan 27 Task 3). | Fred 2026-10-14 |
 | 7 | Verify: one rank above the rung that wrote the step, never opencode or cmd; fix: the failed step's escalated rank (plan 17's rule), never opencode or cmd | plan 17, plan 5 decision 11, Fred 2026-10-14 |
 | 8 | Cost of a non-Claude run: its reported cost, else its tokens x the price row in `prices` keyed by model key, else one unknown run; never zero | D-3, Fred 2026-10-14 |
 | 9 | `peak_hours` exists and is off (`{}`); the FAIL-by-hour view is the evidence that would turn it on | D-4 |
@@ -170,6 +170,7 @@ feeds the window's Claude rungs and `known_model`, not the route.
   (`Hub.count_run`, Task 4); kept for good, like `days`. `seen` holds the counted run ids of the last 3 days (the
   event reader replays the last two daily files at start), so a restart counts nothing twice.
 - `save_days` keeps every key it does not own; both writers hold `usage.FILE_LOCK`.
+- An unreadable file is never overwritten: it is copied once to `usage-days.json.bad` and the write is skipped (plan 27 Task 3).
 
 ### 3.6 `tasks.step_route` (the final signature)
 

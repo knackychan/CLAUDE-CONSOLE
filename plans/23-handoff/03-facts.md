@@ -218,6 +218,8 @@ index 75a1165..8dcc220 100644
      try:
 ```
 
+Plan 27 Task 4: `UNTRACKED_READ_MAX` is 256 KB and at most `UNTRACKED_MAX` (100) untracked files are read; both git calls carry `-c core.quotePath=false`.
+
 `git_snapshot` runs two read-only git commands with the 10 s timeout and `NO_WINDOW` of the module's other git
 helpers, counts the lines of each untracked file of at most 1 MB (a larger one counts 0) and returns None when either
 command fails (no repository, an unknown commit, no git). It never writes.

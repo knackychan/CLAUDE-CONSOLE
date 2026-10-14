@@ -115,6 +115,38 @@ class FactsTest(unittest.TestCase):
             self.assertIsNone(claude_cli.git_snapshot(repo, ""))
             self.assertIsNone(claude_cli.git_snapshot(tempfile.gettempdir(), head))  # not this repo's commit
 
+    @unittest.skipUnless(subprocess.run(["git", "--version"], capture_output=True).returncode == 0, "no git")
+    def test_git_snapshot_reads_non_ascii_paths(self):  # plan 27 (K5): no octal-quoted path
+        with tempfile.TemporaryDirectory() as repo:
+            run = lambda *a: subprocess.run(["git", *a], cwd=repo, capture_output=True, check=True)
+            run("init", "-q")
+            run("config", "core.quotePath", "true")  # git's default, whatever the global config says
+            (Path(repo) / "naïve.py").write_text("a\n", encoding="utf-8")
+            run("add", "naïve.py")
+            run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "start")
+            head = claude_cli.git_head(repo)
+            (Path(repo) / "naïve.py").write_text("a\nb\n", encoding="utf-8")
+            (Path(repo) / "café.py").write_text("x\ny\nz\n", encoding="utf-8")
+            snap = claude_cli.git_snapshot(repo, head)
+            self.assertEqual(snap, {"naïve.py": [1, 0], "café.py": [3, 0]})
+            self.assertEqual(facts.files_in(facts.text(head, head, snap, None)), ["naïve.py", "café.py"])
+
+    @unittest.skipUnless(subprocess.run(["git", "--version"], capture_output=True).returncode == 0, "no git")
+    def test_git_snapshot_caps_the_untracked_files(self):  # plan 27 (K4): a venv or a build folder stays cheap
+        with tempfile.TemporaryDirectory() as repo:
+            run = lambda *a: subprocess.run(["git", *a], cwd=repo, capture_output=True, check=True)
+            run("init", "-q")
+            run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "start")
+            head = claude_cli.git_head(repo)
+            (Path(repo) / "big.txt").write_bytes(b"x\n" * (claude_cli.UNTRACKED_READ_MAX // 2 + 1))  # one byte over
+            (Path(repo) / "build").mkdir()
+            for k in range(claude_cli.UNTRACKED_MAX + 20):
+                (Path(repo) / "build" / f"f{k:03d}.txt").write_text("1\n", encoding="utf-8")
+            snap = claude_cli.git_snapshot(repo, head)
+            self.assertEqual((claude_cli.UNTRACKED_MAX, claude_cli.UNTRACKED_READ_MAX), (100, 256 * 1024))
+            self.assertEqual(len(snap), claude_cli.UNTRACKED_MAX)  # the first 100 untracked files, in git's order
+            self.assertEqual(snap["big.txt"], [0, 0])  # over 256 KB: listed, its lines not read
+
 
 if __name__ == "__main__":
     unittest.main()

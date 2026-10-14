@@ -1,8 +1,9 @@
-"""Plan 24 config keys in paths.DEFAULTS and the opus_max_turns fallback."""
+"""Plan 24 config keys in paths.DEFAULTS and the opus_max_turns fallback; plan 27 the config.json writers."""
 import json
 import os
 import shutil
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -32,6 +33,65 @@ class PlanKeysTest(unittest.TestCase):
             json.dumps({"opus_max_turns": 15, "design_max_turns": 40}), encoding="utf-8")
         self.assertEqual(paths.load_config()["design_max_turns"], 40)
 
+    def test_opus_max_turns_is_read_once_then_dropped(self):
+        """Plan 27 (G8, plan 24 D2): the service start moves the old key into design_max_turns and drops it."""
+        path = Path(self.tmp) / "config.json"
+        path.write_text(json.dumps({"opus_max_turns": 15, "projects": ["C:/x"]}), encoding="utf-8")
+        self.assertEqual(paths.ensure_config()["design_max_turns"], 15)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"projects": ["C:/x"], "design_max_turns": 15})
+        self.assertEqual(paths.ensure_config()["design_max_turns"], 15)  # read from the new key from now on
+        path.write_text(json.dumps({"opus_max_turns": 15, "design_max_turns": 40}), encoding="utf-8")
+        self.assertEqual(paths.ensure_config()["design_max_turns"], 40)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"design_max_turns": 40})
+
+
+class ConfigWriteTest(unittest.TestCase):
+    """Plan 27 (K1): every read-modify-write of config.json holds paths.CONFIG_LOCK and its own temp file."""
+
+    def test_concurrent_writers_all_land(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "config.json"
+            path.write_text(json.dumps({"projects": []}), encoding="utf-8")
+            errors = []
+
+            def write(n):
+                try:
+                    for i in range(15):
+                        paths.set_config(folder, {f"k{n}_{i}": i})
+                        if n == 0:
+                            paths.set_setting(Path(folder), "handoff_auto", bool(i % 2))
+                        elif n == 1:
+                            paths.set_harness(Path(folder), "codex", bool(i % 2))
+                        elif n == 2:
+                            paths.add_project(Path(folder), os.path.join(folder, f"p{i}"))
+                except Exception as exc:  # a lost race shows as an error or a missing key
+                    errors.append(f"{type(exc).__name__}: {exc}")
+
+            threads = [threading.Thread(target=write, args=(n,)) for n in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            missing = [f"k{n}_{i}" for n in range(6) for i in range(15) if f"k{n}_{i}" not in data]
+            self.assertEqual(missing, [])
+            self.assertEqual(len(data["projects"]), 15)
+            self.assertIs(data["handoff_auto"], False)
+            self.assertIs(data["harnesses"]["codex"]["on"], False)
+            self.assertEqual([p.name for p in Path(folder).iterdir()], ["config.json"])  # no temp file left
+
+    def test_a_failed_replace_keeps_the_file_and_leaves_no_temp(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "config.json"
+            path.write_text(json.dumps({"projects": ["C:/x"]}), encoding="utf-8")
+            with mock.patch("console.paths.os.replace", side_effect=PermissionError(13, "Access is denied")):
+                with self.assertRaises(OSError):
+                    paths.set_config(folder, {"task_max_steps": 8})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"projects": ["C:/x"]})
+            self.assertEqual([p.name for p in Path(folder).iterdir()], ["config.json"])
+            paths.set_config(folder, {"task_max_steps": 8})  # the lock was released
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["task_max_steps"], 8)
 
 
 class SettingTest(unittest.TestCase):

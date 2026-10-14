@@ -34,14 +34,15 @@ FOLD_KEY = re.compile(r"[a-z][a-z0-9.]{0,39}")
 FOLDS_MAX = 64
 BUSY = {"running", "quiet", "stall"}
 
+AUTO_HANDOFF_STATES = ("replied", "idle", "verified", "verify_failed")  # plan 23: a turn that ended
+PROBE_S = 20
+READ_ONLY_TOOLS = "Read,Grep,Glob"  # a kind whose tools are exactly these is read only
+
 
 def folds_ok(folds) -> bool:
     """window.json `folds`: {fold key: open} with at most FOLDS_MAX keys of the FOLD_KEY shape."""
     return (isinstance(folds, dict) and len(folds) <= FOLDS_MAX
             and all(isinstance(k, str) and FOLD_KEY.fullmatch(k) and isinstance(v, bool) for k, v in folds.items()))
-AUTO_HANDOFF_STATES = ("replied", "idle", "verified", "verify_failed")  # plan 23: a turn that ended
-PROBE_S = 20
-READ_ONLY_TOOLS = "Read,Grep,Glob"  # a kind whose tools are exactly these is read only
 
 
 class Hub:
@@ -74,6 +75,7 @@ class Hub:
         self.version = 0
         self.auto_since = time.time()  # older verdicts never trigger an automatic step
         self.auto_handed = set()  # plan 23: sessions handoff_auto handed off once (never twice)
+        self.auto_refused = {}  # plan 27: session id -> the turn end whose auto handoff was refused (tried once per turn)
         self._stop = threading.Event()
         self.models_mtime = self._models_mtime()  # models.json as cfg["models"] was read
         self.config_mtime = self._config_mtime()  # config.json as the tuning keys were read
@@ -103,6 +105,13 @@ class Hub:
                     self.cfg["ladder"] = paths._ladder_from(models["claude"], self.cfg.get("ladder") or {})
             self.version += 1
             self.changed.notify_all()
+        for name, listed in ({} if error else models).items():  # review G5: what the readers leave out, logged
+            held = harness.tiers_of(self.cfg, name) if name in harness.NAMES else claude_cli.MODELS
+            for model, tier in listed.items():
+                if tier not in claude_cli.MODELS:
+                    self._log(f"models.json: {name} {model} dropped: unknown tier {tier}")
+                elif tier not in held:
+                    self._log(f"models.json: {name} {model} dropped: {name} holds no {tier} model")
 
     def _config_mtime(self):
         try:
@@ -112,7 +121,9 @@ class Hub:
 
     def reload_tuning(self) -> None:
         """Reread the Models page keys (tuning.KEYS) from config.json when its mtime changed, so a hand edit shows
-        after Reload (plan 26 README 3.1); every other key keeps its value from the service start."""
+        after Reload (plan 26 README 3.1); every other key keeps its value from the service start. Plan 27 (K2): a
+        page key absent from the file goes back to its default; a value tuning.validate refuses is not taken (the
+        live value stays) and console.log names it."""
         mtime = self._config_mtime()
         if mtime is None or mtime == self.config_mtime:
             return
@@ -126,11 +137,17 @@ class Hub:
             return
         with self.lock:
             for key in tuning.KEYS:
-                if key in user:
-                    default = paths.DEFAULTS.get(key)
-                    value = user[key]
-                    self.cfg[key] = {**default, **value} if isinstance(default, dict) and isinstance(value, dict) \
-                        else value
+                if key not in user:
+                    self.cfg[key] = copy.deepcopy(paths.DEFAULTS.get(key))
+            present = {key: user[key] for key in tuning.KEYS if key in user}
+            clean, errors = tuning.validate(present, self.cfg) if present else ({}, {})
+            for key in present:
+                if key in errors:
+                    self._log(f"config.json {key} refused: {errors[key]}")
+                    continue
+                default, value = paths.DEFAULTS.get(key), clean[key]
+                self.cfg[key] = {**default, **value} if isinstance(default, dict) and isinstance(value, dict) \
+                    else value
             self.version += 1
             self.changed.notify_all()
 
@@ -226,6 +243,8 @@ class Hub:
                 return f"{name} is off"
             if not self.found.get(name):
                 return f"{name}: not found on PATH"
+            if bare not in claude_cli._rung_models(self.cfg, name):  # review G5: README 3.2b of plan 5
+                return f"model gone from models.json: {rung}"
         if not isinstance(rung, str) or not claude_cli.known_model(self.cfg, rung):
             return "unknown model or effort"
         if name in ("opencode", "cmd") and kind:
@@ -246,8 +265,13 @@ class Hub:
                 self.changed.notify_all()
         for rec in new:  # plan 18: the fills count other harnesses' runs from their run_ended lines
             if rec.get("event") == "run_ended":
-                self.count_run(rec)
+                try:  # review K9: a malformed line never escapes into start_step or the hub loop
+                    self.count_run(rec)
+                except Exception as exc:
+                    self._log(f"count_run {rec.get('session_id')}: {type(exc).__name__}: {exc}")
         return len(new)
+
+    _count_lock = threading.Lock()  # review K8: one count_run at a time (request threads call poll_once too)
 
     def count_run(self, rec: dict) -> bool:
         """One ended run of a harness other than Claude (whose transcripts the history prices) into usage-days.json:
@@ -261,13 +285,14 @@ class Hub:
         if not isinstance(cost, (int, float)):
             cost = fills.price(rec.get("tokens"), (self.cfg.get("prices") or {}).get(key))  # D3: None = unknown
         ts = float(rec.get("ts") or time.time())
-        if not usage.add_other(self.folder, f"{rec['session_id']}@{ts}", usage.day_of(ts), key, rec.get("tokens"), cost):
-            return False
-        other = usage.load_other(self.folder)
-        with self.lock:
-            self.usage_other = other
-            self.version += 1
-            self.changed.notify_all()
+        with self._count_lock:  # review K8: the dict add_other wrote under FILE_LOCK, kept in the order written
+            other = usage.add_other(self.folder, f"{rec['session_id']}@{ts}", usage.day_of(ts), key, rec.get("tokens"), cost)
+            if other is None:
+                return False
+            with self.lock:
+                self.usage_other = other
+                self.version += 1
+                self.changed.notify_all()
         return True
 
     def read_costs(self) -> int:
@@ -629,20 +654,27 @@ class Hub:
                 if s.task:  # a step's verdict and context are its chain's
                     continue
                 st = self.state.state_of(s, now)
+                turn = (s.turns[-1][1] or 0) if s.turns else 0
+                step = ("escalate" if st == "verify_failed" else "deescalate") if (
+                    s.window and s.verdict_ts >= self.auto_since and st in ("verify_failed", "verified")) else ""
                 if (auto and (s.ctx_tokens or 0) >= red
                         and st in AUTO_HANDOFF_STATES and not s.handoff and s.id not in self.auto_handed
-                        and s.turns and (s.turns[-1][1] or 0) >= self.auto_since):
-                    hand.append((s.id, s.ctx_tokens))  # plan 23: a red turn hands off; no route step
-                elif s.window and s.verdict_ts >= self.auto_since and st in ("verify_failed", "verified"):
-                    due.append((s.id, "escalate" if st == "verify_failed" else "deescalate"))
+                        and s.turns and turn >= self.auto_since and self.auto_refused.get(s.id) != turn):
+                    hand.append((s.id, s.ctx_tokens, turn, step))  # plan 23: a red turn hands off; no route step
+                elif step:
+                    due.append((s.id, step))
         pulled = []
-        for sid, tokens in hand:  # pull forks a VS Code chat first: it is never resumed in place
+        for sid, tokens, turn, step in hand:  # pull forks a VS Code chat first: it is never resumed in place
             try:
                 if self.pull(sid, "handoff", auto=tokens)[0] == 200:
                     self.auto_handed.add(sid)
                     pulled.append((sid, "handoff"))
+                    continue
             except (runs.RunError, OSError):
-                continue
+                pass
+            self.auto_refused[sid] = turn  # plan 27: refused, so not again before this session's next turn end
+            if step:  # and the verdict still takes its route step
+                due.append((sid, step))
         for sid, lever in due:
             try:
                 if self.pull(sid, lever)[0] == 200:
@@ -742,6 +774,17 @@ class Hub:
             hard=(task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard")),
             refuse=lambda rung: self.rung_ok(rung, s["kind"]), pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
 
+    def _base(self, task: dict) -> str:
+        """Why nothing may run in the task's folder now ("" = it may): the project left the list, no claude.exe, or
+        the folder is gone. task_levers, _go_on (the replan pass) and start_brief (the brief pass) ask it."""
+        if not self.allowed(task["project_dir"]):
+            return "runs are off in this project: pick it on the home view and allow runs"
+        if not self.runs.exe:
+            return "claude.exe not found; set \"claude_exe\" in config.json"
+        if not os.path.isdir(task["project_dir"]):
+            return "the task's folder is gone"
+        return ""
+
     def task_levers(self, task_id) -> dict:
         """What each task lever would do and why one is off ("" = allowed); None for an unknown id. The one
         gate: advance and the POST handlers both ask it."""
@@ -750,14 +793,7 @@ class Hub:
             if task is None:
                 return None
             state, owner, cs, nxt = task["state"], task["owner"], tasks.current_step(task), self._next_step(task)
-            if not self.allowed(task["project_dir"]):
-                base = "runs are off in this project: pick it on the home view and allow runs"
-            elif not self.runs.exe:
-                base = "claude.exe not found; set \"claude_exe\" in config.json"
-            elif not os.path.isdir(task["project_dir"]):
-                base = "the task's folder is gone"
-            else:
-                base = ""
+            base = self._base(task)
             live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
             if base:
                 start = base
@@ -782,11 +818,13 @@ class Hub:
                              "" if state in ("stuck", "stopped") else f"task is {state}")
             why = task["why"]
             gap = state == "waiting" and why.startswith("asks: Plan gap:")
-            answer = base or ("" if gap else "no plan gap waits")
+            answer = base or ("" if gap and task.get("plan") else "no plan gap waits")  # plan 27: a plan-less task asks plainly
             has_design = any(x["kind"] == "design" for x in task["steps"])
             redo = base or ("" if has_design and (gap or (state == "waiting" and why.startswith("plan "))
                                                  or (state == "stuck" and cs and cs["kind"] == "design"))
                             else "nothing to redo")
+            if not redo and task["id"] in self.briefing:  # plan 27: an old brief must not land after the redo
+                redo = "brief still writing"
             keep = base or ("" if state == "waiting" and why.startswith("replanned:") else "no plan change waits")
             confirm = base or ("" if (state == "waiting" and (why in ("confirm Fable", "plan ready: confirm")
                                                               or why.startswith(("replanned:", "plan "))))
@@ -843,6 +881,7 @@ class Hub:
     def start_step(self, task: dict, n: int) -> None:
         """Route step `n` and start its run; a hold waits for Fred, a run that cannot start makes the task stuck."""
         s, now, lines = tasks.step(task, n), time.time(), []
+        self.reload_models()  # review B12: a models.json edit reaches this step's route, not the next one
         route = self._route_for(task, s)
         if route["hold"] and task.get("hold_ok") != n:
             tasks._task_to(task, "waiting", route["hold"], now, s, lines)
@@ -850,7 +889,6 @@ class Hub:
         if route["hold"]:  # Fred's Run anyway, for this step only
             route = dict(route, notes=route["notes"] + ["budget: hold released by Fred"], hold="")
             task.pop("hold_ok", None)
-        self.reload_models()
         kind, tier, model = s["kind"], route["model"], route["rung"]  # plan 18: the route chose the rung
         if tier == "fable" and not task["fable_ok"]:  # a hard-only fable rung of the think tier bills credits too
             tasks._task_to(task, "waiting", "confirm Fable", now, s, lines)
@@ -876,7 +914,7 @@ class Hub:
             elif part_text:
                 read.append(f"step {n} section")
         last = task["last_good"]
-        lessons = tasks.lessons_for(levers.read_lessons(self.folder, task["project"]), kind)
+        lessons = tasks.lessons_for(levers.read_lessons(self.folder, task["project"], tasks.LESSONS_READ), kind)
         prompt = tasks.step_prompt(task, s, prev, retry, special=special, plan=plan_text, part=part_text,
                                    facts=tasks.read_facts(self.folder, task, last), lessons=lessons)
         route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
@@ -949,6 +987,12 @@ class Hub:
             return ""
         if cs and cs["state"] == "running" and cs["kind"] == replan.KIND and not cs["session"]:
             if task["id"] not in self.briefing:  # the service restarted while the pass ran: run it again
+                base = self._base(task)
+                if base:  # plan 27: as in _go_on, the pass runs claude in the folder and needs the project
+                    lines = []
+                    tasks._task_to(task, "stuck", base, time.time(), cs, lines)
+                    self._commit(task, lines)
+                    return "stuck"
                 self.start_replan(task, cs["n"])
             return ""
         if cs and cs["state"] == "running":
@@ -1018,11 +1062,12 @@ class Hub:
         if cs["kind"] == "design" and ok and not block_error:  # plan 24: the PLAN block, parsed and checked by plan.py
             found = plan.parse(text)
             later = [x for x in task["steps"] if x["n"] > cs["n"] and x["state"] != "done"]  # a redo keeps done steps
-            room = max(self.cfg["task_max_steps"] - cs["n"], 1)
+            room = max(tasks.room_after(task, cs["n"], self.cfg["task_max_steps"]), 1)  # plan 27: done steps kept
             why = ("no PLAN block" if found is None else
                    plan.check(found, later, self.cfg["plan_max_parts"], room))
             block_error = why if why == "no PLAN block" else f"plan: {why}" if why else ""
-        gap = plan.gap(block) if block and ok and not block_error and cs["kind"] != "design" else ""
+        gap = (plan.gap(block) if block and ok and not block_error and cs["kind"] != "design" and task.get("plan")
+               else "")  # plan 27: `Plan gap:` means something only in a task with a plan
         if gap:  # a Plan gap under Open questions without a STOP line is a question all the same
             cs["asked"] = meta.get("started")
             action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
@@ -1037,7 +1082,8 @@ class Hub:
                                             cap=tasks.cap_reason(subtype, meta.get("limits")))
         self.sync_costs(task)
         if found is not None and action in ("next", "fix", "done"):
-            task.pop("redo", None)
+            if task.pop("redo", None) is not None:  # plan 27: the old plan's parts go before the new plan is saved
+                plan.drop_parts(self.folder, task, cs["n"])
             task["plan"] = plan.save(self.folder, task, found, cs["n"])
             meta = task["plan"]
             what = (f"{len(meta['parts'])} sub-plans, " if meta["parts"] else "") + f"{meta['words']:,} w, {meta['kb']} KB"
@@ -1062,8 +1108,12 @@ class Hub:
         if ended:
             task["briefing"] = cs["n"]  # saved with the transition, so a restart finds the unfinished brief
         ask = replan.ask_line(block) if block and ended and cs["kind"] != "replan" else ""
-        if ask and action == "next":
-            if len(task["steps"]) < self.cfg["task_max_steps"]:
+        if ask and cs["kind"] == "design":  # plan 27: an insert would renumber the steps the plan's sections name
+            lines.append(tasks._line(now, cs, "done", "done", f"replan refused: design step ({ask})"))
+        elif ask and action == "next":
+            later = sum(1 for x in task["steps"] if x["n"] > cs["n"] and x["state"] != "done"
+                        and x["kind"] not in ("verify", "fix"))
+            if later + 1 <= tasks.room_after(task, cs["n"], self.cfg["task_max_steps"]):  # the verify not counted
                 lines += replan.insert(task, cs["n"], now, ask)
             else:
                 lines.append(tasks._line(now, cs, "done", "done", f"replan refused: no room ({ask})"))
@@ -1086,6 +1136,7 @@ class Hub:
         harness_name = (self.runs.meta(sid) or {}).get("harness") or "claude"
         test = facts.last_test(lines) if harness_name == "claude" else None
         cs["facts"] = facts.facts(changed, test)
+        cs["touched"] = list(changed)  # plan 27: every path for the brief's D5 check (the facts text lists 30)
         try:
             tasks.write_facts(self.folder, task, cs, facts.text(base.get("commit", ""), cs["end_commit"], changed,
                                                                 test, git=after is not None,
@@ -1100,12 +1151,16 @@ class Hub:
         nxt = tasks.step(task, n + 1) if n < len(task["steps"]) else None
         raw = tasks.read_note(self.folder, task, n)
         prev = tasks.read_brief(self.folder, task, n - 1)
-        touched = [p for k in range(1, n + 1) for p in facts.files_in(tasks.read_facts(self.folder, task, k))]
+        done = {x["n"]: x for x in task["steps"]}
+        touched = [p for k in range(1, n + 1)  # plan 27: every path; a step from before plan 27 has its facts text only
+                   for p in (done[k]["touched"] if "touched" in done.get(k, {}) else
+                             facts.files_in(tasks.read_facts(self.folder, task, k)))]
         task["briefing"] = n
-        if not self.cfg["brief_on"]:
+        base = self._base(task)  # plan 27: no pass in a folder taken off the list; the code fallback stands in
+        if not self.cfg["brief_on"] or base:
             text = compact.fallback(prev, raw)
             self._brief_done(task["id"], n, {"text": text, "cost": 0, "words": len(text.split()),
-                                             "fallback": "brief is off"}, raw)
+                                             "fallback": base or "brief is off"}, raw)
             return
         self.briefing.add(task["id"])
         threading.Thread(target=self._brief_job, args=(copy.deepcopy(task), copy.deepcopy(s), copy.deepcopy(nxt),
@@ -1174,6 +1229,12 @@ class Hub:
         if nxt["kind"] == replan.KIND:
             if task["state"] == "waiting" or task["id"] in self.briefing:
                 return ""
+            base = self._base(task)
+            if base:  # plan 27: the pass runs claude in the folder, so it needs the project as a step does
+                lines = []
+                tasks._task_to(task, "stuck", base, now, nxt, lines)
+                self._commit(task, lines)
+                return "stuck"
             self.start_replan(task, nxt["n"])
             return "start"
         if self.task_levers(task["id"])["start"]:
@@ -1187,7 +1248,7 @@ class Hub:
         s, now = tasks.step(task, n), time.time()
         lines = tasks.start_step(task, n, "", {"model": self.cfg["brief_model"], "effort": "low",
                                               "notes": ["replan: the pass, no tools"]}, "", now)
-        s["tier"] = "haiku"
+        s["tier"] = fills.rank_of(self.cfg["brief_model"], self.cfg)  # plan 27: the rank brief_model runs on
         self._commit(task, lines)
         briefs = "\n\n".join(b for b in (tasks.read_brief(self.folder, task, k) for k in range(1, n)) if b)
         self.briefing.add(task["id"])  # the same flag: nothing else starts while a thread of the task runs
@@ -1261,7 +1322,8 @@ class Hub:
                 return 404, {"error": "unknown task or no plan"}
             cs = tasks.current_step(task)
             waits = task["state"] == "waiting" and (task["why"].startswith(("plan ", "asks: Plan gap:")))
-            paused = task["owner"] == "fred" and not (cs and cs["state"] == "running")
+            paused = (task["owner"] == "fred" and task["state"] in ("running", "waiting")  # plan 27: paused only
+                      and not (cs and cs["state"] == "running"))
             if not (waits or paused):
                 return 409, {"error": "the plan can be edited while the task waits on it or is paused"}
             if part and not any(p["n"] == part for p in task["plan"]["parts"]):
@@ -1272,7 +1334,8 @@ class Hub:
                                 "text": text if p["n"] == part else plan.part_body(plan.read_part(self.folder, task, p["n"]))}
                                for p in task["plan"]["parts"]]}
             later = [x for x in task["steps"] if x["n"] > task["plan"]["from"] and x["state"] != "done"]
-            why = plan.check(found, later, self.cfg["plan_max_parts"], max(self.cfg["task_max_steps"] - task["plan"]["from"], 1))
+            room = max(tasks.room_after(task, task["plan"]["from"], self.cfg["task_max_steps"]), 1)
+            why = plan.check(found, later, self.cfg["plan_max_parts"], room)
             if why:
                 return 409, {"error": "plan: " + why}
             rel = plan.write(self.folder, task, text, part)
@@ -1425,9 +1488,9 @@ class Handler(BaseHTTPRequestHandler):
                 "tiers": self.hub.tier_view(),
                 "kinds_tier": {k: tasks.kind_tier(k) for k in tasks.PREP_KINDS},
                 "handoff_auto": bool(cfg["handoff_auto"]),
-            "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
-            "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()},
-            "board_tab": window.get("board_tab", "chat"), "folds": window.get("folds") or {}}
+                "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
+                "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()},
+                "board_tab": window.get("board_tab", "chat"), "folds": window.get("folds") or {}}
 
     def do_GET(self):
         if not guard.host_ok(self.headers.get("Host"), self._port()):
@@ -1588,6 +1651,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             message = str(exc)
             return self._error(400 if name == "claude" and not on else 500, message)
+        except OSError as exc:  # plan 27 (K1): the write failed (os.replace on Windows while a reader holds the file)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
 
     def _models_reload(self, body):
         self.hub.reload_models(force=True)
@@ -1642,6 +1707,8 @@ class Handler(BaseHTTPRequestHandler):
             paths.set_setting(self.hub.folder, key, value)
         except ValueError as exc:
             return self._error(400, str(exc))
+        except OSError as exc:  # plan 27 (K1)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
         with self.hub.lock:
             self.hub.cfg[key] = value
             self.hub.version += 1
@@ -1698,6 +1765,8 @@ class Handler(BaseHTTPRequestHandler):
             self.hub.allow(want)
         except ValueError as exc:
             return self._error(409, str(exc))
+        except OSError as exc:  # plan 27 (K1)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
         return self._json({"projects": project_list(self.hub.cfg)})
 
     def _config_models(self, body):
@@ -1707,6 +1776,8 @@ class Handler(BaseHTTPRequestHandler):
             errors = self.hub.save_models(body.get("changes"))
         except ValueError as exc:
             return self._error(409, str(exc))
+        except OSError as exc:  # plan 27 (K1)
+            return self._error(500, f"cannot write config.json: {exc.strerror or exc}")
         if errors:
             text = "; ".join(f"{k}: {v}" if k else v for k, v in errors.items())
             return self._json({"error": text, "errors": errors}, 400)
@@ -1807,7 +1878,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "unknown task")
         last, cs = task["last_good"], tasks.current_step(task)
         texts = self._step_texts(task)
-        return self._json({"task": task, "levers": self.hub.task_levers(task_id),
+        sent = dict(task, steps=[{k: v for k, v in s.items() if k not in ("git_base", "touched")}  # plan 27 K6
+                                 for s in task["steps"]])
+        return self._json({"task": sent, "levers": self.hub.task_levers(task_id),
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
@@ -1824,7 +1897,7 @@ class Handler(BaseHTTPRequestHandler):
     def _measure(self, query):
         """GET /api/measure?project=<folder>&n=10: the Board's measure table (tasks.measure)."""
         project, n = query.get("project", [""])[0], query.get("n", ["10"])[0]
-        if not project or len(project) > 1000 or not n.isdigit():
+        if not project or len(project) > 1000 or not (n.isascii() and n.isdigit() and len(n) <= 4):
             return self._error(400, "bad measure query")
         return self._json(tasks.measure(self.hub.folder, project, int(n)))
 

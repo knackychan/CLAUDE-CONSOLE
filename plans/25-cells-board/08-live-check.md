@@ -33,7 +33,7 @@
 
 ## 8.4 Other harnesses (when plan 5 is placed)
 
-9. A Codex or OpenCode step: `ctx unknown` with the harness title, `? cost` where the harness reports none, the rung
+9. A Codex or OpenCode step: `ctx unknown` with the harness title, `cost unknown` where the harness reports none, the rung
    `codex · gpt-6.1-sol · medium`, the chat labelled `Codex`.
 
 ## 8.5 Record

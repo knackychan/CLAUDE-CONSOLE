@@ -57,7 +57,11 @@ def _number(value, unit: str, low, high) -> str:
     """"" when `value` fits the unit and the range, else the reason."""
     whole = unit in WHOLE
     span = f"between {_fmt(low)} and {_fmt(high)}"
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f"a whole number {span}" if whole else f"a number {span}"
+    if isinstance(value, int) and not low <= value <= high:
+        return span  # plan 27 (B7): a huge int never reaches float(), which raises OverflowError
+    if not math.isfinite(value):
         return f"a whole number {span}" if whole else f"a number {span}"
     if whole and not float(value).is_integer():
         return f"a whole number {span}"

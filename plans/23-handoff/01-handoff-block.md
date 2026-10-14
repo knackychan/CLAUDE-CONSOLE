@@ -278,6 +278,8 @@ END HANDOFF
 
 D4 (a) is the `Next model: <tier>/<effort>` paragraph; with (b) it would name `read|write|think` and need plan 18.
 
+As placed, an empty slot adds no blank line (`${plan}What the earlier steps left you:` and `${lessons}${part}Rules`, with `step_prompt` adding the "\n\n" only to a non-empty slot); same text otherwise.
+
 ## 1.3 `console/brief.py`
 
 ```diff

@@ -146,10 +146,12 @@ def load_models(write: bool = True) -> tuple:
 
 
 def _ladder_from(claude_models: dict, fallback: dict) -> dict:
-    """tier -> rungs in file order, the alias (the tier's own name) first."""
-    ladder = {tier: [] for tier in fallback}
+    """tier -> rungs in file order, the alias (the tier's own name) first; only the tiers of claude_cli.MODELS
+    (review G5: Hub.reload_models logs the others)."""
+    from .claude_cli import MODELS  # late, as claude_cli.known_model imports harness: paths stays import-free
+    ladder = {tier: [] for tier in fallback if tier in MODELS}
     for model, tier in claude_models.items():
-        if isinstance(tier, str) and tier:
+        if tier in MODELS:
             ladder.setdefault(tier, []).append(model)
     return {tier: sorted(rungs, key=lambda m: m != tier) for tier, rungs in ladder.items() if rungs}
 
@@ -185,52 +187,68 @@ def load_config() -> dict:
     return cfg
 
 
+CONFIG_LOCK = threading.Lock()  # plan 27 (K1): every read-modify-write of config.json; the HTTP handlers run in threads
+
+
+def _rewrite_config(path: Path, change, missing=None) -> None:
+    """Read <path> (config.json), apply `change(data)` and write it back whole through a temp file of this write's
+    own, all under CONFIG_LOCK. A missing file starts as `missing()`, or raises ValueError when `missing` is None;
+    a file that is not a JSON object raises ValueError and is left as is (never overwrite Fred's file). OSError
+    from the write (os.replace on Windows while a reader holds the file) propagates, with the temp file removed."""
+    with CONFIG_LOCK:
+        if path.exists() or missing is None:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = None
+            if not isinstance(data, dict):
+                raise ValueError(f"cannot read {path}: fix it by hand")
+        else:
+            data = missing()
+        change(data)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"config.json.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
+
+
 def set_harness(folder: Path, name: str, on: bool) -> None:
     """Write harnesses.<name>.on into <folder>/config.json; every other key stays as written.
     Raises ValueError for an unknown name or a config.json that cannot be read."""
     if name not in HARNESSES:
         raise ValueError(f"unknown harness: {name}")
-    path = Path(folder) / "config.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = None
-    if not isinstance(data, dict):
-        raise ValueError(f"cannot read {path}: fix it by hand")
-    harnesses = data.get("harnesses")
-    if not isinstance(harnesses, dict):
-        harnesses = data["harnesses"] = {}
-    entry = harnesses.get(name)
-    if not isinstance(entry, dict):
-        entry = harnesses[name] = {"on": False, "exe": ""}
-    entry["on"] = bool(on)
-    tmp = path.with_name("config.json.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+
+    def change(data):
+        harnesses = data.get("harnesses")
+        if not isinstance(harnesses, dict):
+            harnesses = data["harnesses"] = {}
+        entry = harnesses.get(name)
+        if not isinstance(entry, dict):
+            entry = harnesses[name] = {"on": False, "exe": ""}
+        entry["on"] = bool(on)
+
+    _rewrite_config(Path(folder) / "config.json", change)
 
 
 def add_project(folder: Path, project: str) -> None:
     """Add `project` to "projects" in <folder>/config.json; every other key stays as written.
     Raises ValueError when config.json exists but cannot be read (never overwrite Fred's file)."""
-    path = Path(folder) / "config.json"
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = None
-        if not isinstance(data, dict):
-            raise ValueError(f"cannot read {path}: fix it by hand")
-    else:
-        data = copy.deepcopy(DEFAULTS)
-    projects = data.get("projects") if isinstance(data.get("projects"), list) else []
-    key = os.path.normcase(os.path.abspath(project))
-    if all(os.path.normcase(os.path.abspath(p)) != key for p in projects if isinstance(p, str)):
-        projects.append(project)
-    data["projects"] = projects
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name("config.json.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+
+    def change(data):
+        projects = data.get("projects") if isinstance(data.get("projects"), list) else []
+        key = os.path.normcase(os.path.abspath(project))
+        if all(os.path.normcase(os.path.abspath(p)) != key for p in projects if isinstance(p, str)):
+            projects.append(project)
+        data["projects"] = projects
+
+    _rewrite_config(Path(folder) / "config.json", change, lambda: copy.deepcopy(DEFAULTS))
 
 
 def set_config(folder: Path, values: dict, merge=("tiers",)) -> None:
@@ -238,24 +256,15 @@ def set_config(folder: Path, values: dict, merge=("tiers",)) -> None:
     for one key): a key named in `merge` updates the file's object one level deep (a tier Fred did not touch keeps
     its list), any other key replaces the file's value. Raises ValueError when config.json exists but cannot be read
     (never overwrite Fred's file)."""
-    path = Path(folder) / "config.json"
-    data = {}
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = None
-        if not isinstance(data, dict):
-            raise ValueError(f"cannot read {path}: fix it by hand")
-    for key, value in values.items():
-        if key in merge and isinstance(value, dict) and isinstance(data.get(key), dict):
-            data[key] = {**data[key], **value}
-        else:
-            data[key] = value
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name("config.json.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+
+    def change(data):
+        for key, value in values.items():
+            if key in merge and isinstance(value, dict) and isinstance(data.get(key), dict):
+                data[key] = {**data[key], **value}
+            else:
+                data[key] = value
+
+    _rewrite_config(Path(folder) / "config.json", change, dict)
 
 
 SETTINGS = ("handoff_auto",)  # plan 23: the booleans the window may flip through POST /api/setting
@@ -268,21 +277,33 @@ def set_setting(folder: Path, key: str, value: bool) -> None:
         raise ValueError(f"not a setting: {key}")
     if not isinstance(value, bool):
         raise ValueError(f"{key} takes true or false")
+
+    def change(data):
+        data[key] = value
+
+    _rewrite_config(Path(folder) / "config.json", change, lambda: copy.deepcopy(DEFAULTS))
+
+
+def _drop_opus_max_turns(folder: Path) -> None:
+    """Plan 24 D2: the old opus_max_turns counts once as design_max_turns (when that key is not set), then leaves
+    config.json. Run at the service start; a file that cannot be read or written is left as is."""
     path = Path(folder) / "config.json"
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = None
-        if not isinstance(data, dict):
-            raise ValueError(f"cannot read {path}: fix it by hand")
-    else:
-        data = copy.deepcopy(DEFAULTS)
-    data[key] = value
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name("config.json.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        user = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(user, dict) or "opus_max_turns" not in user:
+        return
+
+    def change(data):
+        if "opus_max_turns" in data:
+            data.setdefault("design_max_turns", data["opus_max_turns"])
+            del data["opus_max_turns"]
+
+    try:
+        _rewrite_config(path, change)
+    except (OSError, ValueError):
+        pass  # load_config still reads the old key as the fallback
 
 
 _WINDOW_LOCK = threading.Lock()  # the page (project) and the window (form, place) both save
@@ -315,5 +336,6 @@ def ensure_config() -> dict:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(DEFAULTS, indent=2) + "\n", encoding="utf-8")
+    _drop_opus_max_turns(path.parent)
     load_models()  # writes models.json when missing
     return load_config()
