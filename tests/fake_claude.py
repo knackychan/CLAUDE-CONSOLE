@@ -19,10 +19,18 @@ Run (--input-format stream-json): per user message prints init / assistant / res
   "STOP-ASK" in the message: the assistant text ends with `STOP: which file?`.
   "MAXTURNS" in the message: the result's subtype is `error_max_turns` (a step that hit its turn cap).
   "TROUBLE" with HANDOFF-OK: the block's Troubleshooting has one line (plan 23).
+  "PLAN-OK" / "PLAN-SPLIT" / "PLAN-BAD" in a design step's message (it contains "You are the design step"): the reply
+  carries a valid single plan (one `### Step N: code` per number listed after "each write step (") / a valid split
+  plan with two parts / a plan without ## Acceptance, then the HANDOFF block (plan 24).
+  "PLAN-GAP" in any other step's message: a Plan gap under Open questions and `STOP: Plan gap: ...`.
+  "REPLAN-ASK" in the message with HANDOFF-OK: the block's Next ends with `Replan: a search step is needed first`.
+  A request that starts with "Replan the rest of a task" is the replan pass: the remaining steps unchanged
+  (`no change`), or with "REPLAN-ADD" in it one search step first (`search first`).
   "TESTS-OK" / "TESTS-FAIL" in the message: before the reply, a Bash tool_use `py -m unittest discover -s tests` and
   its tool_result (23 tests OK / one FAIL with is_error) (plan 23 facts).
 """
 import json
+import re
 import sys
 import time
 
@@ -63,6 +71,13 @@ def prep():
                                   "past its word cap" for i in range(80)]
         if "HUGE" in raw:
             fields["findings"] = ["word " * 550]
+    if raw.startswith("Replan the rest of a task"):  # the replan pass (console/replan.py)
+        rest = raw.split("The remaining steps", 1)[-1].split("Answer with the JSON", 1)[0]
+        kept = [{"kind": m.group(1), "goal": m.group(2)} for m in re.finditer(r"^- ([a-z]+): (.+)$", rest, re.M)]
+        if "REPLAN-ADD" in raw:
+            fields = {"steps": [{"kind": "search", "goal": "find the week bucket"}] + kept, "why": "search first"}
+        else:
+            fields = {"steps": kept, "why": "no change"}
     if raw.startswith("You review the rules"):  # the rules review (console/review.py)
         fields = {"proposals": [{"kind": "remove", "target": "Always write tests first", "text": "",
                                  "why": "derivable: the Commands section names the test command",
@@ -92,6 +107,56 @@ TESTS_FAIL = ("Exit code 1\n..F.\n==============================================
               "AssertionError: 3 != 4\n\nRan 4 tests in 0.010s\n\nFAILED (failures=1)")
 
 
+PLAN_STEP = """### Step {n}: code
+#### Files
+- calc.py
+#### Actions
+1. `def add(a: int, b: int) -> int` in calc.py.
+#### Tests
+- tests/test_calc.py::test_add asserts add(1, 2) == 3
+#### Done check
+py -m unittest tests.test_calc -q prints OK
+"""
+PLAN_INDEX = """# Plan: calc
+## Goal
+add() in calc.py; done when the test passes.
+## Decisions
+- add lives in calc.py: the only module.
+## Out of scope
+- sub()
+## Files
+- calc.py (change): add()
+## Steps
+{steps}
+## Acceptance
+- tests pass
+"""
+PLAN_SPLIT = """# Plan: calc
+## Goal
+two modules.
+## Decisions
+- one part per module.
+## Out of scope
+- (none)
+## Sub-plans
+| # | Part | Kind | Owns | Depends on | Hard |
+|---|---|---|---|---|---|
+| 1 | Calc module | code | calc.py | - | no |
+| 2 | Report module | code | report.py, calc.py | 1 | yes |
+## Acceptance
+- both suites pass
+"""
+PLAN_PART = """## Files
+- {f}
+## Actions
+1. write {f}
+## Tests
+- tests/test_{f}.py::test_it
+## Done check
+py -m unittest -q
+"""
+
+
 def reply(text):
     """The assistant text: the user message echoed, the step prompt's own HANDOFF template defanged (a quoted
     marker is not a block), then what the words in the message ask for."""
@@ -106,6 +171,22 @@ def reply(text):
         if "TROUBLE" in text:  # a dead end the brief must carry whole (plan 23)
             block = block.replace("## Troubleshooting\n- (none)", "## Troubleshooting\n- py -3.12 fails here: use py -3.14")
         body += "\n\n" + block
+    design = "You are the design step" in text
+    if design and "PLAN-OK" in text:
+        m = re.search(r"each write step \(([\d, ]+)\)", text)
+        ns = [int(x) for x in re.findall(r"\d+", m.group(1))] if m else [3]
+        body += "\nPLAN\n" + PLAN_INDEX.format(steps="".join(PLAN_STEP.format(n=n) for n in ns)) + "END PLAN\n" + HANDOFF_BLOCK
+    if design and "PLAN-SPLIT" in text:
+        body += "\nPLAN\n" + PLAN_SPLIT + "END PLAN\nSUBPLAN 1 code Calc module\n" + PLAN_PART.format(f="calc.py") \
+                + "END SUBPLAN\nSUBPLAN 2 code Report module\n" + PLAN_PART.format(f="report.py") + "END SUBPLAN\n" + HANDOFF_BLOCK
+    if design and "PLAN-BAD" in text:
+        body += "\nPLAN\n" + PLAN_INDEX.format(steps=PLAN_STEP.format(n=3)).replace("## Acceptance\n- tests pass\n", "") \
+                + "END PLAN\n" + HANDOFF_BLOCK
+    if not design and "PLAN-GAP" in text:
+        body += "\n" + HANDOFF_BLOCK.replace("- (none)\n## Next", "- Plan gap: which file holds the ladder?\n## Next") \
+                + "\nSTOP: Plan gap: which file holds the ladder?"
+    if "REPLAN-ASK" in text and "HANDOFF-OK" in text:
+        body += "\n" + HANDOFF_BLOCK.replace("## Next\nGo on", "## Next\nGo on. Replan: a search step is needed first")
     if "VERDICT-PASS" in text:
         body += "\nVERDICT: PASS"
     if "VERDICT-FAIL" in text:

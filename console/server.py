@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import (attach, brief, claude_cli, compact, events, guard, harness, levers, paths, prep, redact, review,
-               routing, runs, tasks, transcript, usage)
+from . import (attach, brief, claude_cli, compact, events, guard, harness, levers, paths, plan, prep, redact, replan,
+               review, routing, runs, tasks, transcript, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -606,7 +606,8 @@ class Hub:
         if cs["state"] == "planned":
             return cs
         if cs["state"] == "done" and cs["n"] < len(task["steps"]):
-            return tasks.step(task, cs["n"] + 1)
+            # a step Fred's Redo design left done (plan 24) is not run twice: the next one that is not done
+            return next((x for x in task["steps"] if x["n"] > cs["n"] and x["state"] != "done"), None)
         return None
 
     def _route_for(self, task: dict, s: dict) -> dict:
@@ -656,15 +657,24 @@ class Hub:
             resume = base or ("" if owner == "fred" and state in ("running", "waiting") else "not paused")
             retry = base or ("still working: wait until it stops" if live else
                              "" if state in ("stuck", "stopped") else f"task is {state}")
-            confirm = base or ("" if (state == "waiting" and task["why"] == "confirm Fable") or tasks.held(task)
-                               else "nothing to confirm")
+            why = task["why"]
+            gap = state == "waiting" and why.startswith("asks: Plan gap:")
+            answer = base or ("" if gap else "no plan gap waits")
+            has_design = any(x["kind"] == "design" for x in task["steps"])
+            redo = base or ("" if has_design and (gap or (state == "waiting" and why.startswith("plan "))
+                                                 or (state == "stuck" and cs and cs["kind"] == "design"))
+                            else "nothing to redo")
+            keep = base or ("" if state == "waiting" and why.startswith("replanned:") else "no plan change waits")
+            confirm = base or ("" if (state == "waiting" and (why in ("confirm Fable", "plan ready: confirm")
+                                                              or why.startswith(("replanned:", "plan "))))
+                               or tasks.held(task) else "nothing to confirm")
             clear = ("still working: wait until it stops" if live else
                      "" if state in ("planned", "done", "stuck", "stopped", "handed") else f"task is {state}")
             done = ("still working: wait until it stops" if live else  # Mark done starts nothing
                     "" if state in ("waiting", "stuck", "stopped", "handed") else f"task is {state}")
             route = self._route_for(task, nxt) if nxt else None
             return {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry,
-                    "confirm": confirm, "clear": clear, "done": done,
+                    "confirm": confirm, "clear": clear, "done": done, "answer": answer, "redo": redo, "keep": keep,
                     "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
                     "next_route": f"{route['model']}/{route['effort']}" if route and not route["hold"] else "",
                     "cwd": task["project_dir"]}
@@ -738,7 +748,22 @@ class Hub:
             notes.append(f"model gone from models.json: {pick}")
         route = dict(route, notes=notes)
         retry = task["why"] if s["retries"] == 1 and s["state"] == "planned" else ""
-        prompt = tasks.step_prompt(task, s, tasks.read_brief(self.folder, task, task["last_good"]), retry)
+        prev = tasks.read_brief(self.folder, task, task["last_good"])
+        special, plan_text, part_text, read = "", "", "", [f"brief {task['last_good']:02d}" if prev else "no brief"]
+        if kind == "design":
+            special = plan.design_text(task, s, self.cfg, redo=task.get("redo", ""))
+            prev = plan.design_input(self.folder, task, n) or prev  # plan 24 D1 a: every earlier raw note, whole
+            read = [f"notes 01-{n - 1:02d}" if n > 1 else "no note"]
+        elif task.get("plan"):
+            plan_text, part_text = plan.prompt_parts(self.folder, task, s)
+            if plan_text:
+                read.append(f"plan {task['plan']['kb']} KB")
+            if s.get("part"):
+                read.append(f"part {s['part']}")
+            elif part_text:
+                read.append(f"step {n} section")
+        prompt = tasks.step_prompt(task, s, prev, retry, special=special, plan=plan_text, part=part_text)
+        route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
         adapter = harness.get(hname)
         read_only = tasks.RULES[kind][2] == READ_ONLY_TOOLS if kind in tasks.RULES else False
         max_turns = (READ_MAX_TURNS if adapter.CAPS and kind in ("scout", "search") else
@@ -802,6 +827,10 @@ class Hub:
             return self._ended(task, cs)  # paused: the step that ended is closed; nothing starts after it
         if task["owner"] != "service" or task["state"] not in ("planned", "running", "waiting"):
             return ""
+        if cs and cs["state"] == "running" and cs["kind"] == replan.KIND and not cs["session"]:
+            if task["id"] not in self.briefing:  # the service restarted while the pass ran: run it again
+                self.start_replan(task, cs["n"])
+            return ""
         if cs and cs["state"] == "running":
             return self._ended(task, cs)
         if task["state"] == "waiting":
@@ -864,6 +893,21 @@ class Hub:
         block_error = "no HANDOFF block" if block is None else tasks.check_handoff(block)
         # a denial in auto mode is not a failure: the model works around it and its handoff says what is left
         ok = not (s["interrupted"] or s["stopped"] or s["failed"]) and subtype == "success"
+        found = None
+        if cs["kind"] == "design" and ok and not block_error:  # plan 24: the PLAN block, parsed and checked by plan.py
+            found = plan.parse(text)
+            later = [x for x in task["steps"] if x["n"] > cs["n"] and x["state"] != "done"]  # a redo keeps done steps
+            room = max(self.cfg["task_max_steps"] - cs["n"], 1)
+            why = ("no PLAN block" if found is None else
+                   plan.check(found, later, self.cfg["plan_max_parts"], room))
+            block_error = why if why == "no PLAN block" else f"plan: {why}" if why else ""
+        gap = plan.gap(block) if block and ok and not block_error and cs["kind"] != "design" else ""
+        if gap:  # a Plan gap under Open questions without a STOP line is a question all the same
+            cs["asked"] = meta.get("started")
+            action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
+                                                question="Plan gap: " + gap, now=now)
+            self._commit(task, lines)
+            return action
         verdict, detail = tasks.reply_verdict(text)
         if not verdict and s["verdict_ts"] >= (cs["started"] or 0):
             verdict, detail = s["verdict"], s["verdict_detail"]
@@ -871,17 +915,38 @@ class Hub:
                                             verdict_detail=detail if verdict else "", question="", now=now,
                                             cap=tasks.cap_reason(subtype, meta.get("limits")))
         self.sync_costs(task)
-        if action in ("next", "fix", "done"):
+        if found is not None and action in ("next", "fix", "done"):
+            task.pop("redo", None)
+            task["plan"] = plan.save(self.folder, task, found, cs["n"])
+            meta = task["plan"]
+            what = (f"{len(meta['parts'])} sub-plans, " if meta["parts"] else "") + f"{meta['words']:,} w, {meta['kb']} KB"
+            lines.append(tasks._line(now, cs, "done", "done", f"plan saved: {what}"))
+            if meta["parts"]:
+                lines += plan.rebuild(task, cs["n"], meta["parts"], now)
+            if meta["kb"] > self.cfg["plan_max_kb"]:
+                tasks._task_to(task, "waiting", f"plan {meta['kb']:.0f} KB, over {self.cfg['plan_max_kb']}", now, cs, lines)
+                action = "wait"
+            elif self.cfg["plan_hold"] and action == "next":
+                tasks._task_to(task, "waiting", "plan ready: confirm", now, cs, lines)
+                action = "wait"
+        ended = action in ("next", "fix", "done") or (found is not None and action == "wait")
+        if ended:
             tasks.write_note(self.folder, task, cs, block)
             lesson = tasks.lesson_of(block)
             if lesson:  # plan 22: one line per step that taught something, read by the rules review
                 levers.add_lesson(self.folder, levers.lesson_line(task["project"], cs["kind"], lesson, now))
         if action == "fix":
             levers.add_miss(self.folder, task["miss"])
-        if action in ("next", "fix", "done"):
+        if ended:
             task["briefing"] = cs["n"]  # saved with the transition, so a restart finds the unfinished brief
+        ask = replan.ask_line(block) if block and ended and cs["kind"] != "replan" else ""
+        if ask and action == "next":
+            if len(task["steps"]) < self.cfg["task_max_steps"]:
+                lines += replan.insert(task, cs["n"], now, ask)
+            else:
+                lines.append(tasks._line(now, cs, "done", "done", f"replan refused: no room ({ask})"))
         self._commit(task, lines)
-        if action in ("next", "fix", "done"):  # the last step gets a brief too: Start next chat reads it
+        if ended:  # the last step gets a brief too: Start next chat reads it
             self.start_brief(task, cs["n"])
         if action in ("next", "fix", "retry") and task["owner"] == "service":
             self._go_on(task)
@@ -961,10 +1026,116 @@ class Hub:
             tasks._task_to(task, "waiting", "confirm Fable", now, nxt, lines)
             self._commit(task, lines)
             return "wait"
+        if nxt["kind"] == replan.KIND:
+            if task["state"] == "waiting" or task["id"] in self.briefing:
+                return ""
+            self.start_replan(task, nxt["n"])
+            return "start"
         if self.task_levers(task["id"])["start"]:
             return ""
         self.start_step(task, nxt["n"])
         return "start"
+
+    def start_replan(self, task: dict, n: int) -> None:
+        """A replan step has no session: the pass runs in a thread on brief_model (plan 24 3.9); the step is running
+        with session "" until the answer is checked."""
+        s, now = tasks.step(task, n), time.time()
+        lines = tasks.start_step(task, n, "", {"model": self.cfg["brief_model"], "effort": "low",
+                                              "notes": ["replan: the pass, no tools"]}, "", now)
+        s["tier"] = "haiku"
+        self._commit(task, lines)
+        briefs = "\n\n".join(b for b in (tasks.read_brief(self.folder, task, k) for k in range(1, n)) if b)
+        self.briefing.add(task["id"])  # the same flag: nothing else starts while a thread of the task runs
+        threading.Thread(target=self._replan_job, args=(copy.deepcopy(task), n, briefs), name="cc-replan",
+                         daemon=True).start()
+
+    def _replan_job(self, task: dict, n: int, briefs: str) -> None:
+        model = self.cfg["brief_model"]
+        cfg = dict(self.cfg, brief_model=self.model_id(model) if model in claude_cli.MODELS else model)
+        try:
+            res = replan.run_replan(cfg, self.runs.exe, task, n, briefs)
+        except Exception as exc:  # run_replan never raises; if it does, the step fails like a bad answer
+            res = {"steps": [], "why": "", "cost": 0, "error": f"{type(exc).__name__}: {exc}"}
+        self._replan_done(task["id"], n, res)
+
+    def _replan_done(self, task_id: str, n: int, res: dict) -> None:
+        with self.tlock:
+            self.briefing.discard(task_id)
+            task = self.tasks.get(task_id)
+            if task is None or tasks.current_step(task) is None or tasks.current_step(task)["n"] != n \
+                    or tasks.step(task, n)["state"] != "running":
+                return  # cleared or stopped while the pass ran
+            s, now, lines = tasks.step(task, n), time.time(), []
+            s["attempts"][-1]["cost"] = s["cost"] = res["cost"]
+            s["attempts"][-1]["final"] = True
+            if res["error"]:
+                action = tasks._retry_or_stuck(task, s, f"replan failed: {res['error']}", now, lines)
+                self._commit(task, lines)
+                if action == "retry" and task["owner"] == "service":
+                    self._go_on(task)
+                return
+            lines += replan.propose(task, n, res["steps"], res["why"], now)
+            tasks._finish(task, s, "done", now, lines)
+            task["last_good"] = n
+            try:
+                tasks.write_note(self.folder, task, s, replan.note_block(task))
+                prev = tasks.read_brief(self.folder, task, n - 1)
+                tasks.write_brief(self.folder, task, s, prev)  # the pass adds nothing a later step reads
+            except OSError:
+                pass
+            if self.cfg["replan_auto"]:
+                lines += replan.apply(task, now)
+                tasks._task_to(task, "running", "", now, s, lines)
+            else:
+                tasks._task_to(task, "waiting", replan.summary(task), now, s, lines)
+            self._commit(task, lines)
+            if self.cfg["replan_auto"] and task["owner"] == "service":
+                self._go_on(task)
+
+    def answer_gap(self, task_id: str, text: str) -> tuple:
+        """Fred's Answer to a Plan gap: the line joins Decisions, then the answer continues the step's session
+        (Hub.pull continue, the STOP answer path). Returns (status, body)."""
+        with self.tlock:
+            info = self.task_levers(task_id)
+            if info is None:
+                return 404, {"error": "unknown task"}
+            if info["answer"]:
+                return 409, {"error": info["answer"]}
+            if not text.strip():
+                return 400, {"error": "empty answer"}
+            task, cs, now = self.tasks[task_id], tasks.current_step(self.tasks[task_id]), time.time()
+            line = plan.add_answer(self.folder, task, text)
+            self._commit(task, [tasks._line(now, cs, "running", "running", f"plan gap answered by Fred: {redact.clip(text, 120)}")])
+        status, body = self.pull(cs["session"], "continue", text)  # the task goes running in _ended, as any answer
+        return status, dict(body, task=task_id, line=line) if status == 200 else body
+
+    def edit_plan(self, task_id: str, text: str, part: int = 0) -> tuple:
+        """Fred's in-place edit of the index or of part `part`, checked like the design step's plan."""
+        with self.tlock:
+            task = self.tasks.get(task_id)
+            if task is None or not task.get("plan"):
+                return 404, {"error": "unknown task or no plan"}
+            cs = tasks.current_step(task)
+            waits = task["state"] == "waiting" and (task["why"].startswith(("plan ", "asks: Plan gap:")))
+            paused = task["owner"] == "fred" and not (cs and cs["state"] == "running")
+            if not (waits or paused):
+                return 409, {"error": "the plan can be edited while the task waits on it or is paused"}
+            if part and not any(p["n"] == part for p in task["plan"]["parts"]):
+                return 404, {"error": "unknown part"}
+            text = plan.part_body(text) if part else text
+            found = {"index": text if not part else plan.read(self.folder, task),
+                     "parts": [{"n": p["n"], "kind": p["kind"], "title": p["title"],
+                                "text": text if p["n"] == part else plan.part_body(plan.read_part(self.folder, task, p["n"]))}
+                               for p in task["plan"]["parts"]]}
+            later = [x for x in task["steps"] if x["n"] > task["plan"]["from"] and x["state"] != "done"]
+            why = plan.check(found, later, self.cfg["plan_max_parts"], max(self.cfg["task_max_steps"] - task["plan"]["from"], 1))
+            if why:
+                return 409, {"error": "plan: " + why}
+            rel = plan.write(self.folder, task, text, part)
+            task["plan"].update(words=plan.words(found), kb=plan.kb(found))
+            self._commit(task, [tasks._line(time.time(), cs, task["state"], task["state"],
+                                            "plan edited by Fred" + (f": part {part}" if part else ""))])
+            return 200, {"task": task_id, "file": rel, "words": task["plan"]["words"], "kb": task["plan"]["kb"]}
 
     def task_lever(self, task_id, lever: str) -> tuple:
         """Fred's Stop, Pause, Resume, Retry, Confirm, Clear and Mark done. task_levers decides first; Stop is the run's
@@ -994,7 +1165,7 @@ class Hub:
             if not ok:
                 return 409, {"error": why}
             self._commit(task, lines)
-            if lever in ("retry", "confirm"):
+            if lever in ("retry", "confirm", "redo", "keep"):
                 self.advance()
             self.poll_once()
             return 200, {"task": task_id, "state": task["state"]}
@@ -1055,8 +1226,9 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             "paused_after": cs["n"] if t["owner"] == "fred" and t["state"] in ("running", "waiting") and cs
             and cs["state"] != "running" else 0,  # the step ended while paused: nothing starts until Resume
             "hold": t["why"].endswith(" over its pace"),
+            "plan": t.get("plan") or None, "redo": t.get("redo") or "",
             "steps": [{**{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
-                                            "cost")},
+                                            "cost")}, "part": s.get("part") or 0, "hard": bool(s.get("hard")),
                        "note": tasks.note_state(t, s, live(s["session"]) if s["state"] == "running" else ""),
                        "attempts": [{"session": a["session"], "cost": a["cost"], "why": a["why"]}
                                     for a in tasks.attempts(s)]} for s in t["steps"]]}
@@ -1152,7 +1324,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/models/open": self._models_open}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
-        for lever in ("stop", "pause", "resume", "retry", "confirm", "clear", "done"):
+        routes["/api/task/answer"], routes["/api/task/plan"] = self._task_answer, self._task_plan
+        for lever in ("stop", "pause", "resume", "retry", "confirm", "clear", "done", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
         path = urlparse(self.path).path
         handler = routes.get(path)
@@ -1427,6 +1600,17 @@ class Handler(BaseHTTPRequestHandler):
                                "project_dir": s["project_dir"]})
         return self._json({"text": self.hub.brief_text(sid, s, kind), "project_dir": s["project_dir"]})
 
+    def _task_answer(self, body):
+        status, data = self.hub.answer_gap(self._text(body, "task"), self._text(body, "text"))
+        return self._json(data, status)
+
+    def _task_plan(self, body):
+        part = body.get("part") or 0
+        if not isinstance(part, int) or isinstance(part, bool) or part < 0:
+            return self._error(400, "part must be a number")
+        status, data = self.hub.edit_plan(self._text(body, "task"), self._text(body, "text"), part)
+        return self._json(data, status)
+
     def _task(self, task_id: str):
         task = self.hub.tasks.get(task_id) if tasks.safe_id(task_id) else None
         if task is None:
@@ -1436,7 +1620,12 @@ class Handler(BaseHTTPRequestHandler):
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
-                           "handoff": tasks.read_handoff(self.hub.folder, task)})
+                           "handoff": tasks.read_handoff(self.hub.folder, task),
+                           "plan": plan.read(self.hub.folder, task),
+                           "parts": {p["n"]: plan.read_part(self.hub.folder, task, p["n"])
+                                     for p in (task.get("plan") or {}).get("parts", [])},
+                           "replan_note": tasks.read_note(self.hub.folder, task, cs["n"])
+                           if cs and cs["kind"] == "replan" else ""})
 
     def _stream(self):
         self.send_response(200)

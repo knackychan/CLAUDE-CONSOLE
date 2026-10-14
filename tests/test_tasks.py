@@ -688,6 +688,68 @@ class ChainTest(unittest.TestCase):
         self.assertEqual([a["session"] for a in tasks.attempts(tasks.step(task, 1))], ["s0", "s-new"])
         self.assertEqual(tasks.step_cost(tasks.step(task, 1)), 0.5)
 
+    def test_fred_redo_resets_the_design_and_later_planned_steps(self):
+        task = make(("scout", "design", "code", "code"))
+        for n in (1, 2, 3):
+            run(task, n)
+            end(task)
+        run(task, 4)
+        task.update(state="waiting", why="asks: Plan gap: which file?")
+        ok, why, lines = tasks.fred(task, "redo", NOW + 9)
+        self.assertEqual((ok, why), (True, ""))
+        self.assertEqual([s["state"] for s in task["steps"][:4]], ["done", "planned", "done", "planned"])
+        self.assertEqual((task["state"], task["current"], task["redo"], task["owner"]), ("running", 2, "which file?", "service"))
+        self.assertEqual(task["steps"][1]["retries"], 0)
+        self.assertEqual(lines[-1]["why"], "design redone by Fred: which file?")
+        task.update(state="running", why="")
+        self.assertEqual(tasks.fred(task, "redo", NOW)[:2], (False, "nothing to redo"))
+        nodesign = make(("scout", "code"))
+        nodesign.update(state="waiting", why="plan 130 KB, over 100")
+        self.assertEqual(tasks.fred(nodesign, "redo", NOW)[:2], (False, "nothing to redo"))
+
+    def test_fred_keep_drops_the_replan_proposal(self):
+        task = make(("scout", "replan", "code"))
+        task["replan"], task["replan_steps"] = {"step": 2, "before": [], "after": []}, []
+        task.update(state="waiting", why="replanned: no change")
+        ok, _, lines = tasks.fred(task, "keep", NOW)
+        self.assertEqual((ok, task["state"], "replan" in task, lines[0]["why"]),
+                         (True, "running", False, "old plan kept by Fred"))
+        self.assertEqual(tasks.fred(task, "keep", NOW)[:2], (False, "no plan change waits"))
+
+    def test_fred_confirm_covers_the_plan_waits(self):
+        for why, line in (("plan ready: confirm", "plan confirmed by Fred"),
+                          ("plan 130 KB, over 100", "plan accepted by Fred")):
+            task = make(("scout", "design", "code"))
+            run(task, 1)
+            end(task)
+            task.update(state="waiting", why=why)
+            ok, _, lines = tasks.fred(task, "confirm", NOW)
+            self.assertEqual((ok, task["state"], lines[0]["why"]), (True, "running", line), why)
+        task = make(("scout", "replan", "code"))
+        task["replan"] = {"step": 2, "before": [], "after": []}
+        task["replan_steps"] = [tasks._blank(0, "code", "x")]
+        task.update(state="waiting", why="replanned: 1 steps added")
+        self.assertEqual(tasks.fred(task, "confirm", NOW)[0], True)
+        self.assertEqual(task["steps"][-1]["goal"], "x")
+        task.update(state="waiting", why="plan something else")
+        self.assertEqual(tasks.fred(task, "confirm", NOW)[:2], (False, "nothing to confirm"))
+
+    def test_clear_keeps_plan_md_and_the_parts(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = make(("scout", "design"))
+            for n in (1, 2):
+                run(task, n)
+                end(task)
+                tasks.write_note(home, task, tasks.step(task, n), GOOD)
+            folder = tasks.folder(home, task["id"])
+            (folder / "plan").mkdir()
+            (folder / "plan.md").write_text("# Plan", encoding="utf-8")
+            (folder / "plan" / "01-x.md").write_text("# Part 1: x", encoding="utf-8")
+            tasks.save(home, task)
+            tasks.clear(home, task, keep_last=True)
+            self.assertTrue((folder / "plan.md").is_file() and (folder / "plan" / "01-x.md").is_file())
+            self.assertFalse((folder / "steps" / "01-scout.md").exists())
+
     def test_clear_returns_every_attempt_session(self):
         task = make(("code",))
         run(task, 1)

@@ -1202,7 +1202,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([(s["n"], s["kind"], s["state"]) for s in row["steps"]],
                          [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
         self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
-                                                          "verdict", "retries", "cost", "note", "attempts"]))
+                                                          "verdict", "retries", "cost", "note", "attempts", "part", "hard"]))
         self.assertIn(row["steps"][0]["note"], ("writing", "unchecked"))
         self.until(tid, self.at(2), "step 2 starts")
         steps = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)["steps"]
@@ -1378,6 +1378,212 @@ class TaskServerTest(RunServerTest):
         self.hub.advance()
         self.assertEqual(planned["state"], "planned")  # it cannot start here
         self.assertEqual(self.call("/api/task/clear", {"task": planned["id"]})[0], 200)  # README 3.7: not running
+
+    # -- plan 24 Task 3: the plan, its waits, the replan step -------------------------------------------------
+
+    def plan_task(self, words="HANDOFF-OK PLAN-OK", kinds=("scout", "design", "code", "test"), goals=None):
+        goals = goals or {}
+        steps = [{"kind": k, "goal": goals.get(i + 1, f"do {k}")} for i, k in enumerate(kinds)]
+        status, data = self.post_task(self.prep_card(), words=words, steps=steps)
+        self.assertEqual(status, 200, data)
+        return data["task"]
+
+    def full_prompt(self, sid):  # the chat view cuts a long prompt; the run keeps it whole
+        for line in self.hub.runs.stream_path(sid).read_text(encoding="utf-8").splitlines():
+            if '"cc_prompt"' in line:
+                return json.loads(line)["text"]
+        self.fail("no cc_prompt line")
+
+    def whys(self, tid):
+        return [c["why"] for c in self.chain(tid)]
+
+    def test_design_step_saves_the_plan_and_the_next_step_reads_it(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(3), "step 3 starts")
+        folder = self.folder / "tasks" / tid
+        self.assertIn("## Goal", (folder / "plan.md").read_text(encoding="utf-8"))
+        self.assertEqual(task["plan"]["from"], 2)
+        self.assertGreater(task["plan"]["words"], 0)
+        self.assertTrue(any(w.startswith("plan saved: ") for w in self.whys(tid)))
+        prompt = self.full_prompt(task["steps"][2]["session"])
+        self.assertIn("The plan (follow it, do not change it):", prompt)
+        self.assertIn("Your part of the plan:\n### Step 3: code", prompt)
+        self.assertRegex(task["steps"][2]["notes"][-1], r"^read: brief 02 · plan [\d.]+ KB · step 3 section$")
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual(row["plan"]["from"], 2)
+        self.assertEqual(self.task(tid)[1]["plan"], (folder / "plan.md").read_text(encoding="utf-8"))
+
+    def test_design_step_reads_the_raw_notes_whole(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(2), "the design step starts")
+        prompt = self.full_prompt(task["steps"][1]["session"])
+        self.assertIn("add() is in calc.py:2", prompt)
+        self.assertIn("You are the design step", prompt)
+        self.assertEqual(task["steps"][1]["notes"][-1], "read: notes 01-01")
+
+    def test_design_step_has_the_design_turn_cap(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(2), "the design step starts")
+        self.assertEqual(self.hub.runs.meta(task["steps"][1]["session"])["limits"]["max_turns"],
+                         self.hub.cfg["design_max_turns"])
+        self.hub.tasks[tid]["steps"][1]["pick"] = "sonnet"  # on any rung
+        self.hub.tasks[tid]["steps"][1]["state"] = "planned"
+        self.hub.tasks[tid]["steps"][1]["session"] = ""
+        self.hub.tasks[tid]["current"] = 1
+        self.hub.tasks[tid]["steps"][0]["state"] = "done"
+        self.hub.start_step(self.hub.tasks[tid], 2)
+        self.assertEqual(self.hub.runs.meta(self.hub.tasks[tid]["steps"][1]["session"])["limits"]["max_turns"],
+                         self.hub.cfg["design_max_turns"])
+
+    def test_split_plan_rebuilds_the_write_steps(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT")
+        task = self.until(tid, self.at(4), "step 4 starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "code", "verify", "test"])
+        self.assertEqual(task["steps"][4]["checked"], 4)
+        folder = self.folder / "tasks" / tid
+        self.assertTrue((folder / "plan" / "01-calc-module.md").is_file())
+        self.assertTrue((folder / "plan" / "02-report-module.md").is_file())
+        self.assertIn("design split into 2 sub-plans: 2 code steps (Prep had 1)", self.whys(tid))
+        self.assertIn("Your part of the plan:\n# Part 2: Report module", self.full_prompt(task["steps"][3]["session"]))
+        self.assertEqual([(s["part"], s["hard"]) for s in self.task(tid)[1]["task"]["steps"][2:4]],
+                         [(1, False), (2, True)])
+
+    def test_bad_plan_retries_then_sticks(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-BAD")
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        self.assertEqual(task["steps"][1]["retries"], 1)
+        self.assertEqual(task["why"], "plan: missing: ## Acceptance (after one retry)")
+        self.assertNotIn("plan", task)
+
+    def test_plan_over_the_size_waits(self):
+        self.hub.cfg["plan_max_kb"] = 0.3
+        tid = self.plan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the size")
+        self.assertTrue(task["why"].startswith("plan ") and " KB, over 0.3" in task["why"], task["why"])
+        self.assertEqual(self.task(tid)[1]["levers"]["redo"], "")
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        self.until(tid, self.at(3), "step 3 starts")
+        self.assertIn("plan accepted by Fred", self.whys(tid))
+        other = self.plan_task()  # a second task: Redo design plans again
+        task = self.until(other, lambda t: t["state"] == "waiting", "the second task waits")
+        why = task["why"]
+        self.assertEqual(self.call("/api/task/redo", {"task": other})[0], 200)
+        task = self.hub.tasks[other]
+        self.assertEqual(task["redo"], why)
+        self.assertEqual(task["steps"][1]["retries"], 0)
+        self.hub.cfg["plan_max_kb"] = 100
+        task = self.until(other, self.at(3), "step 3 starts after the redo")
+        self.assertNotIn("redo", task)
+
+    def test_plan_hold_waits_for_confirm(self):
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task holds")
+        self.assertEqual(task["why"], "plan ready: confirm")
+        text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        edited = text.replace("## Out of scope", "- Fred, 2026-10-14: use ints\n\n## Out of scope", 1)
+        status, data = self.call("/api/task/plan", {"task": tid, "text": edited})
+        self.assertEqual(status, 200, data)
+        self.assertIn("Fred, 2026-10-14: use ints", (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8"))
+        status, data = self.call("/api/task/plan", {"task": tid, "text": text.replace("## Goal", "## Aim")})
+        self.assertEqual((status, data["error"]), (409, "plan: missing: ## Goal"))
+        self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": "x", "part": -1})[0], 400)
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(3), "step 3 starts")
+        self.assertIn("plan confirmed by Fred", self.whys(tid))
+        self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": text})[0], 409)  # running: no edit
+
+    def test_plan_gap_waits_and_the_answer_joins_decisions(self):
+        tid = self.plan_task(goals={3: "write it PLAN-GAP"})
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on a gap")
+        self.assertEqual(task["why"], "asks: Plan gap: which file holds the ladder?")
+        self.assertEqual(self.task(tid)[1]["levers"]["answer"], "")
+        self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": " "})[0], 400)
+        status, data = self.call("/api/task/answer", {"task": tid, "text": "config.json"})
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["session"])
+        plan_text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        decisions = plan_text.split("## Decisions")[1].split("## Out of scope")[0].strip()
+        self.assertTrue(decisions.endswith(f"- Fred, {__import__('datetime').date.today().isoformat()}: config.json"))
+        self.assertIn("plan gap answered by Fred: config.json", self.whys(tid))
+        self.until(tid, lambda t: t["state"] == "running", "the task runs again")
+        self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": "again"})[0], 409)
+
+    def test_redo_design_keeps_done_steps(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-OK", kinds=("scout", "design", "code", "code"),
+                             goals={4: "second PLAN-GAP"})
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on a gap in step 4")
+        self.assertEqual([s["state"] for s in task["steps"][:4]], ["done", "done", "done", "running"])
+        question = task["why"][len("asks: Plan gap: "):]
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+        task = self.hub.tasks[tid]
+        self.assertEqual([s["state"] in ("planned", "running") for s in task["steps"][:4]], [False, True, False, True])
+        self.assertEqual((task["current"], task["redo"]), (2, question))
+        task = self.until(tid, self.at(2), "the design step runs again")
+        prompt = self.full_prompt(task["steps"][1]["session"])
+        self.assertIn("Fred asked for this plan again", prompt)
+        self.assertIn("(done, kept)", prompt)
+        task = self.until(tid, self.at(4), "step 4 runs again")
+        self.assertEqual(task["steps"][2]["state"], "done")
+
+    def replan_task(self, goal_words="REPLAN-ADD"):
+        status, data = self.post_task(self.prep_card(), words=f"HANDOFF-OK {goal_words}", steps=[
+            {"kind": "scout", "goal": "look REPLAN-ASK"}, {"kind": "design", "goal": "plan it"},
+            {"kind": "code", "goal": "write it"}, {"kind": "test", "goal": "run it"}])
+        self.assertEqual(status, 200, status)
+        return data["task"]
+
+    def test_replan_line_inserts_a_replan_step_and_waits(self):
+        self.hub.cfg["task_max_steps"] = 8
+        tid = self.replan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the replan")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "replan", "design", "code", "verify", "test"])
+        step = task["steps"][1]
+        self.assertEqual((step["state"], step["session"], step["model"]), ("done", "", self.hub.cfg["brief_model"]))
+        self.assertTrue((self.folder / "tasks" / tid / "steps" / "02-replan.md").is_file())
+        self.assertEqual(task["why"], "replanned: 1 steps added")
+        self.assertEqual(task["replan"]["after"][0]["kind"], "search")
+        self.assertEqual(self.task(tid)[1]["levers"]["keep"], "")
+        self.assertIn("replan inserted after 01: a search step is needed first", self.whys(tid))
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        self.assertIn("plan changed: 5 steps follow 02", self.whys(tid))
+        task = self.hub.tasks[tid]
+        self.assertEqual([s["kind"] for s in task["steps"]],
+                         ["scout", "replan", "search", "design", "code", "verify", "test"])
+        self.assertNotIn("replan", task)
+        other = self.replan_task()  # a second task: Keep old plan
+        self.until(other, lambda t: t["state"] == "waiting", "the second task waits")
+        self.assertEqual(self.call("/api/task/keep", {"task": other})[0], 200)
+        self.assertIn("old plan kept by Fred", self.whys(other))
+        self.assertEqual([s["kind"] for s in self.hub.tasks[other]["steps"]],
+                         ["scout", "replan", "design", "code", "verify", "test"])
+        self.assertEqual(self.call("/api/task/keep", {"task": other})[0], 409)
+
+    def test_replan_auto_applies_without_confirm(self):
+        self.hub.cfg.update(replan_auto=True, task_max_steps=8)
+        tid = self.replan_task()
+        self.until(tid, self.at(3), "the search step starts")
+        whys = self.whys(tid)
+        after = whys[whys.index("replanned: 1 steps added"):]
+        self.assertTrue(any(w.startswith("plan changed:") for w in after), whys)
+        self.assertNotEqual(self.hub.tasks[tid]["why"], "replanned: 1 steps added")
+
+    def test_replan_refused_when_no_room(self):
+        self.hub.cfg["task_max_steps"] = 5  # the chain is 5 long (scout, design, code, test, verify)
+        tid = self.replan_task()
+        self.until(tid, self.at(2), "step 2 starts")
+        self.assertTrue(any(w.startswith("replan refused: no room") for w in self.whys(tid)))
+
+    def test_clear_keeps_the_plan_files(self):
+        tid = self.plan_task(kinds=("scout", "design", "code"), words="HANDOFF-OK PLAN-SPLIT VERDICT-PASS")
+        self.until(tid, lambda t: t["state"] == "done" or t["state"] == "stuck", "the task ends", seconds=60)
+        self.assertEqual(self.hub.tasks[tid]["state"], "done", self.hub.tasks[tid]["why"])
+        task = self.until(tid, lambda t: not t.get("briefing"), "the last brief is written")
+        self.hub._clear_done(task, task["steps"][-1])
+        folder = self.folder / "tasks" / tid
+        self.assertTrue((folder / "plan.md").is_file())
+        self.assertTrue(any((folder / "plan").glob("*.md")))
+        self.assertTrue((folder / "task.json").is_file())
 
 
 for _name in dir(RunServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parent

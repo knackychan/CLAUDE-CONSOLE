@@ -594,11 +594,42 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0):
             _finish(task, s, "handed" if lever == "handoff" else "done", now, lines, why)
         _task_to(task, "handed" if lever == "handoff" else "done", why, now, s, lines)
         task["owner"] = "fred"
+    elif lever == "keep":  # Keep old plan: the replan proposal is dropped
+        from . import replan
+        if not (state == "waiting" and task["why"].startswith("replanned:")):
+            return False, "no plan change waits", []
+        lines += replan.keep(task, now)
+        _task_to(task, "running", "", now, s, lines)
+    elif lever == "redo":  # Redo design: the design step plans again with the question; done steps stay done
+        design = next((x for x in task["steps"] if x["kind"] == "design"), None)
+        waits = state == "waiting" and (task["why"].startswith("asks: Plan gap:") or task["why"].startswith("plan "))
+        if design is None or not (waits or (state == "stuck" and s and s["kind"] == "design")):
+            return False, "nothing to redo", []
+        question = task["why"][len("asks: Plan gap: "):] if task["why"].startswith("asks: Plan gap:") else task["why"]
+        if s and s["state"] == "running":
+            _finish(task, s, "failed", now, lines, "stopped for a redo")
+        for x in task["steps"]:
+            if x["n"] >= design["n"] and x["state"] != "done" or x is design:
+                if x["state"] != "planned":
+                    lines.append(_line(now, x, x["state"], "planned", "redo by Fred"))
+                x["state"], x["session"], x["ended"] = "planned", "", None
+        design["retries"] = 0
+        task["redo"], task["current"] = question, design["n"]
+        _task_to(task, "running", "", now, design, lines)
+        lines.append(_line(now, design, "planned", "planned", f"design redone by Fred: {question}"))
+        task["owner"] = "service"
     elif lever == "confirm":
+        from . import replan
         if held(task):
             task["hold_ok"] = next_n
         elif state == "waiting" and task["why"] == "confirm Fable":
             task["fable_ok"] = True
+        elif state == "waiting" and task["why"].startswith("replanned:"):
+            lines += replan.apply(task, now)
+        elif state == "waiting" and task["why"] == "plan ready: confirm":
+            lines.append(_line(now, s, "done", "done", "plan confirmed by Fred"))
+        elif state == "waiting" and task["why"].startswith("plan ") and " KB, over " in task["why"]:
+            lines.append(_line(now, s, "done", "done", "plan accepted by Fred"))
         else:
             return False, "nothing to confirm", []
         _task_to(task, "running", "", now, s, lines)
