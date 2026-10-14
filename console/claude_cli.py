@@ -273,6 +273,36 @@ def git_changed(cwd: str, commit: str):
     return len(names)
 
 
+UNTRACKED_READ_MAX = 1024 * 1024  # an untracked file larger than this counts 0 lines (plan 23 facts)
+
+
+def git_snapshot(cwd: str, commit: str):
+    """The tree against `commit` for the facts (plan 23): {path: [plus, minus]} from `git diff --numstat <commit>`,
+    plus each untracked file as [its lines, 0]; None when git cannot tell (not a repo, no commit). Read only: no git
+    object, index or file is written."""
+    from . import facts  # here, not at the top: facts is pure and imports redact only
+    if not commit:
+        return None
+    outs = []
+    for cmd in (["git", "diff", "--numstat", commit], ["git", "ls-files", "--others", "--exclude-standard"]):
+        try:
+            out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+                                 encoding="utf-8", errors="replace")
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if out.returncode != 0:
+            return None
+        outs.append(out.stdout)
+    untracked = {}
+    for name in outs[1].splitlines()[:facts.SNAPSHOT_MAX]:
+        path = Path(cwd) / name
+        try:
+            untracked[name] = path.read_bytes().count(b"\n") if path.stat().st_size <= UNTRACKED_READ_MAX else 0
+        except OSError:
+            untracked[name] = 0
+    return facts.snapshot(outs[0], untracked)
+
+
 def git_status(cwd: str) -> list:
     """`git status --short` lines of `cwd` ([] when it is not a repo or git is missing)."""
     try:
