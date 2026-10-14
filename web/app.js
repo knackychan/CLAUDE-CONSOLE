@@ -504,12 +504,18 @@ function renderTop() {
   setHtml($("today"), `<span class="big">${money(sp.today)}</span><span class="cells row30">${row.html}</span>
     <span class="sub m"><span>today<span class="usd">, USD</span> · $${money(sp.burn)} / min</span>
     <span>${sp.budget > 0 ? "limit $" + sp.budget : "no limit"}</span></span>`);
+  const fl = sp.fills || { over: [], unknown: [] };  // plan 18: models at or over budget_warn_at of their pace
+  $("overpace").hidden = !fl.over.length;
+  setHtml($("overpace"), `<span><b class="y">${fl.over.length} ${fl.over.length === 1 ? "model" : "models"} over pace</b> · fills</span><span class="car">&#9662;</span>`);
   setHtml($("todaymore"), `<div class="legend"><span><i class="h"></i>estimated $${money(sp.today)} (list prices)</span>
     ${sp.budget > 0 ? '<span><i class="mk"></i>80 % of limit</span>' : ""}</div>
     <div class="legend"><span>1 cell = $0.50</span>${sp.models.map(([m, f]) => `<span>${esc(m)} ${f < 0.01 ? "&lt;1" : Math.round(f * 100)} %</span>`).join("")}
     ${sp.runs ? `<span>window runs ${sp.runs}</span>` : ""}
     ${snap.writers.map((w) => `<span>2 writers: ${esc(baseName(w.project_dir))}</span>`).join("")}</div>
-    <button class="btn sm go-usage" data-go="usage">Usage by day, week, month &#8250;</button>`);
+    ${fl.unknown.length ? `<div class="legend">${fl.unknown.map(([k, n]) => `<span>${esc(k)}: cost unknown, ${n} ${n === 1 ? "run" : "runs"}</span>`).join("")}</div>` : ""}
+    ${fl.over.length ? `<div class="fline"><span class="m">fills · ${fl.over.map(([k, sh, w]) => `<b class="y" title="${esc(w)} window">${esc(k)} ${Math.round(sh * 100)}</b>`).join(" · ")} % of pace</span>
+      <button class="btn sm go-usage" data-go="usage">Usage &#8250;</button></div>`
+      : '<button class="btn sm go-usage" data-go="usage">Usage by day, week, month &#8250;</button>'}`);
 }
 
 // -- tasks (plan 17): a card in the list, the step tag on its sessions ---------------------------------
@@ -1047,24 +1053,33 @@ function pick(dir) {  // a project scopes the list and becomes the task target; 
 // -- Prep page ---------------------------------------------------------------------------
 function options(list, value) { return list.map((v) => `<option${v === value ? " selected" : ""}>${esc(v)}</option>`).join(""); }
 
-// every tier with its rungs from config.json "ladder", newest first, so a rung can be picked by hand;
+// plan 18: the tier groups think / write / read. Each rung of config.json "tiers" that can run now (no `why`)
+// sits under its rank's group (opus in write shows under think), then the Claude ladder rungs no tier lists;
 // `auto` is a step's "let the rules pick"
-function kindAllows(h, tier, kind) {  // README decision 11: what an opencode / cmd model may run; codex any kind
-  if (h === "codex" || !kind) return true;
-  const rt = (cfg.kinds_tier || {})[kind];
-  if (!rt) return false;  // verify, fix and an unknown kind
-  return tier === "opus" ? true : rt === "haiku" || rt === "sonnet";
+const RANK_GROUP = { haiku: "read", sonnet: "write", opus: "think", fable: "think" };
+function rungFits(kind, rung, rank) {  // plan 5 decision 11: opencode and cmd never on verify or fix; a cheap model on read and write kinds
+  const h = rung.includes(":") ? rung.split(":")[0] : "claude";
+  if ((h !== "opencode" && h !== "cmd") || !kind) return true;
+  return rank === "opus" || ["read", "write"].includes((cfg.kinds_tier || {})[kind]);
 }
 function modelOptions(value, withAuto, kind = "") {
-  const opt = (v, text) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(text)}</option>`;
-  const rungs = (tier) => (cfg.ladder && cfg.ladder[tier] && cfg.ladder[tier].length ? cfg.ladder[tier] : [tier]);
-  let html = (withAuto ? opt("", "auto") : "") + cfg.models.map((tier) => rungs(tier).map((r) => opt(r, modelText(r))).join("")).join("");
-  for (const [h, info] of Object.entries(cfg.harnesses || {})) {
-    if (h === "claude" || !info.on || !info.found) continue;
-    const ms = Object.entries(info.models || {}).filter(([, tier]) => kindAllows(h, tier, kind));
-    if (ms.length) html += `<optgroup label="${esc(h)}">${ms.map(([m]) => opt(h + ":" + m, h + " · " + m)).join("")}</optgroup>`;
+  const opt = (v) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(modelText(v))}</option>`;
+  const seen = new Set(), groups = { think: [], write: [], read: [] };
+  for (const tier of ["think", "write", "read"]) {
+    for (const x of (cfg.tiers || {})[tier] || []) {
+      if (x.why || seen.has(x.rung) || !RANK_GROUP[x.rank] || !rungFits(kind, x.rung, x.rank)) continue;
+      seen.add(x.rung);
+      groups[RANK_GROUP[x.rank]].push(x.rung);
+    }
   }
-  return html;
+  for (const tier of cfg.models) {
+    for (const r of (cfg.ladder && cfg.ladder[tier] && cfg.ladder[tier].length ? cfg.ladder[tier] : [tier])) {
+      if (!seen.has(r) && RANK_GROUP[alias(r)]) { seen.add(r); groups[RANK_GROUP[alias(r)]].push(r); }
+    }
+  }
+  return (withAuto ? `<option value=""${seen.has(value) ? "" : " selected"}>auto</option>` : "")
+    + Object.entries(groups).filter(([, list]) => list.length)
+      .map(([g, list]) => `<optgroup label="${g}">${list.map(opt).join("")}</optgroup>`).join("");
 }
 
 // Run as task: one row per step. A verify row is fixed text (the service adds it after the last editing step).
@@ -2011,6 +2026,8 @@ let uPicked = "";        // the picked day, YYYY-MM-DD
 let uRange = "days";     // days | weeks | months
 let uMetric = "cost";    // cost | tok
 let usageTimer = null;
+const fillsOpen = new Set();  // plan 18: the model rows opened to their three windows
+const WIN = ["day", "week", "month"];
 function dkey(d) { return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; }
 function ddate(k) { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d || 1); }
 function addDays(k, n) { const d = ddate(k); d.setDate(d.getDate() + n); return dkey(d); }
@@ -2084,7 +2101,8 @@ function usageDay() {
   const projects = Object.entries(r.projects).filter(([, c]) => c >= 0.005).sort((a, b) => b[1] - a[1]);
   const top = projects.length ? projects[0][1] : 1;
   const fams = Object.entries(r.models).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1])
-    .map(([f, c]) => `<span>${esc(f)} ${r.cost ? Math.round(100 * c / r.cost) : 0} %</span>`).join("");
+        .map(([f, c]) => `<span>${esc(f)} ${r.cost ? Math.round(100 * c / r.cost) : 0} %</span>`).join("")
+    + Object.entries(r.unknown || {}).map(([k, n]) => `<span>${esc(k)}: cost unknown · ${n} ${n === 1 ? "run" : "runs"}</span>`).join("");
   const tk = (label, n) => `<span><small>${label}</small><b>${tokText(n)}</b></span>`;
   return `<div class="ublk"><div class="dayd">${head}<span class="m">~${usd(r.cost)}</span></div>
     <div class="tok">${tk("input", r.tokens[0])}${tk("output", r.tokens[1])}${tk("cache write", r.tokens[2])}${tk("cache read", r.tokens[3])}</div>
@@ -2139,6 +2157,57 @@ function usageChart() {
       <span class="m mut">${top.v ? `top ${tok ? tokText(top.v) : usd(top.v)}, ${uRange === "days" ? top.label : top.short}` : ""}</span></div></div>`;
 }
 
+// plan 18: Models · share of pace. One row per model key, one bar of 20 cells for the window that binds (ID-6):
+// 20 cells = the window's allowance, the outlined cell the pace; orange at or over budget_warn_at
+function fillCells(x, over) {
+  const used = x.allowance_usd ? Math.min(20, Math.round(20 * x.used_usd / x.allowance_usd)) : 0;
+  const mark = x.allowance_usd ? Math.max(0, Math.round(20 * x.pace_usd / x.allowance_usd) - 1) : -1;
+  return Array.from({ length: 20 }, (_, k) => [k < used ? (over ? "y" : "f") : "", k === mark ? "mk" : ""].filter(Boolean).join(" "));
+}
+function sharePct(x) { return x == null ? "&ndash;" : Math.round(x * 100) + " %"; }
+function fillWin(f, w) {
+  const x = f[w], over = x.share != null && x.share >= usage.warn_at;
+  return `<span class="rw"><span>${w}</span><span class="cells">${cellsHtml(fillCells(x, over))}</span><b class="${over ? "y" : ""}">${sharePct(x.share)}</b></span>`;
+}
+function fillRow(key, f) {
+  const via = f.via && f.via.length && f.via.join() !== "claude" ? "via " + f.via.join(", ") : "claude";
+  const nm = `<span class="nm" title="${esc(key)}">${esc(key)}<small>${esc(via)}</small></span>`;
+  if (f.share == null) {
+    const why = f.unknown_runs ? `cost unknown · ${f.unknown_runs} ${f.unknown_runs === 1 ? "run" : "runs"}` : "no allowance";
+    return `<div class="mfill na">${nm}<span class="rw"><span></span><span class="cells">${cellsHtml(Array(20).fill(""))}</span><b class="mut">&ndash;</b></span><span class="rest m">${why}</span></div>`;
+  }
+  const others = WIN.filter((w) => w !== f.binding), open = fillsOpen.has(key);
+  const rest = others.map((w) => `${w[0]} ${f[w].share == null ? "&ndash;" : Math.round(f[w].share * 100)}`).join(" · ");
+  return `<div class="mfill" data-fill="${esc(key)}" role="button" tabindex="0" aria-expanded="${open}" title="click for the three windows">${nm}${fillWin(f, f.binding)}<span class="rest m" title="the other two windows, share of pace">${rest}</span></div>
+    <div class="mfill more"${open ? "" : " hidden"}><span></span>${others.map((w) => fillWin(f, w)).join("")}</div>`;
+}
+function usageFills() {
+  const rows = Object.entries(usage.fills || {}).filter(([, f]) => WIN.some((w) => f[w].allowance_usd) || f.month.used_usd > 0 || f.unknown_runs);
+  if (!rows.length) return "";
+  rows.sort((a, b) => (b[1].share ?? -1) - (a[1].share ?? -1));
+  const margin = Math.round(usage.balance_margin * 100);
+  return `<div class="ublk"><div class="hd"><span class="lbl">Models · share of pace</span><span class="m">over pace first</span></div>
+    <div class="mfills">${rows.map(([k, f]) => fillRow(k, f)).join("")}</div>
+    <div class="legend"><span><i class="f"></i>used</span><span><i class="mk"></i>pace</span><span>20 cells = allowance</span><span><b class="y">orange</b> over pace</span></div>
+    ${fold("config", `balance_margin ${usage.balance_margin} · warn_at ${usage.warn_at}`, `<p class="note m">Each step takes the emptiest model of its tier (lowest share of pace), the same one again while the fills are within ${margin} points, so the load spreads from the first step. A model through two CLIs is one fill. Allowances in config.json "allowances".</p>`)}</div>`;
+}
+// plan 18: Verify FAIL by hour, the evidence for peak_hours: rows per model that wrote the checked step, 24 hours
+function usageFails() {
+  const rows = Object.entries(usage.fail_hours || {});
+  if (!rows.length) return "";
+  let top = null;
+  for (const [k, r] of rows) {
+    const f = r.fails.reduce((a, b) => a + b, 0);
+    if (f && (!top || f > top.f)) top = { k, f, h: r.fails.indexOf(Math.max(...r.fails)) };
+  }
+  const info = (top ? `${esc(top.k)} most FAIL at ${two(top.h)}:00` : "no FAIL") + " · last 30 days";
+  const head = "<span></span>" + Array.from({ length: 24 }, (_, h) => `<span class="hr">${h % 6 === 0 ? two(h) : ""}</span>`).join("");
+  const body = rows.map(([k, r]) => `<span class="rn" title="via ${esc(r.via.join(", "))}">${esc(k)}</span>` + r.runs.map((n, h) =>
+    `<span class="hc${r.fails[h] ? " l" + Math.min(r.fails[h], 4) : ""}" title="${two(h)}:00 ${esc(k)}: ${n ? `${r.fails[h]} of ${n} FAIL` : "no verify"}"></span>`).join("")).join("");
+  return `<div class="ublk">${fold("Verify FAIL by hour", info, `<div class="heat">${head}${body}</div>
+    <div class="legend"><span><i></i>no FAIL</span><span><i class="hl1"></i>1</span><span><i class="hl4"></i>4 or more</span><span>rows: the model that wrote the checked step</span></div>
+    <p class="note m">Evidence for peak_hours (off): counted over the verify verdicts of the tasks kept.</p>`)}</div>`;
+}
 function storageLine() {  // the data folder's size by subfolder; orange over storage_warn_mb
   const st = usage.storage;
   if (!st || !st.total) return "";
@@ -2156,8 +2225,9 @@ function renderUsage() {
     return;
   }
   const since = usage.first ? dayName(usage.first) : "today";
-  setHtml($("uscroll"), usageHead() + usageCalendar() + usageDay() + usageChart() + storageLine()
-    + `<p class="ufoot">Estimated from the transcripts at the list prices in config.json, fast mode 2x. Kept from ${esc(since)}:
+  setHtml($("uscroll"), usageHead() + usageFills() + usageCalendar() + usageDay() + usageChart() + usageFails() + storageLine()
+    + `<p class="ufoot">Estimated from the transcripts at the list prices in config.json, fast mode 2x; other harnesses' usage x
+       their price row in "prices", and runs without usage or without a price row count as unknown, never as zero. Kept from ${esc(since)}:
        Claude Code deletes transcripts after 30 days, so the service keeps each closed day in usage-days.json.</p>`);
 }
 
@@ -2171,9 +2241,10 @@ function showTip(el) {
 }
 function moveMonth(n) { const d = ddate(uMonth + "-01"); d.setMonth(d.getMonth() + n); uMonth = dkey(d).slice(0, 7); renderUsage(); }
 $("uscroll").addEventListener("click", (e) => {
-  const t = e.target.closest("[data-day],[data-col],[data-range],[data-metric],[data-umonth]");
+  const t = e.target.closest("[data-fill],[data-day],[data-col],[data-range],[data-metric],[data-umonth]");
   if (!t || t.disabled) return;
-  if (t.dataset.day) uPicked = t.dataset.day;
+  if (t.dataset.fill) { if (!fillsOpen.delete(t.dataset.fill)) fillsOpen.add(t.dataset.fill); }  // plan 18: the three windows
+  else if (t.dataset.day) uPicked = t.dataset.day;
   else if (t.dataset.col && uRange === "days") { uPicked = t.dataset.col; uMonth = uPicked.slice(0, 7); }
   else if (t.dataset.col && uRange === "months") uMonth = t.dataset.col;
   else if (t.dataset.range) uRange = t.dataset.range;
@@ -2245,7 +2316,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today,#overpace");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
   if (t.dataset.open || t.dataset.task) {  // a session opened from a task returns to it, a task opened from a session too
@@ -2278,9 +2349,10 @@ document.addEventListener("click", async (e) => {
     t.querySelector(".car").textContent = briefOpen ? "▴" : "▾";
     $("more").hidden = !briefOpen;
     saveDraft();
-  } else if (t.id === "today") {
+  } else if (t.id === "today" || t.id === "overpace") {  // plan 18: the over-pace line opens the same breakdown
     const open = t.getAttribute("aria-expanded") !== "true";
-    t.setAttribute("aria-expanded", String(open));
+    $("today").setAttribute("aria-expanded", String(open));
+    $("overpace").setAttribute("aria-expanded", String(open));
     $("todaymore").hidden = !open;
   }
 });
