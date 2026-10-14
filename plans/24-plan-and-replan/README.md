@@ -12,9 +12,9 @@
 > Written against today's code (plan 22 placed, 328 tests). Plan 23 (six-heading handoff, facts, tools per kind) is not
 > written yet: where it lands first, its README says which of this plan's lines move (3.5 names them).
 
-Status: written 2026-10-14. Tasks 1 and 2 were run in a scratch copy of the working tree (39 tests OK: 21 in
+Status: written 2026-10-14; Fred took (a) on D1 and D2 the same day (D3 open). Tasks 1 and 2 were run in a scratch copy of the working tree (39 tests OK: 21 in
 `tests/test_plan.py`, 6 in `tests/test_replan.py`, 12 in `tests/test_compact.py`); their final code is in the task
-files. D1 to D3 wait for Fred; the plan is written for the recommended option of each.
+files. D3 waits for Fred; the plan is written for the recommended option of each.
 
 ## 1. Tasks, in order
 
@@ -40,8 +40,8 @@ the split applied without a confirm) is not reopened here. Three points it does 
 
 | # | Question | Options | Plan written for |
 |---|---|---|---|
-| D1 | What the design step reads from the steps before it. The brief is capped at `brief_max_words` (400) and compacted by Haiku; a plan built from a compacted scout loses the file paths and line numbers the plan must cite. | (a) the raw handoff notes of every earlier step, whole (`plan.design_input`; a scout note is at most `NOTE_MAX` 20 KB, so a design step reads at most a few notes); the brief pass still runs after the scout for the chain log and the window; (b) the previous step's brief, as every other step | (a) |
-| D2 | The design step's turn cap. Today `opus_max_turns` 12 caps a design step on opus only; a plan with final code for every change needs more reading than a 400-word handoff did, and the think tier has rungs on other harnesses (plan 5). | (a) one key `design_max_turns` 30 for a design step on any rung, replacing `opus_max_turns` (the old key is read as a fallback once, then dropped from config.json); (b) keep `opus_max_turns` 12 and cap only opus | (a) |
+| D1 | What the design step reads from the steps before it. The brief is capped at `brief_max_words` (400) and compacted by Haiku; a plan built from a compacted scout loses the file paths and line numbers the plan must cite. | (a) the raw handoff notes of every earlier step, whole (`plan.design_input`; a scout note is at most `NOTE_MAX` 20 KB, so a design step reads at most a few notes); the brief pass still runs after the scout for the chain log and the window; (b) the previous step's brief, as every other step | (a), Fred 2026-10-14 |
+| D2 | The design step's turn cap. Today `opus_max_turns` 12 caps a design step on opus only; a plan with final code for every change needs more reading than a 400-word handoff did, and the think tier has rungs on other harnesses (plan 5). | (a) one key `design_max_turns` 30 for a design step on any rung, replacing `opus_max_turns` (the old key is read as a fallback once, then dropped from config.json); (b) keep `opus_max_turns` 12 and cap only opus | (a), Fred 2026-10-14 |
 | D3 | How the handover from step to step is packaged. | (a) the task folder is the package: the service composes each step's prompt from `prompt.md`, the previous brief, `plan.md` and the step's own part (plan 23 adds the facts), and the chain line that starts a step says what it was given (`read: brief 02 · plan 12.4 KB · part 2`); no per-step folder, no copies; (b) a folder per step, `steps/NN/` with a copy of what that step received | (a) |
 
 A different answer changes only the lines the task files mark `D1`, `D2` or `D3`.
