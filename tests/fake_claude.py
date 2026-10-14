@@ -5,7 +5,7 @@ Prep (--json-schema): reads the prompt on stdin, prints one result object.
   "THINK" / "BULK" in the request: the route rates reasoning / token volume high.
   "CHAIN" in the request: `steps` holds a scout and a code step (else `steps` is []).
   A request that starts with "Compact the handoff note" is the brief pass: it answers the brief schema
-  (findings, files, questions, next); "LONG" in it gives 80 findings (over the word cap), "BROKEN"/"SLOW" as above.
+  (goal, findings, files, troubleshooting, questions, next); "LONG" in it gives 80 findings (over the word cap), "BROKEN"/"SLOW" as above.
   A request that starts with "You review the rules" is the rules review: one remove proposal and a summary.
 Run (--input-format stream-json): per user message prints init / assistant / result.
   "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
@@ -18,6 +18,9 @@ Run (--input-format stream-json): per user message prints init / assistant / res
   VERDICT-FAIL also waits 1 s before the result line (a test appends the verdict event meanwhile).
   "STOP-ASK" in the message: the assistant text ends with `STOP: which file?`.
   "MAXTURNS" in the message: the result's subtype is `error_max_turns` (a step that hit its turn cap).
+  "TROUBLE" with HANDOFF-OK: the block's Troubleshooting has one line (plan 23).
+  "TESTS-OK" / "TESTS-FAIL" in the message: before the reply, a Bash tool_use `py -m unittest discover -s tests` and
+  its tool_result (23 tests OK / one FAIL with is_error) (plan 23 facts).
 """
 import json
 import sys
@@ -53,13 +56,13 @@ def prep():
         fields["steps"] = [{"kind": "scout", "goal": "find the add() callers"},
                            {"kind": "code", "goal": "fix add() and its test"}]
     if raw.startswith("Compact the handoff note"):  # the brief pass (console/compact.py)
-        fields = {"findings": ["add() is in calc.py:2", "test_add covers it"], "files": ["calc.py"],
-                  "questions": [], "next": "Fix add() and run the test"}
+        fields = {"goal": "Fix add() in calc.py", "findings": ["add() is in calc.py:2", "test_add covers it"],
+                  "files": ["calc.py"], "troubleshooting": [], "questions": [], "next": "Fix add() and run the test"}
         if "LONG" in raw:
             fields["findings"] = [f"finding {i} says that this long line holds a good many words to pad the brief "
                                   "past its word cap" for i in range(80)]
         if "HUGE" in raw:
-            fields["findings"] = ["word " * 450]
+            fields["findings"] = ["word " * 550]
     if raw.startswith("You review the rules"):  # the rules review (console/review.py)
         fields = {"proposals": [{"kind": "remove", "target": "Always write tests first", "text": "",
                                  "why": "derivable: the Commands section names the test command",
@@ -75,10 +78,18 @@ def prep():
     return 0
 
 
-HANDOFF_BLOCK = ("HANDOFF\n## Findings\nadd() is in calc.py:2\n"
+HANDOFF_BLOCK = ("HANDOFF\n## Goal\nFix add() in calc.py; this step: find add() and its callers\n## Findings\n"
+                 "add() is in calc.py:2\n"
                  "test_add in tests/test_calc.py covers it and fails on a negative number\n"
                  "the callers in report.py and cli.py pass ints only\n## Files touched\n- (none)\n"
-                 "## Open questions\n- (none)\n## Next\nGo on\nEND HANDOFF")  # longer than the fake brief
+                 "## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\nGo on\nEND HANDOFF")  # longer than the fake brief
+
+
+TESTS_OK = "....\n----------------------------------------------------------------------\nRan 23 tests in 0.412s\n\nOK"
+TESTS_FAIL = ("Exit code 1\n..F.\n======================================================================\n"
+              "FAIL: test_add (tests.test_calc.CalcTest.test_add)\n------------------------------------------------"
+              "----------------------\nTraceback (most recent call last):\n  File \"tests/test_calc.py\", line 6\n"
+              "AssertionError: 3 != 4\n\nRan 4 tests in 0.010s\n\nFAILED (failures=1)")
 
 
 def reply(text):
@@ -92,6 +103,8 @@ def reply(text):
             block = block.replace("\nGo on\n", "\nGo on\nNext model: opus/high\n")
         if "LESSON" in text:  # the step's Lesson line, inside the block's Next
             block = block.replace("\nGo on\n", "\nGo on\nLesson: fake claude teaches one thing\n")
+        if "TROUBLE" in text:  # a dead end the brief must carry whole (plan 23)
+            block = block.replace("## Troubleshooting\n- (none)", "## Troubleshooting\n- py -3.12 fails here: use py -3.14")
         body += "\n\n" + block
     if "VERDICT-PASS" in text:
         body += "\nVERDICT: PASS"
@@ -112,6 +125,14 @@ def run():
         if isinstance(text, list):  # attached files: the text block, then one block per file
             text = text[0]["text"] + " +" + " +".join(b["type"] for b in text[1:])
         out({"type": "system", "subtype": "init", "session_id": sid, "cwd": "."})
+        for word, ok in (("TESTS-OK", True), ("TESTS-FAIL", False)):  # plan 23: a test command and its tool result
+            if word in text:
+                out({"type": "assistant", "session_id": sid, "parent_tool_use_id": None, "message": {
+                    "role": "assistant", "content": [{"type": "tool_use", "id": "toolu_test", "name": "Bash",
+                                                      "input": {"command": "py -m unittest discover -s tests"}}]}})
+                out({"type": "user", "session_id": sid, "parent_tool_use_id": None, "message": {
+                    "role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_test",
+                                                 "content": TESTS_OK if ok else TESTS_FAIL, "is_error": not ok}]}})
         out({"type": "assistant", "session_id": sid, "parent_tool_use_id": None, "message": {
             "role": "assistant", "content": [
                 {"type": "text", "text": "echo: " + reply(text)},

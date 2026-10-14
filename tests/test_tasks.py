@@ -7,8 +7,10 @@ from unittest import mock
 
 from console import claude_cli, levers, prep, tasks
 
-GOOD = ("## Findings\nadd() is in calc.py:2\n## Files touched\n- calc.py (fixed add)\n"
-        "## Open questions\n- (none)\n## Next\nRun the tests")
+GOOD = ("## Goal\nAdd the export; this step: fix add()\n## Findings\nadd() is in calc.py:2\n## Files touched\n"
+        "- calc.py (fixed add)\n## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\nRun the tests")
+OLD = ("## Findings\nadd() is in calc.py:2\n## Files touched\n- calc.py (fixed add)\n"
+       "## Open questions\n- (none)\n## Next\nRun the tests")  # a note from before plan 23
 
 
 class RulesTest(unittest.TestCase):
@@ -31,25 +33,25 @@ class RulesTest(unittest.TestCase):
         self.rule("search", "haiku", "low", "Read,Grep,Glob,WebFetch,WebSearch")
 
     def test_rule_draft_haiku_low(self):
-        self.rule("draft", "haiku", "low", "")
+        self.rule("draft", "haiku", "low", "Read,Edit,Write,Grep,Glob")
 
     def test_rule_proofread_haiku_low(self):
-        self.rule("proofread", "haiku", "low", "")
+        self.rule("proofread", "haiku", "low", "Read,Edit,Write,Grep,Glob")
 
     def test_rule_edit_haiku_low(self):
-        self.rule("edit", "haiku", "low", "")
+        self.rule("edit", "haiku", "low", "Read,Edit,Write,Grep,Glob")
 
     def test_rule_code_sonnet_medium(self):
-        self.rule("code", "sonnet", "medium", "")
+        self.rule("code", "sonnet", "medium", "Bash,Read,Edit,Write,Grep,Glob")
 
     def test_rule_document_sonnet_medium(self):
-        self.rule("document", "sonnet", "medium", "")
+        self.rule("document", "sonnet", "medium", "Read,Edit,Write,Grep,Glob")
 
     def test_rule_explain_sonnet_medium(self):
         self.rule("explain", "sonnet", "medium", "Read,Grep,Glob")
 
     def test_rule_debug_sonnet_high(self):
-        self.rule("debug", "sonnet", "high", "")
+        self.rule("debug", "sonnet", "high", "Bash,Read,Edit,Write,Grep,Glob")
 
     def test_rule_test_haiku_low(self):
         self.rule("test", "haiku", "low", "Bash,Read,Grep,Glob")
@@ -59,7 +61,10 @@ class RulesTest(unittest.TestCase):
 
     def test_kind_sets_safe_id_and_disallow(self):
         self.assertEqual(tasks.RULES["verify"][2], "Bash,Read,Grep,Glob")
-        self.assertEqual(tasks.RULES["fix"][2], "")
+        self.assertEqual(tasks.RULES["fix"][2], "Bash,Read,Edit,Write,Grep,Glob")
+        self.assertTrue(all(tasks.RULES[k][2] for k in tasks.KINDS if k != "replan"),  # replan: no session
+                        "plan 23: every kind names its tools")
+        self.assertEqual(tasks.READ_CAPPED, ("scout", "search"))
         self.assertEqual(set(tasks.PREP_KINDS), set(tasks.RULES) - {"verify", "fix"})
         self.assertEqual(set(tasks.EDIT_KINDS), {"edit", "code", "debug", "document", "draft"})
         self.assertEqual(tasks.DISALLOW, ("Agent",))
@@ -217,6 +222,8 @@ class HandoffTest(unittest.TestCase):
 
     def test_check_handoff_reasons(self):
         self.assertEqual(tasks.check_handoff(GOOD), "")
+        self.assertEqual(tasks.HEADINGS, ("## Goal", "## Findings", "## Files touched", "## Troubleshooting",
+                                          "## Open questions", "## Next"))
         self.assertEqual(tasks.check_handoff(GOOD.replace("\n## Next\nRun the tests", "")), "missing: ## Next")
         swapped = GOOD.replace("## Files touched", "## TMP").replace("## Open questions", "## Files touched")
         swapped = swapped.replace("## TMP", "## Open questions")
@@ -226,6 +233,21 @@ class HandoffTest(unittest.TestCase):
             self.assertEqual(tasks.check_handoff(block), "Findings is empty")
         inline = GOOD.replace("## Next\n", "## Next: ")  # a heading must be a whole line
         self.assertEqual(tasks.check_handoff(inline), "missing: ## Next")
+
+    def test_check_handoff_needs_goal_and_troubleshooting(self):
+        self.assertEqual(tasks.check_handoff(GOOD.replace("## Goal\nAdd the export; this step: fix add()\n", "")),
+                         "missing: ## Goal")
+        self.assertEqual(tasks.check_handoff(GOOD.replace("## Troubleshooting\n- (none)\n", "")),
+                         "missing: ## Troubleshooting")
+        self.assertEqual(tasks.check_handoff(GOOD.replace("Add the export; this step: fix add()", "  ")), "Goal is empty")
+        self.assertEqual(tasks.check_handoff(OLD), "missing: ## Goal")  # a step's new block needs all six
+
+    def test_old_four_heading_note_checks_on_read_paths(self):
+        self.assertEqual(tasks.check_handoff(OLD, old_ok=True), "")
+        self.assertEqual(tasks.check_handoff(GOOD, old_ok=True), "")
+        self.assertEqual(tasks.check_handoff(OLD.replace("## Next\n", "## Next: "), old_ok=True), "missing: ## Next")
+        half = GOOD.replace("## Troubleshooting\n- (none)\n", "")  # a Goal heading: a new note, all six
+        self.assertEqual(tasks.check_handoff(half, old_ok=True), "missing: ## Troubleshooting")
 
     def test_next_hint(self):
         self.assertEqual(tasks.next_hint(GOOD + "\nNext model: sonnet/high"), ("sonnet", "high"))
@@ -707,9 +729,12 @@ class ChainTest(unittest.TestCase):
             def files():
                 return sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
 
-            self.assertEqual(len(files()), 6)
+            for n in (1, 3):
+                tasks.write_facts(home, task, tasks.step(task, n), f"facts {n}")
+            self.assertEqual(len(files()), 8)
             self.assertEqual(tasks.clear(home, task, keep_last=True), ["s1", "s2", "s3"])
-            self.assertEqual(files(), ["chain.jsonl", "prompt.md", "steps/03-search.md", "task.json"])
+            self.assertEqual(files(), ["chain.jsonl", "prompt.md", "steps/03-search.facts.md", "steps/03-search.md",
+                                       "task.json"])
             self.assertTrue(task["cleared"])
             self.assertEqual([s["handoff"] for s in task["steps"]], ["", "", "steps/03-search.md"])
             self.assertEqual(tasks.clear(home, task, keep_last=False), ["s1", "s2", "s3"])
@@ -759,9 +784,9 @@ class ChainTest(unittest.TestCase):
         step = tasks.step(task, 2)
         bare = tasks.step_prompt(task, step, "NOTE")
         self.assertNotIn("$", bare)
-        self.assertIn("\nHandoff note of the previous step:\nNOTE\n\nRules for this step:", bare)
+        self.assertIn("\nWhat the earlier steps left you:\nNOTE\n\nRules for this step:", bare)
         text = tasks.step_prompt(task, step, "NOTE", plan="PLAN TEXT", part="PART TEXT")
-        self.assertLess(text.index("PLAN TEXT"), text.index("Handoff note of the previous step"))
+        self.assertLess(text.index("PLAN TEXT"), text.index("What the earlier steps left you:"))
         self.assertIn("PART TEXT\n\nRules for this step:", text)
         self.assertNotIn("$", text)
         special = tasks.step_prompt(task, step, "NOTE", special="SPECIAL")
@@ -771,13 +796,16 @@ class ChainTest(unittest.TestCase):
         task = make(("scout", "code"))
         run(task, 1)
         first = tasks.step_prompt(task, tasks.step(task, 1), "")
-        self.assertIn("This is the first step: there is no handoff note yet.", first)
+        self.assertIn("What the earlier steps left you:\nThis is the first step: there is no handoff note yet.", first)
         code = tasks.step_prompt(task, tasks.step(task, 2), "PREVIOUS NOTE TEXT\n## Findings\nkept")
         self.assertIn("Task: Add the export\nWrite the export and test it", code)
         self.assertIn("Step 2 of 3: code. goal of code", code)
-        self.assertIn("PREVIOUS NOTE TEXT\n## Findings\nkept", code)
-        self.assertIn("HANDOFF\n## Findings", code)
-        self.assertIn("END HANDOFF", code)
+        self.assertIn("What the earlier steps left you:\nPREVIOUS NOTE TEXT\n## Findings\nkept", code)
+        self.assertIn("HANDOFF\n## Goal\n", code)
+        start = code.index("\nHANDOFF\n")
+        heads = [code.index("\n" + h + "\n", start) for h in tasks.HEADINGS]
+        self.assertEqual(heads, sorted(heads))  # the template's six headings, in order
+        self.assertTrue(code.rstrip().endswith("END HANDOFF"))
         self.assertIn("`Lesson: <one sentence>`", code)
         self.assertIn("most steps have none", code)
         self.assertIn("do not run /session-handoff", code)
@@ -791,10 +819,72 @@ class ChainTest(unittest.TestCase):
         self.assertNotIn("Check the work of step", code)
         retry = tasks.step_prompt(task, tasks.step(task, 2), "note", "no HANDOFF block")
         self.assertIn("Your earlier attempt at this step ended without a handoff: no HANDOFF block. "
-                      "Start again from the note above.", retry)
+                      "Start again from the handoff below.", retry)
         self.assertNotIn("Your earlier attempt", code)
         long = dict(task, goal="g" * 9000)
         self.assertLess(len(tasks.step_prompt(long, tasks.step(long, 1), "")), 9000)
+
+    def test_step_prompt_is_harness_neutral(self):
+        task = make(("scout", "code"))
+        text = tasks.step_prompt(task, tasks.step(task, 2), "note")
+        self.assertNotIn("Agent tool", text)
+        self.assertIn("do not hand the work to another agent", text)
+        self.assertIn("`Next model: <tier>/<effort>`", text)
+        self.assertIn("tier is haiku, sonnet or opus", text.replace("\n", " "))
+        self.assertEqual(tasks.next_hint("Next model: opus/high"), ("opus", "high"))  # the hint still parses
+        self.assertNotIn(chr(0x2014), tasks.PROMPT_FILE.read_text(encoding="utf-8"))
+
+    def test_goal_is_cut_to_600_after_the_first_step(self):
+        task = make(("scout", "code"))
+        task["goal"] = "g" * 2000
+        self.assertEqual(tasks.PROMPT_GOAL_MAX, 600)
+        self.assertEqual(tasks.prompt_goal(task, tasks.step(task, 1)), "g" * 2000)  # step 1 has no handoff yet
+        later = tasks.prompt_goal(task, tasks.step(task, 2))
+        self.assertEqual((len(later), later[-1]), (600, "\u2026"))
+        self.assertIn("\n" + later + "\n", tasks.step_prompt(task, tasks.step(task, 2), "note"))
+        task["goal"] = "short goal"
+        self.assertEqual(tasks.prompt_goal(task, tasks.step(task, 2)), "short goal")
+
+    def test_received_puts_the_facts_under_the_brief(self):
+        self.assertEqual(tasks.received("", "facts"), tasks.FIRST_STEP)
+        self.assertEqual(tasks.received("BRIEF", ""), "BRIEF")
+        both = tasks.received("BRIEF", "git diff --stat a..b")
+        self.assertTrue(both.startswith("BRIEF\n\nFacts the service read when that step ended"))
+        self.assertTrue(both.endswith("not compacted):\ngit diff --stat a..b"))
+        task = make(("scout", "code"))
+        text = tasks.step_prompt(task, tasks.step(task, 2), "BRIEF", facts="FACTS LINE")
+        self.assertLess(text.index("BRIEF"), text.index("FACTS LINE"))
+        self.assertLess(text.index("FACTS LINE"), text.index("Rules for this step:"))
+
+    def test_lessons_for_the_step_kind_only(self):
+        lines = ["- 2026-10-01 - APP - code: profile before optimizing",
+                 "- 2026-10-02 - APP - scout: grep the callers first",
+                 "- 2026-10-03 - APP - chat: a chat lesson reaches no step",
+                 "- 2026-10-04 - MY - APP - code: a project name with a dash still parses",
+                 "not a lesson line"]
+        self.assertEqual(tasks.lessons_for(lines, "code"), ["2026-10-01: profile before optimizing",
+                                                            "2026-10-04: a project name with a dash still parses"])
+        self.assertEqual(tasks.lessons_for(lines, "scout"), ["2026-10-02: grep the callers first"])
+        self.assertEqual(tasks.lessons_for(lines, "verify"), [])
+        many = [f"- 2026-10-{d:02d} - APP - code: lesson {d}" for d in range(1, 10)]
+        self.assertEqual(tasks.lessons_for(many, "code"), [f"2026-10-{d:02d}: lesson {d}" for d in range(5, 10)])
+        task = make(("scout", "code"))
+        text = tasks.step_prompt(task, tasks.step(task, 2), "note", lessons=tasks.lessons_for(lines, "code"))
+        self.assertIn("Lessons from earlier code steps in this project (use one only where it applies):\n"
+                      "- 2026-10-01: profile before optimizing\n", text)
+        self.assertLess(text.index("Lessons from"), text.index("Rules for this step:"))
+        self.assertNotIn("Lessons from", tasks.step_prompt(task, tasks.step(task, 2), "note"))
+
+    def test_facts_file_round_trip(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = make(("scout", "code"))
+            one = tasks.step(task, 1)
+            self.assertEqual(tasks.facts_file(task, one), "steps/01-scout.facts.md")
+            self.assertEqual(tasks.read_facts(home, task, 1), "")
+            rel = tasks.write_facts(home, task, one, "Tests: py -m unittest token=abc123\nOK")
+            self.assertEqual(rel, "steps/01-scout.facts.md")
+            self.assertEqual(tasks.read_facts(home, task, 1), "Tests: py -m unittest token=***\nOK")
+            self.assertEqual(tasks.read_facts(home, task, 9), "")
 
 
 class NoteStateTest(unittest.TestCase):

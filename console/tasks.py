@@ -21,24 +21,29 @@ from . import claude_cli, levers, redact, routing
 RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify and fix are computed.
     "scout": ("haiku", "low", "Read,Grep,Glob"),
     "search": ("haiku", "low", "Read,Grep,Glob,WebFetch,WebSearch"),
-    "draft": ("haiku", "low", ""),
-    "proofread": ("haiku", "low", ""),
-    "edit": ("haiku", "low", ""),
-    "code": ("sonnet", "medium", ""),
-    "document": ("sonnet", "medium", ""),
+    "draft": ("haiku", "low", "Read,Edit,Write,Grep,Glob"),  # plan 23 (D3): an explicit list on every kind
+    "proofread": ("haiku", "low", "Read,Edit,Write,Grep,Glob"),
+    "edit": ("haiku", "low", "Read,Edit,Write,Grep,Glob"),
+    "code": ("sonnet", "medium", "Bash,Read,Edit,Write,Grep,Glob"),
+    "document": ("sonnet", "medium", "Read,Edit,Write,Grep,Glob"),
     "explain": ("sonnet", "medium", "Read,Grep,Glob"),
-    "debug": ("sonnet", "high", ""),
+    "debug": ("sonnet", "high", "Bash,Read,Edit,Write,Grep,Glob"),
     "test": ("haiku", "low", "Bash,Read,Grep,Glob"),
     "design": ("opus", "high", "Read,Grep,Glob,WebFetch,WebSearch"),
     "replan": ("haiku", "low", ""),
     "verify": ("", "", "Bash,Read,Grep,Glob"),
-    "fix": ("", "", ""),
+    "fix": ("", "", "Bash,Read,Edit,Write,Grep,Glob"),
 }
 KINDS = tuple(RULES)
 PREP_KINDS = tuple(k for k in KINDS if k not in ("verify", "fix"))  # what Prep may propose
 EDIT_KINDS = frozenset({"edit", "code", "debug", "document", "draft"})  # a verify follows the last of them
 DISALLOW = ("Agent",)
-HEADINGS = ("## Findings", "## Files touched", "## Open questions", "## Next")
+HEADINGS = ("## Goal", "## Findings", "## Files touched", "## Troubleshooting", "## Open questions", "## Next")
+OLD_HEADINGS = ("## Findings", "## Files touched", "## Open questions", "## Next")  # a note from before plan 23
+READ_CAPPED = ("scout", "search")  # kinds whose run gets --max-turns read_max_turns (plan 23)
+PROMPT_GOAL_MAX = 600  # the goal in a step prompt after step 1: every handoff carries its Goal heading (plan 23)
+LESSONS_IN_PROMPT = 5  # the newest lessons of the step's own kind that ride in its prompt (plan 23)
+FIRST_STEP = "This is the first step: there is no handoff note yet."
 MARK_START, MARK_END = "HANDOFF", "END HANDOFF"
 NOTE_MAX = 20 * 1024
 GOAL_MAX = 6000
@@ -178,19 +183,29 @@ def note_state(task: dict, s: dict, live: str = "") -> str:
     return "ready" if step(task, s["n"] + 1)["state"] == "planned" else "sent"
 
 
-def check_handoff(block: str) -> str:
-    """"" when the four headings stand on their own lines in order and Findings has text; else the reason."""
+def check_handoff(block: str, old_ok: bool = False) -> str:
+    """"" when the six headings stand on their own lines in order and Goal and Findings have text; else the reason.
+    `old_ok`: a four-heading note from before plan 23 (an old task folder) passes too; only read paths pass it."""
     lines = str(block or "").splitlines()
+    if old_ok and not any(line.strip() in ("## Goal", "## Troubleshooting") for line in lines):
+        return _check_headings(lines, OLD_HEADINGS)
+    return _check_headings(lines, HEADINGS)
+
+
+def _check_headings(lines: list, headings: tuple) -> str:
     at = []
-    for heading in HEADINGS:
+    for heading in headings:
         found = [i for i, line in enumerate(lines) if line.strip() == heading]
         if not found:
             return f"missing: {heading}"
         at.append(found[0])
     if at != sorted(at):
         return "headings out of order"
-    if not any(line.strip() for line in lines[at[0] + 1:at[1]]):
-        return "Findings is empty"
+    for heading in ("## Goal", "## Findings"):
+        if heading in headings:
+            i = headings.index(heading)
+            if not any(line.strip() for line in lines[at[i] + 1:at[i + 1]]):
+                return f"{heading[3:]} is empty"
     return ""
 
 
@@ -243,6 +258,11 @@ def note_file(task: dict, step: dict) -> str:
 def handoff_file(task: dict, step: dict) -> str:
     """The session-handoff skill's note of the step Fred handed off."""
     return f"steps/{step['n']:02d}-handoff.md"
+
+
+def facts_file(task: dict, step: dict) -> str:
+    """The facts the service read when the step ended (git and its last test command): never compacted."""
+    return f"steps/{step['n']:02d}-{step['kind']}.facts.md"
 
 
 def brief_file(task: dict, step: dict) -> str:
@@ -636,6 +656,22 @@ def write_brief(home, task: dict, step: dict, text: str) -> str:
     return rel
 
 
+def write_facts(home, task: dict, step: dict, text: str) -> str:
+    """The facts text of `step` (facts.text), masked; returns the relative name."""
+    rel = facts_file(task, step)
+    path = folder(home, task["id"]) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(redact.mask(text), encoding="utf-8")
+    return rel
+
+
+def read_facts(home, task: dict, n: int) -> str:
+    try:
+        return (folder(home, task["id"]) / facts_file(task, step(task, n))).read_text(encoding="utf-8")
+    except (KeyError, OSError):
+        return ""
+
+
 def prune(home, days: float, now: float = None) -> list:
     """Remove the task folders of `done`, `stopped`, `stuck` and `handed` tasks whose task.json is older than `days`."""
     cutoff = (time.time() if now is None else now) - days * 86400
@@ -665,7 +701,8 @@ def clear(home, task: dict, keep_last: bool = True) -> list:
     if keep_last:
         last = step(task, task["last_good"]) if task["last_good"] else None
         keep = note_file(task, last) if last else ""
-        kept = {keep, brief_file(task, last) if last else "", task.get("handoff_note") or ""}
+        kept = {keep, brief_file(task, last) if last else "", facts_file(task, last) if last else "",
+                task.get("handoff_note") or ""}
         for path in sorted((root / "steps").glob("*.md")):
             if f"steps/{path.name}" not in kept:
                 path.unlink(missing_ok=True)
@@ -690,15 +727,49 @@ def _fix_text(task: dict, s: dict) -> str:
     return levers.escalate_text(before["verdict_detail"] if before else "", *route)
 
 
+_LESSON_LINE = re.compile(r"^- (\d{4}-\d\d-\d\d) - .*? - ([a-z]+): (.+)$")
+
+
+def lessons_for(lines, kind: str, limit: int = LESSONS_IN_PROMPT) -> list:
+    """The lessons a step of `kind` reads: lessons.md lines (levers.read_lessons, one project) whose kind is the
+    step's own, newest last, at most `limit`, as `<day>: <sentence>`. A chat's lesson (`chat`) reaches no step."""
+    out = []
+    for line in lines or ():
+        m = _LESSON_LINE.match(str(line).strip())
+        if m and m.group(2) == kind:
+            out.append(f"{m.group(1)}: {m.group(3)}")
+    return out[-limit:] if limit > 0 else []
+
+
+def received(prev_note: str, facts: str = "") -> str:
+    """What the earlier steps left a step: the previous brief, then the facts the service read (never compacted)."""
+    if not prev_note:
+        return FIRST_STEP
+    if not facts:
+        return prev_note
+    return f"{prev_note}\n\nFacts the service read when that step ended (git and its last test run, not compacted):\n{facts}"
+
+
+def prompt_goal(task: dict, step: dict) -> str:
+    """The goal as a step prompt carries it: whole (up to GOAL_MAX) for step 1, which has no handoff yet; cut to
+    PROMPT_GOAL_MAX characters for every later step, whose handoff restates it under ## Goal."""
+    goal = str(task.get("goal", ""))[:GOAL_MAX]
+    if step["n"] == 1 or len(goal) <= PROMPT_GOAL_MAX:
+        return goal
+    return goal[:PROMPT_GOAL_MAX - 1].rstrip() + "\u2026"
+
+
 def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", special: str = "",
-                plan: str = "", part: str = "") -> str:
+                plan: str = "", part: str = "", facts: str = "", lessons=()) -> str:
     kind = step["kind"]
     special = special or (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1)
                           if kind == "verify" else _fix_text(task, step) if kind == "fix" else "")
     retry = (f"Your earlier attempt at this step ended without a handoff: {retry_reason}. "
-             "Start again from the note above.") if retry_reason else ""
+             "Start again from the handoff below.") if retry_reason else ""
+    taught = (f"Lessons from earlier {kind} steps in this project (use one only where it applies):\n"
+              + "\n".join(f"- {line}" for line in lessons) + "\n\n") if lessons else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
-        title=task["title"], goal=str(task.get("goal", ""))[:GOAL_MAX], n=step["n"], m=len(task["steps"]),
+        title=task["title"], goal=prompt_goal(task, step), n=step["n"], m=len(task["steps"]),
         kind=kind, step_goal=step["goal"], special=special, retry=retry,
-        plan=plan + "\n\n" if plan else "", part=part + "\n\n" if part else "",
-        prev=prev_note or "This is the first step: there is no handoff note yet.")
+        plan=plan + "\n\n" if plan else "", lessons=taught, part=part + "\n\n" if part else "",
+        prev=received(prev_note, facts))

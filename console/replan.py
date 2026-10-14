@@ -119,8 +119,10 @@ def note_block(task: dict) -> str:
     r = task.get("replan") or {}
     before = "\n".join(f"- {s['kind']}: {s['goal']}" for s in r.get("before", [])) or "- (none)"
     after = "\n".join(f"- {s['kind']}: {s['goal']}" for s in r.get("after", [])) or "- (none)"
-    return ("## Findings\n" + (r.get("why") or "no change") + "\n## Files touched\n- (none)\n## Open questions\n- (none)\n"
-            "## Next\nSteps before:\n" + before + "\nSteps after:\n" + after)
+    goal = redact.clip(task.get("goal") or task["title"], 300)
+    return ("## Goal\n" + goal + "\n## Findings\n" + (r.get("why") or "no change") + "\n## Files touched\n- (none)\n"
+            "## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\nSteps before:\n" + before
+            + "\nSteps after:\n" + after)
 
 
 def summary(task: dict) -> str:

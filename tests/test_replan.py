@@ -75,6 +75,7 @@ class ReplanTest(unittest.TestCase):
         self.assertEqual(replan.summary(t), "replanned: 1 steps added")
         self.assertEqual(lines[0]["why"], "replanned: 1 steps added")
         note = replan.note_block(t)
+        self.assertIn("## Goal\n", note)
         self.assertIn("## Findings\nweek buckets first\n", note)
         self.assertIn("Steps after:\n- code: week buckets\n- code: step code", note)
         self.assertEqual(tasks.check_handoff(note), "")

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 import cc_events
-from console import claude_cli, levers, paths, prep
+from console import claude_cli, levers, paths, prep, tasks
 
 ROOT = Path(__file__).resolve().parent.parent
 DOT = ROOT / "dotclaude"
@@ -76,6 +76,14 @@ class DotClaudeTest(unittest.TestCase):
         body = example.split(" - chat: ", 1)[1]
         self.assertEqual(levers.lesson_line("CLAUDE CONSOLE", "chat", body, day), example)
         self.assertIn("most chats teach nothing", text)
+
+    def test_handoff_block_is_the_step_block(self):
+        text = FILES["session-handoff"].read_text(encoding="utf-8")
+        block = tasks.parse_handoff(text)
+        self.assertIsNotNone(block)
+        self.assertEqual([line for line in block.splitlines() if line.startswith("## ")], list(tasks.HEADINGS))
+        self.assertEqual(tasks.check_handoff(block), "")  # the template the skill shows passes the step check
+        self.assertIn("Nothing comes after `END HANDOFF`", text)
 
     def test_route_model_ignores_old_misses(self):
         text = FILES["route-model"].read_text(encoding="utf-8")
