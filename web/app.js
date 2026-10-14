@@ -74,14 +74,14 @@ let snap = null;
 let cfg = null;          // /api/config
 let live = false;
 let form = "open";       // open | pill
-let page = "list";       // list | session | prep | task | usage
+let page = "list";       // list | session | prep | task | usage | board
 let openId = null;
 let taskId = null;       // the Task page's task
 let taskData = null;     // GET /api/task for it: {task, levers, note, brief}
 let taskSig = "";
 let backTo = null;       // {page: "task", id} or {page: "session", id}: where the session or Task page's back arrow returns
 let rawOpen = false;     // the Task page shows the raw note instead of the brief
-const foldState = new Map(); // plan 23: fold label -> open, kept across redraws (Handoff, its headings, Facts, Window runs); closed on openTask
+const foldLabel = new Map(); // plan 23: fold label -> open, kept across redraws (Handoff, its headings, Facts, Window runs); closed on openTask
 let settingBusy = false; // POST /api/setting in flight (the Window runs switch)
 let settingErr = "";
 let planOpen = new Set(); // the Task page's open plan folds (plan 24); closed on openTask
@@ -113,6 +113,16 @@ let leversSig = "";
 let cold = null;        // {idle_s, tokens, cost} when a lever would re-read the open session at full price
 let coldTimer = null;
 let freshHandoff = false;  // Hand off after a PASS starts a new chat from a brief: it re-reads nothing
+let boardFrom = null;    // {page, id}: where the Board opened from; Esc and the back arrow return there
+let boardTask = "";      // the picked task ("" none: the Board picks the newest in scope)
+let boardPick = "";      // "" nothing (the Measure table), "t" the task head, "s<n>" a step, "c<n>" the connector after step n
+let itab = "chat";       // the step inspector's tab (window.json board_tab)
+let boardData = null;    // {id, sig, data}: GET /api/task of boardTask
+let boardChat = null;    // {sid, at, chat}: GET /api/chat of the picked step's session
+let measureData = null;  // {project, at, data}: GET /api/measure
+let foldState = {};      // window.json folds: {key: open}
+const toolOpen = new Set();  // "<session>:<k>": the chat's tool rows Fred opened (not kept)
+const BOARD_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"]);
 const seen = new Set();  // peek events already shown, answered or dismissed
 const sent = {};         // "session|question" -> the session that runs the answer ("" = same one)
 const cardMsg = {};      // session -> the last error of a list card
@@ -431,6 +441,7 @@ function showPage(name) {
   procShown = "";
   if (name === "session") $("sscroll").scrollTop = 0;
   if (name === "task") $("tscroll").scrollTop = 0;
+  if (name === "board") { $("bchain").scrollTop = 0; boardData = null; }
   clearInterval(usageTimer);
   usageTimer = null;
   if (name === "usage") { $("uscroll").scrollTop = 0; loadUsage(); usageTimer = setInterval(loadUsage, 60000); }
@@ -485,6 +496,7 @@ function render() {
   if (page === "list") renderListPage();
   else if (page === "session") renderSession();
   else if (page === "task") renderTaskPage();
+  else if (page === "board") renderBoard();
 }
 
 // -- list page ---------------------------------------------------------------------------
@@ -500,6 +512,8 @@ function renderTop() {
   const n = snap.counts.needs;
   $("needsbtn").hidden = !n;
   $("needsbtn").textContent = `${n} ${n === 1 ? "needs" : "need"} you`;
+  $("boardbtn").hidden = !native() && innerWidth < 700;  // plan 25: in a browser the Board button shows once the viewport is wide
+  $("boardbtn").classList.toggle("on", innerWidth >= 700);
   $("scopenm").textContent = scope ? projectName(scope) : "All projects";
   const sp = snap.spend, row = spendRow(sp);
   setHtml($("today"), `<span class="big">${money(sp.today)}</span><span class="cells row30">${row.html}</span>
@@ -851,7 +865,7 @@ function setBusy(text) {
 
 function saveDraft() {
   clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => api("/api/draft", { text: draft, project, brief: briefOpen, effort: effortPick }).catch(() => {}), 600);
+  draftTimer = setTimeout(() => api("/api/draft", { text: draft, project, brief: briefOpen, effort: effortPick, board_tab: itab, folds: foldState }).catch(() => {}), 600);
 }
 
 function doPrep() {  // the box empties at once; the Prep runs in the service and shows on the strip
@@ -1351,7 +1365,7 @@ function oldStep(id) {  // [task, step] when `id` is a session of the task on th
 async function renderOldChat(id) {  // a step session out of the snapshot: its transcript, no tabs
   const seq = ++procSeq, chat = await api("/api/chat?session=" + encodeURIComponent(id));
   if (seq !== procSeq || openId !== id) return;
-  setHtml($("proc"), `<div class="pane" id="pane" tabindex="0">${chatPane(chat, id, "chat")}</div>`, { sel: ".pane", end: true, reset: procShown !== id + "|old" });
+  setHtml($("proc"), `<div class="pane" id="pane" tabindex="0">${chatPane(chat, id, "chat", { prompt: true, step: (oldStep(id) || [])[1] })}</div>`, { sel: ".pane", end: true, reset: procShown !== id + "|old" });
   procShown = id + "|old";
 }
 function renderSession() {
@@ -1425,14 +1439,52 @@ function claudeTurn(text) {  // a step's (or a skill's) final reply: the block f
   const h = handoffSections(hb[1]), w = hb[1].split(/\s+/).filter(Boolean).length;
   return (hb[0].trim() ? chatHtml(hb[0]) : "") + `<span class="hchip">HANDOFF block · <b>${w} w</b> · six headings</span><p>Next: ${esc(h.next.split("\n")[0])}</p>`;
 }
-function chatPane(chat, sid, source) {  // the Chat tab's markup: a window run's stream or a transcript's turns
-  const turns = chat.items.filter((i) => i.role !== "tool");
+const AGENT_NAME = { claude: "Claude", codex: "Codex", opencode: "OpenCode", cmd: "Command Code" };
+function toolsRow(list, key) {  // consecutive tool events fold into one row; a failed exit comes first, so an ellipsis never hides it
+  const kinds = [...new Set(list.map((t) => t.split(/[ ·]/)[0]))].join(", ");
+  const bad = list.map((t) => (t.match(/exit [1-9]\d*/) || [])[0]).find(Boolean), open = toolOpen.has(key);
+  return `<button class="tools" data-fold data-tkey="${esc(key)}" aria-expanded="${open}"><span>${list.length} tool ${list.length === 1 ? "event" : "events"}${bad ? ` · <span class="r">${esc(bad)}</span>` : ""} · ${esc(kinds)}</span><span class="car">▾</span></button>
+    <div class="tlist"${open ? "" : " hidden"}>${list.map((t) => `<span${/exit [1-9]/.test(t) ? ' class="r"' : ""}>${esc(t)}</span>`).join("")}</div>`;
+}
+function promptRow(text, o, key) {  // a task step's first turn is the prompt the service built: folded, not labelled You
+  const s = o.step || {}, w = String(text || "").split(/\s+/).filter(Boolean).length, open = foldOpen("prompt", false);
+  const from = s.n > 1 ? `goal and the handoff of ${two(s.n - 1)}` : "goal and the context pack";
+  return `<div class="turn you prompt"><button class="fh" data-fold data-fkey="prompt" aria-expanded="${open}"><span class="lbl">Prompt</span><span class="fi">${from} · ${w} w</span><span class="car">▾</span></button><p${open ? "" : " hidden"}>${esc(text)}</p></div>`;
+}
+function handoffSplit(text, o, last) {  // a turn that ends with the HANDOFF block: the words before it, the chip, its Next line
+  const t = String(text || ""), at = t.search(/(^|\n)HANDOFF\s*\n/);
+  if (at < 0) return chatHtml(t);
+  if (!o.step) return claudeTurn(t);  // a hand chat's skill block keeps plan 23's chip
+  const block = t.slice(at), next = (block.match(/## Next\s*\n+([^\n]*)/) || [, ""])[1];
+  const w = block.split(/\s+/).filter(Boolean).length;
+  return `${chatHtml(t.slice(0, at))}<span class="hchip">HANDOFF block · <b>${w} w</b> · six headings ${o.board ? "in the Handoff tab" : "on the Task page"}</span>${next ? `<p>Next: ${esc(next)}</p>` : ""}`;
+}
+function stepOf(id) {  // the task step whose session, or one of whose attempts, is this session
+  for (const t of snap.tasks || []) for (const x of t.steps) if (x.session === id || (x.attempts || []).some((a) => a.session === id)) return x;
+  return undefined;
+}
+function chatPane(chat, sid, source, o = {}) {  // the Chat tab, the session page and the Board's: one grammar (interface 6.1)
+  const items = chat.items || [], who = AGENT_NAME[chat.harness || "claude"] || "Claude", out = [];
+  const lastClaude = items.map((i) => i.role).lastIndexOf("claude");
+  let tools = [], k = 0, result = "";
+  const flush = () => { if (tools.length) { out.push(toolsRow(tools, `${sid}:${k++}`)); tools = []; } };
+  items.forEach((i, n) => {
+    if (!["you", "claude", "note", "result"].includes(i.role) || (i.role === "note" && i.text !== "stopped")) { tools.push(i.text); return; }
+    if (i.role === "result") { result = i.text || result; return; }
+    flush();
+    if (i.role === "you" && n === 0 && o.prompt) { out.push(promptRow(i.text, o, `${sid}:p`)); return; }
+    if (i.role === "note") { out.push('<p class="src">stopped</p>'); return; }
+    const writing = chat.live && n === lastClaude ? ' · writing<span class="cells"><i class="f live"></i></span>' : "";
+    const lbl = `<span class="lbl">${i.role === "you" ? "You" : esc(who)}${i.ts ? " · " + hhmm(i.ts) : ""}${writing}</span>`;
+    const body = i.role === "claude" ? handoffSplit(i.text, o, n === lastClaude) : i.text ? `<p>${esc(i.text)}</p>` : "";
+    out.push(`<div class="turn ${i.role === "you" ? "you" : "claude"}">${lbl}${body}${o.compact ? "" : chatFiles(i.files, i.role, sid)}</div>`);
+  });
+  flush();
   const foot = chat.source === "window"
     ? "Streamed from this window run." + (chat.start_commit ? ` start ${esc(chat.start_commit.slice(0, 7))} · ${chat.changed == null ? "?" : chat.changed} file(s) changed since.` : "")
     : `Read from the ${esc(source === "?" ? "chat" : source)} transcript, in words and files; tool output stays in Steps.`;
-  return `<div class="chat">${turns.map((i) => `<div class="turn ${i.role}"><span class="lbl">${i.role === "you" ? "You" : i.role === "claude" ? "Claude" : esc(i.role)}${i.ts ? " · " + hhmm(i.ts) : ""}</span>
-    ${i.role === "claude" ? claudeTurn(i.text) : i.text ? `<p>${esc(i.text)}</p>` : ""}${chatFiles(i.files, i.role, sid)}</div>`).join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
-    <p class="src">${foot}</p></div>`;
+  return `<div class="chat${o.compact ? " compact" : ""}">${out.join("") || '<p class="none">Nothing to show yet. A VS Code or terminal chat shows its turns once a prompt has named its transcript.</p>'}
+    <p class="src">${foot}${result ? " · " + esc(result) : ""}</p></div>`;
 }
 
 async function renderProc(s) {
@@ -1469,7 +1521,7 @@ async function renderProc(s) {
       <div class="hd at"><span class="lbl">${hhmm(at(sel))} · ${inMin.length} step${inMin.length === 1 ? "" : "s"}</span><span class="m">← → other minutes</span></div>
       ${inMin.length ? `<div class="log">${inMin.map((x) => logRow(x, "", stepTag(s)(x))).join("")}</div>` : '<p class="none">No step in this minute.</p>'}</div>`;
   } else {
-    body = chatPane(chat, s.id, s.source);
+    body = chatPane(chat, s.id, s.source, { prompt: !!taskTag(s), step: stepOf(s.id) });
   }
   const html = `<div class="tabs" role="tablist" aria-label="Process">${TABS.map(([id, nm]) =>
     `<button role="tab" id="tab-${id}" data-tab="${id}" aria-selected="${wanted === id}" aria-controls="pane" tabindex="${wanted === id ? 0 : -1}">${nm}${id === "agents" ? ` <span class="n">${rows.length}</span>` : ""}</button>`).join("")}</div>
@@ -1590,8 +1642,10 @@ function step(d) {  // ‹ › and Up / Down: the neighbouring session in the li
   if (k >= 0 && to) { openSession(to.id, tab); }
 }
 function goBack() {  // the session page and the Task page: back where they came from, else the list
+  if (page === "board") return closeBoard();
   const b = backTo;
   backTo = null;
+  if (b && b.page === "board") return showPage("board");  // plan 25: no resize, the window is still wide
   if (b && b.page === "task" && (snap.tasks || []).some((t) => t.id === b.id)) return openTask(b.id);
   if (b && b.page === "session") return openSession(b.id, tab);
   showPage("list");
@@ -1692,8 +1746,8 @@ function stepBody(text) {  // a ### Step N section or a sub-plan: Files, Actions
 }
 // -- plan 23: the Handoff fold, its facts, the chip's block parser ---------------------------------
 function fold(label, info, body, o = {}) {  // a head button and a body; o.cls, o.tone ("r" | "y"), o.open, o.title; the open state outlives a redraw
-  const open = foldState.has(label) ? foldState.get(label) : !!o.open;
-  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold aria-expanded="${open}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="lbl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span><span class="car">▾</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
+  const open = o.force ? true : o.key ? foldOpen(o.key, o.open) : foldLabel.has(label) ? foldLabel.get(label) : !!o.open;
+  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold${o.key ? ` data-fkey="${esc(o.key)}"` : ""} aria-expanded="${open}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="lbl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span><span class="car">▾</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
 }
 const HEADS = { "## Goal": "goal", "## Findings": "findings", "## Files touched": "files", "## Troubleshooting": "trouble",
                 "## Open questions": "questions", "## Next": "next" };  // tasks.HEADINGS
@@ -1893,10 +1947,14 @@ function drawTask() {
   setHtml($("tbar"), `${buttons ? `<div class="lr">${buttons}</div>` : ""}<div class="say">${esc(reasons)}</div><div id="t-msg" class="say"></div>`);
 }
 
+function taskRowSig(row) {  // what changed in a task's row: the Task page and the Board fetch GET /api/task only when this does
+  const at = row.steps.find((x) => x.n === row.current), run = at && snap.sessions.find((x) => x.id === at.session);
+  return [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, row.steps.map((x) => x.note + x.part).join(), row.plan ? row.plan.words : "", row.asks, row.hand_off, run ? run.state + run.run_live : ""].join("|");
+}
 async function renderTaskPage() {  // GET /api/task when the task's row changed; the drawing follows every snapshot
   const row = (snap.tasks || []).find((x) => x.id === taskId), at = row && row.steps.find((x) => x.n === row.current);
   const run = at && snap.sessions.find((x) => x.id === at.session);
-  const sig = row ? [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, row.steps.map((x) => x.note + x.part).join(), row.plan ? row.plan.words : "", row.asks, row.hand_off, run ? run.state + run.run_live : ""].join("|") : "gone";
+  const sig = row ? taskRowSig(row) : "gone";
   if (sig !== taskSig) {
     taskSig = sig;
     const id = taskId, data = await api("/api/task?id=" + encodeURIComponent(id)).catch(() => false);
@@ -1911,7 +1969,7 @@ async function openTask(id) {
   taskId = id;
   taskData = null;
   rawOpen = false;
-  foldState.clear();
+  foldLabel.clear();
   planOpen = new Set();
   planEdit = false;
   planEditPart = 0;
@@ -2546,10 +2604,212 @@ $("uscroll").addEventListener("pointerleave", () => { $("utip").hidden = true; }
 $("uscroll").addEventListener("focusin", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); else $("utip").hidden = true; });
 $("uscroll").addEventListener("scroll", () => { $("utip").hidden = true; });
 
+// -- the Board (plan 25): the chain and the inspector, one page of the one window -------------------------------
+function foldOpen(key, dflt) { return key && key in foldState ? foldState[key] : !!dflt; }
+function saveFolds() { saveDraft(); }  // the draft save carries folds and board_tab
+
+function boardTasks() {  // the tasks in scope, newest first; a finished or stopped task leaves a day after its last change (the picked one stays)
+  return (snap.tasks || []).filter((t) => t.id === boardTask || ((!scope || sameDir(t.project_dir, scope)) && (taskGroup(t) !== "done" || snap.now - t.updated < 86400)))
+    .sort((a, b) => b.updated - a.updated);
+}
+function boardProject() {
+  if (scope) return scope;
+  const t = (snap.tasks || []).find((x) => x.id === boardTask);
+  return t ? t.project_dir : "";
+}
+
+async function openBoard(id) {  // the window widens to the saved Board size; Esc gives the old size back
+  if (form === "pill") await setForm("open");
+  boardFrom = page === "board" ? boardFrom : { page, id: page === "task" ? taskId : page === "session" ? openId : "" };
+  boardTask = id || "";  // the opened task stays listed whatever the scope says
+  const t = (snap.tasks || []).find((x) => x.id === id) || boardTasks()[0];
+  boardTask = t ? t.id : "";
+  boardPick = t && t.steps.some((s) => s.n === t.current) && t.state !== "done" ? "s" + t.current : t ? "t" : "";
+  boardData = boardChat = null;
+  if (native()) { try { await window.pywebview.api.board(true); } catch (e) { /* the window keeps its size */ } }
+  showPage("board");
+}
+async function closeBoard() {  // back to the page the Board opened from, at the compact size
+  const b = boardFrom;
+  boardFrom = null;
+  if (native()) { try { await window.pywebview.api.board(false); } catch (e) { /* the window keeps its size */ } }
+  if (b && b.page === "task" && (snap.tasks || []).some((t) => t.id === b.id)) return openTask(b.id);
+  if (b && b.page === "session" && b.id) return openSession(b.id, tab);
+  showPage("list");
+}
+
+async function renderBoard() {
+  const tasks = boardTasks(), row = tasks.find((t) => t.id === boardTask) || tasks[0];
+  if (row && row.id !== boardTask) { boardTask = row.id; boardPick = "t"; boardData = null; }
+  $("bcrumb").textContent = `Board / ${scope ? projectName(scope) : "All projects"} · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+  setHtml($("bfoot"), tasks.length ? `<span><span class="kbd">↑</span><span class="kbd">↓</span> step</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> chat</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
+    <button class="q" title="A step's context in cells of 10K; the chip between two steps is the handoff the next one received, its words in the inspector" aria-label="Legend">?</button>` : "");
+  if (!row) {
+    setHtml($("bchain"), emptyBoard());
+    setHtml($("bwrap"), "");
+    return;
+  }
+  const sig = taskRowSig(row);
+  if (!boardData || boardData.id !== row.id || boardData.sig !== sig) {
+    const id = row.id, data = await api("/api/task?id=" + encodeURIComponent(id)).catch(() => false);
+    if (page !== "board" || boardTask !== id) return;
+    boardData = { id, sig, data };
+  }
+  const d = boardData.data;
+  setHtml($("bchain"), tasks.map((t) => chainHtml(t, t.id === row.id ? d : null, t.id === row.id ? boardPick : null)).join(""));
+  setHtml($("bwrap"), `<div class="binsp">${await boardInspector(row, d)}</div>`, { sel: ".binsp", reset: boardWrapKey() });
+}
+function boardInspector(row, d) {  // Tasks 5 and 6 fill the cases; until they land a pick shows no inspector
+  if (d === false) return '<p class="note m">This task is gone: it was cleared or its folder was removed.</p>';
+  return "";
+}
+function boardWrapKey() {  // true when the pick changed since the last draw: a new pick starts at the top, a redraw keeps the scroll
+  const k = boardTask + "|" + boardPick + "|" + itab, changed = boardWrapKey.last !== k;
+  boardWrapKey.last = k;
+  return changed;
+}
+
+function boardItems(row) {  // ["t", "s1", "c1", "s2", ...] in chain order; a connector only when it is not pending
+  const d = boardData && boardData.id === row.id ? boardData.data : null, t = d && d.task, steps = t ? t.steps : row.steps, out = ["t"];
+  steps.forEach((s, k) => {
+    out.push("s" + s.n);
+    if (t && k < steps.length - 1 && connCase(t, s, d).cls !== "pending") out.push("c" + s.n);
+  });
+  return out;
+}
+function boardKey(e) {
+  const tasks = boardTasks(), k = tasks.findIndex((t) => t.id === boardTask), row = tasks[k];
+  e.preventDefault();
+  if (e.key === "Escape") { if (boardPick) { boardPick = ""; renderBoard(); } else closeBoard(); return; }
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    const to = tasks[k + (e.key === "ArrowRight" ? 1 : -1)];
+    if (to) { boardTask = to.id; boardPick = "t"; boardData = boardChat = null; renderBoard(); }
+    return;
+  }
+  if (!row) return;
+  const items = boardItems(row), at = items.indexOf(boardPick);
+  if (e.key === "Enter") {
+    const s = boardPick[0] === "s" && row.steps.find((x) => "s" + x.n === boardPick);
+    if (s && s.session) { backTo = { page: "board" }; openSession(s.session); }
+    return;
+  }
+  const to = items[at < 0 ? 0 : at + (e.key === "ArrowDown" ? 1 : -1)];
+  if (to) { boardPick = to; renderBoard().then(() => { const f = document.querySelector(`#bchain [data-bpick="${to}"]`); if (f) f.focus({ preventScroll: false }); }); }
+}
+
+// the chain column
+const BWORD = { running: ["Running", "n", "running"], done: ["Done", "g", "done"], failed: ["Fail", "r", "stuck"], planned: ["Planned", "q", "planned"],
+  waiting: ["Waiting", "y", "waiting"], handed: ["Handed", "y", "done"] };  // [word, tone, sprite]
+const HINT_IN_W = 300, HINT_CTX = 100000;  // D4 (a): a small handoff in and a large context reached: the step read on its own
+function stepShown(t, s, row) {
+  if (row && s.n === t.current && (row.state === "waiting" || row.asks)) return "waiting";
+  return s.verdict === "FAIL" || s.state === "failed" ? "failed" : BWORD[s.state] ? s.state : "planned";
+}
+function stepCtx(s) {  // a running step's context is the live session row's; null and undefined both mean unknown
+  const r = s.state === "running" && s.session ? snap.sessions.find((x) => x.id === s.session) : null;
+  const v = r ? r.ctx_tokens : s.ctx_tokens;
+  return v == null ? null : v;
+}
+const ctxUnknown = (s) => s.harness && s.harness !== "claude" ? `${s.harness} reports a turn's spend, not a context size` : "no context reading for this step";
+function ctxFigTone(tok) { const [y, r] = cfg ? cfg.gauge : [150000, 300000]; return tok >= r ? "r" : tok >= y ? "y" : ""; }
+function ctxMiniHtml(s) {  // a finished block: 15 cells and the figure, or the word
+  const tok = stepCtx(s);
+  if (tok == null) return `<span class="ctx" title="${esc(ctxUnknown(s))}">ctx unknown</span>`;
+  return `<span class="ctx" title="context reached ${kTokens(tok)}"><span class="cells">${cellsHtml(ctxClasses(tok).filter((_, k) => k % 2 === 0))}</span><b class="${ctxFigTone(tok)}">${kTokens(tok)}</b></span>`;
+}
+function ctxRowHtml(s, live) {  // a full block: 30 cells and the figure, or the word unknown
+  const tok = stepCtx(s);
+  if (tok == null) return `<span class="cx"><span>ctx</span><span class="unk" title="${esc(ctxUnknown(s))}">unknown</span><span></span></span>`;
+  const cls = ctxClasses(tok), last = cls.map((c) => c !== "").lastIndexOf(true);
+  if (live && last >= 0) cls[last] += " live";
+  return `<span class="cx"><span>ctx</span><span class="cells">${cellsHtml(cls)}</span><b class="${ctxFigTone(tok)}">${kTokens(tok)}</b></span>`;
+}
+function stepCost(s) {
+  if (s.state === "planned") return "";
+  const got = (s.attempts || []).filter((a) => a.cost != null), c = got.length ? got.reduce((x, a) => x + a.cost, 0) : s.cost;
+  return c == null ? '<span class="cost unk" title="the harness reported no usage">? cost</span>' : `<span class="cost">${money(c)}</span>`;
+}
+function rungTime(s) {
+  const rung = modelText(rungOf(s.harness, s.model), s.effort);
+  const t = s.state === "running" && s.started ? elapsed(snap.now - s.started) : s.ended && s.started ? elapsed(s.ended - s.started) : "";
+  return `${esc(rung)}${t ? " · " + t : ""}`;
+}
+function triesHtml(s) {  // one 7 px square per attempt: red failed, green the one that passed, ink the live one
+  const a = s.attempts || [];
+  if (a.length < 2 && !a.some((x) => x.why)) return "";
+  const cls = a.map((x, k) => (x.why ? "r" : k === a.length - 1 ? (s.state === "running" ? "f" : s.state === "done" ? "g" : "") : ""));
+  return `<span class="tries" title="attempts: ${cls.map((c) => (c === "r" ? "failed" : c === "g" ? "passed" : c === "f" ? "live" : "stopped")).join(", ")}">${cls.map((c) => `<i class="${c}"></i>`).join("")}</span>`;
+}
+function scoutHint(t, s, d) {  // D4 (a): a step that received a small handoff and still reached a large context read too much on its own
+  const prev = t.steps.find((x) => x.n === s.n - 1), meta = (prev && prev.brief_meta) || {}, ctx = stepCtx(s);
+  if (meta.sent_w == null || ctx == null || meta.sent_w >= HINT_IN_W || ctx < HINT_CTX || s.state === "planned") return "";
+  return `<span title="${meta.sent_w} w in, ${kTokens(ctx)} reached">△ scout first</span>`;
+}
+function stepBlock(t, s, d, row) {
+  const shown = stepShown(t, s, row), [word, tn, spr] = BWORD[shown], pick = "s" + s.n, isPicked = boardPick === pick && row && row.id === boardTask;
+  const from = s.part ? ' <span class="m" title="a write step the design step made">· from plan</span>' : "";
+  const l1 = `<div class="l1"><span class="st ${tn}">${sprite(spr)}${word}</span><span class="nm">${two(s.n)} ${esc(s.kind)}${from}</span>${stepCost(s)}</div>`;
+  const attr = `data-bpick="${pick}" tabindex="0" role="button"`;
+  if (shown === "planned") return `<div class="sb one${isPicked ? " picked" : ""}" ${attr} title="rung at start (rule ${esc(s.kind)})">${l1}</div>`;
+  const rung = `<span class="rt">${rungTime(s)}</span>`, tok = stepCtx(s), live = s.state === "running";
+  const hot = tok != null && cfg && tok >= cfg.gauge[0];
+  if (shown === "done" && !isPicked && s.n !== t.current && !hot) return `<div class="sb short" ${attr}>${l1}<div class="rung">${rung}${ctxMiniHtml(s)}</div></div>`;
+  const sub = [s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${s.verdict === "FAIL" ? "FAIL " + esc(s.verdict_detail || "") : "PASS"}</span>` : "",
+    scoutHint(t, s, d), shown === "waiting" && row ? `<span class="y">${esc(row.why || row.asks)}</span>` : ""].filter(Boolean).join(" · ");
+  return `<div class="sb${shown === "waiting" ? " y" : ""}${live ? " cur" : ""}${isPicked ? " picked" : ""}" ${attr}>${l1}<div class="rung">${rung}${triesHtml(s)}</div>${ctxRowHtml(s, live)}${sub ? `<div class="sub" title="${esc(s.verdict_detail || "")}">${sub}</div>` : ""}</div>`;
+}
+function connCase(t, s, d) {  // the handoff after step s: its class, chip and title (README 3.5)
+  const meta = s.brief_meta || {}, nn = two(s.n);
+  if (s.state === "running" || t.briefing === s.n) return { cls: "writing", chip: "writing", title: s.state === "running" ? `step ${nn} is writing its handoff` : `Haiku is compacting the handoff for step ${nn}` };
+  if (!(d.notes || {})[String(s.n)] && !s.brief_meta) return { cls: "pending", chip: "", title: "" };
+  if (meta.fallback) return { cls: "fallback", chip: "as written · not compacted", title: meta.fallback };
+  if (s.kind === "design" && t.plan && t.plan.from === s.n)
+    return { cls: "plan", chip: "handoff · <b>plan</b>", title: `the handoff of step ${nn}, compacted to ${meta.sent_w == null ? "?" : meta.sent_w} words, and plan.md (${Number(t.plan.words || 0).toLocaleString("en")} words, never cut), which every later step reads` };
+  if (meta.cut && meta.cut.length) {
+    const n = (meta.raw_w || 0) - (meta.sent_w || 0);
+    return { cls: "cut", chip: `handoff · <b>cut ${n} w</b>`, title: `step ${nn} wrote ${meta.raw_w} words; the next step received ${meta.sent_w} once compacted, Findings cut ${n} w` };
+  }
+  return { cls: "", chip: "handoff", title: `the handoff step ${nn} left for the next step${meta.sent_w == null ? "" : `, compacted to ${meta.sent_w} words`}` };
+}
+function connBlock(t, s, d) {  // after step s; none after the last
+  if (!t.steps.some((x) => x.n > s.n)) return "";
+  const c = connCase(t, s, d);
+  if (c.cls === "pending") return '<div class="conn pending"><span class="ln"></span></div>';
+  return `<div class="conn ${c.cls}${boardPick === "c" + s.n && boardData && boardData.id === boardTask ? " picked" : ""}" data-bpick="c${s.n}" tabindex="0" role="button"><span class="ln"></span><span class="chip" title="${esc(c.title)}">${c.chip}</span></div>`;
+}
+function chainHtml(row, d, picked) {  // a task of the chain: folded to its head, or (the picked one) unfolded to its steps
+  const [word, tn] = TASK_WORD[taskShown(row)] || TASK_WORD.running, folded = d == null, n = row.count;
+  const l2 = folded ? (row.state === "waiting" || row.asks ? `<span class="who y">${esc(row.why || row.asks)}</span>` : `<span class="who">${n} ${n === 1 ? "step" : "steps"}</span>`)
+    : `<span class="who">${row.state === "done" || !row.current ? `${n} ${n === 1 ? "step" : "steps"}` : `step ${row.current} of ${n}`}</span>`;
+  const head = `<div class="thead${picked === "t" ? " picked" : ""}" data-bpick="t" data-btask="${esc(row.id)}" tabindex="0" role="button" title="${esc(row.project)} · effort ${esc(row.effort)}">
+    <div class="l1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><span class="t">${esc(row.title)}</span><span class="age m">${ago(snap.now - row.updated)}</span></div>
+    <div class="l2 m">${l2}<span class="cost">${money(row.cost)}</span></div></div>`;
+  if (folded) return `<div class="tk folded">${head}</div>`;
+  if (d === false) return `<div class="tk">${head}<p class="note m">This task is gone.</p></div>`;
+  const t = d.task, steps = t.steps, block = (s) => stepBlock(t, s, d, row);
+  let html = head;
+  for (let k = 0; k < steps.length; k++) {
+    const s = steps[k], prev = steps[k - 1], nx = steps[k + 1];
+    if (prev && s.kind === "fix" && nx && nx.kind === "verify" && nx.checked === s.n) {  // the fix insert: a bracket under the failed verify
+      html += `<div class="branch"><span class="ln"></span><div class="in">${connBlock(t, prev, d)}${block(s)}${connBlock(t, s, d)}${block(nx)}</div></div>`;
+      k++;
+      continue;
+    }
+    html += (prev ? connBlock(t, prev, d) : "") + block(s);
+  }
+  return `<div class="tk">${html}</div>`;
+}
+function emptyBoard() {
+  const where = scope ? projectName(scope) : "any project";
+  return `<div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
+    <p>No task in ${esc(where)}. Type a task in the list; its steps show here as they run.</p></div>`;
+}
+
 // -- events ------------------------------------------------------------------------------
 async function go(name, button) {
   if (name === "list") { backTo = null; showPage("list"); }
   if (name === "back") goBack();
+  if (name === "board") openBoard(page === "task" ? taskId : "");
   if (name === "new") { if (form === "pill") await setForm("open"); showPage("list"); $("c-prompt").focus(); }
   if (name === "needs") {
     if (scope) pick("");
@@ -2561,7 +2821,7 @@ async function go(name, button) {
   if (name === "empties") { emptyOpen = !emptyOpen; render(); }
   if (name === "usage") showPage("usage");
   if (name === "models") showPage("models");  // plan 26: the Settings band's Models and tuning link
-  if (name === "fold") await setForm("pill");
+  if (name === "fold") { if (page === "board") await closeBoard(); await setForm("pill"); }
   if (name === "unfold") await setForm("open");
   if (name === "allow") allowRuns(button);
   if (name === "retry" && fail) {
@@ -2594,7 +2854,13 @@ document.addEventListener("click", async (e) => {
     const open = fb.getAttribute("aria-expanded") !== "true";
     fb.setAttribute("aria-expanded", String(open));
     fb.nextElementSibling.hidden = !open;
-    foldState.set(fb.querySelector(".lbl").textContent, open);
+    if (fb.dataset.tkey) { if (open) toolOpen.add(fb.dataset.tkey); else toolOpen.delete(fb.dataset.tkey); return; }  // a chat's tool row: not kept
+    foldLabel.set(fb.querySelector(".lbl").textContent, open);
+    if (fb.dataset.fkey) {  // plan 25: a keyed fold is remembered per window (window.json folds)
+      foldState[fb.dataset.fkey] = open;
+      while (Object.keys(foldState).length > 64) delete foldState[Object.keys(foldState)[0]];
+      saveFolds();
+    }
     return;
   }
   const swb = e.target.closest("[data-setting]");
@@ -2606,15 +2872,21 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-tact],#brief,#today,#overpace");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],#brief,#today,#overpace");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
   if (t.dataset.open || t.dataset.task) {  // a session opened from a task returns to it, a task opened from a session too
     const card = t.closest(".card.task");
-    backTo = t.dataset.open && (t.closest("#tscroll") || card) ? { page: "task", id: card ? card.dataset.task : taskId }
+    backTo = t.dataset.open && t.closest("#bwrap,#bchain") ? { page: "board" }
+      : t.dataset.open && (t.closest("#tscroll") || card) ? { page: "task", id: card ? card.dataset.task : taskId }
       : t.dataset.task && page === "session" ? { page: "session", id: openId } : null;
   }
-  if (t.dataset.eff) setEffort(t.dataset.eff);
+  if (t.dataset.bpick !== undefined) {  // plan 25: a pick on the Board's chain
+    if (t.dataset.btask && t.dataset.btask !== boardTask) { boardTask = t.dataset.btask; boardData = boardChat = null; }
+    boardPick = t.dataset.bpick;
+    renderBoard();
+  } else if (t.dataset.itab) { itab = t.dataset.itab; saveDraft(); renderBoard(); }
+  else if (t.dataset.eff) setEffort(t.dataset.eff);
   else if (t.dataset.task) openTask(t.dataset.task);
   else if (t.dataset.tact) taskAct(t.dataset.tact, t);
   else if (t.dataset.attach) { pickFor = t.dataset.attach; $("filepick").value = ""; $("filepick").click(); }
@@ -2719,11 +2991,12 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); go("new"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
+  if (page === "board" && form === "open" && BOARD_KEYS.has(e.key) && $("pop").hidden && !inField && !e.target.closest(".tabs")) return boardKey(e);
   if (e.key === "Escape") {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();
     else if (page === "prep") prepAct("back");
-    else if (page === "session" || page === "task") goBack();
+    else if (page === "session" || page === "task" || page === "board") goBack();
     else if (page === "usage") showPage("list");
     else if (page === "models" && !inField && !Object.keys(modelChanges()).length) showPage("list");  // edits stay until Save or Discard
     return;
@@ -2782,5 +3055,7 @@ function connect() {
   project = (cfg && cfg.project) || "";
   briefOpen = !!(cfg && cfg.brief);
   effortPick = cfg && EFF_LEVELS.includes(cfg.effort) ? cfg.effort : "auto";
+  itab = cfg && ["chat", "recv", "hand", "route", "plan"].includes(cfg.board_tab) ? cfg.board_tab : "chat";
+  foldState = (cfg && cfg.folds) || {};
   connect();
 })();

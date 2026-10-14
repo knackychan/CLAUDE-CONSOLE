@@ -19,6 +19,7 @@
         <span class="grip drag-region" title="Drag to move">&#8942;&#8942;</span>
         <button id="scope" class="scope" data-pick aria-haspopup="listbox" aria-expanded="false" title="Project (Ctrl+P)"><span id="scopenm" class="nm">All projects</span><span class="car">&#9662;</span></button>
         <button id="needsbtn" class="needs" data-go="needs" title="Show what needs you, in every project" hidden></button>
+        <button id="boardbtn" class="wide-btn" data-go="board" title="Open the Board: the window widens to 900 px" hidden>&#8660; Board</button>
         <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
         <span data-winbtns></span>
       </div>
@@ -73,6 +74,17 @@
       </div>
       <div id="tscroll" class="scroll stack"></div>
       <div id="tbar" class="levers"></div>
+    </section>
+
+    <section data-page="board" hidden>
+      <div class="top">
+        <button class="rb" data-go="back" title="Back (Esc)" aria-label="Back">&#8592;</button>
+        <span id="bcrumb" class="crumb m">Board</span>
+        <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
+        <span data-winbtns></span>
+      </div>
+      <div class="board"><div id="bchain" class="bchain"></div><div id="bwrap" class="bwrap"></div></div>
+      <div id="bfoot" class="bfoot"></div>
     </section>
 
     <section data-page="usage" hidden>
