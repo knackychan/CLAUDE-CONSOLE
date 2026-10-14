@@ -359,8 +359,8 @@ link; tabs **Kinds**, **Tiers**, **Tuning**, each tab label carrying `n edited` 
   and the hint, capped per model), and the auto picker's title says where it starts. A picked rung or level
   pins it as that kind's default: `step_route` then skips the demand, floor and hint for the effort, as the
   composer's fixed effort does today (the model's cap still applies). Effort on a tier's rung works the same
-  way: `auto` unless pinned. The Prep card can still pick another rung for one step. `verify` (always the think
-  tier at high effort, another family than the writer when one is on; Fred, 2026-10-14) and `fix` (the failed step's tier, never opencode or cmd) sit in a Checks card,
+  way: `auto` unless pinned. The Prep card can still pick another rung for one step. `verify` (one tier above
+  the rung that wrote the step) and `fix` (the failed step's tier, never opencode or cmd) sit in a Checks card,
   set by the rule, not editable. Writes `kinds: {kind: {rung, effort}}`; a kind absent from it keeps the code's
   rule.
 - **Tiers**: one card per tier with its rungs (each step takes the emptiest of them, the order breaks ties
