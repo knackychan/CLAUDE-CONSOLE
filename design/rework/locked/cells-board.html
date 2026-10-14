@@ -251,17 +251,55 @@ textarea.in { width: 100%; resize: none; }
 .blk .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .blk .hd .m { color: var(--mut); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .blk .hd .lbl { white-space: nowrap; flex: none; }
-.prep-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 select { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 4px; font: 12px var(--mono); color: var(--ink); max-width: 100%; }
-.srow { display: grid; grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 28px; gap: 4px 6px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
-.srow .n { color: var(--mut); }
-.srow select, .srow input { min-width: 0; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: 12px var(--mono); color: var(--ink); }
-.srow input { grid-column: 2 / -1; font: 13px var(--ui); }
-.srow .rb { width: 28px; height: 28px; border-radius: 6px; }
-.srow .say { grid-column: 2 / -1; }
-.srow.fixed { grid-template-columns: 22px minmax(0, 1fr); }
 textarea.in.m { font: 12px/1.45 var(--mono); }
-.runs-in { color: var(--mut); margin-bottom: 6px; }
+/* Prep page (reworked 2026-10-13): what you typed as a quote, the prompt and the two routes as cards (the Settings card
+   grammar), each step a two-line row (its goal first, kind and rung as quiet pickers under it), one primary action */
+.pq { display: grid; gap: 4px; padding: 0 2px 0 10px; box-shadow: inset 2px 0 0 var(--me); }
+.pq > .lbl { color: var(--me); }
+.pq .text { font: 14px/1.45 var(--ui); }
+.pq .fold { margin-top: 2px; }
+.pcard { display: grid; background: var(--win); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.pcard > .ph { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--line); }
+.pcard > .ph .nm { font: 600 12.5px var(--ui); color: var(--ink); }
+.pcard > .ph .m { flex: 1; min-width: 0; text-align: right; color: var(--mut); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard > .ph .btn.sm { min-height: 24px; }
+.pcard textarea.pt { display: block; width: 100%; resize: none; border: 0; background: transparent; color: var(--ink); font: 13px/1.5 var(--ui); padding: 9px 12px 10px; }
+.pcard textarea.pt:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--ink); }
+.pcard .pf { padding: 6px 12px 8px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+.pcard .pf .fh { min-height: 20px; }
+.pcard .pf .fh .lbl { text-transform: none; letter-spacing: 0; color: var(--ink); }
+.pcard .pf .note { font: 11px var(--mono); color: var(--mut); }
+/* a quiet picker: a select drawn as a word with a caret, its menu the native one */
+.pick { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+.pick select { appearance: none; -webkit-appearance: none; min-width: 0; max-width: 100%; height: 24px; padding: 0 18px 0 7px; border: 1px solid transparent; border-radius: 5px; background: var(--raise); color: var(--ink); font: 11.5px var(--mono); cursor: pointer; text-overflow: ellipsis; }
+.pick select:hover { border-color: var(--line); }
+.pick::after { content: "▾"; position: absolute; right: 6px; font-size: 9px; color: var(--mut); pointer-events: none; }
+.pick.auto select { color: var(--mut); background: transparent; border-color: var(--line); border-style: dashed; }
+.pick.kind select { font-weight: 500; }
+.route { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 9px 12px; }
+.route .m { color: var(--mut); margin-left: auto; font-size: 11px; }
+.step { display: grid; grid-template-columns: 20px minmax(0, 1fr) 24px; gap: 4px 8px; align-items: center; padding: 8px 6px 8px 10px; }
+.step + .step { border-top: 1px solid var(--line); }
+.step .n { align-self: start; padding-top: 3px; font: 11px var(--mono); color: var(--mut); }
+.step .goal { grid-column: 2; min-width: 0; border-radius: 4px; color: var(--ink); font: 13px/1.4 var(--ui); padding: 2px 4px; margin-left: -4px; overflow-wrap: anywhere; cursor: text; }
+.step .goal:hover { background: var(--raise); }
+.step .goal:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; background: var(--raise); }
+.step .x { grid-column: 3; grid-row: 1; align-self: start; width: 24px; height: 24px; border: 0; border-radius: 5px; background: transparent; color: var(--mut); font: 11px var(--ui); cursor: pointer; opacity: .55; }
+.step:hover .x, .step .x:focus-visible { opacity: 1; }
+.step .x:hover { background: var(--raise); color: var(--ink); }
+.step .pk { grid-column: 2 / -1; display: flex; gap: 4px; align-items: center; min-width: 0; }
+.step .say { grid-column: 2 / -1; }
+.step.bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.step.fixed { color: var(--mut); }
+.step.fixed .v { grid-column: 2 / -1; font: 11.5px var(--mono); }
+.step.fixed .v b { color: var(--ink); font-weight: 500; }
+.pmeta { padding: 0 2px; font: 11px var(--mono); color: var(--mut); }
+.pact { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pact .q { margin-left: auto; display: flex; gap: 2px; }
+.pact .q button { border: 0; background: transparent; color: var(--mut); font: 12px var(--ui); padding: 0 8px; min-height: 30px; border-radius: 6px; cursor: pointer; }
+.pact .q button:hover { color: var(--ink); background: var(--raise); }
+.runs-in { color: var(--mut); }
 .runs-in b { color: var(--ink); }
 
 /* session page */
@@ -1075,29 +1113,33 @@ function prepHtml() {
       ${kind ? "" : '<optgroup label="fable">' + opt("fable", "Fable 5.1") + "</optgroup>"}</select>`;
   };
   const kinds = ["scout", "design", "code", "test", "document"];
-  const ksel = (v) => `<select aria-label="Kind">${kinds.map((k) => `<option${k === v ? " selected" : ""}>${k}</option>`).join("")}</select>`;
+  const ksel = (v) => `<span class="pick kind"><select aria-label="Kind">${kinds.map((k) => `<option${k === v ? " selected" : ""}>${k}</option>`).join("")}</select></span>`;
+  const msel = (v, kind) => `<span class="pick${v ? "" : " auto"}">${sel(v, kind)}</span>`;
+  const step = (n, kind, rung, goal, say = "") => `<div class="step${say ? " bad" : ""}"><span class="n">${n}</span><div class="goal" contenteditable="plaintext-only" role="textbox" aria-label="Step ${n} goal" spellcheck="false">${esc(goal)}</div><button class="x" aria-label="Remove step ${n}" title="Remove step">✕</button><div class="pk">${ksel(kind)}${msel(rung, kind)}</div>${say ? `<span class="say">${say}</span>` : ""}</div>`;
   return `<div class="win" data-view="prep">
     ${topBar(back, "Prep / CLAUDE-CONSOLE")}
     <div class="scroll stack">
-      <div class="blk"><span class="lbl">You typed</span><div class="text">codex adapter for plan 5 task 2, tests first</div></div>
-      ${fold("Scouted", "context pack 1.9 KB · 3 files", `<div class="m mut">console/claude_cli.py:112-168 run_command · console/runs.py:204-251 _watch · plans/05-harnesses/02-codex.md:1-110</div>`)}
-      <div class="blk"><span class="lbl">Enhanced prompt (edit freely)</span><textarea class="in m" rows="5" spellcheck="false">Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events.
+      <div class="pq"><span class="lbl">You typed</span><div class="text">codex adapter for plan 5 task 2, tests first</div>
+        ${fold("Scouted", "context pack 1.9 KB · 3 files", `<div class="m mut">console/claude_cli.py:112-168 run_command · console/runs.py:204-251 _watch · plans/05-harnesses/02-codex.md:1-110</div>`)}</div>
+      <div class="pcard"><div class="ph"><span class="nm">Prompt</span><span class="m">enhanced · edit freely</span></div>
+        <textarea class="pt" rows="6" spellcheck="false" aria-label="Enhanced prompt">Goal: the Codex adapter of plan 5 Task 2, test first, then the Steps tab reads its JSON events.
 Where: console/harness/codex.py (new), console/harness/__init__.py REGISTRY, tests/fake_codex.py.
 Keep: argument lists, never shell strings; the prompt on stdin, never argv.
 Done when: 9 tests pass against the fake; one live codex exec returns a HANDOFF block.</textarea></div>
-      <div class="blk"><span class="lbl">Run route (one session)</span><div class="prep-row">${sel("codex:gpt-5.6-codex")}<select aria-label="Effort"><option>low</option><option selected>medium</option><option>high</option></select><span class="m mut">code</span></div>
-        ${fold("why codex", "balance", `<div class="m mut">rule code: write · balance: sonnet 84 % of pace -> codex · gpt-5.6-codex 31 % · effort medium (rule)</div>`)}
-        <div class="m mut" title="codex has no turn or spend cap: this run ends at step_timeout_s (1800 s) if it is still going">△ no turn cap: stops at 1800 s</div></div>
-      <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm">+ step</button></div>
-        <div class="srow"><span class="n m">1</span>${ksel("scout")}${sel("", "scout")}<button class="rb" aria-label="Remove step">✕</button><input value="Read plan 5 Task 2 and claude_cli.py; cite the functions the adapter mirrors."></div>
-        <div class="srow"><span class="n m">2</span>${ksel("design")}${sel("", "design")}<button class="rb" aria-label="Remove step">✕</button><input value="Decide the stream parsing and the resume command; write the test list."></div>
-        <div class="srow"><span class="n m">3</span>${ksel("code")}${sel("codex:gpt-5.6-codex", "code")}<button class="rb" aria-label="Remove step">✕</button><input value="console/harness/codex.py with run_command, summary, chat, stop; tests first."></div>
-        <div class="srow"><span class="n m">4</span>${ksel("test")}${sel("opencode:deepseek-v4-flash", "test")}<button class="rb" aria-label="Remove step">✕</button><input value="Run the suite on the real codex exe in a scratch folder."></div>
-        <div class="srow"><span class="n m">5</span>${ksel("code")}${sel("", "code")}<button class="rb" aria-label="Remove step">✕</button><input value="Steps tab reads the Codex JSON events."><span class="say"><span class="r">opencode: read steps only (cheap tier)</span> · back to auto</span></div>
-        <div class="srow fixed" title="one tier above the step it checks, on any harness that is on"><span class="n m">6</span><span><b class="m">verify</b> <span class="mut">added after the last edit</span></span></div></div>
-      <div class="m mut">Prep $0.031 · 4 turns · haiku</div>
+      <div class="pcard"><div class="ph"><span class="nm">Steps</span><span class="m">6 · rung per kind unless picked</span><button class="btn sm">+ step</button></div>
+        ${step(1, "scout", "", "Read plan 5 Task 2 and claude_cli.py; cite the functions the adapter mirrors.")}
+        ${step(2, "design", "", "Decide the stream parsing and the resume command; write the test list.")}
+        ${step(3, "code", "codex:gpt-5.6-codex", "console/harness/codex.py with run_command, summary, chat, stop; tests first.")}
+        ${step(4, "test", "opencode:deepseek-v4-flash", "Run the suite on the real codex exe in a scratch folder.")}
+        ${step(5, "code", "", "Steps tab reads the Codex JSON events.", '<span class="r">opencode: read steps only (cheap tier)</span> · back to auto')}
+        <div class="step fixed" title="one tier above the step it checks, on any harness that is on"><span class="n">6</span><span class="v"><b>verify</b> · added after the last edit</span></div></div>
+      <div class="pcard"><div class="ph"><span class="nm">One session</span><span class="m">for Run: the whole prompt on one rung</span></div>
+        <div class="route"><span class="pick">${sel("codex:gpt-5.6-codex")}</span><span class="pick"><select aria-label="Effort"><option>low</option><option selected>medium</option><option>high</option></select></span><span class="m">kind code</span></div>
+        <div class="pf">${fold("why codex", "balance", `<div class="m mut">rule code: write · balance: sonnet 84 % of pace -> codex · gpt-5.6-codex 31 % · effort medium (rule)</div>`)}
+          <span class="note" title="codex has no turn or spend cap: this run ends at step_timeout_s (1800 s) if it is still going">△ no turn cap: stops at 1800 s</span></div></div>
+      <div class="pmeta">Prep $0.031 · 4 turns · haiku</div>
     </div>
-    <div class="levers"><div class="m runs-in">Runs in <b>CLAUDE-CONSOLE</b></div><div class="lr"><button class="btn go" title="Each step's rung comes from its kind's tier (auto) or the rung you pick on its row. Tiers: think / write / read; opencode and cmd rungs on read kinds only">Run as task</button><button class="btn go">Run</button><button class="btn">Run raw</button><button class="btn">Edit</button><button class="btn">Cancel</button></div></div><span class="rsz"></span></div>`;
+    <div class="levers"><div class="pact"><button class="btn go" title="Each step's rung comes from its kind's tier (auto) or the rung you pick on its row. Tiers: think / write / read; opencode and cmd rungs on read kinds only">Run as task</button><button class="btn" title="One session on the rung under One session">Run</button><span class="q"><button title="Send what you typed as is, without the enhanced prompt">Run raw</button><button>Edit</button><button>Cancel</button></span></div><div class="m runs-in">Runs in <b>CLAUDE-CONSOLE</b> · 6 steps</div></div><span class="rsz"></span></div>`;
 }
 function sessionHtml() {
   const s3 = T[0].steps[2];
@@ -1165,7 +1207,7 @@ const CAP = {
   list: "<b>Compact list.</b> The today strip as locked, its breakdown closed; under it one line only because models are over their pace: \"3 models over pace · fills\", which opens the breakdown (spend legend, model mix, the over-pace figures and the Usage button). Needs you then starts on the first screen: a task waiting on a replan with Confirm / Keep in place, and a window run that handed itself off at 312K (auto hand off, D-5) with Start next chat. The working card says which step of how many; the rung is on its doing line. Project names are hidden while the scope is one project.",
   tpage: "<b>Compact Task page.</b> The steps list is the page: a finished step is two lines (name, rung, cost, Open; its goal), the failed step gives its sub line to the FAIL verdict whole, and the context gauge (15 cells and the figure; no in / out words, ID-5) stays open only on the current, failed and past-150K rows, a click opens it on the others. The page opens scrolled to the current step. The handoff for the next step folds to one line with its words and its Next; opened, it shows the six headings and the facts the service added, folded.",
   settings: "<b>Settings popover.</b> Under the project groups, one raised Settings band with a card per group. Harnesses is open here because cmd is on but not found (its closed line keeps \"△ cmd not found\" in red). One row per CLI: glyph, the name over its version (or what limits it), and one switch that is both the state word and the action; cmd's switch is red and the row says what to fix. Window runs (closed) holds the auto hand off switch (ID-2) with its one-line why. Click a switch or a card's head to try it.",
-  prep: "<b>Prep page.</b> The prompt and the step rows are the page. Scouted folds to its size and file count; the route reason folds under the selects (\"why codex · balance\"); the missing cap is one muted line with △. Every model select lists tiers as groups (think / write / read) with rungs on any harness that is on; opencode and cmd rungs only under read, and only on read kinds. Row 5 shows a refused pick: the note in red and the select back to auto.",
+  prep: "<b>Prep page.</b> What you typed is a quote with Fred's violet edge, Scouted folded under it. The prompt, the steps and the one-session route are cards with the Settings card head (name, one fact, an action). A step is two lines: its goal first, editable in place and never cut, then the kind and the rung as quiet pickers (auto dashed, a picked rung filled); the remove cross is faint until the row is hovered. Row 5 shows a refused pick: a red tint, the note in red, the rung back to auto. One primary action, Run as task; Run is the second button; Run raw, Edit and Cancel are quiet text buttons.",
   session: "<b>Session page of a Codex step.</b> The head chip reads codex · gpt-5.6-codex · medium; the brief says context unknown in words with no cells; tabs Chat and Steps only. The chat starts with the folded Prompt row, then the same bubbles and folded tool rows as the Board (a failed exit first), the source line at the end. Continue resumes the thread; the levers that are off say \"claude only\" in one line.",
   usage: "<b>Usage page.</b> Models: one row per model, sorted over pace first, with one bar of 20 cells for the window that binds (day, week or month), the pace as an orange outline cell and the share of pace as the figure (orange over pace), the other two windows as text; a click opens the three bars. Days stays as locked. The Verify FAIL by hour heatmap folds to one line that carries its reading.",
 };

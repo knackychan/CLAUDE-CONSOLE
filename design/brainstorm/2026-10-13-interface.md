@@ -125,6 +125,16 @@ switches are buttons, Tab reaches them, Space flips a switch).
 
 ## 5. Prep page and the Run route
 
+Layout (reworked 2026-10-13, as the Settings popover was): `You typed` is a quote with the `--me` edge,
+`Scouted` folded under it. The prompt, the steps and the one-session route are cards in the Settings card
+grammar (head: name, one muted fact, an action; hairlines between rows). The prompt card's textarea is
+borderless, ui type, six rows. A step row is two lines: the goal first (13 px ui, edited in place, wraps,
+never cut), then the kind and rung pickers: a select drawn as a word with a caret on `--raise`, `auto`
+dashed and muted, the native menu on click. The remove cross is faint until the row is hovered or focused.
+A refused pick tints the row red at 6 % with the say line under the pickers. The verify row is one muted
+mono line. The levers: one primary `Run as task`, `Run` as the plain second button, `Run raw`, `Edit`,
+`Cancel` as quiet text buttons at the right; under them `Runs in CLAUDE-CONSOLE · 6 steps`.
+
 - **Model selects** (`modelOptions`): tier groups `think`, `write`, `read` (and `fable` on the Run route),
   each holding rungs on any harness that is on and found, Claude's ladder first as `opus 4.8`, then
   `codex · gpt-5.6`, then the older Claude rungs. `opencode` and `cmd` rungs appear under `read` only, and
