@@ -19,6 +19,15 @@ def already_running(port: int) -> bool:
         return False
 
 
+def log_harnesses(hub) -> None:
+    """One line in console.log once the start probe is done: which harnesses were found, with their versions."""
+    hub.probing.join()
+    found = hub.harnesses()
+    hub._log("harnesses: " + ", ".join(
+        f"{name} {'on' if h['on'] else 'off'}" + (f" {h['version'] or 'found'}" if h["found"] else " not found" if h["on"] else "")
+        for name, h in found.items()))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="console")
     parser.add_argument("--serve", action="store_true", help="service only, no window")
@@ -50,6 +59,7 @@ def main(argv=None) -> int:
             return 1
     if httpd:
         hub.start()
+        threading.Thread(target=log_harnesses, args=(hub,), name="cc-harness-log", daemon=True).start()
         threading.Thread(target=httpd.serve_forever, name="cc-http", daemon=True).start()
 
     if args.serve:

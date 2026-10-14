@@ -3,14 +3,15 @@ starts, stops and resumes window runs (phase 2), and pulls the levers (phase 3).
 import copy
 import json
 import os
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import (attach, brief, claude_cli, compact, events, guard, levers, paths, prep, redact, review, routing, runs,
-               tasks, transcript, usage)
+from . import (attach, brief, claude_cli, compact, events, guard, harness, levers, paths, prep, redact, review,
+               routing, runs, tasks, transcript, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -28,17 +29,23 @@ MAX_FILES_BODY = attach.MAX_TOTAL * 4 // 3 + MAX_BODY  # /api/prep, /api/run and
 FILE_ROUTES = ("/api/prep", "/api/run", "/api/continue")
 MAX_PROMPT = 20000
 BUSY = {"running", "quiet", "stall"}
+READ_MAX_TURNS = 15  # a scout or search on an adapter with a turn cap (plan 23 replaces it with read_max_turns)
+PROBE_S = 20
+READ_ONLY_TOOLS = "Read,Grep,Glob"  # a kind whose tools are exactly these is read only
 
 
 class Hub:
     """Owns the State. One thread polls the log; readers wait on `changed`."""
 
-    def __init__(self, cfg: dict, folder: Path, exe: list = None):
+    def __init__(self, cfg: dict, folder: Path, exe: list = None, exes: dict = None):
         self.cfg = cfg
         self.folder = Path(folder)
         self.state = State(cfg)
         self.reader = events.LogReader(folder)
-        self.runs = runs.RunManager(cfg, folder, exe)
+        self.runs = runs.RunManager(cfg, folder, exe)  # runs.exes is filled by the probe
+        self.exes = dict(exes or {})  # {harness: command prefix} given by the caller (the tests' fakes)
+        self.versions_h = {}  # harness -> version string
+        self.found = {}  # harness -> bool
         self.usage = usage.Usage(cfg["prices"])
         self.history = usage.History(cfg["prices"])
         self.usage_days = {}  # day -> totals: every transcript merged with usage-days.json
@@ -56,6 +63,120 @@ class Hub:
         self.version = 0
         self.auto_since = time.time()  # older verdicts never trigger an automatic step
         self._stop = threading.Event()
+        self.models_mtime = self._models_mtime()  # models.json as cfg["models"] was read
+        self.models_error = ""
+        self.probing = threading.Thread(target=self.probe, name="probe", daemon=True)
+        self.probing.start()
+
+    # -- plan 5: harnesses and models.json -----------------------------------------------
+    @staticmethod
+    def _models_mtime():
+        try:
+            return (paths.home() / "models.json").stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def reload_models(self, force: bool = False) -> None:
+        """Reread models.json when its mtime changed (or `force`); a file with an error keeps the last good lists."""
+        mtime = self._models_mtime()
+        if not force and mtime == self.models_mtime:
+            return
+        models, error = paths.load_models(write=False)
+        with self.lock:
+            self.models_mtime, self.models_error = mtime, error
+            if not error:
+                self.cfg["models"] = models
+                if isinstance(models.get("claude"), dict) and models["claude"]:
+                    self.cfg["ladder"] = paths._ladder_from(models["claude"], self.cfg.get("ladder") or {})
+            self.version += 1
+            self.changed.notify_all()
+
+    def models_file(self) -> dict:
+        count = sum(len(v) for v in (self.cfg.get("models") or {}).values() if isinstance(v, dict))
+        return {"path": str(paths.home() / "models.json"), "count": count, "error": self.models_error}
+
+    def probe(self, names=None) -> dict:
+        """For each harness that is on: find its exe and run its version command (never a prompt). Never raises:
+        a failure is found False, version "" and a line in the service log."""
+        for name in names or harness.NAMES:
+            cmd, version = None, ""
+            try:
+                if name == "claude":
+                    cmd = self.runs.exe
+                elif harness.is_on(self.cfg, name):
+                    cmd = self.exes.get(name)
+                    if not cmd:
+                        found = harness.find_exe(self.cfg, name)
+                        cmd = [found] if found else None
+                if cmd:
+                    adapter = harness.get(name)
+                    try:
+                        out = subprocess.run(adapter.version_command(list(cmd)), capture_output=True, text=True,
+                                             stdin=subprocess.DEVNULL, timeout=PROBE_S, creationflags=claude_cli.NO_WINDOW,
+                                             env=claude_cli.child_env() | adapter.env(False))
+                        lines = (out.stdout.strip() or out.stderr.strip()).splitlines()
+                        version = redact.clip(lines[0], 60) if lines else ""
+                        if out.returncode != 0 and name != "claude":
+                            raise OSError(f"{name} --version exited {out.returncode}")
+                    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+                        version = ""
+                        if name != "claude":
+                            cmd = None
+                        self._log(f"probe {name}: {type(exc).__name__}: {exc}")
+            except Exception as exc:  # whatever went wrong, the harness is not found
+                cmd, version = (self.runs.exe if name == "claude" else None), ""
+                self._log(f"probe {name}: {type(exc).__name__}: {exc}")
+            with self.lock:
+                self.found[name], self.versions_h[name] = bool(cmd), version
+                if name != "claude":
+                    if cmd:
+                        self.runs.exes[name] = list(cmd)
+                    else:
+                        self.runs.exes.pop(name, None)
+                self.version += 1
+                self.changed.notify_all()
+        return self.harnesses()
+
+    def _log(self, line: str) -> None:
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            with open(self.folder / "console.log", "a", encoding="utf-8") as fh:
+                fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+        except OSError:
+            pass
+
+    def harnesses(self) -> dict:
+        return {name: {"on": harness.is_on(self.cfg, name), "found": bool(self.runs.exe) if name == "claude" else bool(self.found.get(name)),
+                       "version": self.versions_h.get(name, ""), "models": harness.models_of(self.cfg, name),
+                       "tiers": list(harness.get(name).TIERS if name in harness.REGISTRY else claude_cli.MODELS)}
+                for name in harness.NAMES}
+
+    def set_harness(self, name: str, on: bool) -> dict:
+        if name == "claude" and not on:
+            raise ValueError("Prep and the brief pass run on Claude")
+        paths.set_harness(self.folder, name, on)  # ValueError when config.json cannot be read
+        with self.lock:
+            section = self.cfg.setdefault("harnesses", {}).setdefault(name, {"on": False, "exe": ""})
+            section["on"] = bool(on)
+        return self.probe([name])
+
+    def rung_ok(self, rung, kind: str = "") -> str:
+        """"" when `rung` may run a step of `kind` ("" = a plain Run), else the reason (README 3.6)."""
+        name, bare = claude_cli.split_rung(rung)
+        if name != "claude":
+            if not harness.is_on(self.cfg, name):
+                return f"{name} is off"
+            if not self.found.get(name):
+                return f"{name}: not found on PATH"
+        if not isinstance(rung, str) or not claude_cli.known_model(self.cfg, rung):
+            return "unknown model or effort"
+        if name in ("opencode", "cmd") and kind:
+            if kind in ("verify", "fix"):
+                return f"{name}: not on verify or fix steps"
+            if claude_cli.tier_of(rung, self.cfg) != "opus" and (tasks.RULES.get(kind) or ("haiku",))[0] not in (
+                    "haiku", "sonnet"):
+                return f"{name}: {bare} is not a think model"
+        return ""
 
     def poll_once(self) -> int:
         with self.lock:  # request threads call this too, right after they add a line
@@ -226,7 +347,7 @@ class Hub:
             if s is None:
                 return None
             return {"cwd": s.cwd, "first_cwd": s.first_cwd or s.cwd, "window": s.window, "title": s.title,
-                    "model": s.model, "effort": s.effort, "prep": s.prep, "start_commit": s.start_commit,
+                    "model": s.model, "effort": s.effort, "harness": s.harness, "prep": s.prep, "start_commit": s.start_commit,
                     "project": s.project, "project_dir": s.project_dir, "route": s.route,
                     "run_live": s.run_live, "state": self.state.state_of(s, time.time()),
                     "verdict": s.verdict, "verdict_detail": s.verdict_detail, "escalated": s.escalated,
@@ -262,11 +383,14 @@ class Hub:
             return None
         meta = self.runs.meta(session_id)
         window = bool(s["window"] and meta)
+        hname = (meta.get("harness") or "claude") if window else "claude"
+        adapter = harness.get(hname)
         cwd = meta.get("cwd") if window else s["first_cwd"]  # Claude Code files a chat under its start folder
         if not self.allowed(s["project_dir"]):
             base = "runs are off in this project: pick it on the home view and allow runs"
-        elif not self.runs.exe:
-            base = "claude.exe not found; set \"claude_exe\" in config.json"
+        elif not self.runs.exe_for(hname):
+            base = ("claude.exe not found; set \"claude_exe\" in config.json" if hname == "claude"
+                    else f"{hname}: not found")
         elif s["run_live"] or s["state"] in BUSY or self.runs.is_live(session_id):
             base = "still working: wait until it stops"
         elif not cwd or not os.path.isdir(cwd):
@@ -274,7 +398,7 @@ class Hub:
         else:
             base = ""
         model, effort = self.route_of(session_id, s)
-        step = levers.escalate_step(model, effort)
+        step = levers.escalate_step(model, effort) if hname == "claude" else None
         if base:
             escalate = base
         elif s["verdict"] != "FAIL":
@@ -302,11 +426,20 @@ class Hub:
                            "the session-handoff skill is not installed here: copy "
                            "dotclaude/skills/session-handoff to ~/.claude/skills")
         nxt = base or ("" if s["handoff_by"] else "only after a Hand off")  # a new task seeded with the note
-        out = {"continue": base, "verify": base, "handoff": handoff, "escalate": escalate, "next": nxt,
+        cont = base
+        if hname != "claude" and not base:  # a harness resumes where its adapter can and has a session id
+            cont = ("" if adapter.RESUME and meta.get("harness_session") else "this session cannot be resumed")
+        out = {"continue": cont, "verify": base, "handoff": handoff, "escalate": escalate, "next": nxt,
                "handoff_fresh": s["verdict"] == "PASS" and not s["task"],  # a new chat from a brief, no re-read
                "deescalate": deescalate, "deescalate_to": "/".join(start) if start else "",
                "after_verify": list(levers.after_verify(s["verdict"])), "route": f"{model}/{effort}", "escalate_to": "/".join(step) if step else "",
-               "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model)}
+               "fork": not window, "cwd": cwd or "", "cold": None if base else self.cold(s, model),
+               "terminal": "" if adapter.terminal_command([], "x", "", "") is not None else "claude only",
+               "harness": hname}
+        if hname != "claude":  # the hooks, the skills and the terminal chat are Claude Code's
+            for lever in ("verify", "handoff", "escalate", "deescalate", "terminal"):
+                out[lever] = "claude only"
+            out["deescalate_to"], out["escalate_to"] = "", ""
         task = self.tasks.get(s["task"]) if s["task"] else None
         if task and task["state"] in ("planned", "running", "waiting"):  # a working chain owns its steps' turns
             cs = tasks.current_step(task)
@@ -422,7 +555,7 @@ class Hub:
     def last_reply(self, sid: str) -> str:
         """Claude's last message in a session: its window run's stream, or its transcript."""
         if self.runs.meta(sid):
-            items = runs.chat(self.runs.stream_path(sid))
+            items = self.runs.chat_of(sid)
         else:
             s = self.session(sid)
             items = transcript.turns(s["transcript_path"]) if s else []
@@ -456,18 +589,13 @@ class Hub:
         return hit
 
     def final_message(self, sid: str) -> tuple:
-        """(the last assistant text, the last result's subtype) of a window run, whole: runs.chat cuts a text at
-        4000 characters, and a step's HANDOFF block stands at the end of its final message."""
-        _, lines = runs.read_lines(self.runs.stream_path(sid), 0)
-        text, subtype = "", ""
-        for d in lines:
-            if d.get("type") == "assistant" and not d.get("parent_tool_use_id"):
-                for block in (d.get("message") or {}).get("content") or []:
-                    if block.get("type") == "text" and block.get("text", "").strip():
-                        text = block["text"]
-            elif d.get("type") == "result":
-                subtype = d.get("subtype", "")
-        return text, subtype
+        """(the last assistant text, the last result's subtype) of a window run's current turn, whole: runs.chat
+        cuts a text at 4000 characters, and a step's HANDOFF block stands at the end of its final message. Read
+        through the run's adapter; a timed-out run reports error_step_timeout (the retry reason reads it)."""
+        meta = self.runs.meta(sid) or {}
+        _, lines = runs.read_lines(self.runs.stream_path(sid), meta.get("offset", 0))  # this turn only
+        summary = harness.get(meta.get("harness") or "claude").summary(lines)
+        return summary["final"], "error_step_timeout" if meta.get("timed_out") else summary["subtype"]
 
     def _next_step(self, task: dict):
         """The step that would start now: the first of a planned task, the current step when it was reset to
@@ -484,7 +612,8 @@ class Hub:
     def _route_for(self, task: dict, s: dict) -> dict:
         """tasks.step_route for step `s`, with everything it reads: the checked step, the misses, the last note."""
         return tasks.step_route(
-            s["kind"], pick=s["pick"], checked=tasks.checked_route(task, s), demand=task["demand"],
+            s["kind"], pick=claude_cli.tier_of(s["pick"], self.cfg) if s["pick"] else "",
+            checked=tasks.checked_route(task, s), demand=task["demand"],
             misses=routing.fresh(levers.read_misses(self.folder, task["project"]), self.cfg["miss_floor_days"]),
             prev=tasks.read_note(self.folder, task, task["last_good"]),
             budget=self.tier_budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"])
@@ -516,7 +645,7 @@ class Hub:
                 start = "a step is running"
             elif nxt is None:
                 start = "no step to start"
-            elif claude_cli.tier_of(nxt["pick"]) == "fable" and not task["fable_ok"]:
+            elif claude_cli.tier_of(nxt["pick"], self.cfg) == "fable" and not task["fable_ok"]:
                 start = "confirm Fable"
             else:
                 start = ""
@@ -588,26 +717,45 @@ class Hub:
         if route["hold"]:  # Fred's Run anyway, for this step only
             route = dict(route, notes=route["notes"] + ["budget: hold released by Fred"], hold="")
             task.pop("hold_ok", None)
+        self.reload_models()
         kind, tier = s["kind"], route["model"]
-        pick = s["pick"]  # a rung Fred picked is used as given, unless the budget moved the step to another tier
-        model = pick if pick and pick not in claude_cli.MODELS and claude_cli.tier_of(pick) == tier \
+        pick, notes = s["pick"], list(route["notes"])  # a rung Fred picked is used as given, unless the budget moved
+        # the step to another tier
+        model = pick if pick and pick not in claude_cli.MODELS and claude_cli.tier_of(pick, self.cfg) == tier \
             else self.model_id(tier)
+        hname, model_name = claude_cli.split_rung(model)
+        if hname != "claude":
+            why = self.rung_ok(model, kind)
+            if why:  # turned off or not found since Prep, or a cheap rung on a kind it may not run (decision 12)
+                model = self.model_id(tier)
+                hname, model_name = "claude", model
+                word = ("off" if not harness.is_on(self.cfg, claude_cli.split_rung(pick)[0]) else
+                        "not found" if "not found" in why else "refused")
+                notes.append(f"harness: {claude_cli.split_rung(pick)[0]} {word} -> {model}")
+            else:
+                notes.append(f"harness: {hname}")
+        elif pick and claude_cli.split_rung(pick)[0] != "claude" and not claude_cli.tier_of(pick, self.cfg):
+            notes.append(f"model gone from models.json: {pick}")
+        route = dict(route, notes=notes)
         retry = task["why"] if s["retries"] == 1 and s["state"] == "planned" else ""
         prompt = tasks.step_prompt(task, s, tasks.read_brief(self.folder, task, task["last_good"]), retry)
-        max_turns = self.cfg["design_max_turns"] if kind == "design" else 0
+        adapter = harness.get(hname)
+        read_only = tasks.RULES[kind][2] == READ_ONLY_TOOLS if kind in tasks.RULES else False
+        max_turns = (READ_MAX_TURNS if adapter.CAPS and kind in ("scout", "search") else
+                     self.cfg["design_max_turns"] if kind == "design" else 0)
         try:
             sid = self.runs.start(
-                task["project_dir"], prompt, model, route["effort"],
+                task["project_dir"], prompt, model_name, route["effort"],
                 title=f"{task['title']} · {n}/{len(task['steps'])} {kind}", route=kind,
                 reason=" · ".join(route["notes"]), prep=task["prep"], kind="task",
                 extra={"task": task["id"], "step": n}, disallow=tasks.DISALLOW, tools=tasks.RULES[kind][2],
-                budget=self.cfg["task_step_budget_usd"], max_turns=max_turns)
+                budget=self.cfg["task_step_budget_usd"], max_turns=max_turns, harness=hname, read_only=read_only)
         except (runs.RunError, OSError) as exc:
             tasks._task_to(task, "stuck", str(exc), now, s, lines)
             return self._commit(task, lines)
         lines = tasks.start_step(task, n, sid, dict(route, model=model),
                                  (self.runs.meta(sid) or {}).get("start_commit", ""), now)
-        s["tier"] = tier
+        s["tier"], s["harness"] = tier, hname
         self._commit(task, lines)
         self.poll_once()
 
@@ -776,7 +924,7 @@ class Hub:
             s = tasks.step(task, n)
             why = (f"brief fallback: {res['fallback']}" if res["fallback"] else
                    f"brief: {len(raw.split())} -> {res['words']} words, ${res['cost']:.2f}"
-                   + (f", cut {res['cut']} findings" if res.get("cut") else ""))
+                   + (f", cut {len(res['cut'])} findings" if res.get("cut") else ""))
             task["briefing"] = 0
             try:
                 tasks.write_brief(self.folder, task, s, res["text"])
@@ -808,7 +956,7 @@ class Hub:
                 self.start_brief(task, task["briefing"])  # the service restarted while it ran
             if task.get("briefing"):
                 return ""
-        if claude_cli.tier_of(nxt["pick"]) == "fable" and not task["fable_ok"]:
+        if claude_cli.tier_of(nxt["pick"], self.cfg) == "fable" and not task["fable_ok"]:
             lines = []
             tasks._task_to(task, "waiting", "confirm Fable", now, nxt, lines)
             self._commit(task, lines)
@@ -958,10 +1106,13 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/steps":
             return self._json(self.hub.steps(query.get("session", [""])[0]))
         if url.path == "/api/config":
+            self.hub.reload_models()
             cfg, window = self.hub.cfg, paths.load_window(self.hub.folder)
+            found = self.hub.harnesses()
             return self._json({"projects": project_list(cfg), "models": claude_cli.MODELS,
                                "efforts": claude_cli.EFFORTS, "default_model": cfg["default_model"],
-                               "default_effort": cfg["default_effort"], "claude": bool(self.hub.runs.exe),
+                               "default_effort": cfg["default_effort"], "claude": found["claude"]["found"],
+                               "harnesses": found, "models_file": self.hub.models_file(),
                                "config_path": str(self.hub.folder / "config.json"),
                                "gauge": [cfg["gauge_yellow_tokens"], cfg["gauge_red_tokens"]],
                                "project": window.get("project", ""), "brief": window.get("brief") is True,
@@ -996,7 +1147,9 @@ class Handler(BaseHTTPRequestHandler):
         routes = {"/api/prep": self._prep, "/api/prep/drop": self._prep_drop, "/api/run": self._run, "/api/stop": self._stop,
                   "/api/terminal": self._terminal, "/api/draft": self._draft, "/api/allow": self._allow,
                   "/api/open_folder": lambda body: self._allow(body, sessions_only=False),
-                  "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review}
+                  "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review,
+                  "/api/harness": self._harness, "/api/models/reload": self._models_reload,
+                  "/api/models/open": self._models_open}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
         for lever in ("stop", "pause", "resume", "retry", "confirm", "clear", "done"):
@@ -1067,9 +1220,12 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.hub.cfg
         model = body.get("model") or cfg["default_model"]
         effort = body.get("effort") or cfg["default_effort"]
-        if not claude_cli.known_model(cfg, model) or effort not in claude_cli.EFFORTS:
+        why = self.hub.rung_ok(model) if isinstance(model, str) else "unknown model or effort"
+        if why == "unknown model or effort" or effort not in claude_cli.EFFORTS:
             return self._error(400, "unknown model or effort")
-        if claude_cli.tier_of(model) == "fable" and body.get("fable_ok") is not True:  # print mode bills credits
+        if why:
+            return self._error(409, why)
+        if claude_cli.tier_of(model, cfg) == "fable" and body.get("fable_ok") is not True:  # print mode bills credits
             return self._error(409, "confirm Fable: it may bill usage credits on this plan")
         card = prep.load(self.hub.folder, body.get("prep")) if body.get("prep") else None
         if card:
@@ -1082,12 +1238,38 @@ class Handler(BaseHTTPRequestHandler):
             title, route, reason, prep_id, extra = text, "raw", "", "", None
         # sent now (the composer), or waiting with the card's Prep job (Run, or Run raw with files_from)
         files = attach.parse(body.get("files")) or self.hub.prep_files(prep_id or body.get("files_from"))
-        sid = self.hub.runs.start(folder, text, model, effort, title=title, route=route,
-                                  reason=reason, prep=prep_id, extra=extra, files=files)
+        hname, model_name = claude_cli.split_rung(model)
+        sid = self.hub.runs.start(folder, text, model_name, effort, title=title, route=route,
+                                  reason=reason, prep=prep_id, extra=extra, files=files, harness=hname)
         if prep_id:
             self.hub.drop_prep(prep_id)  # the card became this run
         self.hub.poll_once()
         return self._json({"session": sid})
+
+    def _harness(self, body):
+        name, on = body.get("name"), body.get("on")
+        if name not in harness.NAMES or not isinstance(on, bool):
+            return self._error(400, "expected a harness name and on true or false")
+        try:
+            return self._json({"harnesses": self.hub.set_harness(name, on)})
+        except ValueError as exc:
+            message = str(exc)
+            return self._error(400 if name == "claude" and not on else 500, message)
+
+    def _models_reload(self, body):
+        self.hub.reload_models(force=True)
+        return self._json({"models_file": self.hub.models_file(), "harnesses": self.hub.harnesses()})
+
+    def _models_open(self, body):
+        """Open models.json in Fred's editor: the one fixed path, nothing from the caller."""
+        path = paths.home() / "models.json"
+        if not path.is_file():
+            return self._error(404, "models.json does not exist yet")
+        opener = getattr(os, "startfile", None)
+        if opener is None:
+            return self._error(409, "opening a file needs Windows")
+        opener(str(path))
+        return self._json({"ok": True})
 
     def _window_session(self, body):
         sid = body.get("session")
@@ -1140,8 +1322,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "unknown effort")
         if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
             return self._error(400, "bad steps")
-        if any(s.get("model") and not claude_cli.known_model(self.hub.cfg, s["model"]) for s in steps):
-            return self._error(400, "unknown model")
+        for n, item in enumerate(steps, 1):
+            why = self.hub.rung_ok(item["model"], str(item.get("kind") or "")) if item.get("model") else ""
+            if why:
+                return self._error(400, f"step {n}: {why}")
         title = body.get("title") if isinstance(body.get("title"), str) else ""
         return self._json({"task": self.hub.create_task(dict(card, prompt=text), steps, effort, title.strip())})
 
@@ -1200,7 +1384,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.hub.user_home / ".claude" / "projects", sid)  # an older step: no row, no stream
             items = transcript.turns(path) if path else []
             return self._json({"items": items, "source": "transcript", "changed": None, "live": False})
-        items = runs.chat(self.hub.runs.stream_path(sid), meta.get("cwd", ""))
+        items = self.hub.runs.chat_of(sid)
         changed = claude_cli.git_changed(meta["cwd"], meta.get("start_commit", ""))
         return self._json({"items": items, "source": "window", "changed": changed,
                            "live": self.hub.runs.is_live(sid), "start_commit": meta.get("start_commit", "")})
@@ -1277,13 +1461,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
 
-def make_server(cfg: dict, port: int = None, folder: Path = None, exe: list = None):
+def make_server(cfg: dict, port: int = None, folder: Path = None, exe: list = None, exes: dict = None):
     """Bind 127.0.0.1 (never another host). Returns (httpd, hub); raises OSError if the port is taken.
-    `exe` is the claude command prefix (tests pass a fake); default: the real claude.exe."""
+    `exe` is the claude command prefix (tests pass a fake); default: the real claude.exe. `exes` are the other
+    harnesses' command prefixes as RunManager takes them (tests pass fakes); the probe finds the rest."""
     if exe is None:
         found = claude_cli.find_exe(cfg)
         exe = [found] if found else None
-    hub = Hub(cfg, folder or paths.home(), exe)
+    hub = Hub(cfg, folder or paths.home(), exe, exes)
     handler = type("BoundHandler", (Handler,), {"hub": hub})
     httpd = ThreadingHTTPServer(("127.0.0.1", cfg["port"] if port is None else port), handler)
     httpd.daemon_threads = True
