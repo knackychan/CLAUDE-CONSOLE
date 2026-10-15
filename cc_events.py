@@ -12,7 +12,10 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from console import paths, redact  # noqa: E402
+try:
+    from console import paths, redact  # noqa: E402
+except Exception:  # plan 34 F1: a broken console package must not break the session (never raise, exit 0)
+    paths = redact = None
 
 TAIL_BYTES = 512 * 1024
 RULES_READ_MAX = 4 * 1024 * 1024  # a rules file bigger than this is counted by size only
@@ -156,7 +159,7 @@ def build_record(data: dict, now: float = None) -> dict:
         rec["what"] = redact.summarize(tool, data.get("tool_input"), cwd)
         rec["tool_use_id"] = data.get("tool_use_id")
         if event == "PermissionDenied":
-            rec["reason"] = redact.clip(data.get("reason", ""), 120)
+            rec["reason"] = redact.clip(redact.mask(data.get("reason", "")), 120)
     elif event == "SubagentStop":
         tail = transcript_tail(data.get("agent_transcript_path"), sidechain=True)
         rec["model"] = tail.get("model")
@@ -214,6 +217,12 @@ def log_error() -> None:
 
 
 def main() -> int:
+    if paths is None or redact is None:  # plan 34 F1: the console package did not import; nothing to log with
+        try:
+            sys.stdin.buffer.read()  # take the payload so Claude Code's write never meets a closed pipe
+        except Exception:
+            pass
+        return 0
     try:
         raw = sys.stdin.buffer.read().decode("utf-8", "replace")
         data = json.loads(raw) if raw.strip() else {}

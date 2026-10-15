@@ -1,6 +1,9 @@
 import io
 import json
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -151,6 +154,12 @@ class BuildRecordTest(unittest.TestCase):
                                                tool_input={"command": "git push"}, reason="[Push]"))
         self.assertEqual((rec["what"], rec["reason"]), ("git push", "[Push]"))
 
+    def test_permission_denied_reason_is_masked(self):
+        """Plan 34 F3: the reason can quote the command."""
+        rec = cc_events.build_record(self.base("PermissionDenied", tool_name="Bash", tool_input={"command": "x"},
+                                               reason="denied: OPENAI_API_KEY=" + "test-only-value in command"))
+        self.assertEqual(rec["reason"], "denied: OPENAI_API_KEY=*** in command")
+
 
 class MainTest(unittest.TestCase):
     def test_main_appends_one_line_and_never_raises(self):
@@ -165,6 +174,22 @@ class MainTest(unittest.TestCase):
             lines = files[0].read_text(encoding="utf-8").splitlines()
             self.assertEqual(json.loads(lines[0])["reason"], "other")
             self.assertTrue((Path(tmp) / "hook-errors.log").exists())
+
+
+class ImportFailureTest(unittest.TestCase):
+    def test_a_broken_console_package_still_exits_0(self):
+        """Plan 34 F1: the import of console sits inside the never-raise rule."""
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copy(Path(cc_events.__file__), Path(tmp) / "cc_events.py")
+            (Path(tmp) / "console").mkdir()
+            (Path(tmp) / "console" / "__init__.py").write_text("raise ImportError('broken on purpose')\n",
+                                                                encoding="utf-8")
+            payload = json.dumps({"hook_event_name": "SessionEnd", "session_id": "s9"}).encode()
+            proc = subprocess.run([sys.executable, str(Path(tmp) / "cc_events.py")], input=payload,
+                                  capture_output=True, timeout=30,
+                                  env=dict(os.environ, CC_CONSOLE_HOME=str(Path(tmp) / "home")))
+            self.assertEqual((proc.returncode, proc.stderr), (0, b""))
+            self.assertFalse((Path(tmp) / "home").exists())
 
 
 if __name__ == "__main__":
