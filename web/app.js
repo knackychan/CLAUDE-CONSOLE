@@ -2705,9 +2705,12 @@ async function renderBoard() {
   $("bcrumb").textContent = `Board / ${scope ? projectName(scope) : "All projects"} · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
   setHtml($("bfoot"), tasks.length ? `<span><span class="kbd">↑</span><span class="kbd">↓</span> step</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> chat</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
     <button class="q" title="A step's context in cells of 10K; the chip between two steps is the handoff the next one received, its words in the inspector" aria-label="Legend">?</button>` : "");
+  const live = boardSessions(), liveHtml = live.map(boardSessionHtml).join("");
+  if (live.length) $("bcrumb").textContent += ` · ${live.length} live ${live.length === 1 ? "chat" : "chats"}`;
+  if (boardPick[0] === "l") await liveChatFetch(boardPick.slice(1));
   if (!row) {
-    setHtml($("bchain"), emptyBoard());
-    setHtml($("bwrap"), "");
+    setHtml($("bchain"), liveHtml ? `<div class="tk folded">${liveHtml}</div>` : emptyBoard());
+    setHtml($("bwrap"), liveHtml ? `<div class="binsp">${boardPick[0] === "l" ? inspLive(boardPick.slice(1)) : '<p class="note m">No task here. Pick a live chat on the left.</p>'}</div>` : "");
     return;
   }
   const sig = taskRowSig(row);
@@ -2720,8 +2723,34 @@ async function renderBoard() {
   if (d && boardPick[0] === "s") await boardChatFetch(d, row);
   else if (boardPick === "") await measureFetch();
   if (page !== "board" || boardTask !== row.id) return;
-  setHtml($("bchain"), tasks.map((t) => chainHtml(t, t.id === row.id ? d : null, t.id === row.id ? boardPick : null)).join(""));
+  setHtml($("bchain"), (liveHtml ? `<div class="tk folded">${liveHtml}</div>` : "") + tasks.map((t) => chainHtml(t, t.id === row.id ? d : null, t.id === row.id ? boardPick : null)).join(""));
   setHtml($("bwrap"), `<div class="binsp">${await boardInspector(row, d)}</div>`, { sel: ".binsp", reset: boardWrapKey() });
+}
+function boardSessions() {  // plain chats that need Fred or are working: the list shows them, so the Board does too (a step's chat belongs to its task)
+  const g = groups();
+  return [...g.needs, ...g.work].sort((a, b) => b.last_ts - a.last_ts);
+}
+function boardSessionHtml(s) {  // one folded row, like a task head; a click opens the session page and Esc returns to the Board
+  const [glyph, word, t] = stateWord(s);
+  return `<div class="thead sess${boardPick === "l" + s.id ? " picked" : ""}" data-bpick="l${esc(s.id)}" tabindex="0" role="button" title="${esc(s.project)}">
+    <div class="l1"><span class="st ${t}">${sessionMark(s, glyph, t)}${esc(word)}</span><span class="t">${esc(s.title)}</span><span class="age m">${ago(snap.now - s.last_ts)}</span></div>
+    <div class="l2 m"><span class="who">${esc(s.project)}</span><span class="cost">${spentText(s)}</span></div></div>`;
+}
+function inspLive(id) {  // a plain chat picked on the Board: its facts and the way in
+  const s = snap.sessions.find((x) => x.id === id);
+  if (!s) return '<p class="note m">This chat is gone from the list.</p>';
+  const [glyph, word, tn] = stateWord(s);
+  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sessionMark(s, glyph, tn)}${esc(word)}</span><h2>${esc(s.title)}</h2>
+    <span class="lr"><button class="btn sm" data-open="${esc(s.id)}" title="The session page, with its levers">Open chat</button></span></div>
+    <div class="meta"><span>${esc(s.project)}</span><span>spent <b>${spentText(s)}</b></span><span>${ago(snap.now - s.last_ts)}</span></div></div>
+    <div class="ipane">${boardChat && boardChat.sid === id && boardChat.chat ? chatPane(boardChat.chat, id, s.source || "chat", { compact: true, board: true }) : '<p class="note m">Reading the chat.</p>'}</div>`;
+}
+async function liveChatFetch(sid) {  // a picked plain chat: fetched when the pick changed, and every 2 s while it runs
+  const live = snap.sessions.find((x) => x.id === sid), running = !!live && live.state === "running", turn = live ? live.turn_ts : 0;
+  if (boardChat && boardChat.sid === sid && boardChat.running === running && (!running || (snap.now - boardChat.at < 2 && boardChat.turn === turn))) return;
+  const chat = await api("/api/chat?session=" + encodeURIComponent(sid)).catch(() => null);
+  if (page !== "board" || boardPick !== "l" + sid) return;
+  boardChat = chat ? { sid, at: snap.now, chat, running, turn } : null;
 }
 async function boardChatFetch(d, row) {  // the picked step's chat: when the pick changed, and every 2 s while the step runs
   const s = d.task.steps.find((x) => "s" + x.n === boardPick);
@@ -2742,6 +2771,7 @@ async function measureFetch() {  // the Measure table: once a minute per project
   measureData = { project, at: snap.now, data };
 }
 function boardInspector(row, d) {
+  if (boardPick[0] === "l") return inspLive(boardPick.slice(1));
   if (d === false) return '<p class="note m">This task is gone: it was cleared or its folder was removed.</p>';
   const t = d.task;
   if (boardPick === "t") return inspTask(t, d, row);
@@ -2782,6 +2812,7 @@ function boardKey(e) {
   if (!row) return;
   const items = boardItems(row), at = items.indexOf(boardPick);
   if (e.key === "Enter") {
+    if (boardPick[0] === "l") { backTo = { page: "board" }; openSession(boardPick.slice(1)); return; }
     const s = boardPick[0] === "s" && row.steps.find((x) => "s" + x.n === boardPick);
     if (s && s.session) { backTo = { page: "board" }; openSession(s.session); }
     return;

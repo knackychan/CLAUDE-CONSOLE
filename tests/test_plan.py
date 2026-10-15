@@ -123,8 +123,14 @@ class CheckTest(unittest.TestCase):
 
     def test_check_refuses_todo_and_open_decisions(self):
         t = make_task(("design", "code", "verify"))
-        p = plan.parse(single(2).replace("add()", "add() TODO"))
+        p = plan.parse(single(2).replace("add()", "add() TODO: fill in"))
         self.assertEqual(plan.check(p, self.later(t, 1), 6, 5), "TBD or TODO left in the plan")
+        p = plan.parse(single(2).replace("add()", "add() TBD"))
+        self.assertEqual(plan.check(p, self.later(t, 1), 6, 5), "TBD or TODO left in the plan")
+        p = plan.parse(single(2).replace("add()", "add(); the sub-plan has a TODO list"))
+        self.assertEqual(plan.check(p, self.later(t, 1), 6, 5), "")
+        p = plan.parse(single(2).replace("add()", "add()\n#### TODO\n- **TODO**: edit calc.py"))
+        self.assertEqual(plan.check(p, self.later(t, 1), 6, 5), "")
         p = plan.parse(single(2).replace("- add lives in calc.py: the only module.", "- where does add live?"))
         self.assertTrue(plan.check(p, self.later(t, 1), 6, 5).startswith("a Decisions line is a question"))
 

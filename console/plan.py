@@ -24,7 +24,12 @@ PROMPT_FILE = Path(__file__).resolve().parent / "design_prompt.md"
 _STEP = re.compile(r"^### Step (\d+): ([a-z]+)\s*$", re.M)
 _ROW = re.compile(r"^\|\s*(\d+)\s*\|(.*)\|\s*$")
 _GAP = re.compile(r"^[\s`*>\-]*Plan gap:\**\s*(.+?)[\s`*]*$", re.M)
-_BAD = re.compile(r"\b(TBD|TODO)\b")
+_BAD = re.compile(r"\bTBD\b|\bTODO[:(]")  # a placeholder; the word TODO alone is the plan's own section name
+_LABEL = re.compile(r"^(#{1,6}\s+|[-*]\s+)?\*{0,2}TODO\*{0,2}:?(?=\s|$)", re.M)  # TODO as a step label, not a placeholder
+
+
+def _unfinished(text: str) -> bool:
+    return bool(_BAD.search(_LABEL.sub("", str(text or ""))))
 _HEAD = re.compile(r"^#{1,4} ", re.M)
 
 
@@ -141,7 +146,7 @@ def check(plan: dict, later: list, max_parts: int, room: int) -> str:
     design step (their n and kind); `room`: how many steps may follow the design step after a split, the verify not
     counted (task_max_steps minus the design step's n)."""
     index, parts = plan["index"], plan["parts"]
-    if _BAD.search(index) or any(_BAD.search(p["text"]) for p in parts):
+    if _unfinished(index) or any(_unfinished(p["text"]) for p in parts):
         return "TBD or TODO left in the plan"
     why = _headings(index, INDEX_HEADINGS if parts else HEADINGS)
     if why:
