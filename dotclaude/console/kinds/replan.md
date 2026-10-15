@@ -1,3 +1,5 @@
+# replan
+
 Replan the rest of a task that Claude Console runs as a chain of separate steps. A step before you asked for it:
 $why
 

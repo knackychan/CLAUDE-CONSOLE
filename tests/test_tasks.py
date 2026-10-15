@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import claude_cli, levers, prep, tasks
+from console import claude_cli, kinds, levers, paths, prep, tasks
 
 GOOD = ("## Goal\nAdd the export; this step: fix add()\n## Findings\nadd() is in calc.py:2\n## Files touched\n"
         "- calc.py (fixed add)\n## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\nRun the tests")
@@ -204,6 +204,13 @@ class HandoffTest(unittest.TestCase):
             self.assertEqual(tasks.parse_handoff(f"text\n{start}\n{body}\n{end}\n"), body, start)
         self.assertIsNone(tasks.parse_handoff("**HANDOFF block follows**\n" + body + "\nEND HANDOFF"))
 
+    def test_missing_block_says_which_marker_is_missing(self):  # plan 33
+        self.assertEqual(tasks.missing_block(f"Done.\n\nHANDOFF\n{GOOD}"), "HANDOFF has no END HANDOFF line")
+        self.assertEqual(tasks.missing_block(f"**HANDOFF**\n{GOOD}"), "HANDOFF has no END HANDOFF line")
+        self.assertEqual(tasks.missing_block("Done, no block."), "no HANDOFF block")
+        self.assertEqual(tasks.missing_block("see the HANDOFF block: x"), "no HANDOFF block")  # not a whole line
+        self.assertEqual(tasks.missing_block(""), "no HANDOFF block")
+
     def test_check_handoff_reasons(self):
         self.assertEqual(tasks.check_handoff(GOOD), "")
         self.assertEqual(tasks.HEADINGS, ("## Goal", "## Findings", "## Files touched", "## Troubleshooting",
@@ -254,6 +261,10 @@ class HandoffTest(unittest.TestCase):
         self.assertEqual(tasks.reply_verdict("VERDICT: FAIL\nVERDICT: PASS"), ("PASS", ""))  # the last one
         self.assertEqual(tasks.reply_verdict("end with `VERDICT: PASS` or not"), ("", ""))  # not a whole line
         self.assertEqual(tasks.reply_question("text\n- STOP: which file?\n"), "which file?")
+        self.assertEqual(tasks.reply_question("Done.\n\nShall I fix those two lines? They're small. Also still open: the flaky test."),
+                         "Shall I fix those two lines?")
+        self.assertEqual(tasks.reply_question("I checked why this failed? The cause is the missing file."), "")
+        self.assertEqual(tasks.reply_question("## Open questions\n- Which file?\n\nEND HANDOFF"), "")
         for none in ("STOP: none", "STOP: N/A.", "STOP: -", "no question"):
             self.assertEqual(tasks.reply_question(none), "", none)
 
@@ -297,6 +308,43 @@ def kinds_of(task):
 
 
 class ChainTest(unittest.TestCase):
+    def test_a_floor_is_spent_by_the_step_that_proves_it(self):
+        """Plan 32: a code step on its floor is proven by the verify that passes after it; a scout by its own end."""
+        task = make(("scout", "code"))
+        floored = {"scout": "haiku/medium", "code": "opus/high"}
+        for n, kind in ((1, "scout"), (2, "code")):
+            route = {"model": floored[kind].split("/")[0], "effort": floored[kind].split("/")[1], "hold": "",
+                     "notes": [f"rule {kind}: x/y", f"floor {kind}: {floored[kind]}"]}
+            tasks.start_step(task, n, f"s{n}", route, "abc1234", NOW + n)
+            self.assertEqual(tasks.floor_of(tasks.step(task, n)), floored[kind])
+            self.assertEqual(end(task, verdict="")[0], "next")
+            got = tasks.spend_floors(task, tasks.step(task, n), "", NOW + n)
+            self.assertEqual([(x["n"], r) for x, r in got], [(1, "haiku/medium")] if n == 1 else [])  # code waits
+        run(task, 3, "opus", "high")
+        self.assertEqual(end(task, verdict="PASS")[0], "done")
+        verify = tasks.step(task, 3)
+        self.assertEqual([(x["n"], r) for x, r in tasks.spend_floors(task, verify, "PASS", NOW)], [(2, "opus/high")])
+        self.assertEqual(tasks.spend_floors(task, verify, "PASS", NOW), [])  # once
+        self.assertEqual(tasks.spend_floors(task, tasks.step(task, 1), "", NOW), [])
+
+    def test_a_failed_verify_or_a_kept_pick_spends_nothing(self):
+        task = make(("code",))
+        route = {"model": "sonnet", "effort": "high", "hold": "",
+                 "notes": ["rule code: sonnet/medium", "floor code: opus/high -> pick sonnet/high kept"]}
+        tasks.start_step(task, 1, "s1", route, "abc1234", NOW)
+        self.assertEqual(tasks.floor_of(tasks.step(task, 1)), "")  # Fred's pick ran, not the floor
+        end(task)
+        run(task, 2, "opus", "high")
+        end(task, verdict="PASS")
+        self.assertEqual(tasks.spend_floors(task, tasks.step(task, 2), "PASS", NOW), [])
+        task = make(("code",))
+        route["notes"] = ["rule code: sonnet/medium", "floor code: opus/high"]
+        tasks.start_step(task, 1, "s1", route, "abc1234", NOW)
+        end(task)
+        run(task, 2, "opus", "high")
+        self.assertEqual(end(task, verdict="FAIL", verdict_detail="x")[0], "fix")
+        self.assertEqual(tasks.spend_floors(task, tasks.step(task, 2), "FAIL", NOW), [])
+
     def test_plan_steps_validates_and_appends_verify(self):
         proposed = [{"kind": "scout", "goal": "a"}, {"kind": "code", "goal": "b"},
                     {"kind": "bogus", "goal": "c"}, {"kind": "test"}]
@@ -465,7 +513,7 @@ class ChainTest(unittest.TestCase):
         self.assertTrue(lines)
         route = tasks.step_route("fix", checked=(code["model"], code["effort"]))
         before = tasks.step_prompt(task, fix, "PREV")  # the service builds the prompt before the step starts
-        self.assertIn(levers.FIX_FRAME, before)  # a fix step names its hypotheses before it edits
+        self.assertIn(levers.FIX_FRAME, " ".join(before.split()))  # a fix step names its hypotheses before it edits
         self.assertIn("The checks failed: test_x - KeyError: 'a'. You now run on sonnet/high", before)
         run(task, 4, route["model"], route["effort"])
         self.assertEqual(tasks.step_prompt(task, fix, "PREV"), before)
@@ -595,7 +643,16 @@ class ChainTest(unittest.TestCase):
         ok, _, _ = tasks.fred(stuck, "retry", NOW + 15)
         self.assertEqual((ok, stuck["state"], tasks.step(stuck, 1)["state"], tasks.step(stuck, 1)["retries"]),
                          (True, "running", "planned", 1))
+        self.assertEqual((stuck.get("retry_why"), stuck.get("retry_note")), ("x", None))  # plan 33: why it ended, no note
         self.assertEqual(tasks.fred(stuck, "confirm", NOW + 16)[:2], (False, "nothing to confirm"))
+        again = make(("scout", "explain"))
+        run(again, 1)
+        end(again, block_error="x")
+        run(again, 1)
+        end(again, block_error="x")
+        ok, _, lines = tasks.fred(again, "retry", NOW + 15, note="use the other file")
+        self.assertEqual((ok, again["retry_note"], again["retry_why"]), (True, "use the other file", "x"))
+        self.assertEqual(lines[0]["why"], "retry by Fred: use the other file")
         waiting = make(("scout", "explain"))
         waiting["state"], waiting["why"] = "waiting", "confirm Fable"
         ok, _, _ = tasks.fred(waiting, "confirm", NOW + 17)
@@ -621,7 +678,7 @@ class ChainTest(unittest.TestCase):
             self.assertEqual([r["step"] for r in rows], [1, 2, 3])
             step = tasks.step(task, 1)
             rel = tasks.write_note(home, task, step, GOOD)
-            self.assertEqual(rel, "steps/01-scout.md")
+            self.assertEqual(rel, "01-scout/handoff.md")  # plan 28: the step's folder
             self.assertEqual((folder / rel).read_text(encoding="utf-8"), tasks.note_text(task, step, GOOD))
             self.assertEqual(step["handoff"], rel)
             self.assertEqual(tasks.read_note(home, task, 1), tasks.note_text(task, step, GOOD))
@@ -643,6 +700,85 @@ class ChainTest(unittest.TestCase):
             self.assertIsNone(tasks.load(home, "abc-def"))
             with self.assertRaises(ValueError):
                 tasks.folder(home, "../escape")
+
+    def test_step_folders_hold_the_step_files(self):
+        """Plan 28: one folder per step, named when it first starts; a step from before plan 28 reads flat files."""
+        with tempfile.TemporaryDirectory() as home:
+            task = make(("scout", "code"))
+            one = tasks.step(task, 1)
+            self.assertEqual(tasks.step_dir(one), "01-scout")
+            self.assertNotIn("dir", one)  # not started: no folder named yet
+            run(task, 1)
+            self.assertEqual(one["dir"], "01-scout")
+            one["n"] = 2  # renumbered by an insert: the folder it started in stays
+            self.assertEqual((tasks.note_file(task, one), tasks.brief_file(task, one), tasks.facts_file(task, one),
+                              tasks.handoff_file(task, one)),
+                             ("01-scout/handoff.md", "01-scout/brief.md", "01-scout/facts.md", "01-scout/handed.md"))
+            one["n"] = 1
+            rel = tasks.write_step_file(home, task, one, "notes.md", "thinking\nsk-ant-api03-" + "x" * 40, head=True)
+            text = tasks.read_step_file(home, task, one, "notes.md")
+            self.assertEqual(rel, "01-scout/notes.md")
+            self.assertTrue(text.startswith("# Step 01: scout on sonnet/medium, session s1\n\nthinking"))
+            self.assertNotIn("x" * 40, text)
+            tasks.write_step_file(home, task, one, "notes.2.md", "y" * 30000)
+            self.assertTrue(tasks.read_step_file(home, task, one, "notes.2.md").rstrip().endswith("[cut at 20 KB]"))
+            for bad in ("../task.json", "notes.md.bak", "x.md", "notes.100.md"):
+                self.assertFalse(tasks.file_name_ok(bad), bad)
+                self.assertEqual(tasks.read_step_file(home, task, one, bad), "")
+            with self.assertRaises(ValueError):
+                tasks.write_step_file(home, task, one, "../task.json", "x")
+            old = dict(tasks.step(task, 2))  # a step of a task.json from before plan 28: no "dir"
+            self.assertEqual((tasks.note_file(task, old), tasks.brief_file(task, old), tasks.facts_file(task, old),
+                              tasks.handoff_file(task, old)),
+                             ("steps/02-code.md", "steps/02-code.brief.md", "steps/02-code.facts.md",
+                              "steps/02-handoff.md"))
+
+    def test_notes_of_is_the_message_before_its_blocks(self):
+        self.assertEqual(tasks.notes_of("I read calc.py.\n## Notes\nx\n\nHANDOFF\n## Goal\ng\nEND HANDOFF"),
+                         "I read calc.py.\n## Notes\nx")
+        self.assertEqual(tasks.notes_of("why\n**PLAN**\n# Plan\nEND PLAN\nHANDOFF\nEND HANDOFF"), "why")
+        self.assertEqual(tasks.notes_of("no blocks at all\n"), "no blocks at all")
+        self.assertEqual(tasks.notes_of("HANDOFF\n## Goal\nEND HANDOFF"), "")
+
+    def test_clear_trims_step_folders_and_keeps_the_plan(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = make(("scout", "code"))
+            for n in (1, 2):
+                run(task, n)
+                end(task)
+                s = tasks.step(task, n)
+                tasks.write_note(home, task, s, GOOD)
+                tasks.write_step_file(home, task, s, "notes.md", "n")
+                tasks.write_step_file(home, task, s, "role.md", "r")
+            task["plan"] = {"from": 1, "dir": "01-scout", "parts": []}
+            folder = tasks.folder(home, task["id"])
+            (folder / "01-scout" / "plan.md").write_text("plan", encoding="utf-8")
+            (folder / "01-scout" / "plan").mkdir()
+            (folder / "01-scout" / "plan" / "01-a.md").write_text("part", encoding="utf-8")
+            legacy = folder / "steps" / "00-old.md"
+            legacy.parent.mkdir()
+            legacy.write_text("old", encoding="utf-8")
+            tasks.clear(home, task, keep_last=True)
+            files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
+            self.assertEqual(files, ["01-scout/plan.md", "01-scout/plan/01-a.md", "02-code/handoff.md"])
+
+    def test_prune_keeps_everything_at_zero_days(self):
+        self.assertEqual(paths.DEFAULTS["task_retention_days"], 0)  # plan 28 (D9)
+        with tempfile.TemporaryDirectory() as home:
+            task = make(("scout",))
+            task["state"] = "done"
+            tasks.save(home, task)
+            stamp = NOW - 900 * 86400
+            os.utime(tasks.folder(home, task["id"]) / "task.json", (stamp, stamp))
+            self.assertEqual(tasks.prune(home, 0, now=NOW), [])
+            self.assertTrue(tasks.folder(home, task["id"]).exists())
+            self.assertEqual(tasks.prune(home, 90, now=NOW), [task["id"]])
+
+    def test_new_task_has_a_slug(self):
+        self.assertEqual(make()["slug"], "add-the-export")
+        self.assertEqual(tasks.slug("  !!  "), "task")
+        self.assertEqual(tasks.slug("Fix the Usage page: export as CSV, and a much longer title than that"),
+                         "fix-the-usage-page-export-as-csv-and-a")
 
     def test_prune_removes_only_finished_old_tasks(self):
         with tempfile.TemporaryDirectory() as home:
@@ -779,10 +915,11 @@ class ChainTest(unittest.TestCase):
                 tasks.write_facts(home, task, tasks.step(task, n), f"facts {n}")
             self.assertEqual(len(files()), 8)
             self.assertEqual(tasks.clear(home, task, keep_last=True), ["s1", "s2", "s3"])
-            self.assertEqual(files(), ["chain.jsonl", "prompt.md", "steps/03-search.facts.md", "steps/03-search.md",
+            self.assertEqual(files(), ["03-search/facts.md", "03-search/handoff.md", "chain.jsonl", "prompt.md",
                                        "task.json"])
+            self.assertEqual(sorted(p.name for p in folder.iterdir() if p.is_dir()), ["03-search"])  # empty ones go
             self.assertTrue(task["cleared"])
-            self.assertEqual([s["handoff"] for s in task["steps"]], ["", "", "steps/03-search.md"])
+            self.assertEqual([s["handoff"] for s in task["steps"]], ["", "", "03-search/handoff.md"])
             self.assertEqual(tasks.clear(home, task, keep_last=False), ["s1", "s2", "s3"])
             self.assertFalse(folder.exists())
             self.assertIsNone(tasks.load(home, task["id"]))
@@ -790,10 +927,10 @@ class ChainTest(unittest.TestCase):
     def test_brief_file_and_read_brief(self):
         task = make(("scout", "explain"))
         run(task, 1)
-        self.assertEqual(tasks.brief_file(task, tasks.step(task, 1)), "steps/01-scout.brief.md")
+        self.assertEqual(tasks.brief_file(task, tasks.step(task, 1)), "01-scout/brief.md")
         with tempfile.TemporaryDirectory() as home:
             self.assertEqual(tasks.read_brief(home, task, 1), "")
-            path = tasks.folder(home, task["id"]) / "steps" / "01-scout.brief.md"
+            path = tasks.folder(home, task["id"]) / "01-scout" / "brief.md"
             path.parent.mkdir(parents=True)
             path.write_text("the brief", encoding="utf-8")
             self.assertEqual(tasks.read_brief(home, task, 1), "the brief")
@@ -805,7 +942,7 @@ class ChainTest(unittest.TestCase):
         run(task, 1)
         with tempfile.TemporaryDirectory() as home:
             rel = tasks.write_brief(home, task, tasks.step(task, 1), "## Findings\nthe brief")
-            self.assertEqual(rel, "steps/01-scout.brief.md")
+            self.assertEqual(rel, "01-scout/brief.md")
             self.assertEqual(tasks.read_brief(home, task, 1), "## Findings\nthe brief")
             self.assertEqual(tasks.read_brief(home, task, 2), "")
             self.assertEqual(tasks.step(task, 1)["handoff"], "")  # task.json has no brief key: nothing is set
@@ -823,7 +960,7 @@ class ChainTest(unittest.TestCase):
             tasks.save(home, task)
             tasks.clear(home, task, keep_last=True)
             files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
-            self.assertEqual(files, ["steps/02-explain.brief.md", "steps/02-explain.md", "task.json"])
+            self.assertEqual(files, ["02-explain/brief.md", "02-explain/handoff.md", "task.json"])
 
     def test_step_prompt_carries_the_plan_and_the_part(self):
         task = make(("scout", "code"))
@@ -835,8 +972,9 @@ class ChainTest(unittest.TestCase):
         self.assertLess(text.index("PLAN TEXT"), text.index("What the earlier steps left you:"))
         self.assertIn("PART TEXT\n\nRules for this step:", text)
         self.assertNotIn("$", text)
-        special = tasks.step_prompt(task, step, "NOTE", special="SPECIAL")
-        self.assertIn("SPECIAL", special)
+        role = tasks.step_prompt(task, step, "NOTE", role="ROLE TEXT")  # plan 28: the kind file as rendered
+        self.assertIn("Step 2 of 3: code. goal of code\n\nROLE TEXT\n", role)
+        self.assertIn("You are the code step", bare)  # None: the repo's seed of kinds/code.md
 
     def test_step_prompt_text(self):
         task = make(("scout", "code"))
@@ -867,6 +1005,10 @@ class ChainTest(unittest.TestCase):
         self.assertIn("Your earlier attempt at this step ended without a handoff: no HANDOFF block. "
                       "Start again from the handoff below.", retry)
         self.assertNotIn("Your earlier attempt", code)
+        noted = tasks.step_prompt(task, tasks.step(task, 2), "note", "no HANDOFF block", note="close it with END HANDOFF", you="Fred")
+        self.assertIn("Start again from the handoff below.\nFred adds for this retry: close it with END HANDOFF", noted)
+        self.assertIn("Fred adds for this retry: try again", tasks.step_prompt(task, tasks.step(task, 2), "note", note="try again", you="Fred"))
+        self.assertNotIn("adds for this retry", retry)
         long = dict(task, goal="g" * 9000)
         self.assertLess(len(tasks.step_prompt(long, tasks.step(long, 1), "")), 9000)
 
@@ -879,6 +1021,16 @@ class ChainTest(unittest.TestCase):
         self.assertIn("tier is haiku, sonnet or opus", text.replace("\n", " "))
         self.assertEqual(tasks.next_hint("Next model: opus/high"), ("opus", "high"))  # the hint still parses
         self.assertNotIn(chr(0x2014), tasks.PROMPT_FILE.read_text(encoding="utf-8"))
+
+    def test_prompts_name_the_configured_person(self):
+        """Plan 31: no prompt file names Fred; the step prompt's question rule names `you` (paths.you)."""
+        for path in sorted(tasks.PROMPT_FILE.parent.glob("*.md")) + sorted(kinds.SEED.glob("*.md")):
+            self.assertNotIn("Fred", path.read_text(encoding="utf-8"), path.name)
+        task = make(("scout", "code"))
+        self.assertIn("- a question the next step or the user must settle", tasks.step_prompt(task, tasks.step(task, 1), ""))
+        text = tasks.step_prompt(task, tasks.step(task, 1), "", you="Fred")
+        self.assertIn("- a question the next step or Fred must settle", text)
+        self.assertNotIn("$", text)
 
     def test_goal_is_cut_to_600_after_the_first_step(self):
         task = make(("scout", "code"))
@@ -967,7 +1119,7 @@ class NoteStateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             self.assertEqual(tasks.read_handoff(home, task), "")
             rel = tasks.write_handoff(home, task, one, "Decided: calc.py\nNext: step 2, token sk-ant-api03-" + "x" * 40)
-            self.assertEqual((rel, task["handoff_note"]), ("steps/01-handoff.md", rel))
+            self.assertEqual((rel, task["handoff_note"]), ("01-scout/handed.md", rel))  # plan 28: renamed
             self.assertEqual(tasks.note_state(task, one), "handed")
             text = tasks.read_handoff(home, task)
             self.assertTrue(text.startswith("# Step 01: handoff note, session "), text)
@@ -1158,6 +1310,12 @@ def brief(*questions):
 class BoardTest(unittest.TestCase):
     """Plan 25 Task 1: open questions from the briefs, the chain log, the measure table."""
 
+    def test_label_is_mmdd_and_the_hex(self):  # plan 30 (D11)
+        self.assertEqual(tasks.label("20261015-093012-a3f2"), "1015-a3f2")
+        self.assertEqual(tasks.label(prep.new_id())[4], "-")
+        for bad in ("", "x", "20261015-093012-A3F2", "../20261015-093012-a3f2", None):
+            self.assertEqual(tasks.label(bad), "")
+
     def test_open_questions_open_and_close(self):
         task = make(("scout", "code", "document"))  # scout, code, verify, document
         briefs = {1: brief("Which exe is the real one?"), 2: brief("Which exe is the real one?", "Week or 7 days?"),
@@ -1226,6 +1384,145 @@ class BoardTest(unittest.TestCase):
             self.assertEqual([(r["kind"], r["received"], r["context"], r["handoff"]) for r in m["kinds"]],
                              [("scout", None, None, 200), ("code", 160, None, 400), ("verify", 300, None, 180)])
             self.assertEqual(m["hot"], "")  # no context reading: nothing to name
+
+
+class NextStepTest(unittest.TestCase):
+    """Plan 36 Task 1: a manual successor runs in the same task, and every manual step stops at its own boundary."""
+
+    def manual(self, kinds=("scout",)):
+        """A one-step task whose last step just ended well under manual progression: it waits for Fred."""
+        task = make(kinds)
+        task["progression"] = "manual"
+        run(task, 1)
+        self.assertEqual(end(task)[0], "manual")
+        return task
+
+    def test_next_kinds_are_the_work_the_form_offers(self):
+        self.assertEqual(tasks.NEXT_KINDS, ("code", "verify", "scout", "design", tasks.CHAT))
+        self.assertNotIn("fix", tasks.NEXT_KINDS)  # a fix only ever follows a failed automatic verify
+
+    def test_a_manual_step_leaves_the_task_paused_for_fred(self):
+        task = self.manual()
+        self.assertEqual((task["state"], task["why"], task["owner"]), ("waiting", "choose next step", "fred"))
+        self.assertEqual((task["last_good"], task["steps"][0]["state"]), (1, "done"))
+
+    def test_an_automatic_chain_still_advances_by_itself(self):
+        task = make(("scout", "code"))
+        run(task, 1)
+        self.assertEqual(end(task)[0], "next")
+        self.assertEqual((task["state"], task["owner"]), ("running", "service"))
+
+    def test_a_manual_step_in_a_longer_chain_starts_nothing(self):
+        task = make(("scout", "code"))  # scout, code, verify: two planned steps after the first
+        task["progression"] = "manual"
+        run(task, 1)
+        self.assertEqual(end(task)[0], "manual")
+        self.assertEqual((task["state"], task["owner"]), ("waiting", "fred"))
+        self.assertEqual([s["state"] for s in task["steps"]], ["done", "planned", "planned"])
+
+    def test_append_step_numbers_the_successor_and_keeps_the_task(self):
+        task = self.manual()
+        before = {k: task[k] for k in ("id", "goal", "project_dir", "project", "title", "created", "prep")}
+        task["steps"][0]["cost"] = 0.25
+        new = tasks.append_step(task, "verify", " Check what step 01 changed ", now=NOW + 200)
+        self.assertEqual({k: task[k] for k in before}, before)  # id, goal, folder, prep and creation kept
+        self.assertEqual(task["steps"][0]["cost"], 0.25)  # the earlier step keeps its cost
+        self.assertEqual([s["n"] for s in task["steps"]], [1, 2])
+        self.assertEqual((new["n"], new["kind"], new["goal"], new["state"]),
+                         (2, "verify", "Check what step 01 changed", "planned"))
+        self.assertEqual(tasks.step_file(new, "received.md"), "02-verify/received.md")
+        self.assertEqual((new["checked"], new["source_step"], new["source_session"]), (1, 1, "s1"))
+        self.assertEqual(new["pick"], "")
+        self.assertEqual(task["progression"], "manual")
+        self.assertEqual((task["state"], task["owner"], task["current"], task["last_good"]),
+                         ("running", "service", 1, 1))
+        self.assertEqual(task["updated"], NOW + 200)
+        self.assertEqual(tasks.current_step(task), task["steps"][0])  # the successor is not current until it starts
+
+    def test_append_step_takes_a_pick(self):
+        task = self.manual()
+        new = tasks.append_step(task, "code", "write it", "codex:gpt-6-astra", now=NOW)
+        self.assertEqual((new["kind"], new["pick"], new["checked"]), ("code", "codex:gpt-6-astra", 0))
+
+    def test_append_step_refuses_a_kind_goal_or_source_it_cannot_take(self):
+        task = self.manual()
+        for kind in ("replan", "fix", "search", "CHAT", "", None):
+            with self.assertRaises(ValueError, msg=str(kind)):
+                tasks.append_step(task, kind, "do it", now=NOW)
+        for goal in ("", "   ", "x" * (tasks.STEP_GOAL_MAX + 1), None, 7):
+            with self.assertRaises(ValueError, msg=str(goal)):
+                tasks.append_step(task, "code", goal, now=NOW)
+        self.assertEqual(len(task["steps"]), 1)  # a refused append changes nothing
+        self.assertEqual(task["progression"], "manual")
+        late = make(("scout", "code"))  # a historical step is not a branch point
+        late["progression"] = "manual"
+        run(late, 1)
+        end(late)
+        with self.assertRaises(ValueError):
+            tasks.append_step(late, "code", "again", now=NOW)
+        fresh = make(("scout",))  # nor is a task that never ran
+        with self.assertRaises(ValueError):
+            tasks.append_step(fresh, "code", "start", now=NOW)
+
+    def test_append_step_refuses_another_progression(self):
+        task = self.manual()
+        task["progression"] = "automatic"
+        with self.assertRaises(ValueError):
+            tasks.append_step(task, "code", "do it", now=NOW)
+
+    def test_append_step_finishes_a_running_chat_and_drops_the_legacy_flag(self):
+        s = tasks.chat_step(1, "what next", "w1", "sonnet", "medium", NOW)
+        task = tasks.new_task("D:\\WORK\\APP", "APP", "hi", "hi there", [s], "normal", {}, "20261012-101455-9c1d",
+                              "auto", NOW)
+        task.update(state="running", owner="window", current=1, chat=True)
+        new = tasks.append_step(task, "code", "do the thing", now=NOW + 5)
+        self.assertEqual((task["steps"][0]["state"], task["steps"][0]["ended"]), ("done", NOW + 5))
+        self.assertNotIn("chat", task)  # the whole-task flag goes: the current step's kind decides
+        self.assertEqual((task["progression"], new["source_session"], task["current"]), ("manual", "w1", 1))
+        self.assertEqual((task["state"], task["owner"]), ("running", "service"))
+
+    def test_manual_verify_fail_waits_without_inserting_a_fix(self):
+        task = self.manual()  # step 01 scout, done, manual
+        tasks.append_step(task, "code", "write it", now=NOW)
+        run(task, 2)
+        self.assertEqual(end(task)[0], "manual")
+        tasks.append_step(task, "verify", "check it", now=NOW)
+        run(task, 3, "opus", "high")
+        action, lines = end(task, verdict="FAIL", verdict_detail="3 != 4")
+        self.assertEqual(action, "manual")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])  # no fix, no second verify
+        self.assertEqual((task["state"], task["owner"], task["why"]), ("waiting", "fred", "VERDICT: FAIL: 3 != 4"))
+        self.assertEqual((task["steps"][2]["state"], task["steps"][2]["verdict"]), ("done", "FAIL"))
+        self.assertEqual(task["last_good"], 3)
+
+    def test_a_manual_verify_pass_reaches_the_boundary_too(self):
+        task = self.manual()
+        tasks.append_step(task, "code", "write it", now=NOW)
+        run(task, 2)
+        end(task)
+        tasks.append_step(task, "verify", "check it", now=NOW)
+        run(task, 3, "opus", "high")
+        self.assertEqual(end(task, verdict="PASS")[0], "manual")
+        self.assertEqual((task["state"], task["why"]), ("waiting", "choose next step"))
+
+    def test_a_manual_chat_step_belongs_to_the_task(self):
+        task = make(("scout",))
+        task["progression"] = "manual"
+        run(task, 1)
+        end(task)
+        new = tasks.append_step(task, tasks.CHAT, "keep talking", now=NOW)
+        self.assertEqual((new["kind"], new["checked"], new["pick"]), (tasks.CHAT, 0, ""))
+        self.assertEqual(task["progression"], "manual")
+
+    def test_received_manifest_names_the_handover_and_the_source_facts(self):
+        """Plan 36 Task 2: what a reserved manual step received is written once, at reservation, not by start_step."""
+        task = self.manual()
+        new = tasks.append_step(task, "code", "write it", now=NOW)
+        text = tasks.received_manifest(task, new, task["steps"][0])
+        self.assertEqual(text.splitlines()[0], "# Step 02: what it received")
+        self.assertIn("02-code/received-handoff.md (saved handover from step 01)", text)
+        self.assertIn("01-scout/facts.md (source facts, if recorded)", text)
+        self.assertIn(task["project_dir"], text)
 
 
 if __name__ == "__main__":

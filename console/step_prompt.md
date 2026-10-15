@@ -5,8 +5,8 @@ Task: $title
 $goal
 
 Step $n of $m: $kind. $step_goal
-$special
-$retry
+
+${role}$retry
 ${plan}What the earlier steps left you:
 $prev
 
@@ -26,7 +26,7 @@ What you learned or did, in a few lines, with the file paths and line numbers th
 ## Troubleshooting
 - what failed and what fixed it, what you tried that does not work, a command that reproduces it, or: - (none)
 ## Open questions
-- a question the next step or Fred must settle, or: - (none)
+- a question the next step or $you must settle, or: - (none)
 ## Next
 One line for the next step. Add `Next model: <tier>/<effort>` only when the next step needs more than planned: the
 tier is haiku, sonnet or opus (cheapest to strongest, whatever CLI runs the step), the effort low, medium or high.

@@ -123,6 +123,27 @@ class CommandTest(unittest.TestCase):
         self.assertFalse(claude_cli.pid_alive(proc.pid))
         self.assertFalse(claude_cli.pid_alive(None))
 
+    def test_run_alive_refuses_a_recycled_pid(self):
+        """Plan 34 F4: a process born after its run's start (plus the slack) holds a recycled pid."""
+        with mock.patch.object(claude_cli, "pid_alive", return_value=True), \
+                mock.patch.object(claude_cli, "process_started", return_value=100.0):
+            self.assertTrue(claude_cli.run_alive(5, 99.0))
+            self.assertFalse(claude_cli.run_alive(5, 50.0))
+            self.assertTrue(claude_cli.run_alive(5, None))  # an old meta without "started"
+        with mock.patch.object(claude_cli, "pid_alive", return_value=True), \
+                mock.patch.object(claude_cli, "process_started", return_value=None):
+            self.assertTrue(claude_cli.run_alive(5, 50.0))  # creation time unknown: pid_alive alone
+        with mock.patch.object(claude_cli, "pid_alive", return_value=False):
+            self.assertFalse(claude_cli.run_alive(5, 99.0))
+
+    @unittest.skipUnless(os.name == "nt", "the creation time is read on Windows only")
+    def test_process_started_reads_this_process(self):
+        born = claude_cli.process_started(os.getpid())
+        self.assertIsNotNone(born)
+        self.assertLess(born, time.time())
+        self.assertGreater(born, time.time() - 86400)
+        self.assertIsNone(claude_cli.process_started(None))
+
 
 @unittest.skipUnless(os.name == "nt", "job objects are Windows only")
 class ServiceJobTest(unittest.TestCase):

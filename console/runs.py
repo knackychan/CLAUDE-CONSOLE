@@ -9,7 +9,7 @@ import uuid
 from itertools import chain
 from pathlib import Path
 
-from . import attach, claude_cli, events, redact
+from . import attach, claude_cli, events, redact, tasks
 from . import harness as harness_pkg
 
 WATCH_S = 0.5
@@ -52,7 +52,8 @@ def chat(path: Path, cwd: str = "", limit: int = 200, harness: str = "claude") -
     return harness_pkg.get(harness).chat(lines, cwd)[-limit:]
 
 
-def result_record(session_id: str, summary: dict, exit_code, stopped: bool, timed_out: bool = False) -> dict:
+def result_record(session_id: str, summary: dict, exit_code, stopped: bool, timed_out: bool = False,
+                  harness: str = "claude") -> dict:
     """The run_ended event line for one finished process; `summary` is the adapter's summary() of the turn.
     cost and tokens are left out when the adapter did not report them (never 0)."""
     subtype = "error_step_timeout" if timed_out else summary.get("subtype", "")
@@ -66,6 +67,13 @@ def result_record(session_id: str, summary: dict, exit_code, stopped: bool, time
         rec["tokens"] = summary["tokens"]
     if summary.get("denials"):
         rec["denials"] = summary["denials"]
+    if subtype == "success" and not stopped:
+        question = tasks.reply_question(summary.get("final"))
+        if question:
+            rec["stop_question"] = question
+        if harness != "claude":  # its hook may be untrusted or not installed: read the VERDICT line here
+            from cc_events import verdict as parse_verdict  # the hook's own parser, so the record matches
+            rec.update(parse_verdict(summary.get("final") or ""))
     return rec
 
 
@@ -146,7 +154,7 @@ class RunManager:
         if resume:
             harness = old.get("harness") or "claude"
         elif fork:
-            harness = forked.get("harness") or "claude"
+            harness = forked.get("harness") or harness or "claude"
         try:
             adapter = harness_pkg.get(harness)
         except KeyError:
@@ -164,7 +172,8 @@ class RunManager:
             if resume:
                 harness_sid = old.get("harness_session") or ""
             elif fork:
-                harness_sid = forked.get("harness_session") or ""
+                # a window copy forks the CLI's id out of the run meta; an outside chat's row id is that id
+                harness_sid = forked.get("harness_session") or ("" if forked else fork)
             if (resume or fork) and not (harness_sid and adapter.RESUME):
                 raise RunError("this session cannot be resumed: no harness session id")
         self.runs.mkdir(parents=True, exist_ok=True)
@@ -200,8 +209,10 @@ class RunManager:
             fh.write(json.dumps({"type": "cc_prompt", "ts": time.time(), "text": prompt,
                                  "files": attach.summary(files)}, ensure_ascii=False) + "\n")
         offset = path.stat().st_size
-        proc = self._spawn(cmd, cwd, path, stdin, claude_cli.child_env() | adapter.env(read_only),
-                           close_stdin=not adapter.INTERRUPT)
+        env = claude_cli.child_env() | adapter.env(read_only)
+        if harness != "claude":
+            env["CC_CONSOLE_SID"] = sid  # the CLI's hook files this run under the console's session id (README 3.5)
+        proc = self._spawn(cmd, cwd, path, stdin, env, close_stdin=not adapter.INTERRUPT)
         with self.lock:
             self.live[sid] = proc
             self.stopping.discard(sid)
@@ -315,7 +326,8 @@ class RunManager:
             meta["harness_session"] = summary["session_id"]
         meta["ended"] = time.time()
         self._save_meta(meta)
-        self.emit(result_record(sid, summary, exit_code, stopped, timed_out))
+        self.emit(result_record(sid, summary, exit_code, stopped, timed_out,
+                                harness=meta.get("harness") or "claude"))
 
     # -- stop -----------------------------------------------------------------------
     def stop(self, sid: str) -> str:
@@ -332,7 +344,7 @@ class RunManager:
                     self.stopping.discard(sid)
                     return "finishing"
         meta = self.meta(sid)
-        if meta and not meta.get("ended") and claude_cli.pid_alive(meta.get("pid")):
+        if meta and not meta.get("ended") and claude_cli.run_alive(meta.get("pid"), meta.get("started")):
             with self.lock:
                 self.stopping.add(sid)
             claude_cli.kill_tree(meta["pid"])
@@ -373,7 +385,7 @@ class RunManager:
                 continue
             _, lines = read_lines(self.stream_path(sid), meta.get("offset", 0))
             is_result = harness_pkg.get(meta.get("harness") or "claude").is_result
-            if not any(is_result(d) for d in lines) and claude_cli.pid_alive(meta.get("pid")):
+            if not any(is_result(d) for d in lines) and claude_cli.run_alive(meta.get("pid"), meta.get("started")):
                 continue
             self._finish(sid, None)
             done += 1

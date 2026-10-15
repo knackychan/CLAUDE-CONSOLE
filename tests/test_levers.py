@@ -3,7 +3,7 @@ import time
 import unittest
 from pathlib import Path
 
-from console import levers, prep
+from console import levers, prep, routing
 
 
 class LeversTest(unittest.TestCase):
@@ -31,6 +31,10 @@ class LeversTest(unittest.TestCase):
             self.assertEqual(levers.read_misses(Path(tmp) / "nope", "CALC"), [])
             self.assertIn(line, prep.build_prompt("x", [line]))
             self.assertIn("\n(none)\n", prep.build_prompt("x"))
+            used = levers.used_line("CALC", "code", "opus/high", "20261015-085403-e56d", 3, now)
+            self.assertEqual(used, "- 2026-10-10 - CALC - code: floor opus/high used by task 20261015-085403-e56d "
+                                   "step 03; it passed.")
+            self.assertIsNone(routing.floor([used], "code"))  # a used line is never a floor itself
 
     def test_after_verify(self):
         self.assertEqual(levers.after_verify("PASS"), ("handoff", "done"))
@@ -66,6 +70,28 @@ class LeversTest(unittest.TestCase):
             self.assertEqual(levers.read_lessons(Path(tmp) / "nope", "CALC"), [])
             self.assertEqual(levers.read_misses(Path(tmp), "CALC"), [])  # the two files stay apart
             self.assertLessEqual(len(levers.lesson_line("P", "code", "w" * 500, now)), 240)
+
+    def test_escalate_step_other_harness(self):
+        cfg = {"models": {"codex": {"gpt-a": "sonnet", "gpt-b": "opus"}, "cmd": {"m": "haiku"}}}
+        self.assertEqual(levers.escalate_step("gpt-a", "low", "codex", cfg), ("gpt-a", "medium"))
+        self.assertEqual(levers.escalate_step("gpt-a", "medium", "codex", cfg), ("gpt-a", "high"))
+        self.assertEqual(levers.escalate_step("gpt-a", "high", "codex", cfg), ("gpt-b", "high"))
+        self.assertIsNone(levers.escalate_step("gpt-b", "high", "codex", cfg))  # nothing above opus
+        self.assertIsNone(levers.escalate_step("m", "high", "cmd", cfg))        # only haiku-tier models
+        self.assertIsNone(levers.escalate_step("gone", "high", "codex", cfg))   # not in models.json
+        self.assertIsNone(levers.escalate_step("gpt-a", "auto", "codex", cfg))
+
+    def test_handoff_prompt_strips_front_matter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            self.assertEqual(levers.handoff_prompt(home), "")
+            skill = home / ".claude" / "skills" / "session-handoff"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: session-handoff\ndescription: x\n---\n\n# Handoff\n\n"
+                                            "Write the note.\n", encoding="utf-8")
+            text = levers.handoff_prompt(home)
+            self.assertTrue(text.startswith("# Handoff"))
+            self.assertNotIn("description:", text)
 
     def test_escalate_text_frames_the_fix(self):
         text = levers.escalate_text("test_x - KeyError", "sonnet", "high")

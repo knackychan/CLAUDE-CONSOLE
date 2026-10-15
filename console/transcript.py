@@ -4,6 +4,7 @@ stay out (Steps shows tool calls)."""
 import base64
 import json
 import re
+import sqlite3
 from datetime import datetime
 from pathlib import Path, PurePath
 
@@ -18,6 +19,10 @@ TURN_MAX = 20000  # one chat turn: a long reply must not end mid-word
 # Fred's own pastes stay, as in cc_events.py.
 _INJECTED = re.compile(r"\s*<(?!pasted_content\b)([A-Za-z][\w-]*)[^>]*>.*?</\1>\s*", re.S)
 _PASTED = re.compile(r"</?pasted_content[^>]*>")
+# cc_events.strip_ide_context's rule, copied: this module does not import the hook.
+_IDE_CONTEXT = "## My request:"
+OPENCODE_DB = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+OPENCODE_ROWS = 20  # rows read per turn wanted: an assistant turn may be several rows
 IMAGE_EXT = {"png", "jpg", "jpeg", "gif", "webp"}  # the kinds a Chat thumbnail shows (attach.kind_of)
 
 
@@ -187,3 +192,143 @@ def find(root, session_id: str):
         return None
     hits = sorted(Path(root).glob(f"*/{session_id}.jsonl"))
     return hits[0] if hits else None
+
+
+# -- the other CLIs --------------------------------------------------------------------------------------
+
+def _tail_lines(path) -> list:
+    """The last lines of a file, reading at most TAIL_BYTES from its end; [] when it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            start = max(0, fh.seek(0, 2) - TAIL_BYTES)
+            fh.seek(start)
+            data = fh.read()
+    except (OSError, TypeError, ValueError):
+        return []
+    lines = data.split(b"\n")
+    return lines[1:] if start else lines  # the first line was cut in the middle
+
+
+def _item(role: str, text: str, ts) -> dict:
+    """One turn of a chat, cut and masked like `turns` does."""
+    text = _PASTED.sub("", _INJECTED.sub(" ", str(text or ""))).strip()
+    text = redact.mask(text)
+    if len(text) > TURN_MAX:
+        text = text[:TURN_MAX].rstrip() + "\n[cut here, the full text is in the transcript]"
+    return {"role": role, "text": text, "ts": ts, "files": []}
+
+
+def codex_turns(path, limit: int = TURNS) -> list:
+    """The last turns of a Codex rollout: Fred's prompts and the agent's messages, oldest first. Tool calls
+    and reasoning stay out (Steps shows tool calls), as for Claude."""
+    path = str(path or "")
+    if not path.endswith(".jsonl"):
+        return []
+    out = []
+    for raw in _tail_lines(path):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        payload = rec.get("payload") if isinstance(rec, dict) else None
+        if rec.get("type") != "event_msg" or not isinstance(payload, dict):
+            continue
+        text = str(payload.get("message") or "")
+        if not text.strip():
+            continue
+        ts = _when(rec.get("timestamp"))
+        if payload.get("type") == "user_message":
+            at = text.rfind(_IDE_CONTEXT)  # Codex VS Code puts its editor state before the prompt
+            out.append(_item("you", text[at + len(_IDE_CONTEXT):] if at >= 0 else text, ts))
+        elif payload.get("type") == "agent_message":
+            out.append(_item("claude", text, ts))
+    return out[-limit:]
+
+
+def cmd_turns(path, limit: int = TURNS) -> list:
+    """The last turns of a Command Code transcript: Fred's prompts and the assistant's text blocks. A tool
+    result is a user record with no text block: it stays out."""
+    path = str(path or "")
+    if not path.endswith(".jsonl"):
+        return []
+    out = []
+    for raw in _tail_lines(path):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("type") != "message":
+            continue
+        msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+        content = msg.get("content")
+        blocks = content if isinstance(content, list) else []
+        text = "\n".join(b["text"] for b in blocks
+                         if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
+        if not text.strip():
+            continue
+        if msg.get("role") == "user":
+            out.append(_item("you", text, _when(rec.get("timestamp"))))
+        elif msg.get("role") == "assistant":
+            out.append(_item("claude", text, _when(rec.get("timestamp"))))
+    return out[-limit:]
+
+
+def opencode_turns(db, session_id: str, limit: int = TURNS) -> list:
+    """The last turns of an OpenCode chat, read only from session_message (the database also holds
+    credentials). The file is opened read only; any error gives []."""
+    if not db or not session_id:
+        return []
+    try:
+        con = sqlite3.connect(f"file:{Path(db).as_posix()}?mode=ro", uri=True, timeout=1)
+    except (sqlite3.Error, ValueError, OSError):
+        return []
+    try:
+        rows = con.execute("SELECT type, data, time_created FROM session_message"
+                           " WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+                           (str(session_id), int(limit) * OPENCODE_ROWS)).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+    out = []
+    for kind, data, created in reversed(rows):
+        try:
+            rec = json.loads(data)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if kind == "user":
+            text = str(rec.get("text") or "")
+        elif kind == "assistant":
+            text = "\n".join(b["text"] for b in (rec.get("content") or [])
+                             if isinstance(b, dict) and b.get("type") == "text"
+                             and isinstance(b.get("text"), str))
+        else:
+            continue
+        if not text.strip():
+            continue
+        ts = float(created) / 1000 if isinstance(created, (int, float)) and created > 1e11 else created
+        out.append(_item("you" if kind == "user" else "claude", text, ts))
+    return out[-limit:]
+
+
+def turns_of(harness: str, path, session_id: str, limit: int = TURNS, opencode_db=None) -> list:
+    """The last turns of one CLI's chat: Claude's transcript, a Codex rollout, a Command Code transcript or
+    OpenCode's database."""
+    if harness == "codex":
+        return codex_turns(path, limit)
+    if harness == "cmd":
+        return cmd_turns(path, limit)
+    if harness == "opencode":
+        return opencode_turns(opencode_db or OPENCODE_DB, session_id, limit)
+    return turns(path, limit)
+
+
+def first_prompt_of(harness: str, path, session_id: str, opencode_db=None) -> str:
+    """The first thing typed in a chat, for its brief: Claude's own head reader, the others' first turn."""
+    if harness == "claude":
+        return first_prompt(path)
+    text = next((t["text"] for t in turns_of(harness, path, session_id, opencode_db=opencode_db)
+                 if t["role"] == "you"), "")
+    return text[:TEXT_MAX]

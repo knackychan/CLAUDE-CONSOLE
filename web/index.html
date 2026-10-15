@@ -14,30 +14,38 @@
   <div id="open" class="win">
     <div id="banner" class="banner" hidden><b>OFFLINE</b> The service stopped answering. Runs keep going; the window reconnects by itself.</div>
 
-    <section data-page="list">
+    <section data-page="board">
       <div class="top">
         <span class="grip drag-region" title="Drag to move">&#8942;&#8942;</span>
         <button id="scope" class="scope" data-pick aria-haspopup="listbox" aria-expanded="false" title="Project (Ctrl+P)"><span id="scopenm" class="nm">All projects</span><span class="car">&#9662;</span></button>
         <button id="needsbtn" class="needs" data-go="needs" title="Show what needs you, in every project" hidden></button>
-        <button id="boardbtn" class="wide-btn" data-go="board" title="Open the Board: the window widens to 900 px" hidden>&#8660; Board</button>
         <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
+        <button class="v-pg" data-go="usage" title="Usage by day, week and month">Usage</button>
+        <button class="v-pg" data-go="models" title="Models and tuning">Models</button>
         <span data-winbtns></span>
       </div>
-      <div id="listscroll" class="scroll">
-        <button id="today" class="today" aria-expanded="false" title="Show today's breakdown"></button>
-        <button id="overpace" class="overpace" aria-expanded="false" hidden title="The today breakdown: where the spend went and which models are over their pace"></button>
-        <div id="todaymore" class="todaymore" hidden></div>
-        <div id="list"></div>
+      <div id="calh" class="v-calh"></div>
+      <div id="todaymore" class="todaymore" hidden></div>
+      <div id="vboard" class="v-board">
+        <div class="v-left">
+          <div id="bchain" class="v-chain" aria-label="Tasks and chats"></div>
+          <div id="prepfail"></div>
+          <div id="delbar" class="v-delbar" hidden></div>
+          <div id="compose" class="compose">
+            <div class="lr"><textarea id="c-prompt" rows="1" spellcheck="false" aria-label="New task"
+              title="Enter = Prep · Ctrl+Enter = Run raw · Shift+Enter = new line · paste or drop files to attach"></textarea></div>
+            <ul id="files-compose" class="files" aria-label="Attached files"></ul>
+            <div id="effort" class="effort" role="radiogroup" aria-label="Effort"></div>
+            <div id="c-say" class="say"></div>
+          </div>
+        </div>
+        <div class="v-right">
+          <div class="v-back"><button data-go="bback" title="Back to the chain (Esc)">&#8249; Board</button><span id="bbackwhat"></span></div>
+          <div id="bwrap" class="bwrap"></div>
+          <div id="iprep" class="v-iprep" hidden><div id="pscroll" class="scroll stack"></div><div id="pbar" class="levers"></div></div>
+        </div>
       </div>
-      <div id="preps" class="preps"></div>
-      <div id="prepfail"></div>
-      <div class="compose">
-        <div class="lr"><textarea id="c-prompt" rows="1" spellcheck="false" aria-label="New task"
-          title="Enter = Prep · Ctrl+Enter = Run raw · Shift+Enter = new line · paste or drop files to attach"></textarea></div>
-        <ul id="files-compose" class="files" aria-label="Attached files"></ul>
-        <div id="effort" class="effort" role="radiogroup" aria-label="Effort"></div>
-        <div id="c-say" class="say"></div>
-      </div>
+      <div id="bfoot" class="bfoot"></div>
       <input id="filepick" type="file" multiple hidden>
     </section>
 
@@ -54,42 +62,9 @@
       <div id="levers" class="levers"></div>
     </section>
 
-    <section data-page="prep" hidden>
-      <div class="top">
-        <button class="rb" data-pact="back" title="Back to the list; the card waits above the task box (Esc)" aria-label="Back">&#8592;</button>
-        <span id="crumb" class="crumb m"></span>
-        <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
-        <span data-winbtns></span>
-      </div>
-      <div id="pscroll" class="scroll stack"></div>
-      <div id="pbar" class="levers"></div>
-    </section>
-
-    <section data-page="task" hidden>
-      <div class="top">
-        <button class="rb" data-go="back" title="Back (Esc)" aria-label="Back">&#8592;</button>
-        <span class="crumb m">Task</span>
-        <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
-        <span data-winbtns></span>
-      </div>
-      <div id="tscroll" class="scroll stack"></div>
-      <div id="tbar" class="levers"></div>
-    </section>
-
-    <section data-page="board" hidden>
-      <div class="top">
-        <button class="rb" data-go="back" title="Back (Esc)" aria-label="Back">&#8592;</button>
-        <span id="bcrumb" class="crumb m">Board</span>
-        <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
-        <span data-winbtns></span>
-      </div>
-      <div class="board"><div id="bchain" class="bchain"></div><div id="bwrap" class="bwrap"></div></div>
-      <div id="bfoot" class="bfoot"></div>
-    </section>
-
     <section data-page="usage" hidden>
       <div class="top">
-        <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">&#8592;</button>
+        <button class="rb" data-go="board" title="Back to the Board (Esc)" aria-label="Back">&#8592;</button>
         <span class="crumb m">Usage</span>
         <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
         <span data-winbtns></span>
@@ -99,7 +74,7 @@
 
     <section data-page="models" hidden>
       <div class="top">
-        <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">&#8592;</button>
+        <button class="rb" data-go="board" title="Back to the Board (Esc)" aria-label="Back">&#8592;</button>
         <span class="crumb m">Models and tuning</span>
         <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
         <span data-winbtns></span>

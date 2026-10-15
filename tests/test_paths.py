@@ -36,13 +36,14 @@ class PlanKeysTest(unittest.TestCase):
     def test_opus_max_turns_is_read_once_then_dropped(self):
         """Plan 27 (G8, plan 24 D2): the service start moves the old key into design_max_turns and drops it."""
         path = Path(self.tmp) / "config.json"
-        path.write_text(json.dumps({"opus_max_turns": 15, "projects": ["C:/x"]}), encoding="utf-8")
+        path.write_text(json.dumps({"opus_max_turns": 15, "projects": ["C:/x"], "user_name": ""}), encoding="utf-8")
         self.assertEqual(paths.ensure_config()["design_max_turns"], 15)
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"projects": ["C:/x"], "design_max_turns": 15})
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                         {"projects": ["C:/x"], "user_name": "", "design_max_turns": 15})
         self.assertEqual(paths.ensure_config()["design_max_turns"], 15)  # read from the new key from now on
-        path.write_text(json.dumps({"opus_max_turns": 15, "design_max_turns": 40}), encoding="utf-8")
+        path.write_text(json.dumps({"opus_max_turns": 15, "design_max_turns": 40, "user_name": ""}), encoding="utf-8")
         self.assertEqual(paths.ensure_config()["design_max_turns"], 40)
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"design_max_turns": 40})
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"design_max_turns": 40, "user_name": ""})
 
 
 class ConfigWriteTest(unittest.TestCase):
@@ -119,6 +120,68 @@ class SettingTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 paths.set_setting(Path(folder), "handoff_auto", True)
             self.assertEqual((Path(folder) / "config.json").read_text(encoding="utf-8"), "{broken")  # left as is
+
+
+class NameTest(unittest.TestCase):
+    """Plan 31: config `user_name`, filled once at the service start, read through paths.you."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        patcher = mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": self.tmp})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_you_collapses_and_falls_back(self):
+        self.assertEqual(paths.you({"user_name": "  Fred \n T.  "}), "Fred T.")
+        self.assertEqual(paths.you({"user_name": ""}), "the user")
+        self.assertEqual(paths.you({"user_name": ""}, start=True), "The user")
+        self.assertEqual(paths.you({"user_name": 7}), "the user")
+        self.assertEqual(paths.you({}), "the user")
+        self.assertEqual(len(paths.you({"user_name": "x" * 200})), paths.NAME_MAX)
+        self.assertEqual(paths.DEFAULTS["user_name"], "")
+
+    def test_os_user_name_prefers_git_then_the_login_and_never_raises(self):
+        git = mock.Mock(returncode=0, stdout=b"Fred Tms\n")
+        with mock.patch("subprocess.run", return_value=git), mock.patch("getpass.getuser", return_value="ftms"):
+            self.assertEqual(paths.os_user_name(), "Fred Tms")
+        with mock.patch("subprocess.run", side_effect=OSError("no git")), \
+                mock.patch("getpass.getuser", return_value="ftms"):
+            self.assertEqual(paths.os_user_name(), "ftms")
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1, stdout=b"")), \
+                mock.patch("getpass.getuser", side_effect=KeyError("no login")):
+            self.assertEqual(paths.os_user_name(), "")
+
+    def test_the_first_start_fills_the_name_once(self):
+        path = Path(self.tmp) / "config.json"
+        with mock.patch.object(paths, "os_user_name", return_value="Fred"):
+            self.assertEqual(paths.ensure_config()["user_name"], "Fred")  # a missing file
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["user_name"], "Fred")
+        path.write_text(json.dumps({"projects": ["C:/x"]}), encoding="utf-8")  # a file from before plan 31
+        with mock.patch.object(paths, "os_user_name", return_value="ftms"):
+            self.assertEqual(paths.ensure_config()["user_name"], "ftms")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"projects": ["C:/x"], "user_name": "ftms"})
+        path.write_text(json.dumps({"user_name": ""}), encoding="utf-8")  # cleared by hand: stays cleared
+        with mock.patch.object(paths, "os_user_name", side_effect=AssertionError("not asked")):
+            self.assertEqual(paths.ensure_config()["user_name"], "")
+        path.write_text("{broken", encoding="utf-8")  # unreadable: left as is
+        with mock.patch.object(paths, "os_user_name", side_effect=AssertionError("not asked")):
+            paths.ensure_config()
+        self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
+
+
+class AtomicWriteTest(unittest.TestCase):
+    def test_write_text_atomic_replaces_whole_and_cleans_up(self):
+        """Plan 34 F5: the text lands whole; a failed replace keeps the old file and leaves no temp file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sub" / "draft.txt"
+            paths.write_text_atomic(path, "one")
+            self.assertEqual(path.read_text(encoding="utf-8"), "one")
+            with mock.patch.object(paths.os, "replace", side_effect=PermissionError(13, "in use")):
+                with self.assertRaises(PermissionError):
+                    paths.write_text_atomic(path, "two")
+            self.assertEqual(path.read_text(encoding="utf-8"), "one")
+            self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["draft.txt"])
 
 
 if __name__ == "__main__":

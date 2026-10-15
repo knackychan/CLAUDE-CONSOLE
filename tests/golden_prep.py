@@ -1,5 +1,5 @@
 """Golden Prep routes (plan 22): three reference requests Prep must route the same way after every change to
-prep_prompt.md. Fred's script: it calls the real claude three times (about $0.09). Not a unit test.
+the prep kind file (dotclaude/console/kinds/prep.md, plan 29). Fred's script: it calls the real claude three times (about $0.09). Not a unit test.
 
     py tests/golden_prep.py            runs in this repo's folder, prints one line per case, exits 1 on a miss
 """
@@ -29,8 +29,10 @@ def main() -> int:
         for raw, want in CASES:
             card = prep.run_prep(cfg, Path(tmp), str(ROOT), raw, [found])
             got = card["route"]["type"]
-            mark = "ok  " if got == want else "MISS"
-            bad += got != want
+            scouted = bool(str(card["fields"].get("scouting") or "").strip())  # plan 29: Prep says what it read
+            mark = "ok  " if got == want and scouted else "MISS"
+            bad += got != want or not scouted
+            got += "" if scouted else " (no scouting)"
             print(f"{mark} {want:<10} got {got:<10} {card['route']['model']}/{card['route']['effort']}  ${card['cost']:.3f}  {raw}")
     print("golden: PASS" if not bad else f"golden: FAIL {bad} of {len(CASES)}")
     return 1 if bad else 0

@@ -28,7 +28,8 @@ DONE = {"done", "stale", "lost", "verified"}
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 READ_TOOLS = {"Read", "Grep", "Glob", "WebFetch", "WebSearch"}  # main-chat reads: "should delegate"
 HANDOFF_SKILL = "session-handoff"
-SOURCES = {"claude-vscode": "vscode", "cli": "terminal", "claude-desktop": "desktop"}
+SOURCES = {"claude-vscode": "vscode", "vscode": "vscode", "cli": "terminal", "claude-desktop": "desktop",
+           "interactive": "terminal", "print": "terminal", "exec": "terminal"}
 MAX_STEPS = 500
 MAX_TURNS = 200
 SHOW_FOR_S = 86400
@@ -78,6 +79,8 @@ class Session:
     route: str = ""
     prompts: int = 0
     in_turn: bool = False
+    turn_prompt: bool = False   # this turn's prompt is already counted (Command Code sends it on Stop)
+    turn_tokens: dict = None    # the last Stop's turn tokens (another CLI's chat), for the service
     ended: bool = False
     doing: str = ""
     ctx_tokens: int = None
@@ -184,11 +187,15 @@ class State:
         elif rec.get("effort"):
             s.effort = rec["effort"]
 
+        if rec.get("harness") and not s.window:  # another CLI's own chat: the run lines own a window run's harness
+            s.harness = rec["harness"]
         event = rec.get("event")
         if event == "SessionStart":
             s.ended = False
             if rec.get("model"):
                 s.model = rec["model"]
+            if rec.get("entrypoint") and not s.window:
+                s.source = SOURCES.get(rec["entrypoint"], rec["entrypoint"])
         elif event == "UserPromptSubmit":
             s.in_turn, s.ended = True, False
             s.prompts += 1
@@ -204,6 +211,7 @@ class State:
             words = rec.get("prompt", "").split()
             s.chat_handoff = bool(words) and words[0] == "/" + HANDOFF_SKILL  # typed: no Skill step
             self._turn_open(s, ts)
+            s.turn_prompt = True
         elif event == "PreToolUse":
             s.in_turn = True
             self._turn_open(s, ts)
@@ -233,9 +241,18 @@ class State:
                         "reason": rec.get("reason", ""), "ts": ts}
             self._step(s, ts, aid, rec.get("tool", ""), rec.get("what", ""), denied=True)
         elif event == "Stop":
+            if rec.get("prompt") and not s.in_turn:
+                self._turn_open(s, ts)  # Command Code: a turn with no tool call opens and closes on this Stop
+            if rec.get("prompt") and not s.turn_prompt:  # the prompt arrives on Stop, not on a hook of its own
+                s.prompts += 1
+                s.turn_prompt = True
+                text = redact.clip(_PASTED.sub(" ", rec["prompt"]), 60)
+                if not s.title and not _TAGGED.match(text):
+                    s.title = text
             s.in_turn = False
             s.doing = ""
             self._turn_close(s, ts)
+            s.turn_tokens = rec["tokens"] if isinstance(rec.get("tokens"), dict) else None
             s.model = rec.get("model") or s.model
             if rec.get("context_tokens") is not None:
                 s.ctx_tokens = rec["context_tokens"]
@@ -243,7 +260,7 @@ class State:
                 s.source = SOURCES.get(rec["entrypoint"], rec["entrypoint"])
             if rec.get("route"):
                 s.route = rec["route"]
-            s.stop_question = rec.get("stop_question", "")
+            s.stop_question = rec.get("stop_question") or s.stop_question
             if rec.get("verdict"):
                 self._verdict(s, rec, ts)
             s.reply, s.replied_ts = rec.get("reply", ""), ts
@@ -255,6 +272,11 @@ class State:
             s.replied_ts = 0.0
             self._turn_close(s, ts)
             s.failed = {"error": rec.get("error", "unknown"), "details": rec.get("error_details", "")}
+        elif event == "Interrupt":  # Fred stopped the turn (Codex's Esc, OpenCode's abort)
+            s.in_turn = False
+            s.doing = ""
+            self._turn_close(s, ts)
+            s.interrupted = True
         elif event == "InstructionsLoaded" and not agent and rec.get("file"):
             s.rules[rec["file"]] = {"scope": rec.get("scope", ""), "lines": int(rec.get("lines") or 0),
                                     "bytes": int(rec.get("bytes") or 0)}
@@ -318,8 +340,11 @@ class State:
                 s.model = rec["model"]
         elif event == "run_ended":
             s.window, s.run_live, s.in_turn = True, False, False
+            s.stop_question = rec.get("stop_question") or s.stop_question
             s.doing = ""
             self._turn_close(s, ts)
+            if rec.get("verdict") and s.turns and s.verdict_ts < s.turns[-1][0]:
+                self._verdict(s, rec, ts)  # another CLI's run whose hook did not bring the verdict
             s.cost += float(rec.get("cost") or 0)
             s.run_costs.append([ts, float(rec.get("cost") or 0)])
             if "cost" not in rec and s.harness != "claude":
@@ -361,6 +386,7 @@ class State:
     def _turn_open(self, s, ts):
         if not s.turns or s.turns[-1][1] is not None:
             s.turns.append([ts, None])
+            s.turn_prompt = False
             if len(s.turns) > MAX_TURNS:
                 del s.turns[0]
 
@@ -438,8 +464,9 @@ class State:
         return {p: ids for p, ids in by_project.items() if len(ids) >= 2}
 
     def files(self, s: Session) -> list:
-        """The session's transcript and its agents' transcripts ([] until a hook line names it)."""
-        if not s.transcript_path:
+        """The session's transcript and its agents' transcripts ([] until a hook line names it). Another
+        CLI's transcript is not Claude's format: it is priced through usage.add_other, not estimated."""
+        if s.harness != "claude" or not s.transcript_path:
             return []
         return [s.transcript_path] + [usage_mod.agent_path(s.transcript_path, a) for a in s.agents]
 

@@ -226,7 +226,8 @@ Resume, as today.
   answer `{"steps": [{"kind", "goal"}], "why"}`.
 - `replan.check(task, n, answer, task_max_steps)`: known kinds (`PREP_KINDS` minus `replan`), a goal per step, at most
   `MAX_ADDED` 2 steps more than the remaining ones, `n + len(steps)` within `task_max_steps`, the verify re-placed after
-  the last edit kind (the pass never writes one). Reasons: `no steps in the answer`, `unknown kind: x`, `a step has no
+  the last edit kind (the pass never writes one); an empty `steps` is accepted only when no step remains after the
+  replan step (a replan that ends the chain). Reasons: `no steps in the answer`, `unknown kind: x`, `a step has no
   goal`, `3 steps added, over 2`, `9 steps in all, over task_max_steps 8`.
 - The note `steps/NN-replan.md` (written by the service through `tasks.write_note` with a block built by
   `replan.note_block`): `## Findings` the why, `## Files touched` (none), `## Open questions` (none), `## Next` the

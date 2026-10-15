@@ -3,15 +3,20 @@ import re
 from pathlib import PurePath
 
 _SECRETS = [
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
     re.compile(r"gh[pousr]_[A-Za-z0-9]{8,}"),
     re.compile(r"github_pat_[A-Za-z0-9_]{8,}"),
     re.compile(r"xox[abprs]-[A-Za-z0-9\-]{8,}"),
+    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    re.compile(r"AIza[0-9A-Za-z_\-]{35}"),
+    re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]*"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{8,}"),
 ]
-_ASSIGN = re.compile(
-    r"(?i)\b([A-Z0-9_]*(?:api[_-]?key|token|secret|password)[A-Z0-9_]*)\s*([=:])\s*"
-    r"(\"[^\"]*\"|'[^']*'|\S+)"
+_ASSIGN = re.compile(  # plan 34 F2: more names; an auth scheme and its token are one value
+    r"(?i)\b([A-Z0-9_]*(?:api[_-]?key|token|secret|password|passwd|authorization|cookie|credential|private[_-]?key)"
+    r"[A-Z0-9_]*)\s*([=:])\s*"
+    r"(\"[^\"]*\"|'[^']*'|(?:basic|bearer|digest)\s+\S+|\S+)"
 )
 _PATH_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 

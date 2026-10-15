@@ -209,13 +209,14 @@ def cut_lines(findings: str) -> list:
     return out
 
 
-def fallback(prev_brief: str, raw: str) -> str:
+def fallback(prev_brief: str, raw: str, cut: bool = True) -> str:
     """Code only: the carried Goal and Troubleshooting whole, the raw note's Findings cut, its Files touched with the
-    earlier brief's after them, its Open questions as they are, its Next (else the earlier brief's)."""
+    earlier brief's after them, its Open questions as they are, its Next (else the earlier brief's). `cut` False keeps
+    the Findings whole: the brief of a handoff under brief_max_words (plan 28, as_is)."""
     now, before = _sections(raw), _sections(prev_brief)
     goal, trouble = carried(raw, prev_brief)
     findings = now.get("## Findings", "")
-    if len(findings) > FINDINGS_CUT:
+    if cut and len(findings) > FINDINGS_CUT:
         findings = findings[:FINDINGS_CUT].rstrip() + "\n[cut]"
     nxt = now.get("## Next") or before.get("## Next") or "(none)"
     return redact.mask("\n".join([
@@ -225,6 +226,19 @@ def fallback(prev_brief: str, raw: str) -> str:
         "## Troubleshooting", "\n".join(f"- {line}" for line in trouble) or "- (none)",
         "## Open questions", now.get("## Open questions") or "- (none)",
         "## Next", nxt]))
+
+
+AS_IS = "as is"  # brief_meta "by" of a brief no pass rewrote (plan 28)
+
+
+def as_is(cfg: dict, prev_brief: str, raw: str) -> str:
+    """Plan 28 (D14): the brief of a handoff that is already short. When the raw note's Findings, joined by code to
+    what the earlier brief carries (fallback with nothing cut), fit brief_max_words, that text is the brief and no
+    pass rewrites it; "" when it is over the cap (the pass runs) or the note has no handoff headings."""
+    if not _sections(raw):
+        return ""
+    text = fallback(prev_brief, raw, cut=False)
+    return text if words(text) <= cfg["brief_max_words"] else ""
 
 
 def _ask(cfg: dict, exe: list, project_dir: str, prompt: str, schema: dict = BRIEF_SCHEMA, info: dict = None):

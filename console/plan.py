@@ -1,14 +1,16 @@
 """The plan the design step writes (brainstorm 8b, plan 24): the PLAN block and the SUBPLAN blocks of the step's final
-message, parsed and checked here, saved by the service as tasks/<id>/plan.md and plan/NN-<slug>.md, read whole by every
-later step. Pure functions on text and dicts; the file functions take the data home, as tasks.py's do. The plan is never
-compacted and never cut: the only bound is plan_max_kb, and over it the task waits for Fred."""
+message, parsed and checked here, saved by the service in the design step's folder (plan 28: tasks/<id>/NN-design/plan.md
+and plan/NN-<slug>.md; a task from before plan 28 has them at the task root), read whole by every later step, and
+mirrored into the project under .claude/console/plans/<id>-<slug>/ for history (never read back). Pure functions on text
+and dicts; the file functions take the data home, as tasks.py's do. The plan is never compacted and never cut: the only
+bound is plan_max_kb, and over it the task waits for the person."""
+import os
 import re
 import shutil
 from datetime import date
 from pathlib import Path
-from string import Template
 
-from . import redact, tasks
+from . import kinds, paths, redact, tasks
 
 MARK_START, MARK_END = "PLAN", "END PLAN"
 PART_END = "END SUBPLAN"
@@ -20,7 +22,8 @@ STEP_HEADINGS = ("#### Files", "#### Actions", "#### Tests", "#### Done check")
 WRITE_KINDS = ("code", "document", "debug", "edit", "draft")  # tasks.EDIT_KINDS, in the order the prompt names them
 FILE = "plan.md"
 PART_DIR = "plan"
-PROMPT_FILE = Path(__file__).resolve().parent / "design_prompt.md"
+PROMPT_FILE = kinds.SEED / "design.md"  # plan 28: the design kind file's repo copy (the service reads kinds.text)
+MIRROR_DIR = Path(".claude") / "console" / "plans"  # plan 28 (D4): in the project; the one place the console writes there
 _STEP = re.compile(r"^### Step (\d+): ([a-z]+)\s*$", re.M)
 _ROW = re.compile(r"^\|\s*(\d+)\s*\|(.*)\|\s*$")
 _GAP = re.compile(r"^[\s`*>\-]*Plan gap:\**\s*(.+?)[\s`*]*$", re.M)
@@ -240,35 +243,48 @@ def slug(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")[:40] or "part"
 
 
-def part_file(n: int, title: str) -> str:
-    return f"{PART_DIR}/{n:02d}-{slug(title)}.md"
+def part_file(n: int, title: str, where: str = "") -> str:
+    """A part's file relative to the task folder: under the design step's folder `where` (plan 28), else the root."""
+    rel = f"{PART_DIR}/{n:02d}-{slug(title)}.md"
+    return f"{where}/{rel}" if where else rel
+
+
+def index_file(task: dict) -> str:
+    """plan.md relative to the task folder: in the design step's folder task["plan"]["dir"] (plan 28), else the root
+    (a plan saved before plan 28)."""
+    where = (task.get("plan") or {}).get("dir") or ""
+    return f"{where}/{FILE}" if where else FILE
 
 
 def save(home, task: dict, plan: dict, n: int) -> dict:
-    """Write plan.md (the plan, or the index) and plan/NN-<slug>.md per part, masked like a note; returns the value of
-    task["plan"]: {"from": n, "words", "kb", "parts": [{"n", "kind", "title", "file", "owns", "depends", "hard",
-    "step": 0}]} ("step" is set by rebuild)."""
-    folder = tasks.folder(home, task["id"])
+    """Write plan.md (the plan, or the index) and plan/NN-<slug>.md per part in design step n's folder, masked like a
+    note; returns the value of task["plan"]: {"from": n, "dir", "words", "kb", "parts": [{"n", "kind", "title", "file",
+    "owns", "depends", "hard", "step": 0}]} ("step" is set by rebuild). A redo writes into the same folder: the step
+    keeps its "dir" (plan 28)."""
+    where = tasks.step_dir(tasks.step(task, n))
+    folder = tasks.folder(home, task["id"]) / where
     folder.mkdir(parents=True, exist_ok=True)
     (folder / FILE).write_text(redact.mask(plan["index"]), encoding="utf-8")
     rows = {r["n"]: r for r in table(plan["index"])}
     meta = []
     for p in plan["parts"]:
-        rel = part_file(p["n"], p["title"])
-        path = folder / rel
+        rel = part_file(p["n"], p["title"], where)
+        path = tasks.folder(home, task["id"]) / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# Part {p['n']}: {p['title']}\n\n" + redact.mask(p["text"]), encoding="utf-8")
         r = rows.get(p["n"], {})
         meta.append({"n": p["n"], "kind": p["kind"], "title": p["title"], "file": rel, "owns": r.get("owns", []),
                      "depends": r.get("depends", []), "hard": bool(r.get("hard")), "step": 0})
-    return {"from": n, "words": words(plan), "kb": kb(plan), "parts": meta}
+    return {"from": n, "dir": where, "words": words(plan), "kb": kb(plan), "parts": meta}
 
 
 def drop_parts(home, task: dict, n: int) -> None:
     """Before a redo's plan is saved (plan 27): the earlier plan's plan/ folder goes, and the planned steps after
     design step `n` lose `part`, `hard` and their `Part k: ` goal head, so a single plan reaches them through its
     `### Step N` sections (a split rebuilds them anyway). Done steps keep what they ran with."""
-    shutil.rmtree(tasks.folder(home, task["id"]) / PART_DIR, ignore_errors=True)
+    root = tasks.folder(home, task["id"])
+    shutil.rmtree(root / tasks.step_dir(tasks.step(task, n)) / PART_DIR, ignore_errors=True)
+    shutil.rmtree(root / PART_DIR, ignore_errors=True)  # a plan saved before plan 28
     for s in task["steps"]:
         if s["n"] > n and s["state"] != "done" and "part" in s:
             del s["part"]
@@ -278,7 +294,7 @@ def drop_parts(home, task: dict, n: int) -> None:
 
 def read(home, task: dict) -> str:
     try:
-        return (tasks.folder(home, task["id"]) / FILE).read_text(encoding="utf-8")
+        return (tasks.folder(home, task["id"]) / index_file(task)).read_text(encoding="utf-8")
     except OSError:
         return ""
 
@@ -305,7 +321,7 @@ def part_body(text: str) -> str:
 def write(home, task: dict, text: str, k: int = 0) -> str:
     """Fred's edit of the index (k = 0) or of part k, through the service; a part is written with its head line
     again, masked like save. Returns the relative file name."""
-    rel = FILE if not k else next(p["file"] for p in task["plan"]["parts"] if p["n"] == k)
+    rel = index_file(task) if not k else next(p["file"] for p in task["plan"]["parts"] if p["n"] == k)
     path = tasks.folder(home, task["id"]) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     if k:
@@ -315,9 +331,9 @@ def write(home, task: dict, text: str, k: int = 0) -> str:
     return rel
 
 
-def with_answer(index: str, answer: str, day: str = "") -> str:
-    """The index with `- Fred, <date>: <answer>` as the last line of ## Decisions; the answer on one line, its
-    whitespace collapsed (a multi-line answer adds no heading)."""
+def with_answer(index: str, answer: str, day: str = "", who: str = "The user") -> str:
+    """The index with `- <who>, <date>: <answer>` as the last line of ## Decisions (`who` is paths.you(cfg,
+    start=True), plan 31); the answer on one line, its whitespace collapsed (a multi-line answer adds no heading)."""
     day = day or date.today().isoformat()
     answer = " ".join(str(answer or "").split())
     lines = str(index or "").splitlines()
@@ -326,7 +342,7 @@ def with_answer(index: str, answer: str, day: str = "") -> str:
         if on and line.startswith("## ") and not placed:
             while out and not out[-1].strip():
                 out.pop()
-            out += [f"- Fred, {day}: {answer}", ""]
+            out += [f"- {who}, {day}: {answer}", ""]
             placed = True
         if line.strip() == "## Decisions":
             on = True
@@ -334,41 +350,84 @@ def with_answer(index: str, answer: str, day: str = "") -> str:
     if on and not placed:
         while out and not out[-1].strip():
             out.pop()
-        out.append(f"- Fred, {day}: {answer}")
+        out.append(f"- {who}, {day}: {answer}")
     return "\n".join(out).rstrip() + "\n"
 
 
-def add_answer(home, task: dict, answer: str, day: str = "") -> str:
-    """Append Fred's answer to the Decisions of plan.md, masked by write; returns the line written."""
-    text = redact.mask(with_answer(read(home, task), answer, day))
+def add_answer(home, task: dict, answer: str, day: str = "", who: str = "The user") -> str:
+    """Append the person's answer to the Decisions of plan.md, masked by write; returns the line written."""
+    text = redact.mask(with_answer(read(home, task), answer, day, who))
     write(home, task, text)
     return text.rstrip().splitlines()[-1] if not section(text, "## Decisions") else section(text, "## Decisions").splitlines()[-1]
 
 
+def mirror_dir(task: dict) -> Path:
+    """Where the plan is mirrored in the project (plan 28, D4): .claude/console/plans/<id>-<slug>/."""
+    name = task.get("slug") or tasks.slug(task.get("title"))
+    return Path(task["project_dir"]) / MIRROR_DIR / f"{tasks.safe_id(task['id']) or 'task'}-{name}"
+
+
+def mirror(home, task: dict) -> tuple:
+    """Copy plan.md and the parts into the project for history (plan 28, D4), each under one head line that says
+    where the console's copy is. The copy is rewritten whole each time (the old parts go) and read by nobody in the
+    chain. Returns (the folder relative to the project, "") or ("", why) when it could not be written."""
+    where = mirror_dir(task)
+    origin = os.path.dirname(index_file(task)) or "."
+    head = (f"> Mirrored by Claude Console from its task folder tasks/{task['id']}/{origin}/ for history. "
+            "Edit the console's copy: this file is rewritten.\n\n")
+    try:
+        text = read(home, task)
+        if not text:
+            return "", "no plan.md"
+        shutil.rmtree(where / PART_DIR, ignore_errors=True)
+        where.mkdir(parents=True, exist_ok=True)
+        (where / FILE).write_text(head + text, encoding="utf-8")
+        for p in (task.get("plan") or {}).get("parts") or []:
+            path = where / PART_DIR / Path(p["file"]).name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(head + read_part(home, task, p["n"]), encoding="utf-8")
+    except OSError as exc:
+        return "", redact.clip(f"{exc.strerror or exc}", 120)
+    return where.relative_to(task["project_dir"]).as_posix(), ""
+
+
 # -- what the prompts carry -------------------------------------------------------------------------------
 
-def design_text(task: dict, step: dict, cfg: dict, redo: str = "") -> str:
-    """The design step's part of the step prompt (console/design_prompt.md): the later steps, the write steps that need a
-    ### Step N section, the limits, and on a redo the question and the steps already done."""
+def design_slots(task: dict, step: dict, cfg: dict, redo: str = "") -> dict:
+    """The design kind file's slots (plan 28; the text was console/design_prompt.md): the later steps, the write steps
+    that need a ### Step N section, the limits, and on a redo the question and the steps already done."""
     later = [s for s in task["steps"] if s["n"] > step["n"]]
     lines = [f"- Step {s['n']}: {s['kind']}. {s['goal']}" + (" (done, kept)" if s["state"] == "done" else "")
              for s in later] or ["- (none planned yet)"]
     edits = ", ".join(str(s["n"]) for s in later if s["kind"] in tasks.EDIT_KINDS and s["state"] != "done") or "none"
     redo_text = ""
     if redo:
-        redo_text = ("Fred asked for this plan again: " + redo + " Plan the steps that are not done; a done step keeps "
-                     "its place and its work, and its handoff is above.")
-    return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
-        turns=cfg["design_max_turns"], later="\n".join(lines), edit_steps=edits, redo=redo_text,
-        max_kb=cfg["plan_max_kb"], max_parts=cfg["plan_max_parts"],
-        room=max(tasks.room_after(task, step["n"], cfg["task_max_steps"]), 1),
-        write_kinds=", ".join(WRITE_KINDS))
+        redo_text = (paths.you(cfg, start=True) + " asked for this plan again: " + redo + " Plan the steps that are not "
+                     "done; a done step keeps its place and its work, and its handoff is above.")
+    return {"turns": cfg["design_max_turns"], "later": "\n".join(lines), "edit_steps": edits, "redo": redo_text,
+            "max_kb": cfg["plan_max_kb"], "max_parts": cfg["plan_max_parts"],
+            "room": max(tasks.room_after(task, step["n"], cfg["task_max_steps"]), 1),
+            "write_kinds": ", ".join(WRITE_KINDS)}
+
+
+def design_text(task: dict, step: dict, cfg: dict, redo: str = "", raw: str = None) -> str:
+    """The design step's role as its prompt carries it: the design kind file (`raw`, kinds.text; the repo's seed when
+    None) with design_slots and $you filled in (tasks.role_text)."""
+    raw = PROMPT_FILE.read_text(encoding="utf-8") if raw is None else raw
+    return tasks.role_text(task, step, raw, design_slots(task, step, cfg, redo), paths.you(cfg))
 
 
 def design_input(home, task: dict, n: int) -> str:
     """What the design step reads instead of a brief: the raw handoff notes of every earlier step, whole (D1); on a
-    redo (task["redo"]) also the notes of the done steps after n, which the redo keeps (plan 27)."""
+    redo (task["redo"]) also the notes of the done steps after n, which the redo keeps (plan 27). Plan 29: Prep's
+    scouting (00-prep/scouting.md) first, whole."""
     out = []
+    try:
+        scouting = (tasks.folder(home, task["id"]) / "00-prep" / "scouting.md").read_text(encoding="utf-8").strip()
+    except OSError:
+        scouting = ""
+    if scouting:
+        out.append("What Prep read while scouting (00-prep/scouting.md):\n" + scouting)
     for s in task["steps"]:
         if s["n"] == n or (s["n"] > n and not (task.get("redo") and s["state"] == "done")):
             continue

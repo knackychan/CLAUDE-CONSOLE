@@ -1,4 +1,6 @@
-You are a prompt formatter for Claude Code. Fred typed the request at the end for the project in the
+# prep
+
+You are a prompt formatter for Claude Code. $You typed the request at the end for the project in the
 current folder. Do three things, then answer with the JSON object only.
 
 1. Scout (at most 8 tool calls, Read / Grep / Glob only). Read CLAUDE.md first if it exists, then the
@@ -51,11 +53,13 @@ Fields: goal (one sentence), where (files and functions, short), keep (what must
 done_when (a check that can be run), last_decisions (from PLAN.md History, one line each, or ""),
 question, route {type, reasoning, volume, model, effort}, reason (one sentence: why this route for one
 run of the whole request; when you split it into steps, never say the task needs a model or an effort: each step's model comes from its kind),
-steps (a list of {kind, goal}, or []).
+steps (a list of {kind, goal}, or []), scouting (what you read while scouting, one line each: the file or
+symbol, then why it matters to this request; at most 12 lines; "" when you read nothing). Write only what you
+saw: the next step reads it instead of looking again.
 
-Output rules: the JSON object has exactly these 9 keys and all 9 are always present: goal, where,
-keep, done_when, last_decisions, question, route, reason, steps. A text field with nothing to say is "" and
-is never left out; with no open question write "question": "" and with nothing to split write "steps": []. `route` is always an object with
+Output rules: the JSON object has exactly these 10 keys and all 10 are always present: goal, where,
+keep, done_when, last_decisions, question, route, reason, steps, scouting. A text field with nothing to say is "" and
+is never left out; with no open question write "question": "" and with nothing to split write "steps": [] and with nothing read "scouting": "". `route` is always an object with
 type, reasoning, volume, model and effort; never put type, reasoning, volume, model or effort at the top level.
 
 Routing misses in this project $window(Escalate wrote them; newest last):

@@ -1,12 +1,15 @@
 """Where Claude Console keeps its files, and its config with defaults."""
 import copy
+import getpass
 import json
 import os
+import subprocess
 import threading
 from pathlib import Path
 
 DEFAULTS = {
     "port": 47770,
+    "user_name": "",  # plan 31: the person the prompts and the plan's Decisions name; "" reads "the user"
     "retention_days": 14,
     "quiet_after_s": 180,
     "stall_after_s": 600,
@@ -31,7 +34,7 @@ DEFAULTS = {
     "daily_budget_usd": 15,
     "cold_after_s": 3600,  # idle this long: both prompt-cache lifetimes (5 min, 1 h) are gone
     # plan 17, task chain: see plans/17-tasks/README.md section 4
-    "task_retention_days": 90,
+    "task_retention_days": 0,  # plan 28 (D9): 0 keeps every task folder; runs/ and preps/ keep retention_days
     "task_step_budget_usd": 3,
     "task_max_steps": 6,
     "design_max_turns": 30,  # plan 24 D2: --max-turns of a design step on any rung
@@ -306,6 +309,24 @@ def _drop_opus_max_turns(folder: Path) -> None:
         pass  # load_config still reads the old key as the fallback
 
 
+def write_text_atomic(path: Path, text: str) -> None:
+    """Write <path> whole through a temp file of this write's own (pid and thread in its name), then os.replace: a
+    reader never sees half a file and two writers never share a temp file (plan 34 F5). OSError propagates, with the
+    temp file removed."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 _WINDOW_LOCK = threading.Lock()  # the page (project) and the window (form, place) both save
 
 
@@ -330,12 +351,59 @@ def save_window(folder: Path, **fields) -> dict:
         return data
 
 
+NAME_MAX = 60  # plan 31: user_name, in characters, on one line
+
+
+def you(cfg: dict, start: bool = False) -> str:
+    """The person as prompts and the plan's Decisions name them (plan 31): config `user_name` with its whitespace
+    collapsed, else "the user" ("The user" with `start`, at the head of a sentence or a Decisions line)."""
+    name = cfg.get("user_name") if isinstance(cfg, dict) else ""
+    name = " ".join(name.split())[:NAME_MAX] if isinstance(name, str) else ""
+    return name or ("The user" if start else "the user")
+
+
+def os_user_name() -> str:
+    """The name a fresh config.json starts with (plan 31): git's global user.name, else the OS login, else "".
+    Never raises; git gets 5 s."""
+    try:
+        out = subprocess.run(["git", "config", "--global", "user.name"], capture_output=True, timeout=5,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        name = " ".join(out.stdout.decode("utf-8", "replace").split()) if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    if not name:
+        try:
+            name = " ".join(str(getpass.getuser() or "").split())
+        except Exception:  # getpass raises when no variable names the login (a service account)
+            name = ""
+    return name[:NAME_MAX]
+
+
+def _fill_user_name(folder: Path) -> None:
+    """Plan 31: a config.json without `user_name` gets it once, from os_user_name, at the service start. A key
+    already there (empty included: Fred cleared it) is never touched; a file that cannot be read is left as is."""
+    path = Path(folder) / "config.json"
+    try:
+        user = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(user, dict) or "user_name" in user:
+        return
+    name = os_user_name()
+    try:
+        _rewrite_config(path, lambda data: data.setdefault("user_name", name))
+    except (OSError, ValueError):
+        pass  # load_config reads DEFAULTS' "": the prompts say "the user"
+
+
 def ensure_config() -> dict:
     """Write config.json with the defaults if it does not exist, then load it."""
     path = home() / "config.json"
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(DEFAULTS, indent=2) + "\n", encoding="utf-8")
+        path.write_text(json.dumps({k: v for k, v in DEFAULTS.items() if k != "user_name"}, indent=2) + "\n",
+                        encoding="utf-8")
     _drop_opus_max_turns(path.parent)
+    _fill_user_name(path.parent)
     load_models()  # writes models.json when missing
     return load_config()

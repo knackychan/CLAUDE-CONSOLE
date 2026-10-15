@@ -5,14 +5,13 @@ Fred's Confirm plan unless replan_auto is on. Inserted by the service when a han
 placed by Prep as a step of kind replan."""
 import copy
 import re
-from pathlib import Path
 from string import Template
 
-from . import compact, redact, tasks
+from . import compact, kinds, redact, tasks
 
 KIND = "replan"
 MAX_ADDED = 2
-PROMPT_FILE = Path(__file__).resolve().parent / "replan_prompt.md"
+PROMPT_FILE = kinds.SEED / "replan.md"  # plan 28: the replan kind file's repo copy (the service reads kinds.text)
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["steps", "why"],
           "properties": {"why": {"type": "string"},
                          "steps": {"type": "array", "items": {
@@ -49,13 +48,14 @@ def insert(task: dict, after_n: int, now: float, why: str) -> list:
     return [tasks._line(now, s, "none", "planned", f"replan inserted after {after_n:02d}: {why}")]
 
 
-def build_prompt(task: dict, n: int, briefs: str) -> str:
-    """The pass's prompt (console/replan_prompt.md): the goal, what the steps so far left, the remaining steps as
-    planned, the kinds it may use and the room left in the chain."""
+def build_prompt(task: dict, n: int, briefs: str, raw: str = None) -> str:
+    """The pass's prompt (the replan kind file, `raw`; the repo's seed when None): the goal, what the steps so far left,
+    the remaining steps as planned, the kinds it may use and the room left in the chain."""
     s = tasks.step(task, n)
     rest = remaining(task, n)
     lines = [f"- {x['kind']}: {x['goal']}" for x in rest] or ["- (none)"]
-    return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
+    raw = PROMPT_FILE.read_text(encoding="utf-8") if raw is None else raw
+    return Template(kinds.body_of(raw)).safe_substitute(
         task=redact.clip(task.get("goal") or task["title"], 600), why=s["goal"].replace("Replan: ", "", 1),
         briefs=briefs or "(nothing yet)", remaining="\n".join(lines), kinds=", ".join(tasks.PREP_KINDS),
         most=len(rest) + MAX_ADDED)
@@ -68,7 +68,7 @@ def check(task: dict, n: int, answer, max_steps: int) -> tuple:
     with no edit kind keeps the verify the replaced steps held, of the last edit step before n (plan 27)."""
     rest = remaining(task, n)
     items = answer.get("steps") if isinstance(answer, dict) else None
-    if not isinstance(items, list) or not items:
+    if not isinstance(items, list) or (not items and rest):  # nothing left to plan: an empty answer is right
         return [], "no steps in the answer"
     kept = []
     for item in items:
@@ -161,12 +161,13 @@ def keep(task: dict, now: float) -> list:
     return [tasks._line(now, tasks.step(task, r["step"]), "done", "done", "old plan kept by Fred")]
 
 
-def run_replan(cfg: dict, exe: list, task: dict, n: int, briefs: str) -> dict:
+def run_replan(cfg: dict, exe: list, task: dict, n: int, briefs: str, raw: str = None) -> dict:
     """Blocking (the service runs it in a thread). Never raises: {"steps": [...] or [], "why": str, "cost": float,
-    "error": "" | why}. The pass runs on brief_model with no tools (claude_cli.brief_command, the replan schema)."""
+    "error": "" | why}. The pass runs on brief_model with no tools (claude_cli.brief_command, the replan schema);
+    `raw` is the replan kind file (kinds.text)."""
     cost = 0
     try:
-        answer, cost = compact._ask(cfg, exe, task["project_dir"], build_prompt(task, n, briefs), SCHEMA)
+        answer, cost = compact._ask(cfg, exe, task["project_dir"], build_prompt(task, n, briefs, raw), SCHEMA)
     except compact.BriefError as exc:
         return {"steps": [], "why": "", "cost": cost, "error": str(exc)}
     steps, why = check(task, n, answer, cfg["task_max_steps"])

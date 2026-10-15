@@ -32,7 +32,8 @@ class ViewTest(unittest.TestCase):
             "task_max_steps", "task_step_budget_usd", "step_timeout_s", "design_max_turns", "read_max_turns",
             "brief_max_words", "brief_timeout_s", "gauge_red_tokens", "gauge_yellow_tokens", "balance_margin",
             "cache_bonus", "budget_warn_at", "daily_budget_usd", "allowances", "plan_max_kb", "plan_max_parts",
-            "plan_hold", "replan_auto", "prep_model", "brief_model", "review_model", "default_model", "kinds", "tiers"})
+            "plan_hold", "replan_auto", "prep_model", "brief_model", "review_model", "default_model", "kinds", "tiers",
+            "user_name"})
 
 
 class NumbersTest(unittest.TestCase):
@@ -149,6 +150,18 @@ class SetConfigTest(unittest.TestCase):
             path.unlink()
             paths.set_config(tmp, {"plan_hold": True})  # no file yet: only what was saved
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"plan_hold": True})
+
+
+class NameTest(unittest.TestCase):
+    """Plan 31: user_name is one line of text on the Tuning tab."""
+
+    def test_the_name_is_collapsed_and_bounded(self):
+        self.assertEqual(check(user_name="  Fred \t T.\n"), ({"user_name": "Fred T."}, {}))
+        self.assertEqual(check(user_name=""), ({"user_name": ""}, {}))
+        self.assertEqual(check(user_name="x" * 61)[1], {"user_name": "text of at most 60 characters"})
+        self.assertEqual(check(user_name=7)[1], {"user_name": "text of at most 60 characters"})
+        view = tuning.view(dict(CFG, user_name="Fred"))["user_name"]
+        self.assertEqual((view["value"], view["default"], view["unit"], view["group"]), ("Fred", "", "text", "you"))
 
 
 if __name__ == "__main__":

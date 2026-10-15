@@ -55,7 +55,10 @@ def prep():
               "done_when": "py -m unittest passes", "last_decisions": "", "question": "",
               "route": {"type": "mechanical", "reasoning": "low", "volume": "low", "model": "sonnet",
                         "effort": "low"},
-              "reason": "one-line fix with a clear spec", "steps": []}
+              "reason": "one-line fix with a clear spec", "steps": [],
+              "scouting": "calc.py:2 add(): the function to fix\ntests/test_calc.py test_add: the test that covers it"}
+    if "SCOUT-LONG" in raw:  # plan 29: a scouting over prep.FINDINGS_CUT characters
+        fields["scouting"] = "\n".join(f"file{i:02d}.py: read for the request, one line on why it matters" for i in range(30))
     if "THINK" in raw:
         fields["route"]["reasoning"] = "high"
     if "BULK" in raw:
