@@ -109,7 +109,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .askbox.r { background: color-mix(in srgb, var(--bad) 9%, var(--win));
   border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .askbox .q { font: 600 15px/1.4 var(--ui); white-space: pre-wrap; overflow-wrap: anywhere; }
-.askbox.ho { background: var(--raise); border-color: var(--line); }  /* handed off, the note not in: nothing for Fred yet */
+.askbox.ho, .askbox.cont { background: var(--raise); border-color: var(--line); }  /* handed off, the note not in: nothing for Fred yet */
 .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .t { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .age { color: var(--mut); white-space: nowrap; }
@@ -765,9 +765,37 @@ html:not(.native) .native-only { display: none; }
 .ihead .meta .y { color: var(--you); } .ihead .meta .r { color: var(--bad); }
 .ihead .ln1 .lr { margin-left: auto; display: flex; gap: 6px; }
 .binsp .tabs { padding: 0; margin-top: -4px; }
+/* a step's page docks in three bands: head and tabs, the scrolling pane, the lever bar */
+.binsp.docked { overflow: hidden; padding: 0; align-content: stretch; grid-template-rows: minmax(0, 1fr); }
+.idock { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); min-height: 0; min-width: 0; }
+.idock-head { display: grid; gap: 10px; padding: 12px 14px 0; border-bottom: 1px solid var(--line); }
+.idock-head .tabs { margin-top: 0; border-bottom: 0; }
+.iscroll { overflow-y: auto; overflow-x: hidden; min-height: 0; padding: 14px 14px 16px; scrollbar-width: thin; scrollbar-color: var(--off) transparent; display: grid; gap: 14px; align-content: start; grid-template-columns: minmax(0, 1fr); }
+.idock-bar { display: grid; gap: 6px; padding: 8px 14px; border-top: 1px solid var(--line); }
+.idock-bar .lr { justify-content: flex-end; }
+.idock > .say { padding: 6px 14px; border-top: 1px solid var(--line); }
 .ipane { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
 .ipane .chat .turn p { font-size: 12.5px; }
 .ipane .doing { margin-top: -4px; }
+/* plan 36: Add next step — the inline form replaces the follow-up area; source, work/model, instructions, handover */
+select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--ink); background: var(--raise);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.nform { gap: 9px; }
+.nform .nfrom { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; min-width: 0; }
+.nform .nfrom .lbl { color: var(--ink); }
+.nform .nrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+.nform .nl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.nform .nroute { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; min-width: 0; font: 11.5px var(--mono); color: var(--mut); }
+.nform .nroute .r { color: var(--bad); }
+.nform .nroute b { color: var(--ink); font-weight: 500; }
+.nform .chip { font: 10.5px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; }
+.nform .hb { gap: 6px; }
+.lr.sub .btn { color: var(--mut); }
+.hfoot .lr { margin-top: 2px; }
+@container (max-width: 699px) {  /* the Board's one column: Work and Model stack, the action row wraps */
+  .nform .nrow { grid-template-columns: minmax(0, 1fr); }
+  .nform .nrow .nl { margin-top: 6px; }
+}
 .rn { display: flex; gap: 6px; flex-wrap: wrap; }
 .rn span { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; max-width: 100%; overflow-wrap: anywhere; }
 .rn span b { color: var(--ink); font-weight: 400; }
