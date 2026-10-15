@@ -2523,7 +2523,7 @@ function doneDays(tasks, sessions) {  // {day: [tasks], ...} and the sessions by
 }
 function chainHtml() {
   const c = chainGroups(), job = (j) => (j.kind === "review" ? reviewHtml(j) : prepTaskHtml(j));
-  const item = (x) => (x.raw !== undefined && x.kind !== undefined && !x.steps ? job(x) : taskHtml(x));
+  const item = (x) => (x.steps ? taskHtml(x) : job(x));  // a Prep job has no steps and, unlike a review, no kind
   let html = secHtml("y", "Needs you", c.needs.length + c.needsS.length, "", "needsec") + c.needs.map(item).join("") + c.needsS.map(cardHtml).join("")
     + secHtml("", "Replied", c.replied.length + c.repliedS.length) + c.replied.map(item).join("") + c.repliedS.map((s) => quietHtml(s, !scope)).join("")
     + secHtml("", "Working", c.work.length + c.workS.length) + c.work.map(item).join("") + c.workS.map(cardHtml).join("")
