@@ -191,6 +191,39 @@ def pid_alive(pid) -> bool:
     return bool(ok) and code.value == 259  # STILL_ACTIVE
 
 
+PID_SLACK_S = 2.0  # plan 34 F4: a process born this long after its run's "started" holds a recycled pid
+
+
+def process_started(pid):
+    """When process <pid> was created (epoch seconds), or None when that cannot be read: gone, no access, or not
+    Windows (plan 34 F4)."""
+    if not pid or os.name != "nt":
+        return None
+    k = ctypes.windll.kernel32
+    handle = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        times = [ctypes.c_ulonglong() for _ in range(4)]  # creation, exit, kernel, user: FILETIME, 100 ns since 1601
+        if not k.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return None
+        return (times[0].value - 116444736000000000) / 1e7
+    finally:
+        k.CloseHandle(handle)
+
+
+def run_alive(pid, started) -> bool:
+    """pid_alive, and the process is the run that started at `started` (meta["started"], epoch seconds): a process
+    created more than PID_SLACK_S after it holds a recycled pid. A meta without `started`, or a creation time that
+    cannot be read, trusts pid_alive alone (plan 34 F4)."""
+    if not pid_alive(pid):
+        return False
+    if not started:
+        return True
+    born = process_started(pid)
+    return born is None or born <= float(started) + PID_SLACK_S
+
+
 def kill_tree(pid) -> None:
     """Last resort for a run this service did not start (no stdin to send an interrupt to)."""
     subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True,

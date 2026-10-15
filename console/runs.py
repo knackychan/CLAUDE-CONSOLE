@@ -332,7 +332,7 @@ class RunManager:
                     self.stopping.discard(sid)
                     return "finishing"
         meta = self.meta(sid)
-        if meta and not meta.get("ended") and claude_cli.pid_alive(meta.get("pid")):
+        if meta and not meta.get("ended") and claude_cli.run_alive(meta.get("pid"), meta.get("started")):
             with self.lock:
                 self.stopping.add(sid)
             claude_cli.kill_tree(meta["pid"])
@@ -373,7 +373,7 @@ class RunManager:
                 continue
             _, lines = read_lines(self.stream_path(sid), meta.get("offset", 0))
             is_result = harness_pkg.get(meta.get("harness") or "claude").is_result
-            if not any(is_result(d) for d in lines) and claude_cli.pid_alive(meta.get("pid")):
+            if not any(is_result(d) for d in lines) and claude_cli.run_alive(meta.get("pid"), meta.get("started")):
                 continue
             self._finish(sid, None)
             done += 1

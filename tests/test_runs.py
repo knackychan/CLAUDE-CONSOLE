@@ -188,6 +188,32 @@ class RunsTest(unittest.TestCase):
         self.assertEqual(self.ended("orphan")[0]["interrupted"], False)
         self.assertIsNone(self.mgr.meta("working")["ended"])
 
+    def test_stop_spares_a_recycled_pid(self):
+        """Plan 34 F4: a meta left by an earlier service names a pid a newer process holds: Stop kills nothing."""
+        self.mgr.runs.mkdir(parents=True)
+        self.mgr._save_meta({"session_id": "old", "pid": 4, "cwd": str(self.project), "offset": 0,
+                             "model": "sonnet", "effort": "low", "started": 1000.0, "ended": None})
+        with mock.patch.object(runs.claude_cli, "pid_alive", return_value=True), \
+                mock.patch.object(runs.claude_cli, "process_started", return_value=5000.0), \
+                mock.patch.object(runs.claude_cli, "kill_tree") as kill:
+            self.assertEqual(self.mgr.stop("old"), "not running")
+            kill.assert_not_called()
+        with mock.patch.object(runs.claude_cli, "pid_alive", return_value=True), \
+                mock.patch.object(runs.claude_cli, "process_started", return_value=999.0), \
+                mock.patch.object(runs.claude_cli, "kill_tree") as kill:
+            self.assertEqual(self.mgr.stop("old"), "killed")
+            kill.assert_called_once_with(4)
+
+    def test_reconcile_ends_a_run_whose_pid_was_recycled(self):
+        self.mgr.runs.mkdir(parents=True)
+        self.mgr.stream_path("old").write_text('{"type":"cc_prompt","text":"x"}\n', encoding="utf-8")
+        self.mgr._save_meta({"session_id": "old", "pid": 4, "cwd": str(self.project), "offset": 0,
+                             "model": "sonnet", "effort": "low", "started": 1000.0, "ended": None})
+        with mock.patch.object(runs.claude_cli, "pid_alive", return_value=True), \
+                mock.patch.object(runs.claude_cli, "process_started", return_value=5000.0):
+            self.assertEqual(self.mgr.reconcile(), 1)
+        self.assertEqual(self.ended("old")[0]["interrupted"], True)
+
     def test_result_record_lists_denials(self):
         summary = harness.get("claude").summary([{"type": "result", "subtype": "success", "total_cost_usd": 0.2,
                                                   "permission_denials": [
