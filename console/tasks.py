@@ -44,6 +44,7 @@ RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify
 KINDS = tuple(RULES)
 PREP_KINDS = tuple(k for k in KINDS if k not in ("verify", "fix"))  # what Prep may propose
 CHAT = "chat"  # plan 29: a no-step card or Raw runs one chat step (tasks.chat_step); not in KINDS
+NEXT_KINDS = ("code", "verify", "scout", "design", CHAT)  # plan 36: manual same-task steps
 EDIT_KINDS = frozenset({"edit", "code", "debug", "document", "draft"})  # a verify follows the last of them
 DISALLOW = ("Agent",)
 HEADINGS = ("## Goal", "## Findings", "## Files touched", "## Troubleshooting", "## Open questions", "## Next")
@@ -217,6 +218,12 @@ def parse_handoff(text: str):
     return blocks[-1] if blocks else None
 
 
+def missing_block(text: str) -> str:
+    """Why parse_handoff found no block: no HANDOFF line at all, or one that END HANDOFF never closed."""
+    opened = any(_mark(line) == MARK_START for line in str(text or "").splitlines())
+    return f"{MARK_START} has no {MARK_END} line" if opened else "no HANDOFF block"
+
+
 def live_note(text: str) -> str:
     """What a running step's reply says about its note so far: "writing" (no HANDOFF line, or no END HANDOFF yet)
     or "unchecked" (the whole block stands; the check runs when the run ends)."""
@@ -307,8 +314,8 @@ def lesson_of(block: str) -> str:
     return "" if text.rstrip(".").lower() in _NO_QUESTION else text
 
 
-STEP_FILES = ("role.md", "received.md", "notes.md", "handoff.md", "brief.md", "facts.md", "verdict.md", "handed.md",
-              "plan.md", "proposal.json")  # plan 28: what a step folder may hold (GET /api/task/file reads these)
+STEP_FILES = ("role.md", "received.md", "received-handoff.md", "source-reply.md", "notes.md", "handoff.md", "brief.md",
+              "facts.md", "verdict.md", "handed.md", "plan.md", "proposal.json")  # one step's inspectable input and output
 _ATTEMPT_NOTES = re.compile(r"notes\.(\d{1,2})\.md")  # a failed attempt's final message
 _STEP_DIR = re.compile(r"\d\d-[a-z]+")
 
@@ -492,13 +499,37 @@ def current_step(task: dict):
     return step(task, task["current"]) if task["current"] else None
 
 
-def checked_route(task: dict, s: dict):
+def checked_route(task: dict, s: dict, cfg=None):
     """(tier, effort) the step `s` (a verify or a fix) checks or fixes, as it ran; None for any other step."""
     if not s.get("checked"):
         return None
     done = step(task, s["checked"])
-    tier = done.get("tier") or claude_cli.model_alias(done["model"])
+    tier = done.get("tier") or fills.rank_of(done["model"], cfg)
     return (tier, done["effort"]) if tier and done["effort"] else None
+
+
+def append_step(task: dict, kind: str, goal: str, pick: str = "", now: float = None) -> dict:
+    """Reserve one manual successor after the current final step; launch and source readiness belong to Hub."""
+    source = current_step(task)
+    if kind not in NEXT_KINDS or source is None or source["n"] != len(task["steps"]):
+        raise ValueError("no appendable source step")
+    if not isinstance(goal, str) or not goal.strip() or len(goal) > STEP_GOAL_MAX:
+        raise ValueError("step instructions must be 1 to 1000 characters")
+    if task.get("progression") not in (None, "manual"):
+        raise ValueError("task does not use manual progression")
+    n = source["n"] + 1
+    new = _blank(n, kind, goal.strip(), pick, checked=source["n"] if kind == "verify" else 0)
+    new.update(source_step=source["n"], source_session=source["session"])
+    task["steps"].append(new)
+    task["progression"] = "manual"
+    task.pop("chat", None)
+    task["current"] = source["n"]
+    task["last_good"] = source["n"]
+    task["owner"], task["state"], task["why"] = "service", "running", ""
+    task["updated"] = time.time() if now is None else now
+    if source["kind"] == CHAT and source["state"] == "running":
+        source.update(state="done", ended=task["updated"])
+    return new
 
 
 def _line(now: float, s, frm: str, to: str, why: str = "") -> dict:
@@ -599,6 +630,12 @@ def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdi
     if s["kind"] == "verify":
         s["verdict"], s["verdict_detail"] = verdict, verdict_detail
     if s["kind"] == "verify" and verdict == "FAIL":
+        if task.get("progression") == "manual":
+            _finish(task, s, "done", now, lines, "VERDICT: FAIL")
+            task["last_good"] = s["n"]
+            _task_to(task, "waiting", "VERDICT: FAIL" + (f": {verdict_detail}" if verdict_detail else ""), now, s, lines)
+            task["owner"] = "fred"
+            return "manual", lines
         if task["escalated"]:
             _finish(task, s, "failed", now, lines, "VERDICT: FAIL")
             _task_to(task, "stuck", "verify failed twice" + (f": {verdict_detail}" if verdict_detail else ""),
@@ -611,6 +648,10 @@ def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdi
         return "fix", lines
     _finish(task, s, "done", now, lines, f"VERDICT: {verdict}" if s["kind"] == "verify" else "")
     task["last_good"] = s["n"]
+    if task.get("progression") == "manual":
+        _task_to(task, "waiting", "choose next step", now, s, lines)
+        task["owner"] = "fred"
+        return "manual", lines
     if s["n"] < len(task["steps"]):
         _task_to(task, "running", "", now, s, lines)
         return "next", lines
@@ -702,7 +743,9 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0):
     elif lever in ("handoff", "done"):
         if lever == "handoff" and state in ("done", "handed"):
             return False, f"task is {state}", []
-        if lever == "done" and state not in ("waiting", "stuck", "stopped", "handed"):
+        if lever == "done" and state not in ("waiting", "stuck", "stopped", "handed") \
+                and not (task.get("progression") == "manual" and s and s["kind"] == CHAT and state == "running") \
+                and not (task.get("chat") and s and state == "running"):
             return False, f"task is {state}", []
         why = "handed off by Fred" if lever == "handoff" else "marked done by Fred"
         if s and s["state"] == "running":  # its turn is over (asks, or a hold): the step ends here, handed or done

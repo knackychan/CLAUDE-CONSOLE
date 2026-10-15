@@ -2633,5 +2633,157 @@ for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, 
         setattr(HarnessServerTest, _name, None)
 
 
+class NextStepServerTest(TaskServerTest):
+    """Plan 36 Task 1: manual progression through the service: one task, one step at a time, Fred picks the next."""
+
+    def source_of(self, tid, kind="code", instructions="do the next thing", model="auto"):
+        src = tasks.current_step(self.hub.tasks[tid])
+        return {"task": tid, "source_step": src["n"], "source_session": src["session"],
+                "kind": kind, "instructions": instructions, "model": model}
+
+    def start_next(self, tid, kind="code", instructions="do the next thing", model="auto", expect=200):
+        """The service operation: preview, then commit one successor. Returns (body, preview)."""
+        body = self.source_of(tid, kind, instructions, model)
+        status, preview = self.call("/api/task/next/preview", body)
+        self.assertEqual(status, 200, preview)
+        self.seq = getattr(self, "seq", 0) + 1
+        status, data = self.call("/api/task/next", dict(body, revision=preview["revision"],
+                                                        request_id=f"{self.seq:032x}"))
+        self.assertEqual(status, expect, data)
+        return data, preview
+
+    def one_step_task(self):
+        """A one-step task that ends by itself: a read-only step gets no verify after it."""
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "find add()"}])
+        self.until(tid, lambda t: t["state"] == "done", "the one-step task ends")
+        return tid
+
+    def boundary(self, tid, at=2):
+        return self.until(tid, lambda t: t["state"] == "waiting" and t["owner"] == "fred"
+                          and any(s["n"] == at and s["state"] == "done" for s in t["steps"]), "the manual boundary")
+
+    def test_a_manual_step_ends_at_its_boundary_and_the_task_keeps_its_id(self):
+        tid = self.one_step_task()
+        goal = self.hub.tasks[tid]["goal"]
+        data, _ = self.start_next(tid, "code", "add the missing case")
+        self.assertEqual((data["task"], data["step"], data["status"]), (tid, 2, "running"))
+        task = self.boundary(tid)
+        self.assertEqual((task["state"], task["why"], task["owner"]), ("waiting", "choose next step", "fred"))
+        self.assertEqual((task["id"], task["goal"], task["project_dir"]), (tid, goal, str(self.project)))
+        self.assertEqual(task["progression"], "manual")
+        self.assertEqual([(s["n"], s["kind"], s["state"]) for s in task["steps"]],
+                         [(1, "scout", "done"), (2, "code", "done")])
+        self.assertNotEqual(task["steps"][0]["session"], task["steps"][1]["session"])  # a fresh session
+        self.assertEqual(self.hub.session(task["steps"][1]["session"])["task"], tid)  # the same task
+        self.assertEqual(self.call(f"/api/task?id={tid}")[1]["levers"]["add_next"], "")
+        for _ in range(3):  # the boundary starts nothing by itself
+            self.hub.poll_once()
+            self.hub.advance()
+        self.assertEqual((len(task["steps"]), task["state"]), (2, "waiting"))
+
+    def test_resume_at_the_boundary_says_to_choose_or_finish(self):
+        tid = self.one_step_task()
+        self.start_next(tid, "code", "add the missing case")
+        task = self.boundary(tid)
+        self.assertEqual(self.call("/api/task/resume", {"task": tid}),
+                         (409, {"error": "choose a next step or finish the task"}))
+        self.assertEqual((task["steps"][1]["state"], task["steps"][1]["session"]), ("done", task["steps"][1]["session"]))
+        self.assertEqual(self.call("/api/task/done", {"task": tid}), (200, {"task": tid, "state": "done"}))
+
+    def test_a_finished_task_is_reopened_by_an_explicit_append(self):
+        tid = self.one_step_task()
+        self.start_next(tid, "code", "add the missing case")
+        self.boundary(tid)
+        self.assertEqual(self.call("/api/task/done", {"task": tid})[0], 200)
+        data, _ = self.start_next(tid, "scout", "look again")
+        self.assertEqual((data["step"], [s["n"] for s in self.hub.tasks[tid]["steps"]]), (3, [1, 2, 3]))
+        self.assertEqual(self.boundary(tid, at=3)["why"], "choose next step")
+
+    def test_a_manual_verify_fail_waits_and_starts_no_fix(self):
+        tid = self.one_step_task()
+        self.start_next(tid, "code", "add the missing case")
+        self.boundary(tid)
+        self.start_next(tid, "verify", "check step 02 against its goal VERDICT-FAIL")
+        task = self.until(tid, lambda t: t["state"] == "waiting" and t["steps"][-1]["state"] == "done", "verify FAIL")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])
+        self.assertTrue(task["why"].startswith("VERDICT: FAIL"), task["why"])
+        self.assertEqual((task["steps"][2]["checked"], task["steps"][2]["verdict"]), (2, "FAIL"))
+        for _ in range(3):
+            self.hub.poll_once()
+            self.hub.advance()
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])
+
+    def test_a_manual_design_step_saves_the_plan_and_schedules_nothing(self):
+        tid = self.one_step_task()
+        self.start_next(tid, "code", "add the missing case")
+        self.boundary(tid)
+        self.start_next(tid, "design", "plan the rest PLAN-OK")
+        task = self.boundary(tid, at=3)
+        self.assertTrue(task["plan"], task["why"])  # the plan is saved: a later step reads it
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "design"])
+        self.start_next(tid, "scout", "read the plan")
+        task = self.until(tid, self.at(4), "step 4 starts")
+        prompt = self.full_prompt(task["steps"][3]["session"])
+        self.assertIn("Step 4 of 4: scout", prompt)  # its own number, not the plan's section number
+        self.assertIn("## Acceptance", prompt)
+
+    def test_a_manual_chat_step_takes_turns_and_leaves_earlier_steps_alone(self):
+        tid = self.one_step_task()
+        first = self.hub.tasks[tid]["steps"][0]["session"]
+        self.start_next(tid, "code", "add the missing case")
+        self.boundary(tid)
+        self.start_next(tid, "chat", "what should we do next?")
+        task = self.until(tid, self.at(3), "the chat step starts")
+        chat = task["steps"][2]["session"]
+        self.wait_idle(chat)
+        self.assertEqual(self.hub.levers(chat)["continue"], "")  # the newest chat step takes turns
+        self.assertEqual(self.call("/api/continue", {"session": chat, "text": "carry on"})[0], 200)
+        self.wait_idle(chat)
+        self.assertIn("carry on", [i["text"] for i in self.call(f"/api/chat?session={chat}")[1]["items"]
+                                   if i["role"] == "you"][-1])
+        task = self.hub.tasks[tid]
+        self.assertEqual([(s["n"], s["state"]) for s in task["steps"]],
+                         [(1, "done"), (2, "done"), (3, "running")])
+        self.assertEqual(task["steps"][0]["session"], first)  # step 01 is untouched
+        self.assertEqual((task["state"], task.get("chat")), ("running", None))
+
+    def test_the_earlier_steps_are_not_continuable_once_a_successor_ran(self):
+        tid = self.one_step_task()
+        first = self.hub.tasks[tid]["steps"][0]["session"]
+        self.start_next(tid, "code", "the next thing")
+        task = self.boundary(tid)
+        second = task["steps"][1]["session"]
+        self.assertEqual(self.call("/api/task/done", {"task": tid})[0], 200)  # Finish task: the history stays
+        for sid in (first, second):
+            self.assertIn("Next steps start from the latest step", self.hub.levers(sid)["continue"])
+            self.assertEqual(self.call("/api/continue", {"session": sid, "text": "hello"}),
+                             (409, {"error": "Next steps start from the latest step"}))
+
+    def test_a_legacy_chat_task_stays_one_chat_until_it_is_converted(self):
+        body = self.call("/api/run", {"project_dir": str(self.project), "prompt": "hi there"})[1]
+        sid, tid = body["session"], body["task"]
+        self.wait_idle(sid)
+        task = self.until(tid, lambda t: t["steps"][0].get("turns") == 1, "turn 1 is filed")
+        self.assertEqual((task["chat"], task["state"]), (True, "running"))
+        self.assertEqual(self.hub.levers(sid)["continue"], "")  # the single chat keeps its own levers
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "one more"})[0], 200)
+        self.until(tid, lambda t: t["steps"][0].get("turns") == 2, "turn 2 is filed")
+        notes = self.folder / "tasks" / tid / "01-chat" / "notes.md"
+        self.assertTrue(notes.read_text(encoding="utf-8").startswith("# Turn 2\n\n"))
+        self.start_next(tid, "code", "now change calc.py")  # an explicit append converts it
+        task = self.boundary(tid)
+        self.assertEqual(task["id"], tid)
+        self.assertEqual((task["progression"], task.get("chat"), task["steps"][0]["state"]), ("manual", None, "done"))
+        self.assertEqual([s["kind"] for s in task["steps"]], ["chat", "code"])
+        self.assertEqual(self.hub.levers(sid)["continue"], "Next steps start from the latest step")
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "hello"})[0], 409)
+        self.assertTrue(notes.read_text(encoding="utf-8").startswith("# Turn 2\n\n"))  # the chat's notes stay
+
+
+for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
+    if _name.startswith("test_") and _name not in NextStepServerTest.__dict__:
+        setattr(NextStepServerTest, _name, None)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1362,5 +1362,134 @@ class BoardTest(unittest.TestCase):
             self.assertEqual(m["hot"], "")  # no context reading: nothing to name
 
 
+class NextStepTest(unittest.TestCase):
+    """Plan 36 Task 1: a manual successor runs in the same task, and every manual step stops at its own boundary."""
+
+    def manual(self, kinds=("scout",)):
+        """A one-step task whose last step just ended well under manual progression: it waits for Fred."""
+        task = make(kinds)
+        task["progression"] = "manual"
+        run(task, 1)
+        self.assertEqual(end(task)[0], "manual")
+        return task
+
+    def test_next_kinds_are_the_work_the_form_offers(self):
+        self.assertEqual(tasks.NEXT_KINDS, ("code", "verify", "scout", "design", tasks.CHAT))
+        self.assertNotIn("fix", tasks.NEXT_KINDS)  # a fix only ever follows a failed automatic verify
+
+    def test_a_manual_step_leaves_the_task_paused_for_fred(self):
+        task = self.manual()
+        self.assertEqual((task["state"], task["why"], task["owner"]), ("waiting", "choose next step", "fred"))
+        self.assertEqual((task["last_good"], task["steps"][0]["state"]), (1, "done"))
+
+    def test_an_automatic_chain_still_advances_by_itself(self):
+        task = make(("scout", "code"))
+        run(task, 1)
+        self.assertEqual(end(task)[0], "next")
+        self.assertEqual((task["state"], task["owner"]), ("running", "service"))
+
+    def test_a_manual_step_in_a_longer_chain_starts_nothing(self):
+        task = make(("scout", "code"))  # scout, code, verify: two planned steps after the first
+        task["progression"] = "manual"
+        run(task, 1)
+        self.assertEqual(end(task)[0], "manual")
+        self.assertEqual((task["state"], task["owner"]), ("waiting", "fred"))
+        self.assertEqual([s["state"] for s in task["steps"]], ["done", "planned", "planned"])
+
+    def test_append_step_numbers_the_successor_and_keeps_the_task(self):
+        task = self.manual()
+        before = {k: task[k] for k in ("id", "goal", "project_dir", "project", "title", "created", "prep")}
+        task["steps"][0]["cost"] = 0.25
+        new = tasks.append_step(task, "verify", " Check what step 01 changed ", now=NOW + 200)
+        self.assertEqual({k: task[k] for k in before}, before)  # id, goal, folder, prep and creation kept
+        self.assertEqual(task["steps"][0]["cost"], 0.25)  # the earlier step keeps its cost
+        self.assertEqual([s["n"] for s in task["steps"]], [1, 2])
+        self.assertEqual((new["n"], new["kind"], new["goal"], new["state"]),
+                         (2, "verify", "Check what step 01 changed", "planned"))
+        self.assertEqual(tasks.step_file(new, "received.md"), "02-verify/received.md")
+        self.assertEqual((new["checked"], new["source_step"], new["source_session"]), (1, 1, "s1"))
+        self.assertEqual(new["pick"], "")
+        self.assertEqual(task["progression"], "manual")
+        self.assertEqual((task["state"], task["owner"], task["current"], task["last_good"]),
+                         ("running", "service", 1, 1))
+        self.assertEqual(task["updated"], NOW + 200)
+        self.assertEqual(tasks.current_step(task), task["steps"][0])  # the successor is not current until it starts
+
+    def test_append_step_takes_a_pick(self):
+        task = self.manual()
+        new = tasks.append_step(task, "code", "write it", "codex:gpt-6-astra", now=NOW)
+        self.assertEqual((new["kind"], new["pick"], new["checked"]), ("code", "codex:gpt-6-astra", 0))
+
+    def test_append_step_refuses_a_kind_goal_or_source_it_cannot_take(self):
+        task = self.manual()
+        for kind in ("replan", "fix", "search", "CHAT", "", None):
+            with self.assertRaises(ValueError, msg=str(kind)):
+                tasks.append_step(task, kind, "do it", now=NOW)
+        for goal in ("", "   ", "x" * (tasks.STEP_GOAL_MAX + 1), None, 7):
+            with self.assertRaises(ValueError, msg=str(goal)):
+                tasks.append_step(task, "code", goal, now=NOW)
+        self.assertEqual(len(task["steps"]), 1)  # a refused append changes nothing
+        self.assertEqual(task["progression"], "manual")
+        late = make(("scout", "code"))  # a historical step is not a branch point
+        late["progression"] = "manual"
+        run(late, 1)
+        end(late)
+        with self.assertRaises(ValueError):
+            tasks.append_step(late, "code", "again", now=NOW)
+        fresh = make(("scout",))  # nor is a task that never ran
+        with self.assertRaises(ValueError):
+            tasks.append_step(fresh, "code", "start", now=NOW)
+
+    def test_append_step_refuses_another_progression(self):
+        task = self.manual()
+        task["progression"] = "automatic"
+        with self.assertRaises(ValueError):
+            tasks.append_step(task, "code", "do it", now=NOW)
+
+    def test_append_step_finishes_a_running_chat_and_drops_the_legacy_flag(self):
+        s = tasks.chat_step(1, "what next", "w1", "sonnet", "medium", NOW)
+        task = tasks.new_task("D:\\WORK\\APP", "APP", "hi", "hi there", [s], "normal", {}, "20261012-101455-9c1d",
+                              "auto", NOW)
+        task.update(state="running", owner="window", current=1, chat=True)
+        new = tasks.append_step(task, "code", "do the thing", now=NOW + 5)
+        self.assertEqual((task["steps"][0]["state"], task["steps"][0]["ended"]), ("done", NOW + 5))
+        self.assertNotIn("chat", task)  # the whole-task flag goes: the current step's kind decides
+        self.assertEqual((task["progression"], new["source_session"], task["current"]), ("manual", "w1", 1))
+        self.assertEqual((task["state"], task["owner"]), ("running", "service"))
+
+    def test_manual_verify_fail_waits_without_inserting_a_fix(self):
+        task = self.manual()  # step 01 scout, done, manual
+        tasks.append_step(task, "code", "write it", now=NOW)
+        run(task, 2)
+        self.assertEqual(end(task)[0], "manual")
+        tasks.append_step(task, "verify", "check it", now=NOW)
+        run(task, 3, "opus", "high")
+        action, lines = end(task, verdict="FAIL", verdict_detail="3 != 4")
+        self.assertEqual(action, "manual")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])  # no fix, no second verify
+        self.assertEqual((task["state"], task["owner"], task["why"]), ("waiting", "fred", "VERDICT: FAIL: 3 != 4"))
+        self.assertEqual((task["steps"][2]["state"], task["steps"][2]["verdict"]), ("done", "FAIL"))
+        self.assertEqual(task["last_good"], 3)
+
+    def test_a_manual_verify_pass_reaches_the_boundary_too(self):
+        task = self.manual()
+        tasks.append_step(task, "code", "write it", now=NOW)
+        run(task, 2)
+        end(task)
+        tasks.append_step(task, "verify", "check it", now=NOW)
+        run(task, 3, "opus", "high")
+        self.assertEqual(end(task, verdict="PASS")[0], "manual")
+        self.assertEqual((task["state"], task["why"]), ("waiting", "choose next step"))
+
+    def test_a_manual_chat_step_belongs_to_the_task(self):
+        task = make(("scout",))
+        task["progression"] = "manual"
+        run(task, 1)
+        end(task)
+        new = tasks.append_step(task, tasks.CHAT, "keep talking", now=NOW)
+        self.assertEqual((new["kind"], new["checked"], new["pick"]), (tasks.CHAT, 0, ""))
+        self.assertEqual(task["progression"], "manual")
+
+
 if __name__ == "__main__":
     unittest.main()
