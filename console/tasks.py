@@ -4,8 +4,10 @@ run, handed on through a note. This module is pure: rules, routes, the handoff c
 reads the final messages and writes every file. A model never writes into the task folder.
 
     <home>/tasks/<id>/   task.json   the task and its steps (written whole, through a temp file)
-                         prompt.md   the task text as it was run (the service writes it)
+                         prompt.md   the prompt as typed (plan 29: written when it is sent; before, the goal)
                          chain.jsonl one line per transition
+                         00-prep/    Prep's files (plan 29, prep.py): role.md, prep.json, prompt.md (the goal the
+                                     steps run on), scouting.md, handoff.md (what step 1 reads)
                          NN-<kind>/  one folder per step (plan 28): role.md, received.md, notes.md, handoff.md,
                                      brief.md, facts.md, verdict.md, handed.md, notes.<k>.md of a failed attempt;
                                      the design step's plan.md and plan/
@@ -41,6 +43,7 @@ RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify
 }
 KINDS = tuple(RULES)
 PREP_KINDS = tuple(k for k in KINDS if k not in ("verify", "fix"))  # what Prep may propose
+CHAT = "chat"  # plan 29: a no-step card or Raw runs one chat step (tasks.chat_step); not in KINDS
 EDIT_KINDS = frozenset({"edit", "code", "debug", "document", "draft"})  # a verify follows the last of them
 DISALLOW = ("Agent",)
 HEADINGS = ("## Goal", "## Findings", "## Files touched", "## Troubleshooting", "## Open questions", "## Next")
@@ -426,17 +429,34 @@ def slug(title: str) -> str:
 
 
 def new_task(project_dir: str, project: str, title: str, goal: str, steps: list, type_: str, demand,
-             prep: str, effort: str, now: float) -> dict:
+             prep, effort: str, now: float, id_: str = "") -> dict:
+    """A task dict. `prep` is task["prep"] (plan 29: prep.summary of the card, a dict; a Prep id before it); `id_`
+    is the Prep job's id, whose folder the prompt opened (plan 29), else a new id."""
     if not steps:
         raise ValueError("a task needs at least one step")
     if effort != "auto" and effort not in claude_cli.EFFORTS:
         raise ValueError(f"unknown effort: {effort}")
     from .prep import new_id  # here, not at the top: prep imports this module for PREP_KINDS
-    return {"id": new_id(), "project_dir": project_dir, "project": project, "title": title, "slug": slug(title),
+    return {"id": safe_id(id_) or new_id(), "project_dir": project_dir, "project": project, "title": title, "slug": slug(title),
             "goal": str(goal or "")[:GOAL_MAX], "type": type_, "demand": dict(demand or {}), "effort": effort,
             "state": "planned", "owner": "service", "current": 0, "last_good": 0, "escalated": "",
             "fable_ok": False, "prep": prep, "why": "", "created": now, "updated": now,
             "steps": copy.deepcopy(steps)}
+
+
+def prep_id(task: dict) -> str:
+    """The Prep id of a task: task["prep"]["id"] (plan 29), or the bare id string of a task from before it."""
+    p = task.get("prep")
+    return str(p.get("id") or "") if isinstance(p, dict) else str(p or "")
+
+
+def chat_step(n: int, goal: str, sid: str, model: str, effort: str, now: float) -> dict:
+    """The `chat` step (plan 29, D6): a window session the task files turn by turn. Not a chain kind: never routed,
+    never planned by Prep, never compacted; its session keeps Continue, Verify, Handoff and Stop."""
+    s = _blank(n, CHAT, redact.clip(goal, STEP_GOAL_MAX))
+    s.update(state="running", session=sid, model=model, effort=effort, started=now, dir=f"{n:02d}-{CHAT}",
+             turns=0, filed=None)
+    return s
 
 
 def step(task: dict, n: int) -> dict:
@@ -867,7 +887,7 @@ def sessions_of(task: dict) -> list:
 
 def clear(home, task: dict, keep_last: bool = True) -> list:
     """Remove what is only history. `keep_last` (Fred's Clear lever): every step file but the last good step's
-    handoff, brief and facts, the handed note and the plan (task.json, chain.jsonl and prompt.md stay; plan 28: in the
+    handoff, brief and facts, the handed note and the plan (task.json, chain.jsonl, prompt.md and 00-prep/ stay; plan 28: in the
     step folders and the flat steps/ of an older task alike; a step folder left empty goes); else the whole folder.
     Returns the step session ids so the caller can forget their runs."""
     sessions = sessions_of(task)
@@ -881,8 +901,8 @@ def clear(home, task: dict, keep_last: bool = True) -> list:
         for path in sorted((root / "steps").glob("*.md")):
             if f"steps/{path.name}" not in kept:
                 path.unlink(missing_ok=True)
-        for sub in sorted(p for p in root.iterdir() if p.is_dir() and _STEP_DIR.fullmatch(p.name)) \
-                if root.is_dir() else ():
+        for sub in sorted(p for p in root.iterdir() if p.is_dir() and _STEP_DIR.fullmatch(p.name)
+                          and p.name != "00-prep") if root.is_dir() else ():  # plan 29: Prep's files stay whole
             for path in sorted(sub.iterdir()):
                 rel = f"{sub.name}/{path.name}"
                 if sub.name == plan_dir and (path.name == "plan.md" or path.name == "plan"):

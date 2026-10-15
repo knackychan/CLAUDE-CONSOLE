@@ -348,6 +348,10 @@ class Hub:
         """Prep in its own thread: the request answers at once and the strip shows the job as it runs.
         `files` (attach.parse) wait with the job, in memory only, for the run its card starts."""
         job = prep.new_id()
+        try:
+            prep.begin(self.folder, job, raw)  # plan 29: the prompt has its task folder from the moment it is sent
+        except OSError:
+            pass  # Prep still runs; save writes the folder when it ends
         with self.lock:
             self.preps[job] = {"id": job, "project_dir": project_dir, "raw": raw, "ts": time.time(),
                                "state": "running", "files": list(files)}
@@ -377,6 +381,8 @@ class Hub:
                 self.preps[job].update(end)
                 self.version += 1
                 self.changed.notify_all()
+                return
+        prep.discard(self.folder, job)  # plan 29: the card was dropped while Prep ran; its folder goes too
 
     def start_review(self, project_dir: str) -> str:
         """The rules review (plan 22) rides the Prep strip: same dict, same drop route, `kind` "review"."""
@@ -397,12 +403,14 @@ class Hub:
         self._end_job(job, end)
 
     def drop_prep(self, job: str) -> bool:
-        """Off the strip: the card was run, edited or dismissed. Its preps/<id>.json stays."""
+        """Off the strip: the card was run, edited or dismissed. Plan 29: a card that became a task keeps its folder
+        (task.json is in it); an unsent one's folder is removed (prep.discard)."""
         with self.lock:
             if self.preps.pop(job, None) is None:
                 return False
             self.version += 1
             self.changed.notify_all()
+        prep.discard(self.folder, job)
         return True
 
     def tick(self) -> None:
@@ -443,7 +451,8 @@ class Hub:
                                      "attached": attach.summary(j["files"])} for j in self.preps.values()),
                                    key=lambda j: j["ts"])
             rows = {r["id"]: r for r in snap["sessions"]}
-            snap["tasks"] = sorted((task_row(t, self._live_note, rows) for t in self.tasks.values()),
+            snap["tasks"] = sorted((task_row(t, self._live_note, rows) for t in self.tasks.values()
+                                    if not t.get("chat")),  # plan 29: a chat task shows as its session until plan 30
                                    key=lambda r: r["updated"], reverse=True)
             loose = [r for r in snap["sessions"] if not r.get("task")]  # a task counts once, not per step session
             count = lambda g: sum(1 for r in loose if r["group"] == g)
@@ -793,6 +802,12 @@ class Hub:
             if task is None:
                 return None
             state, owner, cs, nxt = task["state"], task["owner"], tasks.current_step(task), self._next_step(task)
+            if task.get("chat"):  # plan 29: the chat's session has the levers (Hub.levers), the task none
+                off = "a chat: use its session's levers"
+                return {**{k: off for k in ("start", "stop", "pause", "resume", "retry", "confirm", "clear", "done",
+                                            "answer", "redo", "keep")},
+                        "route": f"{cs['model']}/{cs['effort']}" if cs else "", "next_route": "",
+                        "cwd": task["project_dir"]}
             base = self._base(task)
             live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
             if base:
@@ -866,10 +881,9 @@ class Hub:
         with self.tlock:
             name = redact.clip(title or (card.get("fields") or {}).get("goal") or card.get("raw") or "task", 80)
             task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], planned,
-                                  (card.get("route") or {}).get("type") or "", card.get("demand") or {}, card["id"],
-                                  effort, time.time())
-            tasks.folder(self.folder, task["id"]).mkdir(parents=True, exist_ok=True)
-            (tasks.folder(self.folder, task["id"]) / "prompt.md").write_text(task["goal"], encoding="utf-8")
+                                  (card.get("route") or {}).get("type") or "", card.get("demand") or {},
+                                  prep.summary(card), effort, time.time(), id_=self._free_id(card["id"]))
+            self._prep_files(task, card, planned[0]["goal"])
             tasks.save(self.folder, task)
             with self.lock:
                 self.tasks[task["id"]] = task
@@ -877,6 +891,89 @@ class Hub:
             self.advance()
             self.poll_once()
         return task["id"]
+
+    def _free_id(self, prep_id: str) -> str:
+        """The card's id for its task (plan 29), unless a task already holds it (the same card run twice): "" then."""
+        if not tasks.safe_id(prep_id) or prep_id in self.tasks:
+            return ""
+        return "" if (tasks.folder(self.folder, prep_id) / "task.json").exists() else prep_id
+
+    def _prep_files(self, task: dict, card, first_goal: str) -> None:
+        """Plan 29: the task folder as Run leaves it. prompt.md as typed (written when it was sent; a card from before
+        plan 29 or a Raw run writes it now); 00-prep/prompt.md is the goal the steps run on, as Fred edited it, and
+        00-prep/handoff.md names step 1's goal as it was run. Raw has no 00-prep/."""
+        where = tasks.folder(self.folder, task["id"])
+        where.mkdir(parents=True, exist_ok=True)
+        if not (where / "prompt.md").exists():
+            raw = (card or {}).get("raw") or task["goal"]
+            (where / "prompt.md").write_text(str(raw).strip() + "\n", encoding="utf-8")
+        if not card:
+            return
+        if not (where / prep.DIR / "prep.json").exists():  # a card from before plan 29: its files land here once
+            prep.save(self.folder, dict(card, id=task["id"]))
+        (where / prep.DIR / "prompt.md").write_text(redact.mask(task["goal"]).rstrip("\n") + "\n", encoding="utf-8")
+        (where / prep.DIR / "handoff.md").write_text(redact.mask(prep.handoff_text(card, first_goal)), encoding="utf-8")
+
+    def chat_task(self, project_dir: str, sid: str, card, text: str, rung: str, effort: str, title: str) -> str:
+        """Plan 29 (D6): a no-step card or a Raw run is a task of one `chat` step, the window session `sid` that
+        /api/run started. It keeps the session levers (Hub.levers sees no task on it); the service files each turn's
+        final message in 01-chat/ and closes the task when the session is done (_chat_tick). Raw marks Prep skipped.
+        Returns the task id. The window's lists do not show a chat task yet (plan 30 does)."""
+        now = time.time()
+        with self.tlock:
+            name = redact.clip(title or text or "chat", 80)
+            s = tasks.chat_step(1, name, sid, rung, effort, now)
+            task = tasks.new_task(project_dir, Path(project_dir).name, name, text, [s],
+                                  ((card or {}).get("route") or {}).get("type") or "", (card or {}).get("demand") or {},
+                                  prep.summary(card), "auto", now, id_=self._free_id(card["id"]) if card else "")
+            task.update(state="running", owner="window", current=1, chat=True)
+            self._prep_files(task, card, f"One chat on {rung}/{effort}.")
+            got = ([f"{prep.DIR}/prompt.md (the goal, as sent)", f"{prep.DIR}/handoff.md (not sent: the chat runs the "
+                    "prompt alone)"] if card else ["prompt.md (as typed; Prep skipped)"])
+            tasks.write_step_file(self.folder, task, task["steps"][0], "received.md",
+                                  "# Step 01: what it received\n\n" + "\n".join(f"- {x}" for x in got))
+            line = tasks._line(now, task["steps"][0], "planned", "running", f"chat on {rung}/{effort}"
+                               + ("" if card else " · Prep skipped"))
+            with self.lock:
+                self.tasks[task["id"]] = task
+            self._commit(task, [line])
+        return task["id"]
+
+    def _chat_tick(self, task: dict) -> str:
+        """A chat task on each hub pass (plan 29): a turn that ended is filed (01-chat/notes.md, the latest turn's
+        final message; handoff.md when it ends with a HANDOFF block), the cost follows the session, and the task is
+        done while the session is done (Mark done, a handoff) and running again when a next prompt brings it back."""
+        s = task["steps"][0]
+        sid, lines, now = s["session"], [], time.time()
+        meta, row = self.runs.meta(sid) or {}, self.session(sid)
+        if row is None:
+            return ""
+        if not self.runs.is_live(sid) and meta.get("ended") and meta.get("started") != s.get("filed"):
+            text, _ = self.final_message(sid)
+            s["filed"], s["turns"] = meta.get("started"), int(s.get("turns") or 0) + 1
+            if text.strip():
+                tasks.write_step_file(self.folder, task, s, "notes.md", f"# Turn {s['turns']}\n\n"
+                                      + (tasks.notes_of(text) or text))
+                block = tasks.parse_handoff(text)
+                if block and not tasks.check_handoff(block):
+                    tasks.write_note(self.folder, task, s, block)
+            lines.append(tasks._line(now, s, s["state"], s["state"], f"turn {s['turns']} filed"))
+        if row["cost"] is not None and row["cost"] != s["cost"]:
+            s["cost"] = row["cost"]
+            lines = lines or [None]
+        done = row["state"] == "done"
+        if done != (task["state"] == "done"):
+            to = "done" if done else "running"
+            lines.append(tasks._line(now, s, s["state"], to, "the chat is done" if done else "the chat goes on"))
+            s.update(state=to, ended=now if done else None)
+            task["state"], task["why"] = to, ""
+            if done:
+                task["last_good"] = 1 if s["handoff"] else 0
+        if not lines:
+            return ""
+        task["updated"] = now
+        self._commit(task, [x for x in lines if x])
+        return "chat"
 
     def start_step(self, task: dict, n: int) -> None:
         """Route step `n` and start its run; a hold waits for Fred, a run that cannot start makes the task stuck."""
@@ -905,6 +1002,11 @@ class Hub:
         prev = tasks.read_brief(self.folder, task, last)
         plan_text, part_text, read = "", "", [f"brief {last:02d}" if prev else "no brief"]
         got = [tasks.brief_file(task, done) + " (the brief of step " + f"{last:02d})" if prev else "no brief: the first step"]
+        if not last and isinstance(task.get("prep"), dict):  # plan 29: step 1 reads Prep's handoff
+            prev = prep.first_handoff(self.folder, task)
+            if prev:
+                read = ["prep handoff"]
+                got = [f"{prep.DIR}/handoff.md (Prep's scouting, cut to {prep.FINDINGS_CUT} characters)"]
         you, raw_role = paths.you(self.cfg), kinds.text(self.folder, kind)
         if kind == "design":
             role = plan.design_text(task, s, self.cfg, redo=task.get("redo", ""), raw=raw_role)
@@ -913,6 +1015,8 @@ class Hub:
             got = [tasks.note_file(task, x) + " (whole)" for x in task["steps"]
                    if x["n"] != n and tasks.read_note(self.folder, task, x["n"])
                    and (x["n"] < n or (task.get("redo") and x["state"] == "done"))] or ["no note: the first step"]
+            if prep.read(self.folder, task, "scouting.md"):  # plan 29: Prep's scouting, whole
+                got.insert(0, f"{prep.DIR}/scouting.md (whole)")
         else:
             role = tasks.role_text(task, s, raw_role, you=you)
             if task.get("plan"):
@@ -934,7 +1038,8 @@ class Hub:
                                    facts=facts_text, lessons=lessons, you=you)
         route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
         goal_cut = n != 1 and len(str(task.get("goal", ""))) > tasks.PROMPT_GOAL_MAX
-        got = ([f"prompt.md (the goal{', cut to 600 characters' if goal_cut else ''})"] + got
+        goal_file = f"{prep.DIR}/prompt.md" if prep.read(self.folder, task, "prompt.md") else "prompt.md"  # plan 29
+        got = ([f"{goal_file} (the goal{', cut to 600 characters' if goal_cut else ''})"] + got
                + ([tasks.facts_file(task, done) + " (the facts of step " + f"{last:02d})"] if facts_text and done else [])
                + ([f"lessons.md ({len(lessons)} {kind} lessons)"] if lessons else [])
                + [f"kinds/{kind}.md (as role.md)"] + ([f"retry: {retry}"] if retry else []))
@@ -955,7 +1060,7 @@ class Hub:
             sid = self.runs.start(
                 task["project_dir"], prompt, model_name, route["effort"],
                 title=f"{task['title']} · {n}/{len(task['steps'])} {kind}", route=kind,
-                reason=" · ".join(route["notes"]), prep=task["prep"], kind="task",
+                reason=" · ".join(route["notes"]), prep=tasks.prep_id(task), kind="task",
                 extra={"task": task["id"], "step": n}, disallow=tasks.DISALLOW, tools=tasks.RULES[kind][2],
                 budget=self.cfg["task_step_budget_usd"], max_turns=max_turns, harness=hname, read_only=read_only,
                 strict_mcp=True)
@@ -999,6 +1104,8 @@ class Hub:
         return changed
 
     def _advance_one(self, task: dict) -> str:
+        if task.get("chat"):  # plan 29: a chat step is Fred's session; the service only files it
+            return self._chat_tick(task)
         if self.sync_costs(task):
             self._commit(task)
         if task["state"] == "done" and task.get("briefing") and task["id"] not in self.briefing:
@@ -1716,10 +1823,11 @@ class Handler(BaseHTTPRequestHandler):
         hname, model_name = claude_cli.split_rung(model)
         sid = self.hub.runs.start(folder, text, model_name, effort, title=title, route=route,
                                   reason=reason, prep=prep_id, extra=extra, files=files, harness=hname)
+        tid = self.hub.chat_task(folder, sid, card, text, model, effort, title)  # plan 29: every prompt is a task
         if prep_id:
             self.hub.drop_prep(prep_id)  # the card became this run
         self.hub.poll_once()
-        return self._json({"session": sid})
+        return self._json({"session": sid, "task": tid})
 
     def _harness(self, body):
         name, on = body.get("name"), body.get("on")

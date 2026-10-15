@@ -3,14 +3,14 @@
 text editor). The service inlines a step's kind file into its prompt in place of the code's per-kind text and copies
 the rendered text into the step folder as role.md. The text is string.Template text with named slots: $you and $You
 everywhere, $checked (verify), $failed, $model and $effort (fix), the design and replan slots (plan.design_slots,
-replan.build_prompt). Never raises on a read: a missing or empty file reads the seed."""
+replan.build_prompt) and Prep's ($You, $raw, $misses, $window, prep.build_prompt). Never raises on a read: a missing or empty file reads the seed."""
 import os
 import re
 from pathlib import Path
 
 SEED = Path(__file__).resolve().parent.parent / "dotclaude" / "console" / "kinds"
 NAMES = ("scout", "search", "draft", "proofread", "edit", "code", "document", "explain", "debug", "test", "design",
-         "replan", "verify", "fix")  # tasks.KINDS, in its order (a test asserts it)
+         "replan", "verify", "fix", "prep")  # tasks.KINDS in its order (a test asserts it), then Prep (plan 29)
 KIND_MAX = 32 * 1024  # bytes of one kind file the window may save
 _HEAD = re.compile(r"# ([a-z]+)\s*")
 

@@ -2,14 +2,19 @@ import copy
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from console import paths, prep, tasks
 
+def _step(kind, goal):
+    return tasks.plan_steps([{"kind": kind, "goal": goal}], 6)[0]
+
+
 FAKE = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
 FIELDS = {"goal": "Fix add()", "where": "calc.py", "keep": "", "done_when": "tests pass",
-          "last_decisions": "", "question": "which file?", "reason": "small",
+          "last_decisions": "", "question": "which file?", "reason": "small", "scouting": "",
           "route": {"type": "mechanical", "model": "sonnet", "effort": "low"}}
 
 
@@ -94,6 +99,75 @@ class PrepTest(unittest.TestCase):
             same = prep.run_prep(cfg, Path(tmp), tmp, "fix it", FAKE, prep_id="20261012-101010-ab12")
             self.assertEqual(same["id"], "20261012-101010-ab12")  # the background job's id names the card
             self.assertEqual(prep.load(Path(tmp), same["id"])["raw"], "fix it")
+            where = Path(tmp) / "tasks" / same["id"] / "00-prep"  # plan 29: the card lives in its task folder
+            self.assertEqual(sorted(p.name for p in where.iterdir()),
+                             ["handoff.md", "prep.json", "prompt.md", "role.md", "scouting.md"])
+            self.assertTrue((where / "role.md").read_text(encoding="utf-8").startswith("# prep\n\nYou are a prompt"))
+            self.assertIn("Request:\nfix it", (where / "role.md").read_text(encoding="utf-8"))
+            self.assertEqual((where / "scouting.md").read_text(encoding="utf-8"),
+                             "calc.py:2 add(): the function to fix\ntests/test_calc.py test_add: the test that covers it\n")
+            self.assertFalse((Path(tmp) / "preps").exists())
+
+    # -- plan 29: the prompt's task folder, 00-prep/ ---------------------------------------------------------
+
+    def test_a_card_from_before_plan_29_still_loads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "preps").mkdir()
+            (Path(tmp) / "preps" / "20261001-101010-ab12.json").write_text('{"id": "20261001-101010-ab12", "raw": "old"}',
+                                                                          encoding="utf-8")
+            self.assertEqual(prep.load(Path(tmp), "20261001-101010-ab12")["raw"], "old")
+
+    def test_handoff_text_is_six_headings_from_the_card(self):
+        card = {"id": "20261015-101010-ab12", "raw": "fix add", "route": {"model": "sonnet", "effort": "low"},
+                "fields": {"goal": "Fix add()  in\ncalc.py", "scouting": "calc.py:2 add(): to fix", "question": "ints?"},
+                "steps": [{"kind": "scout", "goal": "find callers"}]}
+        text = prep.handoff_text(card)
+        self.assertEqual(tasks.check_handoff(text), "")
+        self.assertEqual(text, "## Goal\nFix add() in calc.py\n## Findings\ncalc.py:2 add(): to fix\n## Files touched\n"
+                               "- (none)\n## Troubleshooting\n- (none)\n## Open questions\n- ints?\n## Next\nfind callers\n")
+        self.assertTrue(prep.handoff_text(card, "fix it now").endswith("## Next\nfix it now\n"))
+        bare = prep.handoff_text(dict(card, steps=[], fields={"goal": "x"}))
+        self.assertIn("## Findings\n(Prep read nothing)\n", bare)
+        self.assertTrue(bare.endswith("## Next\nOne chat on sonnet/low does the whole request.\n"))
+
+    def test_first_handoff_cuts_the_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            card = {"id": "20261015-101010-ab12", "fields": {"goal": "g", "scouting": "x" * 2000}, "steps": [],
+                    "route": {}}
+            prep.save(tmp, card)
+            text = prep.first_handoff(tmp, {"id": card["id"]})
+            findings = text.split("## Findings\n")[1].split("\n## Files touched")[0]
+            self.assertEqual(len(findings), prep.FINDINGS_CUT)
+            self.assertTrue(findings.endswith("\u2026"))
+            self.assertEqual(tasks.check_handoff(text), "")
+            self.assertEqual(prep.first_handoff(tmp, {"id": "20261015-101010-ffff"}), "")
+
+    def test_begin_discard_and_orphans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prep.begin(tmp, "20261015-101010-ab12", "  fix add\n")
+            where = Path(tmp) / "tasks" / "20261015-101010-ab12"
+            self.assertEqual((where / "prompt.md").read_text(encoding="utf-8"), "fix add\n")
+            self.assertTrue(prep.discard(tmp, "20261015-101010-ab12"))
+            self.assertFalse(where.exists())
+            prep.begin(tmp, "20261015-101010-cd34", "run me")
+            (Path(tmp) / "tasks" / "20261015-101010-cd34" / "task.json").write_text("{}", encoding="utf-8")
+            self.assertFalse(prep.discard(tmp, "20261015-101010-cd34"))  # a task: never removed here
+            self.assertFalse(prep.discard(tmp, "../x"))
+            prep.begin(tmp, "20261015-101010-ef56", "lost card")
+            now = time.time()
+            self.assertEqual(prep.prune_orphans(tmp, now=now), [])  # younger than ORPHAN_DAYS
+            self.assertEqual(prep.prune_orphans(tmp, now=now + 3 * 86400), ["20261015-101010-ef56"])
+            self.assertTrue((Path(tmp) / "tasks" / "20261015-101010-cd34").exists())
+
+    def test_summary_is_step_0(self):
+        card = {"id": "20261015-101010-ab12", "model": "haiku", "turns": 5, "cost": 0.03, "reason": "small",
+                "route": {"type": "lookup"}, "fields": {"question": ""}, "steps": [_step("scout", "look")]}
+        self.assertEqual(prep.summary(card), {"id": card["id"], "state": "done", "model": "haiku", "turns": 5,
+                                              "cost": 0.03, "route": {"type": "lookup"}, "reason": "small",
+                                              "question": "", "steps": [{"kind": "scout", "goal": "look"}]})
+        self.assertEqual(prep.summary(None), {"id": "", "state": "skipped"})
+        self.assertEqual(tasks.prep_id({"prep": prep.summary(card)}), card["id"])
+        self.assertEqual(tasks.prep_id({"prep": "20261001-101010-ab12"}), "20261001-101010-ab12")
 
 
     def test_run_prep_returns_steps_and_appends_verify(self):

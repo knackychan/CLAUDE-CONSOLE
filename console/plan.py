@@ -419,8 +419,15 @@ def design_text(task: dict, step: dict, cfg: dict, redo: str = "", raw: str = No
 
 def design_input(home, task: dict, n: int) -> str:
     """What the design step reads instead of a brief: the raw handoff notes of every earlier step, whole (D1); on a
-    redo (task["redo"]) also the notes of the done steps after n, which the redo keeps (plan 27)."""
+    redo (task["redo"]) also the notes of the done steps after n, which the redo keeps (plan 27). Plan 29: Prep's
+    scouting (00-prep/scouting.md) first, whole."""
     out = []
+    try:
+        scouting = (tasks.folder(home, task["id"]) / "00-prep" / "scouting.md").read_text(encoding="utf-8").strip()
+    except OSError:
+        scouting = ""
+    if scouting:
+        out.append("What Prep read while scouting (00-prep/scouting.md):\n" + scouting)
     for s in task["steps"]:
         if s["n"] == n or (s["n"] > n and not (task.get("redo") and s["state"] == "done")):
             continue

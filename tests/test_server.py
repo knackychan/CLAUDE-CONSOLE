@@ -315,7 +315,7 @@ class RunServerTest(unittest.TestCase):
         self.assertNotIn("files", job)  # the bytes never reach the snapshot
         self.assertNotIn(shot["data"], json.dumps(self.hub.snapshot()))
         self.assertEqual(job["card"]["raw"], "fix it")  # as typed; Prep read the names too:
-        saved = json.loads((self.folder / "preps" / f"{old}.json").read_text(encoding="utf-8"))
+        saved = json.loads((self.folder / "tasks" / old / "00-prep" / "prep.json").read_text(encoding="utf-8"))
         self.assertTrue(saved["raw"].endswith("sent with the run: shot.png (image)."))
         new = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "fix it", "files_from": old})[1]["job"]
         self.assertEqual(self.prep_job(new)["attached"][0]["name"], "shot.png")  # Try again keeps them
@@ -809,7 +809,9 @@ class TaskServerTest(RunServerTest):
         tid = data["task"]
         folder = self.folder / "tasks" / tid
         self.assertTrue((folder / "task.json").is_file())
-        self.assertIn("HANDOFF-OK", (folder / "prompt.md").read_text(encoding="utf-8"))
+        self.assertIn("HANDOFF-OK", (folder / "00-prep" / "prompt.md").read_text(encoding="utf-8"))  # the goal as run
+        self.assertEqual((folder / "prompt.md").read_text(encoding="utf-8"), "CHAIN fix add\n")  # plan 29: as typed
+        self.assertEqual(tid, card["id"])  # the prompt's folder became the task's
         task = self.task(tid)[1]["task"]
         step = task["steps"][0]
         self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])
@@ -1296,7 +1298,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(list(self.project.iterdir()), [])  # the fake claude writes no file, and nor does the service
         folder = self.folder / "tasks" / tid
         self.assertEqual(sorted(p.name for p in folder.iterdir()),
-                         ["01-scout", "02-explain", "chain.jsonl", "prompt.md", "task.json"])  # plan 28: a folder a step
+                         ["00-prep", "01-scout", "02-explain", "chain.jsonl", "prompt.md", "task.json"])  # plan 28, 29
         self.assertEqual(sorted(p.name for p in (folder / "01-scout").iterdir()),
                          ["brief.md", "facts.md", "handoff.md", "notes.md", "received.md", "role.md"])
 
@@ -2042,7 +2044,7 @@ class TaskServerTest(RunServerTest):
         role = (folder / "01-scout" / "role.md").read_text(encoding="utf-8")
         self.assertTrue(role.startswith("# scout\n\n## Role\n"))
         received = (folder / "02-explain" / "received.md").read_text(encoding="utf-8")
-        self.assertTrue(received.startswith("# Step 02: what it received\n\n- prompt.md (the goal)\n"))
+        self.assertTrue(received.startswith("# Step 02: what it received\n\n- 00-prep/prompt.md (the goal)\n"))
         self.assertIn("- 01-scout/brief.md (the brief of step 01)", received)
         self.assertIn("- kinds/explain.md (as role.md)", received)
         self.assertIn("add() is in calc.py:2", (folder / "01-scout" / "notes.md").read_text(encoding="utf-8")
@@ -2094,6 +2096,92 @@ class TaskServerTest(RunServerTest):
         self.assertTrue(text.startswith("> Mirrored by Claude Console from its task folder"))
         self.assertIn("## Goal", text)
         self.assertIn(f"plan mirrored: .claude/console/plans/{tid}-{task['slug']}", self.whys(tid))
+
+    # -- plan 29: the prompt opens its task folder, Prep's files, the chat step ----------------------------------
+
+    def test_a_sent_prompt_opens_its_task_folder(self):
+        job = self.call("/api/prep", {"project_dir": str(self.project), "prompt": "  fix add  "})[1]["job"]
+        folder = self.folder / "tasks" / job
+        self.assertEqual((folder / "prompt.md").read_text(encoding="utf-8"), "fix add\n")  # before Prep ends
+        self.assertEqual(self.prep_job(job)["state"], "done")
+        self.assertEqual(sorted(p.name for p in (folder / "00-prep").iterdir()),
+                         ["handoff.md", "prep.json", "prompt.md", "role.md", "scouting.md"])
+        self.assertNotIn(job, self.hub.tasks)  # no task.json until it runs
+        self.assertEqual(self.call("/api/prep/drop", {"job": job})[0], 200)
+        self.assertFalse(folder.exists())  # a dropped card leaves no history
+
+    def test_step_one_reads_the_prep_handoff(self):
+        tid = self.make_task(steps=self.TWO)
+        task = self.until(tid, self.at(2), "step 2 starts")
+        folder = self.folder / "tasks" / tid
+        self.assertEqual(task["prep"]["state"], "done")
+        self.assertEqual(task["prep"]["id"], tid)
+        handoff = (folder / "00-prep" / "handoff.md").read_text(encoding="utf-8")
+        self.assertIn("## Findings\ncalc.py:2 add(): the function to fix", handoff)
+        self.assertTrue(handoff.endswith("## Next\nlook around\n"), handoff)  # step 1's goal as it was run
+        self.assertIn("- 00-prep/handoff.md (Prep's scouting, cut to 600 characters)",
+                      (folder / "01-scout" / "received.md").read_text(encoding="utf-8"))
+        prompt = self.prompt_of(task["steps"][0]["session"])
+        self.assertIn("What the earlier steps left you:\n## Goal\nFix add() in calc.py", prompt)
+        self.assertIn("read: prep handoff", task["steps"][0]["notes"])
+        self.assertEqual(self.session(task["steps"][0]["session"])["prep"], tid)  # the Route block's Prep row
+
+    def test_a_long_scouting_is_cut_for_step_one(self):
+        tid = self.make_task(text="CHAIN SCOUT-LONG fix add", steps=self.TWO)
+        task = self.until(tid, self.at(1), "step 1 starts")
+        prompt = self.full_prompt(task["steps"][0]["session"])
+        self.assertIn("file00.py", prompt)
+        self.assertNotIn("file29.py", prompt)
+        self.assertIn("file29.py", (self.folder / "tasks" / tid / "00-prep" / "scouting.md").read_text(encoding="utf-8"))
+
+    def test_design_step_reads_the_scouting_whole(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(2), "the design step starts")
+        prompt = self.full_prompt(task["steps"][1]["session"])
+        self.assertIn("What Prep read while scouting (00-prep/scouting.md):\ncalc.py:2 add(): the function to fix", prompt)
+        self.assertIn("- 00-prep/scouting.md (whole)",
+                      (self.folder / "tasks" / tid / "02-design" / "received.md").read_text(encoding="utf-8"))
+
+    def test_a_no_step_card_runs_a_chat_task(self):
+        card = self.prep_card("fix add")
+        self.assertEqual(card["steps"], [])
+        status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": card["prompt"],
+                                              "prep": card["id"]})
+        self.assertEqual(status, 200, data)
+        sid, tid = data["session"], data["task"]
+        self.assertEqual(tid, card["id"])
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["chat"], task["state"], task["owner"], task["prep"]["state"]),
+                         (True, "running", "window", "done"))
+        self.assertEqual([(s["n"], s["kind"], s["session"]) for s in task["steps"]], [(1, "chat", sid)])
+        self.assertNotIn(tid, [t["id"] for t in self.hub.snapshot()["tasks"]])  # shown as its session until plan 30
+        self.assertEqual(self.hub.task_levers(tid)["start"], "a chat: use its session's levers")
+        self.wait_idle(sid)
+        self.assertEqual(self.hub.levers(sid)["continue"], "")  # the session keeps its levers
+        task = self.until(tid, lambda t: t["steps"][0].get("turns") == 1, "turn 1 is filed")
+        folder = self.folder / "tasks" / tid / "01-chat"
+        self.assertTrue((folder / "notes.md").read_text(encoding="utf-8").startswith("# Turn 1\n\n"))
+        self.assertIn("- 00-prep/prompt.md (the goal, as sent)", (folder / "received.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.call("/api/done", {"session": sid})[0], 200)
+        task = self.until(tid, lambda t: t["state"] == "done", "the chat task is done")
+        self.assertEqual(task["steps"][0]["state"], "done")
+        self.assertIn("the chat is done", [c["why"] for c in self.chain(tid)])
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "one more"})[0], 200)
+        task = self.until(tid, lambda t: t["state"] == "running", "the chat goes on")
+        self.wait_idle(sid)
+        task = self.until(tid, lambda t: t["steps"][0].get("turns") == 2, "turn 2 is filed")
+        self.assertTrue((folder / "notes.md").read_text(encoding="utf-8").startswith("# Turn 2\n\n"))
+
+    def test_raw_run_is_a_chat_task_with_prep_skipped(self):
+        status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "just do it"})
+        self.assertEqual(status, 200, data)
+        task = self.hub.tasks[data["task"]]
+        self.assertEqual(task["prep"], {"id": "", "state": "skipped"})
+        folder = self.folder / "tasks" / task["id"]
+        self.assertEqual((folder / "prompt.md").read_text(encoding="utf-8"), "just do it\n")
+        self.assertFalse((folder / "00-prep").exists())
+        self.assertEqual(self.chain(task["id"])[0]["why"], f"chat on {self.hub.cfg['default_model']}/"
+                                                          f"{self.hub.cfg['default_effort']} · Prep skipped")
 
     # -- plan 27 Task 2: plan and replan edges --------------------------------------------------------------
 

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from console import kinds, plan, replan, tasks
+from console import kinds, plan, prep, replan, tasks
 
 
 class KindFilesTest(unittest.TestCase):
@@ -14,14 +14,15 @@ class KindFilesTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.home, True)
 
     def test_one_seed_per_chain_kind_in_the_shape(self):
-        self.assertEqual(kinds.NAMES, tasks.KINDS)
+        self.assertEqual(kinds.NAMES, tasks.KINDS + ("prep",))  # plan 29: Prep's kind file after the chain kinds
+        self.assertNotIn(tasks.CHAT, kinds.NAMES)  # a chat runs the prompt alone
         self.assertEqual(sorted(p.stem for p in kinds.SEED.glob("*.md")), sorted(kinds.NAMES))
         for kind in kinds.NAMES:
             text = kinds.seed_text(kind)
             self.assertEqual(kinds.check(kind, text), "", kind)
             self.assertNotIn("Fred", text, kind)  # plan 31: the person is $you
             self.assertNotIn(chr(0x2014), text, kind)
-            if kind not in ("design", "replan"):  # those two carry their old prompt files whole
+            if kind not in ("design", "replan", "prep"):  # those three carry their old prompt files whole
                 at = [text.index(h) for h in ("## Role", "## Do\n", "## Do not", "## Read", "## Leave behind")]
                 self.assertEqual(at, sorted(at), kind)
                 self.assertIn("HANDOFF block", text, kind)
@@ -31,6 +32,9 @@ class KindFilesTest(unittest.TestCase):
             self.assertIn(slot, kinds.seed_text("design"), slot)
         self.assertEqual(plan.PROMPT_FILE, kinds.SEED / "design.md")
         self.assertEqual(replan.PROMPT_FILE, kinds.SEED / "replan.md")
+        self.assertEqual(prep.PROMPT_FILE, kinds.SEED / "prep.md")
+        for slot in ("$You", "$raw", "$misses", "$window"):
+            self.assertIn(slot, kinds.seed_text("prep"), slot)
 
     def test_ensure_seeds_once_and_keeps_an_edit(self):
         self.assertEqual(kinds.ensure(self.home), list(kinds.NAMES))
