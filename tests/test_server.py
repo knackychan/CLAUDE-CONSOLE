@@ -1407,7 +1407,7 @@ class TaskServerTest(RunServerTest):
                          [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
         self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
                                                           "verdict", "retries", "cost", "note", "attempts", "part", "hard",
-                                                          "end_commit", "brief_meta", "facts"]))
+                                                          "end_commit", "brief_meta", "facts", "checked", "harness", "ctx_tokens"]))
         self.assertIn(row["steps"][0]["note"], ("writing", "unchecked"))
         self.until(tid, self.at(2), "step 2 starts")
         steps = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)["steps"]
@@ -2154,7 +2154,10 @@ class TaskServerTest(RunServerTest):
         self.assertEqual((task["chat"], task["state"], task["owner"], task["prep"]["state"]),
                          (True, "running", "window", "done"))
         self.assertEqual([(s["n"], s["kind"], s["session"]) for s in task["steps"]], [(1, "chat", sid)])
-        self.assertNotIn(tid, [t["id"] for t in self.hub.snapshot()["tasks"]])  # shown as its session until plan 30
+        snap = self.hub.snapshot()  # plan 30: the task shows, its session row only points at it
+        row = next(t for t in snap["tasks"] if t["id"] == tid)
+        self.assertEqual((row["chat"], row["label"], row["prep"]["state"]), (True, tasks.label(tid), "done"))
+        self.assertEqual(next(r for r in snap["sessions"] if r["id"] == sid)["chat_task"], tid)
         self.assertEqual(self.hub.task_levers(tid)["start"], "a chat: use its session's levers")
         self.wait_idle(sid)
         self.assertEqual(self.hub.levers(sid)["continue"], "")  # the session keeps its levers
@@ -2182,6 +2185,79 @@ class TaskServerTest(RunServerTest):
         self.assertFalse((folder / "00-prep").exists())
         self.assertEqual(self.chain(task["id"])[0]["why"], f"chat on {self.hub.cfg['default_model']}/"
                                                           f"{self.hub.cfg['default_effort']} · Prep skipped")
+
+    # -- plan 30: the one view --------------------------------------------------------------------------------
+
+    def put_task(self, state="done", days=0, chat=False):
+        """A task straight into the hub and its folder, no run: `days` old, in `state`."""
+        now = time.time() - days * 86400
+        t = tasks.new_task(str(self.project), "proj", f"old {days}", "goal", [tasks._blank(1, "code", "do it")], "",
+                           {}, {"id": "", "state": "skipped"}, "auto", now)
+        t.update(state=state, updated=now, chat=chat)
+        tasks.save(self.folder, t)
+        self.hub.tasks[t["id"]] = t
+        return t["id"]
+
+    def test_task_row_carries_label_prep_and_fix_links(self):
+        self.brief_pass_always()
+        tid = self.make_task()
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual((row["label"], row["slug"], row["chat"]), (tasks.label(tid), "fix-add-in-calc-py", False))
+        self.assertEqual({k: row["prep"][k] for k in ("state", "steps")}, {"state": "done", "steps": 3})
+        self.assertEqual([(s["n"], s["checked"]) for s in row["steps"]], [(1, 0), (2, 0), (3, 2)])
+        self.assertEqual(row["steps"][0]["harness"], "claude")
+
+    def test_task_get_lists_step_files_and_preps_texts(self):
+        self.brief_pass_always()
+        tid = self.make_task()
+        task = self.hub.tasks[tid]
+        (self.folder / "tasks" / tid / tasks.step_dir(task["steps"][0])).mkdir(parents=True, exist_ok=True)
+        for name in ("notes.md", "notes.1.md", "role.md"):
+            (self.folder / "tasks" / tid / tasks.step_file(task["steps"][0], name)).write_text("x", encoding="utf-8")
+        data = self.task(tid)[1]
+        names = data["files"]["1"]
+        self.assertEqual((names[0], names[-1]), ("role.md", "notes.1.md"))  # tasks.STEP_FILES order, then the tries
+        self.assertLess(names.index("notes.md"), names.index("notes.1.md"))
+        self.assertEqual(sorted(data["prep_files"]), ["handoff", "prompt", "scouting"])
+        self.assertIn("## Goal", data["prep_files"]["handoff"])
+        task["steps"][0]["ctx_tokens"] = 41000
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual(row["steps"][0]["ctx_tokens"], 41000)
+
+    def test_done_tasks_past_two_weeks_leave_the_snapshot(self):
+        new, old = self.put_task(days=3), self.put_task(days=server.DONE_DAYS + 1)
+        live = self.put_task(state="stuck", days=server.DONE_DAYS + 5)  # never old while it needs Fred
+        snap = self.hub.snapshot()
+        self.assertEqual(snap["older"], 1)
+        self.assertEqual({t["id"] for t in snap["tasks"]}, {new, live})
+        status, data = self.call("/api/tasks/older")
+        self.assertEqual((status, [t["id"] for t in data["tasks"]]), (200, [old]))
+        self.assertEqual(data["tasks"][0]["label"], tasks.label(old))
+
+    def test_bulk_delete_takes_finished_tasks_only(self):
+        done, chat, stuck = self.put_task(), self.put_task(chat=True), self.put_task(state="stuck")
+        self.brief_pass_always()
+        running = self.make_task()
+        status, data = self.call("/api/tasks/delete", {"ids": [done, chat, stuck, running, done]})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(sorted(data["deleted"]), sorted([done, chat, stuck]))
+        self.assertEqual(data["refused"], {running: "still working: wait until it stops"})
+        for tid in (done, chat, stuck):
+            self.assertNotIn(tid, self.hub.tasks)
+            self.assertFalse((self.folder / "tasks" / tid).exists())
+        self.assertTrue((self.folder / "tasks" / running / "task.json").exists())
+        for bad in ({}, {"ids": []}, {"ids": ["../x"]}, {"ids": "x"}, {"ids": ["20261015-093012-a3f2"] * 201}):
+            self.assertEqual(self.call("/api/tasks/delete", bad)[0], 400, bad)
+        self.assertEqual(self.call("/api/tasks/delete", {"ids": ["20260101-000000-ffff"]})[1],
+                         {"deleted": [], "refused": {"20260101-000000-ffff": "unknown task"}})
+
+    def test_open_folder_is_the_services_own_path(self):
+        tid = self.put_task()
+        opened = []
+        with mock.patch.object(server.os, "startfile", opened.append, create=True):
+            self.assertEqual(self.call("/api/task/folder", {"task": tid}), (200, {"ok": True}))
+            self.assertEqual(self.call("/api/task/folder", {"task": "../x"})[0], 404)
+        self.assertEqual(opened, [str(self.folder / "tasks" / tid)])
 
     # -- plan 27 Task 2: plan and replan edges --------------------------------------------------------------
 

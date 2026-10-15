@@ -71,17 +71,17 @@ class WindowApiTest(unittest.TestCase):
         self.api.form("open")
         self.assertEqual(self.api.resize(1, 99999), [window.OPEN_MIN_W, window.OPEN_MAX_H])
         self.assertEqual(self.win.calls[-1], ("resize", window.OPEN_MIN_W, window.OPEN_MAX_H))
-        self.assertNotIn("size", paths.load_window(self.folder))  # mid-drag: not written yet
+        self.assertNotIn("view", paths.load_window(self.folder))  # mid-drag: not written yet
         self.assertEqual(self.api.resize(360, 900, True), [360, 900])
-        self.assertEqual(paths.load_window(self.folder)["size"], [360, 900])
+        self.assertEqual(paths.load_window(self.folder)["view"], [360, 900])
         again = window.WindowApi(self.folder)
         again._attach(self.win)
         self.assertEqual(again.form("open"), "open")  # the next start opens at the saved size
         self.assertEqual(self.win.calls[-1], ("resize", 360, 900))
         self.api.form("pill")
         self.assertIsNone(self.api.resize(500, 500, True))  # the grip belongs to the open form
-        self.assertEqual(paths.load_window(self.folder)["size"], [360, 900])
-        paths.save_window(self.folder, size=["bad"])
+        self.assertEqual(paths.load_window(self.folder)["view"], [360, 900])
+        paths.save_window(self.folder, view=["bad"])
         self.assertEqual(window.WindowApi(self.folder).open_size(), (window.OPEN_W, window.OPEN_H))
 
     def test_scale_is_form_pixels_per_css_pixel(self):
@@ -94,14 +94,14 @@ class WindowApiTest(unittest.TestCase):
 
     def test_text_size_scales_every_size_the_page_asks_for(self):
         self.api.form("open")
-        self.assertEqual(self.api.fit(308), 1.3)  # the page lays out at 308 css px in a 400 px form
-        self.assertEqual(self.win.calls[-1], ("resize", round(400 * 1.3), round(760 * 1.3)))
+        self.assertEqual(self.api.fit(692), 1.3)  # the page lays out at 692 css px in a 900 px form
+        self.assertEqual(self.win.calls[-1], ("resize", round(900 * 1.3), round(700 * 1.3)))
         self.assertEqual(paths.load_window(self.folder)["scale"], 1.3)
-        self.assertEqual(self.api.fit(400), 1.3)  # the page now lays out at 400 css px: nothing changes
+        self.assertEqual(self.api.fit(900), 1.3)  # the page now lays out at 900 css px: nothing changes
         self.assertEqual(len(self.win.calls), 2)
         self.assertEqual(self.api.resize(360, 900, True), [360, 900])  # css px in and out
         self.assertEqual(self.win.calls[-1], ("resize", 468, 1170))
-        self.assertEqual(paths.load_window(self.folder)["size"], [360, 900])
+        self.assertEqual(paths.load_window(self.folder)["view"], [360, 900])
         self.assertEqual(self.api.resize(1, 1), [window.OPEN_MIN_W, window.OPEN_MIN_H])  # 340 css px, not form px
         self.assertEqual(self.win.calls[-1], ("resize", round(340 * 1.3), round(420 * 1.3)))
         self.api.form("pill", 100)
@@ -125,31 +125,16 @@ class WindowApiTest(unittest.TestCase):
         self.api.drag_move()
         self.assertEqual(len(self.win.calls), 2)
 
-    def test_board_opens_at_its_size_and_returns(self):
-        self.assertEqual(window.clamp_board(10, 10), (window.BOARD_MIN_W, window.OPEN_MIN_H))
-        self.assertEqual(window.clamp_board("x", 1), (window.BOARD_W, window.BOARD_H))
+    def test_the_one_view_keeps_the_board_size_fred_chose(self):  # plan 30 (Q1 a)
+        self.assertEqual((window.OPEN_W, window.OPEN_H), (900, 700))
+        self.assertFalse(hasattr(self.api, "board"))  # one view: nothing widens or narrows the window
+        paths.save_window(self.folder, size=[400, 760], board=[820, 640])  # window.json from before plan 30
+        self.assertEqual(window.WindowApi(self.folder).open_size(), (820, 640))  # the Board's size, not the compact one
+        paths.save_window(self.folder, board=None)
+        self.assertEqual(window.WindowApi(self.folder).open_size(), (900, 700))  # the old compact size is never read
         self.api.form("open")
-        self.api.resize(360, 900, True)  # the compact size Fred set
-        self.assertEqual(self.api.board(True), [900, 680])  # the first time: 900 x 680
-        self.assertEqual(self.win.calls[-1], ("resize", 900, 680))
-        self.api.fit(900)  # a text-size check while the Board is open keeps the Board's size
-        self.assertEqual(self.api.resize(820, 640, True), [820, 640])  # the grip on the Board
-        self.assertEqual(self.api.resize(500, 640, False), [window.BOARD_MIN_W, 640])  # never under 700
-        self.assertEqual(paths.load_window(self.folder)["size"], [360, 900])  # the compact size is untouched
-        self.assertEqual(self.api.board(False), [360, 900])
-        self.assertEqual(self.win.calls[-1], ("resize", 360, 900))
-        self.assertEqual(self.api.board(True), [820, 640])  # the Board's size is kept in window.json
-        self.assertEqual(paths.load_window(self.folder)["board"], [820, 640])
-
-    def test_board_needs_the_open_window(self):
-        self.api.form("pill")
-        self.assertIsNone(self.api.board(True))
-        self.api.form("open")
-        self.api.board(True)
-        self.api.form("pill")  # folding leaves the Board: unfolding opens the compact size
-        self.assertEqual(self.api.form("open"), "open")
-        self.assertEqual(self.win.calls[-1], ("resize", window.OPEN_W, window.OPEN_H))
-        self.assertEqual(window.WindowApi(self.folder)._board, False)  # never kept across starts
+        self.assertEqual(self.api.resize(560, 700, True), [560, 700])  # under 700 px: one column (style.css)
+        self.assertEqual(window.WindowApi(self.folder).open_size(), (560, 700))
 
     def test_hwnd_is_only_this_process_window(self):
         # the test process has no window: an Explorer tab proxy or the real window of the same name

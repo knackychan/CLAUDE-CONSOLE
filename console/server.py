@@ -29,7 +29,8 @@ MAX_BODY = 256 * 1024
 MAX_FILES_BODY = attach.MAX_TOTAL * 4 // 3 + MAX_BODY  # /api/prep, /api/run and /api/continue carry base64 files
 FILE_ROUTES = ("/api/prep", "/api/run", "/api/continue")
 MAX_PROMPT = 20000
-BOARD_TABS = ("chat", "recv", "hand", "route", "plan")  # the Board's step inspector tabs (window.json board_tab)
+BOARD_TABS = ("chat", "recv", "hand", "route", "plan", "files")  # the Board's step inspector tabs (window.json board_tab)
+DONE_DAYS = 14  # plan 30 (D8): done tasks older than this leave the snapshot; GET /api/tasks/older lists them
 FOLD_KEY = re.compile(r"[a-z][a-z0-9.]{0,39}")
 FOLDS_MAX = 64
 BUSY = {"running", "quiet", "stall"}
@@ -451,10 +452,15 @@ class Hub:
                                      "attached": attach.summary(j["files"])} for j in self.preps.values()),
                                    key=lambda j: j["ts"])
             rows = {r["id"]: r for r in snap["sessions"]}
-            snap["tasks"] = sorted((task_row(t, self._live_note, rows) for t in self.tasks.values()
-                                    if not t.get("chat")),  # plan 29: a chat task shows as its session until plan 30
+            chats = {t["steps"][0]["session"]: t["id"] for t in self.tasks.values() if t.get("chat") and t["steps"]}
+            for r in snap["sessions"]:  # plan 30: a chat task's session shows as its task, never twice
+                if r["id"] in chats:
+                    r["chat_task"] = chats[r["id"]]
+            shown = [t for t in self.tasks.values() if not old_done(t, now)]
+            snap["tasks"] = sorted((task_row(t, self._live_note, rows) for t in shown),
                                    key=lambda r: r["updated"], reverse=True)
-            loose = [r for r in snap["sessions"] if not r.get("task")]  # a task counts once, not per step session
+            snap["older"] = len(self.tasks) - len(shown)  # plan 30: GET /api/tasks/older lists them
+            loose = [r for r in snap["sessions"] if not r.get("task") and not r.get("chat_task")]  # a task counts once
             count = lambda g: sum(1 for r in loose if r["group"] == g)
             tg = lambda g: sum(1 for t in snap["tasks"] if t["group"] == g)
             snap["counts"] = {"needs": count("needs") + tg("needs"),
@@ -794,6 +800,42 @@ class Hub:
             return "the task's folder is gone"
         return ""
 
+    def _drop(self, task: dict) -> None:
+        """Delete a task's folder and forget its runs (the Delete lever and bulk delete, plan 30). Under tlock."""
+        for sid in tasks.clear(self.folder, task, keep_last=False):
+            try:
+                self.runs.forget(sid)
+            except runs.RunError:
+                continue
+        with self.lock:
+            self.tasks.pop(task["id"], None)
+            self.version += 1
+            self.changed.notify_all()
+
+    def delete_tasks(self, ids) -> dict:
+        """Plan 30 (D10): the Done days' Select and Delete. Each id goes when its Delete lever is on (task_levers
+        `clear`): a live, waiting or running task is refused with the lever's reason, never raced. Returns
+        {"deleted": [ids], "refused": {id: why}}."""
+        deleted, refused = [], {}
+        with self.tlock:
+            for tid in ids:
+                info = self.task_levers(tid)
+                if info is None:
+                    refused[tid] = "unknown task"
+                elif info["clear"]:
+                    refused[tid] = info["clear"]
+                else:
+                    self._drop(self.tasks[tid])
+                    deleted.append(tid)
+        return {"deleted": deleted, "refused": refused}
+
+    def older_tasks(self) -> list:
+        """The finished tasks the snapshot leaves out (old_done), as task rows, newest first (plan 30: Older)."""
+        now = time.time()
+        with self.tlock:
+            old = [t for t in self.tasks.values() if old_done(t, now)]
+        return sorted((task_row(t) for t in old), key=lambda r: r["updated"], reverse=True)
+
     def task_levers(self, task_id) -> dict:
         """What each task lever would do and why one is off ("" = allowed); None for an unknown id. The one
         gate: advance and the POST handlers both ask it."""
@@ -804,8 +846,11 @@ class Hub:
             state, owner, cs, nxt = task["state"], task["owner"], tasks.current_step(task), self._next_step(task)
             if task.get("chat"):  # plan 29: the chat's session has the levers (Hub.levers), the task none
                 off = "a chat: use its session's levers"
-                return {**{k: off for k in ("start", "stop", "pause", "resume", "retry", "confirm", "clear", "done",
+                live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
+                return {**{k: off for k in ("start", "stop", "pause", "resume", "retry", "confirm", "done",
                                             "answer", "redo", "keep")},
+                        "clear": "still working: wait until it stops" if live else  # plan 30: a finished chat goes too
+                        "" if state == "done" else f"task is {state}",
                         "route": f"{cs['model']}/{cs['effort']}" if cs else "", "next_route": "",
                         "cwd": task["project_dir"]}
             base = self._base(task)
@@ -1537,15 +1582,7 @@ class Hub:
                 return 409, {"error": info[lever]}
             task, now = self.tasks[task_id], time.time()
             if lever == "clear":
-                for sid in tasks.clear(self.folder, task, keep_last=False):
-                    try:
-                        self.runs.forget(sid)
-                    except runs.RunError:
-                        continue
-                with self.lock:
-                    del self.tasks[task_id]
-                    self.version += 1
-                    self.changed.notify_all()
+                self._drop(task)
                 return 200, {"task": task_id, "state": "cleared"}
             cs = tasks.current_step(task)
             if lever == "stop" and cs and cs["state"] == "running" and self.runs.is_live(cs["session"]):
@@ -1588,6 +1625,22 @@ class Hub:
             return projects
 
 
+def old_done(t: dict, now: float) -> bool:
+    """A finished task the window's Done days no longer show (plan 30, D8): done or stopped, and last changed more
+    than DONE_DAYS ago. A task that waits, runs or was handed off always shows."""
+    return t["state"] in ("done", "stopped") and now - t["updated"] > DONE_DAYS * 86400
+
+
+def prep_row(t: dict):
+    """Step 0 as the window draws it (plan 30): Prep's state, model, turns and cost from task["prep"] (plan 29);
+    None for a task from before plan 29, whose prep is a bare id."""
+    p = t.get("prep")
+    if not isinstance(p, dict):
+        return None
+    return {"state": p.get("state") or "done", "model": p.get("model") or "", "turns": p.get("turns") or 0,
+            "cost": p.get("cost") or 0, "steps": len(p.get("steps") or [])}
+
+
 def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
     """A task as the window's list shows it (the whole task.json is GET /api/task). `live(session)` is the
     note state of a running step's reply (Hub._live_note); `sessions` (id -> snapshot row) gives the current step's
@@ -1604,7 +1657,11 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
     handing = t["state"] == "handed" and not noted and r is not None and r["state"] in BUSY  # the skill writes it
     group = ("needs" if t["state"] in ("waiting", "stuck") or asks or hand_off or noted else
              "working" if t["state"] in ("planned", "running") or handing else "done")
+    if t.get("chat") and r is not None:  # plan 30: a chat task sits where its session would (needs, replied, working)
+        group = r["group"] if r["group"] in ("needs", "replied", "working") else "done" if t["state"] == "done" else "working"
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
+            "label": tasks.label(t["id"]), "slug": t.get("slug") or "", "chat": bool(t.get("chat")),
+            "prep": prep_row(t),  # plan 30: step 0
             "group": group, "asks": asks, "hand_off": hand_off,
             "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
             "why": t["why"], "updated": t["updated"], "effort": t["effort"],
@@ -1618,6 +1675,8 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             "plan": t.get("plan") or None, "redo": t.get("redo") or "",
             "steps": [{**{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",
                                             "cost")}, "part": s.get("part") or 0, "hard": bool(s.get("hard")),
+                       "checked": s.get("checked") or 0, "harness": s.get("harness") or "",  # plan 30: fix inserts, rungs
+                       "ctx_tokens": s.get("ctx_tokens"),  # plan 30: the context cells of every row
                        "end_commit": s.get("end_commit", ""), "brief_meta": s.get("brief_meta"),
                        "facts": s.get("facts"),  # plan 23
                        "note": tasks.note_state(t, s, live(s["session"]) if s["state"] == "running" else ""),
@@ -1707,6 +1766,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._task(query.get("id", [""])[0])
         if url.path == "/api/task/file":
             return self._task_file(query)
+        if url.path == "/api/tasks/older":
+            return self._json({"tasks": self.hub.older_tasks()})
         if url.path == "/api/kind":
             return self._kind(query.get("kind", [""])[0])
         if url.path == "/api/measure":
@@ -1730,7 +1791,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review,
                   "/api/config/models": self._config_models, "/api/setting": self._setting,
                   "/api/harness": self._harness, "/api/models/reload": self._models_reload,
-                  "/api/models/open": self._models_open, "/api/kind": self._kind_save}
+                  "/api/models/open": self._models_open, "/api/kind": self._kind_save,
+                  "/api/tasks/delete": self._tasks_delete, "/api/task/folder": self._task_folder}
         for lever in ("continue", "verify", "handoff", "escalate"):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
         routes["/api/task/answer"], routes["/api/task/plan"] = self._task_answer, self._task_plan
@@ -1854,6 +1916,29 @@ class Handler(BaseHTTPRequestHandler):
         if opener is None:
             return self._error(409, "opening a file needs Windows")
         opener(str(path))
+        return self._json({"ok": True})
+
+    def _tasks_delete(self, body):
+        """POST /api/tasks/delete {"ids": [...]} (plan 30, D10): at most 200 ids, each a task id; see Hub.delete_tasks."""
+        ids = body.get("ids")
+        if (not isinstance(ids, list) or not ids or len(ids) > 200
+                or not all(isinstance(x, str) and tasks.safe_id(x) for x in ids)):
+            return self._error(400, "ids: a list of task ids")
+        return self._json(self.hub.delete_tasks(list(dict.fromkeys(ids))))
+
+    def _task_folder(self, body):
+        """POST /api/task/folder {"task": id} (plan 30, D11): open the task's folder in Explorer. The path is the
+        service's own, never the caller's."""
+        tid = body.get("task")
+        if not isinstance(tid, str) or tid not in self.hub.tasks:
+            return self._error(404, "unknown task")
+        where = tasks.folder(self.hub.folder, tid)
+        opener = getattr(os, "startfile", None)
+        if opener is None:
+            return self._error(409, "opening a folder needs Windows")
+        if not where.is_dir():
+            return self._error(404, "the folder is gone")
+        opener(str(where))
         return self._json({"ok": True})
 
     def _window_session(self, body):
@@ -2079,7 +2164,10 @@ class Handler(BaseHTTPRequestHandler):
                            "replan_note": tasks.read_note(self.hub.folder, task, cs["n"])
                            if cs and cs["kind"] == "replan" else "",
                            "questions": tasks.open_questions(task, texts["briefs"]),
-                           "chain": tasks.read_chain(self.hub.folder, task)})
+                           "chain": tasks.read_chain(self.hub.folder, task),
+                           "files": {str(s["n"]): tasks.step_files(self.hub.folder, task, s) for s in task["steps"]},
+                           "prep_files": {k: prep.read(self.hub.folder, task, k + ".md")  # plan 30: step 00
+                                          for k in ("prompt", "scouting", "handoff")}})
 
     def _task_file(self, query):
         """GET /api/task/file?task=<id>&step=<n>&name=<file> (plan 28): one file of a step's folder, by a name of

@@ -1,7 +1,7 @@
-// Claude Console window, Cells Drawer (BRAINSTORM 7.5): a folded pill with one peek card, or one open
-// column: the list (needs you / working / done today), a session page, or the Prep page. A project
-// picker in the header scopes the list and sets where a new task runs. Renders /api/stream snapshots;
-// the levers, Prep and runs go through the same routes as phases 2-4.
+// Claude Console window, Cells Drawer (BRAINSTORM 7.5): a folded pill with one peek card, or the Board, the one
+// view (plan 30): the calendar on top, the tasks and chats on the left with each task's steps under it, the picked
+// thing on the right; a session page, Usage and Models sit behind it. A project picker in the header scopes the
+// Board and sets where a new task runs. Renders /api/stream snapshots; levers, Prep and runs use the service routes.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -13,7 +13,6 @@ const BUSY = new Set(["running", "quiet", "stall"]);
 const PEEK = new Set(["stop", "blocked", "failed", "interrupted", "verify_failed"]);  // a new one opens the peek card
 const SPEND_CELL = 0.5;   // 1 spend cell = $0.50
 const PILL_CHIPS = 9;
-const DONE_SHOWN = 2;     // done sessions listed before "Show N more"
 const TABS = [["chat", "Chat"], ["steps", "Steps"], ["agents", "Agents"], ["timeline", "Timeline"]];
 const EFF_LEVELS = ["auto", "low", "medium", "high", "xhigh", "max"];  // the slider's values, in order
 const TASK_WORD = { planned: ["Task", "n"], running: ["Task", "n"], waiting: ["Waiting", "y"],
@@ -74,34 +73,26 @@ let snap = null;
 let cfg = null;          // /api/config
 let live = false;
 let form = "open";       // open | pill
-let page = "list";       // list | session | prep | task | usage | board
+let page = "board";      // board | session | usage | models (plan 30: the Board is the one view)
 let openId = null;
-let taskId = null;       // the Task page's task
-let taskData = null;     // GET /api/task for it: {task, levers, note, brief}
-let taskSig = "";
-let backTo = null;       // {page: "task", id} or {page: "session", id}: where the session or Task page's back arrow returns
-let rawOpen = false;     // the Task page shows the raw note instead of the brief
+let backTo = null;       // {page: "board"} or {page: "session", id}: where the session page's back arrow returns
 const foldLabel = new Map(); // plan 23: fold label -> open, kept across redraws (Handoff, its headings, Facts, Window runs); closed on openTask
 let settingBusy = false; // POST /api/setting in flight (the Window runs switch)
 let settingErr = "";
-let planOpen = new Set(); // the Task page's open plan folds (plan 24); closed on openTask
-const grown = new Set();  // plan 25: "<task>:<n>" rows whose ctx gauge line a click opened; cleared in openTask
-let scrollCur = false;    // the Task page scrolls its current row into view once per openTask
 let planEdit = false;    // the plan askbox shows the editor
 let planEditPart = 0;    // which text the editor holds: 0 the index, k part k
 let tab = "chat";       // chat | steps | agents | timeline
 let tlMin = -1;          // the Timeline's selected minute (minutes since 1970; -1: the last busy one)
-let scope = "";          // the project folder the list shows ("" = all projects)
+let scope = "";          // the project folder the Board shows ("" = all projects)
 let project = "";        // where a new task runs (window.json, through /api/draft)
 let effortPick = "auto"; // the slider: auto (the rules pick per step) or one level for every step (window.json)
 let card = null;        // the Prep card on screen
-let reviewCard = null;  // the rules review on screen (plan 22); it uses the Prep page section
+let reviewCard = null;  // the rules review on screen (plan 22); it uses the Prep inspector
 let busy = "";           // what the compose box waits for ("" = nothing)
 let fail = null;         // {title, msg, retry} shown above the compose box
 let draft = "";
 let draftKept = false;   // the box holds a draft from an earlier load: marked until typed over or cleared
 let briefOpen = false;   // the session page's brief, open for the window (window.json)
-let doneOpen = false;
 let emptyOpen = false;
 let hi = 0;              // the picker's highlighted row
 let draftTimer = null;
@@ -115,7 +106,6 @@ let leversSig = "";
 let cold = null;        // {idle_s, tokens, cost} when a lever would re-read the open session at full price
 let coldTimer = null;
 let freshHandoff = false;  // Hand off after a PASS starts a new chat from a brief: it re-reads nothing
-let boardFrom = null;    // {page, id}: where the Board opened from; Esc and the back arrow return there
 let boardTask = "";      // the picked task ("" none: the Board picks the newest in scope)
 let boardPick = "";      // "" nothing (the Measure table), "t" the task head, "s<n>" a step, "c<n>" the connector after step n
 let itab = "chat";       // the step inspector's tab (window.json board_tab)
@@ -124,7 +114,7 @@ let boardChat = null;    // {sid, at, chat}: GET /api/chat of the picked step's 
 let measureData = null;  // {project, at, data}: GET /api/measure
 let foldState = {};      // window.json folds: {key: open}
 const toolOpen = new Set();  // "<session>:<k>": the chat's tool rows Fred opened (not kept)
-const BOARD_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"]);
+const BOARD_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "c", "C"]);  // C: copy the picked task's label
 const seen = new Set();  // peek events already shown, answered or dismissed
 const sent = {};         // "session|question" -> the session that runs the answer ("" = same one)
 const cardMsg = {};      // session -> the last error of a list card
@@ -435,20 +425,13 @@ function renderOnTop() {
 
 // -- pages -------------------------------------------------------------------------------
 function showPage(name) {
-  if (boardFrom && name !== "board" && !(name === "session" && backTo && backTo.page === "board")) {  // plan 27 B9: the Board left by any other way than closeBoard
-    boardFrom = null;
-    if (backTo && backTo.page === "board") backTo = null;
-    if (native()) window.pywebview.api.board(false).catch(() => {});  // the compact size again; the service drops _board
-  }
   page = name;
   closePicker();
   document.querySelectorAll("[data-page]").forEach((p) => { p.hidden = p.dataset.page !== name; });
   leversSig = "";
-  taskSig = "";
   procShown = "";
   if (name === "session") $("sscroll").scrollTop = 0;
-  if (name === "task") $("tscroll").scrollTop = 0;
-  if (name === "board") { $("bchain").scrollTop = 0; boardData = null; }
+  if (name === "board") boardData = null;
   clearInterval(usageTimer);
   usageTimer = null;
   if (name === "usage") { $("uscroll").scrollTop = 0; loadUsage(); usageTimer = setInterval(loadUsage, 60000); }
@@ -469,7 +452,7 @@ async function openSession(id, list = "chat") {
 
 function inScope(s) { return !scope || s.project_dir === scope; }
 function groups() {
-  const mine = snap.sessions.filter((s) => inScope(s) && !s.task);  // a step session: its task row is the way in
+  const mine = snap.sessions.filter((s) => inScope(s) && !s.task && !s.chat_task);  // a step or a chat task's session: its task row is the way in
   const work = mine.filter((s) => s.group === "working");
   const byAge = (g) => mine.filter((s) => s.group === g).sort((a, b) => b.last_ts - a.last_ts);
   return { needs: mine.filter((s) => s.group === "needs"), replied: byAge("replied"), empty: byAge("empty"),
@@ -500,13 +483,11 @@ function render() {
   }
   if (form === "pill") { renderFolded(false); return; }
   snap.sessions.filter((s) => PEEK.has(s.state)).forEach((s) => seen.add(peekId(s)));  // seen while open
-  if (page === "list") renderListPage();
-  else if (page === "session") renderSession();
-  else if (page === "task") renderTaskPage();
+  if (page === "session") renderSession();
   else if (page === "board") renderBoard();
 }
 
-// -- list page ---------------------------------------------------------------------------
+// -- the spend cells ----------------------------------------------------------------------
 function spendRow(sp) {  // 30 cells = $15 soft limit; capped so cells never collapse at high spend
   const all = Math.round(sp.today / SPEND_CELL);
   const mark = sp.budget > 0 ? Math.ceil(sp.budget * 0.8 / SPEND_CELL) - 1 : -1;
@@ -515,44 +496,13 @@ function spendRow(sp) {  // 30 cells = $15 soft limit; capped so cells never col
   return { html: cellsHtml(cls) };
 }
 
-function renderTop() {
-  const n = snap.counts.needs;
-  $("needsbtn").hidden = !n;
-  $("needsbtn").textContent = `${n} ${n === 1 ? "needs" : "need"} you`;
-  $("boardbtn").hidden = !native() && innerWidth < 700;  // plan 25: in a browser the Board button shows once the viewport is wide
-  $("boardbtn").classList.toggle("on", innerWidth >= 700);
-  $("scopenm").textContent = scope ? projectName(scope) : "All projects";
-  const sp = snap.spend, row = spendRow(sp);
-  setHtml($("today"), `<span class="big">${money(sp.today)}</span><span class="cells row30">${row.html}</span>
-    <span class="sub m"><span>today<span class="usd">, USD</span> · $${money(sp.burn)} / min</span>
-    <span>${sp.budget > 0 ? "limit $" + sp.budget : "no limit"}</span></span>`);
-  const fl = sp.fills || { over: [], unknown: [] };  // plan 18: models at or over budget_warn_at of their pace
-  $("overpace").hidden = !fl.over.length;
-  setHtml($("overpace"), `<span><b class="y">${fl.over.length} ${fl.over.length === 1 ? "model" : "models"} over pace</b> · fills</span><span class="car">&#9662;</span>`);
-  setHtml($("todaymore"), `<div class="legend"><span><i class="h"></i>estimated $${money(sp.today)} (list prices)</span>
-    ${sp.budget > 0 ? '<span><i class="mk"></i>80 % of limit</span>' : ""}</div>
-    <div class="legend"><span>1 cell = $0.50</span>${sp.models.map(([m, f]) => `<span>${esc(m)} ${f < 0.01 ? "&lt;1" : Math.round(f * 100)} %</span>`).join("")}
-    ${sp.runs ? `<span>window runs ${sp.runs}</span>` : ""}
-    ${snap.writers.map((w) => `<span>2 writers: ${esc(baseName(w.project_dir))}</span>`).join("")}</div>
-    ${fl.unknown.length ? `<div class="legend">${fl.unknown.map(([k, n]) => `<span>${esc(k)}: cost unknown, ${n} ${n === 1 ? "run" : "runs"}</span>`).join("")}</div>` : ""}
-    ${fl.over.length ? `<div class="fline"><span class="m">fills · ${fl.over.map(([k, sh, w]) => `<b class="y" title="${esc(w)} window">${esc(k)} ${Math.round(sh * 100)}</b>`).join(" · ")} % of pace</span>
-      <button class="btn sm go-usage" data-go="usage">Usage &#8250;</button></div>`
-      : '<button class="btn sm go-usage" data-go="usage">Usage by day, week, month &#8250;</button>'}`);
-}
 
-// -- tasks (plan 17): a card in the list, the step tag on its sessions ---------------------------------
+// -- tasks (plan 17): their state words, the step tag on their sessions ----------------------------------
 function sameDir(a, b) { const n = (p) => String(p || "").replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase(); return n(a) === n(b); }
 function taskGroup(t) { return t.group === "working" ? "work" : t.group; }  // the service decides (task_row), counts read the same
 const taskShown = (t) => (t.state === "handed" ? (t.handoff_note ? "handed" : t.group === "working" ? "handing" : "handed_no_note")
   : t.state === "running" && (t.asks || t.hand_off) ? "waiting" : t.state);  // a step's chat waits for Fred
-const stepCell = (t, x) => (x.state === "handed" ? (t.state === "handed" && t.handoff_note ? "y" : "q")  // a handed step is not a checked one
-  : x.state === "running" ? "f live" : x.state === "failed" || x.verdict === "FAIL" ? "r" : x.state === "done" ? "g" : "");
 const handText = (h) => `↻ hand off: ${h}, one task = one chat`;
-function taskGroups() {  // the scope's tasks by group; a finished or stopped task leaves the list a day after its last change
-  const mine = (snap.tasks || []).filter((t) => !scope || sameDir(t.project_dir, scope));
-  const by = (g) => mine.filter((t) => taskGroup(t) === g && (g !== "done" || snap.now - t.updated < 86400));
-  return { needs: by("needs"), work: by("work"), done: by("done") };
-}
 function taskStep(t) { return t.steps.find((x) => x.n === t.current) || t.steps.find((x) => x.state !== "done") || t.steps[0]; }
 function taskTag(s) {  // "step 2/4" after the title of a session that runs a task's step
   if (!s.task) return "";
@@ -560,30 +510,6 @@ function taskTag(s) {  // "step 2/4" after the title of a session that runs a ta
   return `<span class="tag">step ${s.step}${t ? "/" + t.count : ""}</span>`;
 }
 
-function taskCard(t) {
-  const [word, tn] = TASK_WORD[taskShown(t)] || TASK_WORD.running, cur = taskStep(t);
-  const cells = t.steps.map((x) => stepCell(t, x));
-  const live = t.steps.find((x) => x.note === "writing" || x.note === "unchecked" || x.note === "ready");
-  const next = t.state === "handed" && t.handoff_note;  // a pending handoff: the next task and the note, one click each
-  const ask = (t.asks || t.hand_off) && cur && cur.session;
-  const gap = (t.asks || "").startsWith("Plan gap:"), planWhy = /^plan ready: confirm$|^plan .* KB, over /.test(t.why || "");
-  const why = t.why === "confirm Fable" ? `${fableName()} may bill usage credits: confirm on the Task page` : t.asks || next ? "" : t.why;
-  const third = (why ? `<div class="why m mut">${esc(why)}</div>` : "")
-    + (t.asks ? `<div class="q">${esc(t.asks)}</div>` : "") + (t.hand_off ? `<div class="why m y">${esc(handText(t.hand_off))}</div>` : "")
-    + (t.briefing ? '<div class="doing m"><span class="cells"><i class="f live"></i></span><span>Haiku is compacting the note</span></div>' : "")
-    + (live ? noteChip(live, t) : "")
-    + (gap ? `<div class="lr"><button class="btn you sm" data-task="${esc(t.id)}">Answer</button>
-      <button class="btn sm" data-tact="redo" data-tid="${esc(t.id)}" title="Runs the design step again with this question">Redo design</button></div>`
-      : planWhy ? `<div class="lr"><button class="btn you sm" data-task="${esc(t.id)}">${t.why.startsWith("plan ready") ? "Confirm" : "Accept"}</button></div>`
-      : ask ? `<div class="lr"><button class="btn you sm" data-open="${esc(cur.session)}">Open</button></div>` : "")
-    + (next ? `<div class="lr"><button class="btn you sm" data-tact="next" data-tid="${esc(t.id)}" title="A new task seeded with the handoff note">Start next task</button>
-      <span class="link m" data-task="${esc(t.id)}" title="${esc(t.handoff_note)}">handoff note</span></div>` : "");
-  return `<div class="card task${tn === "y" || tn === "r" ? " " + tn : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-task="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + t.title)}">
-    <div class="l1"><span class="st ${tn}">${taskMark({ ...t, state: taskShown(t) })}${word}</span><span class="t">${esc(t.title)}</span>
-    <span class="age m" title="since the last change">${ago(snap.now - t.updated)}</span></div>
-    <div class="l2 m"><span class="who">${esc(t.project)} · step ${cur ? cur.n : 1} / ${t.count}${cur ? " · " + esc(cur.kind) : ""}${cur && cur.part ? " · from plan" : ""}${cur && cur.model ? `<span class="route"> · ${esc(modelText(rungOf(cur.harness, cur.model), cur.effort))}</span>` : ""}</span>
-    <span class="cost">${money(t.cost)}</span><span class="ctx"><span class="cells" style="--n:${cells.length}">${cellsHtml(cells)}</span></span></div>${third}</div>`;
-}
 
 function cardHtml(s) {
   const t = tone(s), key = s.id + "|" + s.stop_question;
@@ -627,30 +553,6 @@ function quietHtml(s, showProject) {
     <span class="age m">${s.state === "replied" ? ago(snap.now - s.last_ts) : spentText(s)}</span></div>${reply}</div>`;
 }
 
-function renderListPage() {
-  renderTop();
-  const g = groups(), tk = taskGroups();  // a group's tasks come first, then its sessions
-  const doneRows = [...tk.done.map(taskCard), ...g.done.map((s) => quietHtml(s, !scope))], shown = doneOpen ? doneRows : doneRows.slice(0, DONE_SHOWN);
-  const sec = (cls, text, list, id = "") => list.length ? `<div class="sec"${id ? ` id="${id}"` : ""}><span class="lbl ${cls}">${text} · ${list.length}</span></div>` : "";
-  let html = sec("y", "Needs you", [...tk.needs, ...g.needs], "needsec") + tk.needs.map(taskCard).join("") + g.needs.map(cardHtml).join("")
-    + sec("", "Replied", g.replied) + g.replied.map((s) => quietHtml(s, !scope)).join("")
-    + sec("", "Working", [...tk.work, ...g.work]) + tk.work.map(taskCard).join("") + g.work.map(cardHtml).join("")
-    + sec("", "Idle", g.idle) + g.idle.map((s) => quietHtml(s, !scope)).join("")
-    + sec("", "Done today", doneRows) + shown.join("")
-    + (doneRows.length > DONE_SHOWN && !doneOpen ? `<div class="more-done"><button class="btn sm" data-go="moredone">Show ${doneRows.length - DONE_SHOWN} more</button></div>` : "")
-    + (g.empty.length ? `<div class="more-done"><button class="btn sm" data-go="empties" title="Chats that loaded their rules and never got a prompt">${emptyOpen ? "Hide" : "Show"} ${g.empty.length} empty ${g.empty.length === 1 ? "chat" : "chats"}</button></div>`
-      + (emptyOpen ? g.empty.map((s) => quietHtml(s, !scope)).join("") : "") : "");
-  if (!g.needs.length && !g.replied.length && !g.work.length && !g.idle.length && !g.done.length && !g.empty.length
-      && !tk.needs.length && !tk.work.length && !tk.done.length) {
-    html = scope
-      ? `<div class="sec"><span class="lbl">${esc(projectName(scope))}</span></div><div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
-         <p>No session in ${esc(projectName(scope))} today. Type a task below, or pick All projects.</p></div>`
-      : `<div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
-         <p>No Claude Code session in the last 24 hours. Start one in VS Code or a terminal, or type a task below.</p></div>`;
-  }
-  setHtml($("list"), html);
-  renderCompose();
-}
 
 // -- compose -----------------------------------------------------------------------------
 function otherHarness() { return Object.entries((cfg && cfg.harnesses) || {}).some(([h, i]) => h !== "claude" && i.on && i.found); }
@@ -678,7 +580,6 @@ function renderCompose() {
   setHtml($("c-say"), html);
   setHtml($("files-compose"), filesHtml("compose"));
   renderEffort();
-  setHtml($("preps"), preps().map(prepJobHtml).join(""));
   spin();
   setHtml($("prepfail"), fail ? `<div class="card r" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">${esc(fail.title)}</span></div>
     <div class="m mut">${esc(fail.msg)}</div>${fail.retry ? '<div class="lr"><button class="btn go sm" data-go="retry">Try again</button></div>' : ""}</div>` : "");
@@ -712,45 +613,17 @@ function rawEffort() { return effortPick !== "auto" ? effortPick : cfg.default_e
 // -- Prep jobs: the strip above the composer; each runs in the service, then waits for Run ---------
 function preps() { return (snap && snap.preps) || []; }
 
-const prepSeen = new Set();  // a Prep row grows in once, the first time it is painted
-function prepJobHtml(j) {
-  const where = esc(projectName(j.project_dir)), id = esc(j.id), grow = prepSeen.has(j.id) ? "" : " grow";
-  prepSeen.add(j.id);
-  const isReview = j.kind === "review", name = isReview ? "Review rules" : "Prep";
-  if (j.state === "running") {
-    return `<div class="card${grow}" style="cursor:default"><div class="l1"><span class="st n">&#9676; ${name}</span><span class="t">${esc(j.raw)}</span>
-      <span class="age m">${ago(snap.now - j.ts)}</span></div>
-      <span class="loading"><span class="cells">${cellsHtml(["f", "", "", "", "", ""])}</span>Haiku is reading ${where}${isReview ? "'s rules" : ""}, 10 to 30 s</span></div>`;
-  }
-  if (j.state === "failed") {
-    return `<div class="card r${grow}" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">${name}: ${esc(j.raw)}</span></div>
-      <div class="m mut">${esc(j.error)}</div><div class="lr"><button class="btn go sm" data-prep="${id}" data-pdo="retry">Try again</button>
-      ${isReview ? "" : `<button class="btn sm" data-prep="${id}" data-pdo="edit">Edit</button>`}<button class="btn sm" data-prep="${id}" data-pdo="drop">Dismiss</button></div></div>`;
-  }
-  const c = j.card;
-  if (isReview) {
-    const n = c.proposals.length, what = n ? `${n} proposal${n === 1 ? "" : "s"}` : "nothing to change";
-    return `<div class="card${grow}" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Review ready: " + what)}">
-      <div class="l1"><span class="st g">&#9654; Review ready</span><span class="t">${esc(c.summary || what)}</span><span class="age m">${ago(snap.now - c.ts)}</span></div>
-      <div class="l2 m"><span class="who">${where} · ${what} · ${c.misses} misses, ${c.lessons} lessons read</span><span class="cost">${money(c.cost)}</span></div></div>`;
-  }
-  const goal = c.fields.goal || c.raw;
-  return `<div class="card${grow}" data-prep="${id}" data-pdo="open" tabindex="0" role="button" aria-label="${esc("Prep ready: " + goal)}">
-    <div class="l1"><span class="st g">&#9654; Ready to run</span><span class="t">${esc(goal)}</span><span class="age m">${ago(snap.now - c.ts)}</span></div>
-    <div class="l2 m"><span class="who">${where}<span class="route"> · ${esc(modelText(c.route.model, c.route.effort))}</span>${j.attached.length ? ` · ${j.attached.length} file${j.attached.length === 1 ? "" : "s"}` : ""}</span>
-    <span class="cost">${money(c.cost)}</span></div></div>`;
-}
 
 async function prepJob(id, what) {
   const j = preps().find((x) => x.id === id);
   if (!j) return;
   if (j.kind === "review") {
-    if (what === "open") { if (j.card) { card = null; reviewCard = j.card; showReview(); } return; }
+    if (what === "open") { boardTask = id; boardPick = "p"; renderBoard(); return; }
     if (what === "retry") await startReview(j.project_dir);
     await dropPrep(id);
     return;
   }
-  if (what === "open") { if (j.card) { card = j.card; showPrep(); } return; }
+  if (what === "open") { boardTask = id; boardPick = "p"; renderBoard(); return; }
   if (what === "retry") await startPrep(j.project_dir, j.raw, [], id);  // the new job takes the old one's files first
   await dropPrep(id);
   if (what === "edit") { putBack(j.raw); if (j.attached.length) filesNotKept(); }
@@ -761,7 +634,7 @@ async function startReview(projectDir) {  // Haiku reads the project's rules, th
   catch (e) { fail = { title: "Review did not start", msg: e.message, retry: "" }; }
   card = null;
   reviewCard = null;
-  showPage("list");
+  showPage("board");
 }
 
 function jobFiles(id) { const j = preps().find((x) => x.id === id); return j ? j.attached.length : 0; }
@@ -777,7 +650,7 @@ function putBack(text) {  // a Prep's request back in the composer, to edit it
   draftKept = false;
   $("c-prompt").value = text;
   saveDraft();
-  showPage("list");
+  showPage("board");
   $("c-prompt").focus();
 }
 
@@ -914,7 +787,7 @@ async function doRun(projectDir, prompt, model, effort, prepId, from = "", fable
     return true;
   } catch (e) {
     setBusy("");
-    if (page === "prep") $("p-msg").innerHTML = `<span class="r">${esc(e.message)}</span>`;
+    if (!$("iprep").hidden && $("p-msg")) $("p-msg").innerHTML = `<span class="r">${esc(e.message)}</span>`;
     else { fail = { title: "Run failed", msg: e.message, retry: "raw" }; renderCompose(); }
     return false;
   }
@@ -1033,7 +906,7 @@ function placePicker(from) {  // beside the control that opened it: below when t
 function openPicker(from) {
   if (!snap || !cfg) return;
   if (form === "pill") return;
-  if (page !== "list") showPage("list");
+  if (page !== "board") showPage("board");
   $("pop").hidden = false;
   placePicker(from || $("scope"));
   $("scope").setAttribute("aria-expanded", "true");
@@ -1062,17 +935,16 @@ async function openFolder() {  // VS Code's Open Folder: the OS dialog picks it,
   }
 }
 
-function pick(dir) {  // a project scopes the list and becomes the task target; All projects keeps the target
+function pick(dir) {  // a project scopes the Board and becomes the task target; All projects keeps the target
   scope = dir;
   if (dir && dir !== project) { movedAt = Date.now(); setTimeout(renderCompose, 4000); }  // the chip shows the move
   if (dir) project = dir;
-  doneOpen = false;
   closePicker();
   render();
   saveDraft();
 }
 
-// -- Prep page ---------------------------------------------------------------------------
+// -- Prep (step 00): the card in the Board's inspector (#iprep), filled once per card ---------------------------
 function options(list, value) { return list.map((v) => `<option${v === value ? " selected" : ""}>${esc(v)}</option>`).join(""); }
 
 // plan 18: the tier groups think / write / read. Each rung of config.json "tiers" that can run now (no `why`)
@@ -1138,7 +1010,7 @@ function floorText(kind, noun) {  // a routing miss of this kind (Escalate wrote
 
 function showPrep() {
   const f = card.fields, steps = card.steps || [];
-  $("crumb").textContent = "Prep / " + projectName(card.project_dir);
+  $("bbackwhat").textContent = "00 prep · " + projectName(card.project_dir);
   $("pscroll").innerHTML = `
     <div class="blk"><span class="lbl">Project</span><div class="proj m"><b>${esc(projectName(card.project_dir))}</b> <span class="mut">${esc(card.project_dir)}</span></div></div>
     <div class="blk"><span class="lbl">You typed</span><div class="text">${esc(card.raw)}</div></div>
@@ -1166,14 +1038,13 @@ function showPrep() {
     <button class="btn" data-pact="raw">Run raw</button><button class="btn" data-pact="edit">Edit</button>
     <button class="btn" data-pact="cancel">Cancel</button></div><div id="p-msg" class="say"></div>`;
   stepsChanged();
-  showPage("prep");
-  $("p-prompt").focus();
+  $("p-prompt").focus({ preventScroll: true });
 }
 
 const REVIEW_KIND = { remove: "Remove", demote: "Demote to a procedure", rule: "New rule", procedure: "New procedure", keep: "Keep as is" };
-function showReview() {  // the Prep page section, with proposals instead of a card; Copy puts a line on the clipboard
+function showReview() {  // the Prep inspector, with proposals instead of a card; Copy puts a line on the clipboard
   const c = reviewCard, items = c.proposals;
-  $("crumb").textContent = "Review / " + projectName(c.project_dir);
+  $("bbackwhat").textContent = "Review · " + projectName(c.project_dir);
   const one = (p, k) => `<div class="blk"><div class="hd"><span class="lbl">${esc(REVIEW_KIND[p.kind] || p.kind)}${p.target ? " · " + esc(p.target) : ""}</span>
       ${p.text ? `<button class="btn sm" data-pact="copy" data-k="${k}">Copy</button>` : ""}</div>
     ${p.text ? `<div class="text m">${esc(p.text)}</div>` : ""}
@@ -1186,7 +1057,6 @@ function showReview() {  // the Prep page section, with proposals instead of a c
     <div class="m mut">Proposals only: nothing was written. Paste what you agree with into CLAUDE.md or a skill yourself.</div>
     <div class="m mut">Review $${Number(c.cost).toFixed(3)} · ${c.turns} turns · ${c.misses} misses, ${c.lessons} lessons read</div>`;
   $("pbar").innerHTML = `<div class="lr"><button class="btn" data-pact="rdrop">Dismiss</button><button class="btn" data-pact="back">Back</button></div><div id="p-msg" class="say"></div>`;
-  showPage("prep");
 }
 
 async function copyText(button) {
@@ -1217,10 +1087,15 @@ async function runAsTask(c, button) {
   }
 }
 
+function unpickPrep() {  // the Prep inspector closes: the pick goes back to nothing (the Measure table, or the chain under 700 px)
+  boardTask = "";
+  boardPick = "";
+  prepShown = "";
+}
 async function prepAct(name, button) {  // Run drops the card's job in the service; Run raw, Edit and Cancel drop it here
-  if (reviewCard && !card) {  // the Review page (plan 22) shares this section
-    if (name === "back") { reviewCard = null; showPage("list"); }
-    if (name === "rdrop") { dropPrep(reviewCard.id); reviewCard = null; showPage("list"); }
+  if (reviewCard && !card) {  // the rules review (plan 22) shares the Prep inspector
+    if (name === "back") { reviewCard = null; unpickPrep(); showPage("board"); }
+    if (name === "rdrop") { dropPrep(reviewCard.id); reviewCard = null; unpickPrep(); showPage("board"); }
     if (name === "copy") copyText(button);
     return;
   }
@@ -1240,7 +1115,7 @@ async function prepAct(name, button) {  // Run drops the card's job in the servi
   if (name === "task") runAsTask(c, button);
   if (name === "run") {
     const fable = alias($("p-model").value) === "fable";
-    if (fable && !button.dataset.armed) {  // two clicks, like the Task page's Stop: Fable may bill usage credits
+    if (fable && !button.dataset.armed) {  // two clicks, like a task's Stop: Fable may bill usage credits
       button.dataset.armed = "1";
       button.dataset.label = button.textContent;
       button.textContent = `Confirm to use ${fableName()}`;
@@ -1250,9 +1125,9 @@ async function prepAct(name, button) {  // Run drops the card's job in the servi
     doRun(c.project_dir, $("p-prompt").value.trim(), $("p-model").value, $("p-effort").value, c.id, "", fable);
   }
   if (name === "raw" && await doRun(c.project_dir, c.raw, cfg.default_model, rawEffort(), "", c.id)) dropPrep(c.id);
-  if (name === "back") { card = null; showPage("list"); }
-  if (name === "edit") { card = null; const had = jobFiles(c.id); await dropPrep(c.id); putBack(c.raw); if (had) filesNotKept(); }
-  if (name === "cancel") { card = null; dropPrep(c.id); showPage("list"); }
+  if (name === "back") { card = null; unpickPrep(); showPage("board"); }
+  if (name === "edit") { card = null; unpickPrep(); const had = jobFiles(c.id); await dropPrep(c.id); putBack(c.raw); if (had) filesNotKept(); }
+  if (name === "cancel") { card = null; unpickPrep(); dropPrep(c.id); showPage("board"); }
   if (name === "review") startReview(c.project_dir);
 }
 
@@ -1358,14 +1233,14 @@ function renderBrief(s) {
     </div></div>`;
 }
 
-function taskLink(s) {  // "task · step 2/4" under the title of a step's session, a link to the Task page
+function taskLink(s) {  // "task · step 2/4" under the title of a step's session, a link to the task on the Board
   if (!s.task) return "";
   const t = (snap.tasks || []).find((x) => x.id === s.task), text = `task · step ${s.step}${t ? "/" + t.count : ""}`;
   return t ? `<div class="m"><span class="link" data-task="${esc(t.id)}">${text}</span></div>` : `<div class="m mut">${text}</div>`;
 }
 
-function oldStep(id) {  // [task, step] when `id` is a session of the task on the Task page; else null
-  const t = taskData && taskData.task;
+function oldStep(id) {  // [task, step] when `id` is a session of the task picked on the Board; else null
+  const t = boardData && boardData.data && boardData.data.task;
   const s = t && t.steps.find((x) => x.session === id || (x.attempts || []).some((a) => a.session === id));
   return s ? [t, s] : null;
 }
@@ -1464,7 +1339,7 @@ function handoffSplit(text, o, last) {  // a turn that ends with the HANDOFF blo
   if (!o.step) return claudeTurn(t);  // a hand chat's skill block keeps plan 23's chip
   const block = t.slice(at), next = (block.match(/## Next\s*\n+([^\n]*)/) || [, ""])[1];
   const w = block.split(/\s+/).filter(Boolean).length;
-  return `${chatHtml(t.slice(0, at))}<span class="hchip">HANDOFF block · <b>${w} w</b> · six headings ${o.board ? "in the Handoff tab" : "on the Task page"}</span>${next ? `<p>Next: ${esc(next)}</p>` : ""}`;
+  return `${chatHtml(t.slice(0, at))}<span class="hchip">HANDOFF block · <b>${w} w</b> · six headings ${o.board ? "in the Handoff tab" : "on the Board"}</span>${next ? `<p>Next: ${esc(next)}</p>` : ""}`;
 }
 function stepOf(id) {  // the task step whose session, or one of whose attempts, is this session
   for (const t of snap.tasks || []) for (const x of t.steps) if (x.session === id || (x.attempts || []).some((a) => a.session === id)) return x;
@@ -1582,7 +1457,7 @@ async function renderLevers(s) {
 
 function seedBox(b) {  // pre-fill the new-task box with a brief; Fred edits it and runs it
   pick(b.project_dir);
-  showPage("list");
+  showPage("board");
   draft = b.text;
   draftKept = false;
   $("c-prompt").value = draft;
@@ -1648,17 +1523,14 @@ function step(d) {  // ‹ › and Up / Down: the neighbouring session in the li
   const nav = navList(), k = navAt(nav), to = nav[k + d];
   if (k >= 0 && to) { openSession(to.id, tab); }
 }
-function goBack() {  // the session page and the Task page: back where they came from, else the list
-  if (page === "board") return closeBoard();
+function goBack() {  // the session page: back where it came from (a session it was opened from), else the Board
   const b = backTo;
   backTo = null;
-  if (b && b.page === "board") return showPage("board");  // plan 25: no resize, the window is still wide
-  if (b && b.page === "task" && (snap.tasks || []).some((t) => t.id === b.id)) return openTask(b.id);
   if (b && b.page === "session") return openSession(b.id, tab);
-  showPage("list");
+  showPage("board");
 }
 
-// -- task page (plan 17): the chain, the brief for the next step, the levers ----------------------------------
+// -- task levers (plan 17), from the Board's inspector ---------------------------------------------------------
 function taskDir(id) {  // the task's folder in the data folder (config_path is <data folder>\config.json)
   const home = String((cfg && cfg.config_path) || "").replace(/[\\/]config\.json$/, "");
   return home ? home + "\\tasks\\" + id : "";
@@ -1668,43 +1540,6 @@ function stepTries(s) {  // the earlier attempts of a step, each a link to its c
   const all = s.attempts && s.attempts.length ? s.attempts : (s.session ? [{ session: s.session, why: "" }] : []);
   return all.slice(0, -1).map((a, k) => `<span class="link" data-open="${esc(a.session)}">try ${k + 1}</span>${a.why ? " " + esc(a.why) : ""}`).join(" · ");
 }
-function noteChip(s, t) {  // what the step does now, by its handoff note from the snapshot row's `note`
-  if (!s.note) return "";
-  const me = `${two(s.n)} ${s.kind}`, nxt = two(s.n + 1);
-  const [word, tip] = {
-    writing: [`${me} running`, "not written yet"],
-    unchecked: [`${me} running · note written`, "written, checked when the run ends"],
-    checked: ["✓ note checked", "checked"],
-    ready: [`✓ note ready for step ${nxt}`, `checked, step ${nxt} has not started`],
-    sent: [`note sent to step ${nxt}`, `step ${nxt} started with it`],
-    handed: ["↻ handed off · note written", "the session-handoff note; Start next task seeds a new task with it"],
-  }[s.note] || [s.note, ""];
-  return `<span class="hn ${s.note}" title="the HANDOFF note of step ${s.n}: ${esc(tip)}">${esc(word)}</span>`;
-}
-function stepGauge(t, s) {  // the step's context as 15 cells and the figure; unknown is a word (ID-3)
-  const ctx = stepCtx(s), live = s.state === "running";
-  const cells = ctx == null ? `<b class="mut" title="${esc(ctxUnknown(s))}">unknown</b>`
-    : `<span class="cells c30">${cellsHtml(ctxClasses(ctx).filter((_, k) => k % 2 === 0).map((c, k, a) => (live && c && !a[k + 1] ? c + " live" : c)))}</span><b class="${ctxFigTone(ctx)}">${kTokens(ctx)}</b>`;
-  const hint = scoutHint(t, s, null);
-  return `<span class="gg"><span title="context reached, 1 cell = 10K">ctx ${cells}</span>${hint ? `<span>· ${hint}</span>` : ""}</span>`;
-}
-function chainRow(t, s) {
-  const ran = s.state !== "planned", ctx = stepCtx(s), key = t.id + ":" + s.n;
-  const auto = s.n === t.current || s.state === "failed" || s.verdict === "FAIL" || (ctx != null && cfg && ctx >= cfg.gauge[0]);
-  const gauge = ran && (auto || grown.has(key)), short = ran && !gauge;
-  const tn = s.state === "handed" ? stepCell(t, s) : s.state === "failed" || s.verdict === "FAIL" ? "r" : s.note === "unchecked" ? "w" : s.state === "done" ? "g" : s.state === "running" ? "f" : "";
-  const cells = cellsHtml(Array.from({ length: 6 }, (_, k) => (tn === "f" && k === 0 ? "f live" : tn)));
-  const verdict = s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${esc(s.verdict)}${s.verdict === "FAIL" && s.verdict_detail ? " " + esc(s.verdict_detail) : ""}</span>` : "";
-  const waits = t.state === "waiting" && s.n === t.current && /^(plan |replanned:|asks: Plan gap:)/.test(t.why || "");  // a plan wait: the reason, in orange
-  const unpriced = ran && costUnknown(s) ? '<span title="no attempt of this step reported a cost">cost unknown</span>' : "";  // plan 27 G7: the words, in the sub line (the cost column is 38 px)
-  const sub = [verdict, unpriced, s.retries ? "retry " + s.retries : "", stepTries(s), waits ? `<span class="y">${esc(t.why)}</span>` : esc(s.goal)].filter(Boolean).join(" · ");
-  const from = s.part ? `<span class="tg" title="a write step the design step made: sub-plan ${s.part} of ${((t.plan || {}).parts || []).length}">from plan</span>` : "";
-  return `<div class="row${s.n === t.current ? " cur" : ""}${short ? " short" : ""}${fresh("c", "t" + t.id + "." + s.n, s.state, 300) && s.state === "done" ? " adv" : ""}${s.note ? " n-" + s.note : ""}"${ran && !auto ? ` data-grow="${s.n}"` : ""}><span class="cells">${cells}</span>
-    <span class="nm m">${two(s.n)} ${esc(s.kind)}${from}${s.model ? ` <span class="mdl">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}${triesHtml(s)}</span>
-    <span class="m c">${!ran || costUnknown(s) ? "" : s.cost ? money(s.cost) : ""}</span>
-    ${s.session ? `<button class="btn sm" data-open="${esc(s.session)}">Open</button>` : "<span></span>"}
-    ${gauge ? stepGauge(t, s) : ""}${short && (s.note === "sent" || s.note === "checked") ? "" : noteChip(s, t)}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
-}
 
 function handedBox(d, t, cur, shown) {  // Fred handed the task off: the skill's note, then Start next task (Mark done ends it)
   const [word, tn] = TASK_WORD[shown] || TASK_WORD.handed, dir = taskDir(t.id);
@@ -1713,7 +1548,7 @@ function handedBox(d, t, cur, shown) {  // Fred handed the task off: the skill's
     : `<p class="note m mut">${shown === "handing" ? `The chat of step ${cur.n} is writing its handoff note.` : "No handoff note: the handoff run did not finish."}</p>`;
   return `<div class="askbox${tn === "y" ? "" : " ho"}"><span class="st ${tn}">${taskMark({ ...t, state: shown })}${word} <span class="lc">· step ${cur.n}</span></span>
     ${body}<div class="lr">${d.handoff ? '<button class="btn you" data-tact="next" title="A new task seeded with the handoff note">Start next task</button>' : ""}
-    ${cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button>` : ""}</div><div id="ta-msg" class="say"></div></div>`;
+    ${cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button>` : ""}</div></div>`;
 }
 
 // -- the plan (plan 24): plan.md by heading, one fold each; the plan is words and folds, never cells ---------------
@@ -1810,23 +1645,6 @@ function factsFold(s, text) {  // the facts the service gathered when the step e
   return fold("Facts", info, `<pre class="text mono">${esc(text || "")}</pre>`, { cls: "facts", tone: fail ? "r" : "", open: fail, key: "facts",
     title: "git diff --stat from the step's start to its end, and its last test command: code reads them, no model" });
 }
-function handoffFold(t, d, n, sn, meta, nextStep) {
-  const brief = (d.briefs || {})[String(n)] || "", raw = (d.notes || {})[String(n)] || "";
-  const sent = handoffSections(brief), wrote = handoffSections(raw), cut = ((meta && meta.cut) || []).map(normItem);
-  const all = [].concat(sent.findings, sent.files, sent.trouble, sent.questions);
-  for (const c of cut) if (!all.includes(c)) sent.findings.push(c);  // plan 27 (G2): the cut lines, struck under Findings, as inspConn does
-  const words = meta ? meta.sent_w : brief.split(/\s+/).filter(Boolean).length;
-  const label = nextStep ? `Handoff for ${two(nextStep.n)}` : "Last handoff";
-  const info = `${words} w${meta && meta.fallback ? ' · <span class="y">as written</span>' : ""} · Next: ${esc(sent.next.split("\n")[0])}`;
-  const head = meta ? `<div class="hd"><span class="m" title="${esc(meta.fallback ? "the brief pass failed: " + meta.fallback + "; code cut the note" : `by ${meta.by}, ${meta.turns} turns, $${money(meta.cost)}`)}">${meta.fallback ? "sent as written, cut by code" : `compacted from ${meta.raw_w} w`}</span>
-      <span class="link m" data-tact="raw">${rawOpen ? "as sent" : `as ${two(n)} wrote it`}</span></div>` : "";
-  const body = rawOpen ? headingBlock(wrote, cut, ["goal", "findings", "trouble", "questions", "next"]) : headingBlock(sent, cut, undefined, true);
-  return `<div class="blk">${fold(label, info, head + body + factsFold(sn || {}, (d.facts || {})[String(n)]))}</div>`;
-}
-function pfold(key, label, info, body, o = {}) {
-  const open = planOpen.has(key);
-  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-tact="pfold" data-key="${esc(key)}" aria-expanded="${open}"><span class="lbl">${label}</span><span class="fi">${info}</span><span class="car">${open ? "▴" : "▾"}</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
-}
 const partText = (d, n) => String((d.parts || {})[n] || "").replace(/^# Part [^\n]*\n+/, "");
 const PLAN_FOLDS = { goal: "goal", decisions: "dec", "out of scope": "out", files: "files", steps: "steps", acceptance: "acc" };
 function planFoldKey(key) {  // plan 27 G3: the six pinned keys of plan 25 5.6; every ### Step N shares plan.steps; any other heading is not kept
@@ -1837,8 +1655,7 @@ function planOpenHtml(t, d, cur, o = {}) {  // the open plan by heading and the 
   const p = t.plan;
   if (!p) return "";
   const parts = p.parts || [], split = parts.length > 0, curN = cur ? cur.n : 0;
-  const mk = (key, label, info, inner, open) => o.board ? fold(label, info, inner, { cls: "hf", key: planFoldKey(key), open })
-    : pfold(key, label, info, inner, { cls: "hf" });
+  const mk = (key, label, info, inner, open) => fold(label, info, inner, { cls: "hf", key: planFoldKey(key), open });
   let body = "";
   for (const sc of planSections(d.plan)) {
     if (split && sc.title === "Sub-plans") continue;
@@ -1868,165 +1685,31 @@ function planOpenHtml(t, d, cur, o = {}) {  // the open plan by heading and the 
   }
   return body;
 }
-function planRowHtml(t, d, cur) {  // after the chain: closed it is one line; open, the plan by heading and the current step's section
-  const p = t.plan;
-  if (!p) return "";
-  const parts = p.parts || [], split = parts.length > 0, words = Number(p.words || 0).toLocaleString("en");
-  const closed = `from ${two(p.from)} design · ` + (split ? `${parts.length} sub-plans · ${words} w` : `${words} w · never cut`);
-  const body = planOpenHtml(t, d, cur);
-  return `<div class="blk">${pfold("plan", "Plan", esc(closed), `<div class="blk">${body || '<p class="m mut" style="margin:0">plan.md is empty.</p>'}</div>`)}</div>`;
-}
 function confirmLabel(t, row) {  // the one button that answers the wait: the same words in the askbox and the bar
   const why = t.why || "";
   return why.startsWith("replanned:") || why === "plan ready: confirm" ? "Confirm plan" : /^plan .* KB, over /.test(why) ? "Accept"
     : row && row.hold ? "Run anyway" : `Confirm to use ${fableName()}`;
 }
-function planAsk(t, d, cur, lv, row) {  // the four plan waits (askbox html), or "" when the task waits on something else
-  const why = t.why || "", p = t.plan || {}, parts = p.parts || [], n = cur ? cur.n : t.current;
-  const b = (lvName, name, cls, label, extra = "") => (lv[lvName] === "" ? `<button class="btn${cls}" data-tact="${name}"${extra}>${label}</button>` : "");
-  const stop = b("stop", "stop", " stop", "Stop"), head = (word, sub) => `<span class="st y">${sprite("waiting")}${word} <span class="lc">· ${sub}</span></span>`;
-  const sizeText = `${parts.length ? parts.length + " sub-plans · " : ""}${Number(p.words || 0).toLocaleString("en")} w`;
-  if (t.state !== "waiting") return "";
-  if (why.startsWith("asks: Plan gap:")) {
-    const q = why.slice("asks: Plan gap:".length).trim();
-    return `<div class="askbox">${head("Plan gap", `step ${two(n)} stopped, nothing chosen`)}<div class="q">${esc(q)}</div>
-      <textarea class="in" id="t-answer" rows="3" aria-label="Answer" placeholder="Your answer joins the plan's Decisions and continues step ${two(n)}."></textarea>
-      <div class="lr">${b("answer", "gapanswer", " you", "Send answer")}${b("redo", "redo", "", "Redo design", ' title="Runs the design step again with this question; the steps still planned are rebuilt, the done ones stay"')}
-      ${cur && cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${n}</button>` : ""}</div>
-      <div class="say">A writer never decides for the plan: your answer is written under Decisions as "${esc(youName())}, ${new Date().toISOString().slice(0, 10)}: ...".</div><div id="ta-msg" class="say"></div></div>`;
-  }
-  if (why === "plan ready: confirm") {
-    const sel = parts.length ? `<select id="t-editpart" aria-label="Which text">${[`<option value="0">index</option>`, ...parts.map((x) => `<option value="${x.n}"${x.n === planEditPart ? " selected" : ""}>part ${x.n}: ${esc(x.title)}</option>`)].join("")}</select>` : "";
-    const text = planEditPart ? partText(d, planEditPart) : d.plan;
-    const ed = planEdit ? `<div class="edbox">${sel}<textarea class="in" id="t-edit" rows="9" aria-label="plan.md" spellcheck="false">${esc(text)}</textarea>
-      <div class="lr"><button class="btn go sm" data-tact="saveplan" title="Writes the plan through the service; the task folder stays the service's">Save</button></div></div>` : "";
-    return `<div class="askbox">${head("Plan ready", sizeText)}
-      <div class="lr">${b("confirm", "confirm", " you", confirmLabel(t, row))}<button class="btn" data-tact="edit" aria-expanded="${planEdit}">Edit</button>${stop}</div>${ed}
-      <div class="say">plan_hold is on: the plan waits for you before any step runs.</div><div id="ta-msg" class="say"></div></div>`;
-  }
-  if (/^plan .* KB, over /.test(why)) {
-    const kb = (/^plan ([\d.,]+) KB/.exec(why) || [])[1] || "";
-    return `<div class="askbox">${head("Plan is large", kb + " KB")}<div class="q">${esc(why)}</div>
-      <div class="lr">${b("confirm", "confirm", " you", confirmLabel(t, row))}${b("redo", "redo", "", "Redo design")}${stop}</div>
-      <div class="say">Nothing is cut: the whole plan goes to every later step.</div><div id="ta-msg" class="say"></div></div>`;
-  }
-  if (why.startsWith("replanned:")) {
-    const r = t.replan || { before: [], after: [], added: [], dropped: [] };
-    const line = (x) => `${esc(x.kind)}: ${esc(x.goal)}`;
-    const dropped = (r.dropped || []).map((i) => r.before[i]).filter(Boolean);
-    return `<div class="askbox">${head("Replanned", `after step ${two(r.step || n)}`)}
-      ${r.why ? `<div class="q">${esc(r.why)}</div>` : ""}
-      <div class="plan1"><span class="lbl">New plan · ${r.after.length} steps <span class="m">(was ${r.before.length})</span></span>
-        <ol>${r.after.map((x, k) => `<li class="${(r.added || []).includes(k) ? "add" : "old"}">${line(x)}</li>`).join("")}</ol></div>
-      ${dropped.length ? `<div class="plan1"><span class="lbl">Dropped · ${dropped.length}</span><ol>${dropped.map((x) => `<li class="drop">${line(x)}</li>`).join("")}</ol></div>` : ""}
-      <div class="lr">${b("confirm", "confirm", " you", confirmLabel(t, row))}${b("keep", "keep", "", "Keep old plan")}${stop}</div>
-      <div class="say">replan_auto is off: a changed plan waits for you.</div><div id="ta-msg" class="say"></div></div>`;
-  }
-  return "";
-}
 
-function drawTask() {
-  const d = taskData;
-  if (!d) {
-    setHtml($("tscroll"), d === false ? '<p class="mut">This task is gone: it was cleared or its folder was removed. <span class="link" data-go="list">Back to the list</span></p>'
-      : `<span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Reading the task</span>`);
-    setHtml($("tbar"), "");
-    return;
-  }
-  const t = d.task, lv = d.levers || {}, cur = t.steps.find((s) => s.n === t.current);
-  const dir = taskDir(t.id), row = (snap.tasks || []).find((x) => x.id === t.id) || {}, shown = row.id ? taskShown(row) : t.state;
-  const [word, tn] = TASK_WORD[shown] || TASK_WORD.running;
-  const paused = t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? " · paused" : "";
-  const head = `<div class="head tk"><span class="st ${tn}">${taskMark({ ...t, state: shown })}${word} <span class="lc">· ${ago(snap.now - t.updated)}${paused}</span></span>
-    <h2>${esc(t.title)}</h2>
-    <div class="where"><span class="m">${esc(t.project)} / effort: ${esc(t.effort)} · $${money(row.cost)}</span><button class="btn sm" data-go="board" title="The chain as connected cells, with the handoffs between the steps: the window widens (Esc returns)">&#8660; Board</button></div>
-    ${dir ? `<div class="m tpath" title="${esc(dir)}">${esc(dir)}</div>` : ""}</div>${row.paused_after
-    ? `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>` : ""}`;
-  const sl = d.step_levers || {}, ask = cur && cur.session ? row.asks : "", hand = cur && cur.session ? row.hand_off : "";
-  const planBox = planAsk(t, d, cur, lv, row);
-  const why = t.state === "handed" && cur ? handedBox(d, t, cur, shown)
-    : planBox ? planBox
-    : ask || hand  // the step's question or hand-off hint, answered here; Hub.levers says when (step_levers)
-    ? `<div class="askbox"><span class="st y">${sprite("waiting")}${ask ? "Asks you" : "Hand off"} <span class="lc">· step ${cur.n}</span></span>
-       ${ask ? `<div class="q">${esc(ask)}</div>
-       <textarea class="in" id="t-answer" rows="3" aria-label="Answer" placeholder="Your answer continues step ${cur.n} in its chat."></textarea>` : ""}
-       ${hand ? `<p class="note m"><span class="y">${esc(handText(hand))}</span>${sl.handoff ? ` · <span class="mut">Hand off off: ${esc(sl.handoff)}</span>` : ""}</p>` : ""}
-       <div class="lr">${ask ? '<button class="btn you" data-tact="answer">Send answer</button>' : ""}
-       ${sl.handoff === "" ? '<button class="btn go" data-tact="handoff" title="Hand the task over: the chat of this step writes its handoff note, nothing more starts">Hand off</button>' : ""}
-       <button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button></div><div id="ta-msg" class="say"></div></div>`
-    : (t.state === "waiting" || t.state === "stuck") && t.why
-    ? `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state)}${word}</span><div class="q">${esc(t.why)}</div></div>`
-    : t.why ? `<p class="note m">${esc(t.why)}</p>` : "";
-  const notes = new Map((row.steps || []).map((x) => [x.n, x.note]));  // the note state is in the snapshot row, not task.json
-  const chain = `<div class="blk"><span class="lbl">Steps · ${t.steps.length}</span><div class="chain">${t.steps.map((s) => chainRow(t, { ...s, note: notes.get(s.n) || "" })).join("")}</div>
-    ${t.cleared ? '<p class="m mut" style="margin:0">cleared: notes and streams removed</p>' : ""}</div>`;
-  const planRow = planRowHtml(t, d, cur);
-  const n = t.last_good, sn = t.steps.find((x) => x.n === n), meta = (sn && sn.brief_meta) || null;
-  const nextStep = t.steps.find((x) => x.n === n + 1);
-  const brief = t.briefing ? `<div class="blk"><span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Compacting the handoff of ${two(t.briefing)}</span></div>`
-    : n ? handoffFold(t, d, n, sn, meta, nextStep) : "";
-  setHtml($("tscroll"), head + why + chain + planRow + brief);
-  if (scrollCur) { scrollCur = false; const r = $("tscroll").querySelector(".row.cur"); if (r) r.scrollIntoView({ block: "nearest" }); }
-  const b = (name, cls, label) => `<button class="btn${cls}" data-tact="${name}">${label}</button>`;
-  let buttons = "";
-  if (lv.stop === "") buttons += b("stop", " stop", "Stop");
-  if (lv.pause === "") buttons += b("pause", "", "Pause");
-  if (lv.resume === "") buttons += b("resume", " go", "Resume");
-  if (lv.retry === "") buttons += b("retry", " go", "Retry");
-  if (t.state === "stuck" && lv.redo === "") buttons += b("redo", "", "Redo design");  // a bad plan twice: plan again
-  if (lv.confirm === "" && !planBox) buttons += b("confirm", " you", confirmLabel(t, row));  // the plan waits have it in the askbox
-  if (lv.done === "") buttons += b("done", "", "Mark done");
-  if (lv.clear === "") buttons += b("clear", "", "Clear");
-  const off = new Map();  // the reasons, one line each: "Retry, Clear off: task is running"
-  const keys = ["stop", "pause", "retry", "clear", ...(paused ? ["resume"] : [])];  // why Resume is off, while paused
-  for (const k of keys) if (lv[k]) off.set(lv[k], [...(off.get(lv[k]) || []), k[0].toUpperCase() + k.slice(1)]);
-  const reasons = [...off].map(([why, names]) => `${names.join(", ")} off: ${why}`).join(" · ");
-  setHtml($("tbar"), `${buttons ? `<div class="lr">${buttons}</div>` : ""}<div class="say">${esc(reasons)}</div><div id="t-msg" class="say"></div>`);
-}
 
-function taskRowSig(row) {  // what changed in a task's row: the Task page and the Board fetch GET /api/task only when this does
+function taskRowSig(row) {  // what changed in a task's row: the Board fetches GET /api/task only when this does
   const at = row.steps.find((x) => x.n === row.current), run = at && snap.sessions.find((x) => x.id === at.session);
   return [row.updated, row.state, row.owner, row.why, row.briefing, row.cleared, row.cost, row.steps.map((x) => x.note + x.part).join(), row.plan ? row.plan.words : "", row.asks, row.hand_off, run ? run.state + run.run_live : ""].join("|");
 }
-async function renderTaskPage() {  // GET /api/task when the task's row changed; the drawing follows every snapshot
-  const row = (snap.tasks || []).find((x) => x.id === taskId);
-  const sig = row ? taskRowSig(row) : "gone";
-  if (sig !== taskSig) {
-    taskSig = sig;
-    const id = taskId, data = await api("/api/task?id=" + encodeURIComponent(id)).catch(() => false);
-    if (taskId !== id || taskSig !== sig || page !== "task") return;
-    taskData = data;
-  }
-  drawTask();
-}
 
-async function openTask(id) {
-  if (form === "pill") await setForm("open");
-  taskId = id;
-  taskData = null;
-  rawOpen = false;
-  grown.clear();
-  scrollCur = true;
-  foldLabel.clear();
-  planOpen = new Set();
-  planEdit = false;
-  planEditPart = 0;
-  showPage("task");
-}
 
 let tArmTimer = null;
-function actMsg() { return page === "board" ? $("b-msg") : $("ta-msg") || $("t-msg"); }  // where a failed lever says why
-function actRedraw() { if (page === "board") { boardData = null; renderBoard(); } else { taskSig = ""; if (page === "task") renderTaskPage(); } }
+function actMsg() { return $("b-msg"); }  // where a failed lever says why
+function actRedraw() { boardData = null; renderBoard(); }
 async function taskAct(name, button) {
-  const id = button.dataset.tid || taskId;
-  if (name === "raw") { rawOpen = !rawOpen; drawTask(); return; }  // page only: the brief or the raw note
-  if (name === "next") return startNext(id, button);  // the card's button too
-  if (name === "pfold") { const k = button.dataset.key; if (planOpen.has(k)) planOpen.delete(k); else planOpen.add(k); drawTask(); return; }
-  if (name === "edit") { planEdit = !planEdit; if (page === "board") renderBoard(); else drawTask(); return; }
+  const id = button.dataset.tid || boardTask;
+  if (name === "next") return startNext(id, button);
+  if (name === "edit") { planEdit = !planEdit; renderBoard(); return; }
   if (name === "saveplan") return savePlan(button);
   if (name === "gapanswer") return gapAnswer(button);
+  if (name === "folder") return openTaskFolder(id, button);
   if (!id) return;
-  const arm = { stop: "Stop the task? Click again", clear: "Delete its notes and streams? Click again",
+  const arm = { stop: "Stop the task? Click again", clear: "Delete the task folder? Click again",
     handoff: "Hand off ends the task? Click again", done: "Mark the task done? Click again" }[name];
   if (arm && !button.dataset.armed) {  // two clicks: a stop loses the running step, a clear deletes the notes
     button.dataset.armed = "1";
@@ -2040,30 +1723,28 @@ async function taskAct(name, button) {
   button.disabled = true;
   try {
     await api("/api/task/" + name, { task: id });
-    if (name === "clear" && page === "board") {  // the Board's pick moves to the next task, not to the list
-      const list = boardTasks(), k = list.findIndex((x) => x.id === id), to = list[k + 1] || list[k - 1];
-      boardTask = to ? to.id : "";
-      boardPick = "t";
+    if (name === "clear") {  // plan 30: the folder is gone; the pick clears
+      boardTask = "";
+      boardPick = "";
       boardData = boardChat = null;
       renderBoard();
       return;
     }
-    if (name === "clear") { taskId = null; showPage("list"); return; }
     actRedraw();  // redraw now, not at the next snapshot
   } catch (e) {
     button.disabled = false;
-    const msg = page === "task" || page === "board" ? actMsg() : null;
+    const msg = actMsg();
     if (!msg) button.textContent = "Failed: " + e.message;
     else msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
   }
 }
 
 async function gapAnswer(button) {  // a Plan gap: the answer joins the plan's Decisions and continues the step (POST /api/task/answer)
-  const ask = button.closest(".askbox"), box = (ask && ask.querySelector("textarea")) || $("t-answer"), text = box ? box.value.trim() : "";
+  const ask = button.closest(".askbox"), box = ask && ask.querySelector("textarea"), text = box ? box.value.trim() : "";
   if (!text) return;
   button.disabled = true;
   try {
-    await api("/api/task/answer", { task: button.dataset.tid || taskId, text });
+    await api("/api/task/answer", { task: button.dataset.tid || boardTask, text });
     box.value = "";
     actRedraw();
   } catch (e) {
@@ -2074,11 +1755,11 @@ async function gapAnswer(button) {  // a Plan gap: the answer joins the plan's D
 }
 
 async function savePlan(button) {  // Fred's edit of the index or of a part, through the service only
-  const ed = button.closest(".edbox"), box = (ed && ed.querySelector("textarea")) || $("t-edit");
+  const ed = button.closest(".edbox"), box = ed && ed.querySelector("textarea");
   if (!box) return;
   button.disabled = true;
   try {
-    await api("/api/task/plan", { task: button.dataset.tid || taskId, text: box.value, part: planEditPart });
+    await api("/api/task/plan", { task: button.dataset.tid || boardTask, text: box.value, part: planEditPart });
     planEdit = false;
     actRedraw();
   } catch (e) {
@@ -2095,17 +1776,24 @@ async function startNext(id, button) {  // a handed-off task: the new-task box s
   try {
     seedBox(await api("/api/brief?session=" + encodeURIComponent(cur.session) + "&kind=next"));
   } catch (e) {
-    const msg = $("ta-msg");
-    if (msg && page === "task") msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
+    const msg = actMsg();
+    if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`;
     else button.textContent = "Failed: " + e.message;
   }
   button.disabled = false;
 }
 
-async function stepAct(name, button) {  // the current step's question or hand-off, from the Task page: a session lever
+async function openTaskFolder(id, button) {  // plan 30: the service opens tasks/<id> in Explorer (409 outside Windows)
+  button.disabled = true;
+  try { await api("/api/task/folder", { task: id }); }
+  catch (e) { const msg = actMsg(); if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`; }
+  button.disabled = false;
+}
+
+async function stepAct(name, button) {  // the current step's question or hand-off, from the inspector: a session lever
   const tid = button.dataset.tid, bd = tid && boardData && boardData.id === tid ? boardData.data : null;
-  const t = bd ? bd.task : taskData && taskData.task, cur = t && t.steps.find((s) => s.n === t.current);
-  const ask = button.closest(".askbox"), box = (ask && ask.querySelector("textarea")) || $("t-answer");
+  const t = bd && bd.task, cur = t && t.steps.find((s) => s.n === t.current);
+  const ask = button.closest(".askbox"), box = ask && ask.querySelector("textarea");
   const text = name === "answer" && box ? box.value.trim() : "";
   if (!cur || !cur.session || (name === "answer" && !text)) return;
   button.disabled = true;
@@ -2702,54 +2390,313 @@ $("uscroll").addEventListener("pointerleave", () => { $("utip").hidden = true; }
 $("uscroll").addEventListener("focusin", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); else $("utip").hidden = true; });
 $("uscroll").addEventListener("scroll", () => { $("utip").hidden = true; });
 
-// -- the Board (plan 25): the chain and the inspector, one page of the one window -------------------------------
+// -- the Board, the one view (plan 30): the calendar, the chain of tasks and chats, the picked thing on the right -----
 function foldOpen(key, dflt) { return key && key in foldState ? foldState[key] : !!dflt; }
 function saveFolds() { saveDraft(); }  // the draft save carries folds and board_tab
 
-function boardTasks() {  // the tasks in scope, newest first; a finished or stopped task leaves a day after its last change (the picked one stays)
-  return (snap.tasks || []).filter((t) => t.id === boardTask || ((!scope || sameDir(t.project_dir, scope)) && (taskGroup(t) !== "done" || snap.now - t.updated < 86400)))
-    .sort((a, b) => b.updated - a.updated);
+const DONE_STATES = new Set(["done", "stopped"]);
+let calUsage = null;     // GET /api/usage for the calendar: once at the start, then every 5 minutes
+let calAt = 0;
+let calWeeks = 0;        // the calendar's offset in weeks: 0 shows last week and this week
+let dayOpen = {};        // "YYYY-MM-DD" -> open: a Done day group opened or folded by a click (today starts open)
+let olderOpen = false;   // the Older row opened in place
+let olderRows = null;    // {n, tasks}: GET /api/tasks/older, fetched when the row opens and again when snap.older changes
+let selecting = "";      // the Done day whose rows carry checkboxes ("" none)
+const selected = new Set();
+let copiedId = "";       // the label chip that says "copied" for a second
+let copiedTimer = null;
+let fileView = null;     // {key, name, text}: the Files tab's open file
+let ptab = "card";       // the Prep inspector's tab: card | scout | hand
+let prepShown = "";      // the Prep card the inspector's #pscroll holds (filled once, so edits survive the snapshots)
+
+function labelOf(id) {  // tasks.label: `20261015-093012-a3f2` -> `1015-a3f2`
+  const m = /^\d{4}(\d{4})-\d{6}-([0-9a-f]{4})$/.exec(String(id || ""));
+  return m ? `${m[1]}-${m[2]}` : "";
 }
+function dayOf(ts) { return dkey(new Date(ts * 1000)); }
+function todayKey() { return dayOf(snap.now); }
+function boardRows() {  // every task row the window knows: the snapshot's, then the older ones once fetched
+  const rows = [...(snap.tasks || [])], have = new Set(rows.map((t) => t.id));
+  for (const t of (olderOpen && olderRows ? olderRows.tasks : [])) if (!have.has(t.id)) rows.push(t);
+  return rows;
+}
+function boardRow(id) { return boardRows().find((t) => t.id === id); }
+function taskInScope(t) { return !scope || sameDir(t.project_dir, scope); }
 function boardProject() {
   if (scope) return scope;
-  const t = (snap.tasks || []).find((x) => x.id === boardTask);
+  const t = boardRow(boardTask);
   return t ? t.project_dir : "";
 }
 
-async function openBoard(id) {  // the window widens to the saved Board size; Esc gives the old size back
-  if (form === "pill") await setForm("open");
-  boardFrom = page === "board" ? boardFrom : { page, id: page === "task" ? taskId : page === "session" ? openId : "" };
-  boardTask = id || "";  // the opened task stays listed whatever the scope says
-  const t = (snap.tasks || []).find((x) => x.id === id) || boardTasks()[0];
-  boardTask = t ? t.id : "";
-  boardPick = t && t.steps.some((s) => s.n === t.current) && t.state !== "done" ? "s" + t.current : t ? "t" : "";
-  boardData = boardChat = null;
-  planEdit = false;
-  planEditPart = 0;
-  if (native()) { try { await window.pywebview.api.board(true); } catch (e) { /* the window keeps its size */ } }
-  showPage("board");
+// the calendar header: the picked day's spend, two weeks of days Monday first (Q2 (a)), the over-pace line
+function calDays() {
+  const today = todayKey(), mon = addDays(today, -((ddate(today).getDay() + 6) % 7) - 7 + 7 * calWeeks);
+  return Array.from({ length: 14 }, (_, k) => addDays(mon, k));
 }
-async function closeBoard() {  // back to the page the Board opened from, at the compact size
-  const b = boardFrom;
-  boardFrom = null;
-  if (native()) { try { await window.pywebview.api.board(false); } catch (e) { /* the window keeps its size */ } }
-  if (b && b.page === "task" && (snap.tasks || []).some((t) => t.id === b.id)) return openTask(b.id);
-  if (b && b.page === "session" && b.id) return openSession(b.id, tab);
-  showPage("list");
+function calLimit() { return snap.spend.budget > 0 ? snap.spend.budget : 15; }
+function daySpend(k) {  // today is live (the snapshot); an earlier day is the usage file's
+  if (k === todayKey()) return snap.spend.today;
+  const d = calUsage && calUsage.days && calUsage.days[k];
+  return d ? d.cost : 0;
+}
+function dayTone(c) { const L = calLimit(); return !c ? "" : c < L ? "t1" : c < 3 * L ? "t2" : c < 6 * L ? "t3" : "t4"; }
+function doneOn(k) {  // the tasks finished on day k, newest first
+  return boardRows().filter((t) => taskInScope(t) && DONE_STATES.has(t.state) && dayOf(t.updated) === k).sort((a, b) => b.updated - a.updated);
+}
+function calPicked() { return boardPick[0] === "d" ? boardPick.slice(1) : todayKey(); }
+async function calLoad() {
+  if (calUsage && snap.now - calAt < 300) return;
+  calAt = snap.now;
+  try { calUsage = await api("/api/usage"); } catch (e) { calUsage = calUsage || { days: {} }; }
+  if (page === "board") renderCal();
+}
+function renderCal() {
+  const sp = snap.spend, today = todayKey(), pick = calPicked(), isToday = pick === today, cost = daySpend(pick);
+  const row = spendRow({ today: cost, budget: sp.budget }).html, n = doneOn(pick).length;
+  const sub = isToday ? `today<span class="usd">, USD</span> · <b>$${money(sp.burn)}</b>/min · ${sp.budget > 0 ? "limit " + sp.budget : "no limit"}`
+    : `${dayName(pick)}, USD · ${n} ${n === 1 ? "task" : "tasks"} done`;
+  const wd = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], days = calDays();
+  const wk = wd.concat(wd).map((w, i) => `<span class="wk${i === 7 ? " gap" : ""}${i < 7 ? " w1" : ""}">${w}</span>`).join("");
+  const cells = days.map((k, i) => {
+    const fut = k > today, c = fut ? 0 : daySpend(k), m = doneOn(k).length;
+    const cls = ["d", fut ? "fut" : dayTone(c), k === today ? "today" : "", k === pick ? "pick" : "", i === 7 ? "gap" : "", i < 7 ? "w1" : ""].filter(Boolean).join(" ");
+    const tip = fut ? dayName(k) : `${dayName(k)} · ${m} ${m === 1 ? "task" : "tasks"} done · ~$${money(c)}`;
+    return `<button class="${cls}" data-day="${k}" title="${esc(tip)}"${fut ? " disabled" : ""}><span class="dn">${ddate(k).getDate()}</span><span class="dc">${fut || !m ? "" : m}</span></button>`;
+  }).join("");
+  const fl = sp.fills || { over: [], unknown: [] }, open = !$("todaymore").hidden;
+  const over = fl.over.length ? `<button id="overpace" class="v-over" aria-expanded="${open}" title="Where today's spend went and which models are over their pace">${fl.over.length} ${fl.over.length === 1 ? "model" : "models"} over pace · fills <span class="car">&#9662;</span></button>`
+    : `<button id="overpace" class="v-over q" aria-expanded="${open}" title="Where today's spend went">today's breakdown <span class="car">&#9662;</span></button>`;
+  setHtml($("calh"), `<div class="fig"><span class="big">${isToday ? "" : '<span class="est">~</span>'}${money(cost)}</span><span class="sub">${sub}</span><span class="cells row30">${row}</span></div>
+    <div class="v-cal"><button class="nav" data-cal="-1" title="The week before" aria-label="The week before">&#8249;</button><div class="days">${wk}${cells}</div>
+      <button class="nav" data-cal="1" title="The week after" aria-label="The week after"${calWeeks >= 0 ? " disabled" : ""}>&#8250;</button>
+      <div class="calk"><span>tone: the day's spend · figure: tasks done</span>${over}</div></div>`);
+  setHtml($("todaymore"), `<div class="legend"><span><i class="h"></i>estimated $${money(sp.today)} (list prices)</span>
+    ${sp.budget > 0 ? '<span><i class="mk"></i>80 % of limit</span>' : ""}</div>
+    <div class="legend"><span>1 cell = $0.50</span>${sp.models.map(([m, f]) => `<span>${esc(m)} ${f < 0.01 ? "&lt;1" : Math.round(f * 100)} %</span>`).join("")}
+    ${sp.runs ? `<span>window runs ${sp.runs}</span>` : ""}
+    ${snap.writers.map((w) => `<span>2 writers: ${esc(baseName(w.project_dir))}</span>`).join("")}</div>
+    ${fl.unknown.length ? `<div class="legend">${fl.unknown.map(([k, n]) => `<span>${esc(k)}: cost unknown, ${n} ${n === 1 ? "run" : "runs"}</span>`).join("")}</div>` : ""}
+    ${fl.over.length ? `<div class="fline"><span class="m">fills · ${fl.over.map(([k, sh, w]) => `<b class="y" title="${esc(w)} window">${esc(k)} ${Math.round(sh * 100)}</b>`).join(" · ")} % of pace</span>
+      <button class="btn sm go-usage" data-go="usage">Usage &#8250;</button></div>`
+      : '<button class="btn sm go-usage" data-go="usage">Usage by day, week, month &#8250;</button>'}`);
+}
+function pickDay(k) {  // Q3 (a): the day's group opens and scrolls into view, the inspector shows the day
+  dayOpen[k] = true;
+  boardPick = "d" + k;
+  boardTask = "";
+  renderBoard().then(() => { const s = $("day-" + k); if (s) s.scrollIntoView({ block: "start", behavior: "smooth" }); });
 }
 
+// the chain: Needs you, Replied, Working, Idle, then Done by local day (D8 (a)) and the Older row
+function prepRows() {  // the Prep jobs in scope, as task heads: a sent prompt is a task from the start (plan 29)
+  return preps().filter((j) => !scope || sameDir(j.project_dir, scope));
+}
+function chainGroups() {
+  const tk = (snap.tasks || []).filter(taskInScope), g = groups(), jobs = prepRows();
+  const by = (name) => tk.filter((t) => taskGroup(t) === name).sort((a, b) => b.updated - a.updated);
+  return { needs: [...jobs.filter((j) => j.state !== "running"), ...by("needs")], needsS: g.needs,
+    replied: by("replied"), repliedS: g.replied,
+    work: [...jobs.filter((j) => j.state === "running"), ...by("work")], workS: g.work, idleS: g.idle,
+    done: tk.filter((t) => taskGroup(t) === "done"), doneS: g.done, empty: g.empty };
+}
+function secHtml(cls, text, n, extra = "", id = "") {
+  return n ? `<div class="v-sec"${id ? ` id="${id}"` : ""}><span class="lbl ${cls}">${text} · ${n}</span>${extra}</div>` : "";
+}
+function dayLabel(k) {
+  const today = todayKey();
+  return k === today ? `Done today · <b>${esc(dayName(k))}</b>` : k === addDays(today, -1) ? `Done yesterday · <b>${esc(dayName(k))}</b>` : `Done ${esc(dayName(k))}`;
+}
+function dayGroup(k, rows, sessions) {  // one Done day: open (its rows) or folded to its label and count
+  const open = k in dayOpen ? dayOpen[k] : k === todayKey(), n = rows.length + sessions.length, sel = selecting === k;
+  const hit = boardPick === "d" + k ? " hit" : "";
+  const act = rows.length && open ? (sel ? '<button class="act" data-sel="all">Select all</button><button class="act" data-sel="">Cancel</button>'
+    : `<button class="act" data-sel="${k}" title="Pick finished tasks of this day to delete their folders">Select</button>`) : "";
+  const head = `<div class="v-sec${open ? "" : " fd"}${hit}" id="day-${k}"><button class="dh" data-dayfold="${k}" aria-expanded="${open}"><span class="lbl">${dayLabel(k)} · ${n}</span>${open ? "" : '<span class="car">&#9662;</span>'}</button>${act}</div>`;
+  if (!open) return head;
+  return head + rows.map((t) => taskHtml(t, { select: sel })).join("") + sessions.map((s) => quietHtml(s, !scope)).join("");
+}
+function doneDays(tasks, sessions) {  // {day: [tasks], ...} and the sessions by the day of their last event, newest day first
+  const out = new Map();
+  for (const t of tasks) { const k = dayOf(t.updated); if (!out.has(k)) out.set(k, [[], []]); out.get(k)[0].push(t); }
+  for (const s of sessions) { const k = dayOf(s.last_ts); if (!out.has(k)) out.set(k, [[], []]); out.get(k)[1].push(s); }
+  return [...out.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([k, [t, s]]) => [k, t.sort((a, b) => b.updated - a.updated), s.sort((a, b) => b.last_ts - a.last_ts)]);
+}
+function chainHtml() {
+  const c = chainGroups(), job = (j) => (j.kind === "review" ? reviewHtml(j) : prepTaskHtml(j));
+  const item = (x) => (x.raw !== undefined && x.kind !== undefined && !x.steps ? job(x) : taskHtml(x));
+  let html = secHtml("y", "Needs you", c.needs.length + c.needsS.length, "", "needsec") + c.needs.map(item).join("") + c.needsS.map(cardHtml).join("")
+    + secHtml("", "Replied", c.replied.length + c.repliedS.length) + c.replied.map(item).join("") + c.repliedS.map((s) => quietHtml(s, !scope)).join("")
+    + secHtml("", "Working", c.work.length + c.workS.length) + c.work.map(item).join("") + c.workS.map(cardHtml).join("")
+    + secHtml("", "Idle", c.idleS.length) + c.idleS.map((s) => quietHtml(s, !scope)).join("");
+  for (const [k, rows, sessions] of doneDays(c.done, c.doneS)) html += dayGroup(k, rows, sessions);
+  const older = snap.older || 0;
+  if (older) {
+    html += `<div class="v-sec${olderOpen ? "" : " fd"}"><button class="dh" data-older aria-expanded="${olderOpen}" title="Tasks finished more than ${OLDER_DAYS} days ago; they open in place, by day"><span class="lbl">Older · ${older}</span><span class="car">&#9662;</span></button></div>`;
+    if (olderOpen) {
+      if (!olderRows) html += '<p class="note m">Reading the older tasks.</p>';
+      else for (const [k, rows] of doneDays(olderRows.tasks.filter(taskInScope), [])) html += dayGroup(k, rows, []);
+    }
+  }
+  if (c.empty.length) html += `<div class="more-done"><button class="btn sm" data-go="empties" title="Chats that loaded their rules and never got a prompt">${emptyOpen ? "Hide" : "Show"} ${c.empty.length} empty ${c.empty.length === 1 ? "chat" : "chats"}</button></div>`
+    + (emptyOpen ? c.empty.map((s) => quietHtml(s, !scope)).join("") : "");
+  return html || emptyBoard();
+}
+const OLDER_DAYS = 14;  // server.DONE_DAYS
+async function olderFetch() {  // the Older row: fetched when it opens, and again when the count changed
+  if (!olderOpen || (olderRows && olderRows.n === snap.older)) return;
+  const n = snap.older, data = await api("/api/tasks/older").catch(() => ({ tasks: [] }));
+  olderRows = { n, tasks: data.tasks || [] };
+}
+function emptyBoard() {
+  const where = scope ? projectName(scope) : "any project";
+  return `<div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
+    <p>No task or chat in ${esc(where)} yet. Type a task below; it shows here from the moment you send it.</p></div>`;
+}
+
+// a task: its head row, then its steps on a tree line (00 prep in violet; a fix and its re-verify one level further)
+function taskOpen(t) {  // Q4 (a): a finished task and a chat fold to their head; the picked one opens
+  if (t.id === boardTask) return true;
+  return !t.chat && taskGroup(t) !== "done";
+}
+function labHtml(id) {
+  const cp = copiedId === id;
+  return `<button class="v-lab${cp ? " cp" : ""}" data-copy="${esc(id)}" title="Copy the folder name: ${esc(id)} (C)">${cp ? "copied" : esc(labelOf(id))}</button>`;
+}
+function headWhy(t) {  // the head's second line: what the task waits on, where it is, or what it was
+  const shown = taskShown(t);
+  if (t.asks) return [t.asks, "y"];
+  if (t.hand_off) return [handText(t.hand_off), "y"];
+  if (t.state === "waiting" || t.state === "stuck") return [t.why || t.state, t.state === "stuck" ? "r" : "y"];
+  if (shown === "handed") return ["handed off · Start next task", "y"];
+  if (t.chat) return [`a chat${t.prep && t.prep.state === "skipped" ? " · Raw, prep skipped" : ""} · ${ago(snap.now - t.updated)}`, ""];
+  if (t.group !== "done") {
+    const s = taskStep(t);
+    return [s ? `step ${s.n} of ${t.count} · ${s.kind}${s.model ? " · " + modelText(rungOf(s.harness, s.model), s.effort) : ""}` : `${t.count} steps`, ""];
+  }
+  return [`${t.count} ${t.count === 1 ? "step" : "steps"} · ${hhmm(t.updated)}${t.state === "stopped" ? " · stopped" : ""}`, ""];
+}
+function taskHtml(t, o = {}) {
+  const shown = taskShown(t), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, open = taskOpen(t), done = taskGroup(t) === "done";
+  const picked = t.id === boardTask && boardPick === "t";
+  const cls = ["v-tk", tn === "y" || tn === "r" ? tn : "", t.id === boardTask || t.state === "running" ? "act" : "", done ? "done" : ""].filter(Boolean).join(" ");
+  const chk = o.select ? `<input type="checkbox" class="chk" data-check="${esc(t.id)}" aria-label="${esc("Select " + t.title)}"${selected.has(t.id) ? " checked" : ""}>` : "";
+  const [why, wt] = headWhy(t);
+  const head = `<div class="v-th${picked ? " picked" : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-bpick="t" data-btask="${esc(t.id)}" tabindex="0" role="button" title="${esc(t.project)} · effort ${esc(t.effort)}">
+    <div class="l1">${chk}<span class="st ${tn}">${taskMark({ ...t, state: shown })}${done ? "" : word}</span><span class="t">${esc(t.title)}</span>${done ? "" : `<span class="age">${ago(snap.now - t.updated)}</span>`}</div>
+    <div class="l2">${labHtml(t.id)}<span class="why${wt ? " " + wt : ""}" title="${esc(why)}">${esc(why)}</span><span class="cost">${money(t.cost)}</span>${open ? "" : '<span class="v-more">&#9656;</span>'}</div></div>`;
+  return `<div class="${cls}">${head}${open ? `<div class="v-subs">${stepRows(t)}</div>` : ""}</div>`;
+}
+function stepRows(t) {
+  const steps = t.steps, picked = t.id === boardTask ? boardPick : "";
+  let html = t.prep ? prepRowHtml(t, picked === "p") : "";
+  for (let k = 0; k < steps.length; k++) {
+    const s = steps[k], nx = steps[k + 1];
+    if (k > 0 && s.kind === "fix") {  // the fix insert, one level further under the verify that failed
+      const pair = nx && nx.kind === "verify" && nx.checked === s.n ? [s, nx] : [s];
+      html += `<div class="v-subs" title="the fix insert: what verify ${two(steps[k - 1].n)} found, fixed, then verified again">${pair.map((x) => chainStepHtml(t, x, picked)).join("")}</div>`;
+      k += pair.length - 1;
+      continue;
+    }
+    html += chainStepHtml(t, s, picked);
+  }
+  return html;
+}
+const SR_SPRITE = { running: "running", done: "done", failed: "stuck", planned: "planned", waiting: "waiting", handed: "handed" };
+function miniCtx(s) {  // 8 cells of 20K and the figure; a harness with no context reading shows "?"
+  const tok = stepCtx(s);
+  if (tok == null) return `<span class="mini" title="${esc(ctxUnknown(s))}"><span class="cells">${cellsHtml(Array(8).fill(""))}</span><b>?</b></span>`;
+  const n = Math.min(8, Math.round(tok / 20000)), live = s.state === "running";
+  const cls = Array.from({ length: 8 }, (_, i) => (i < n ? (live && i === n - 1 ? "f live" : tok >= (cfg ? cfg.gauge[0] : 150000) ? "y" : "f") : ""));
+  return `<span class="mini" title="context reached ${kTokens(tok)} (a cell is 20K)"><span class="cells">${cellsHtml(cls)}</span><b class="${ctxFigTone(tok)}">${kTokens(tok)}</b></span>`;
+}
+function receivedNote(t, s) {  // the handoff s received, shown only when it has something to say: cut, the plan, as written
+  const prev = t.steps.find((x) => x.n === s.n - 1), meta = (prev && prev.brief_meta) || {};
+  if (!prev || s.state === "planned") return "";
+  if (prev.kind === "design" && t.plan && t.plan.from === prev.n) return "received + plan";
+  if (meta.fallback) return "received as written";
+  if (meta.cut && meta.cut.length) return `received cut ${(meta.raw_w || 0) - (meta.sent_w || 0)} w`;
+  return "";
+}
+function chainStepHtml(t, s, picked) {
+  const shown = stepShown(t, s, t), spr = SR_SPRITE[shown] || "planned", pl = shown === "planned";
+  const cur = s.n === t.current && s.state === "running";
+  const cls = ["v-sr", cur ? "cur" : "", pl ? "pl" : "", shown === "waiting" ? "wt" : "", picked === "s" + s.n ? "picked" : ""].filter(Boolean).join(" ");
+  const rung = pl ? "" : modelText(rungOf(s.harness, s.model), s.effort);
+  const cost = pl ? "" : costUnknown(s) ? '<span class="c u" title="the harness reported no usage">?</span>' : `<span class="c">${money(s.cost)}</span>`;
+  const s2 = [s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${s.verdict}</span>` : "", receivedNote(t, s), scoutHint(t, s, null),
+    shown === "waiting" ? `<span class="y">${esc(t.asks || t.why)}</span>` : "", cur ? '<span class="w">writing</span>' : "",
+    s.part ? '<span title="a write step the design step made">from plan</span>' : ""].filter(Boolean).join(" · ");
+  return `<div class="${cls}" data-bpick="s${s.n}" data-btask="${esc(t.id)}" tabindex="0" role="button">${sprite(spr)}<span class="n">${two(s.n)}</span>
+    <span class="k"><b>${esc(s.kind)}</b>${rung ? `<span class="m">${esc(rung)}</span>` : ""}</span>${pl ? "<span></span>" : miniCtx(s)}${cost || '<span class="c"></span>'}${s2 ? `<span class="s2">${s2}</span>` : ""}</div>`;
+}
+function prepRowHtml(t, picked) {  // step 00: the Prep card, from the task row's prep summary
+  const p = t.prep, skipped = p.state === "skipped";
+  const rung = skipped ? "skipped: run raw" : [alias(p.model) || p.model, p.turns ? `${p.turns} ${p.turns === 1 ? "turn" : "turns"}` : "", t.chat ? "no steps: a chat" : ""].filter(Boolean).join(" · ");
+  return `<div class="v-sr zero${skipped ? " skip" : ""}${picked ? " picked" : ""}" data-bpick="p" data-btask="${esc(t.id)}" tabindex="0" role="button" title="Step 00: the Prep card: the enhanced prompt, the route and what Prep read">
+    ${sprite(skipped ? "stopped" : "done")}<span class="n">00</span><span class="k"><b>prep</b><span class="m">${esc(rung)}</span></span><span></span>${skipped ? '<span class="c"></span>' : `<span class="c">${money(p.cost)}</span>`}</div>`;
+}
+function prepTaskHtml(j) {  // a Prep job: running, failed, or its card waiting for Run (step 00 and the proposed steps, planned)
+  const picked = boardTask === j.id, c = j.card, steps = (c && c.steps) || [];
+  const word = j.state === "running" ? ["Prep", "n", "running"] : j.state === "failed" ? ["Failed", "r", "stuck"] : ["Waiting", "y", "waiting"];
+  const why = j.state === "running" ? [`Haiku is reading ${projectName(j.project_dir)}`, ""] : j.state === "failed" ? [j.error, "r"]
+    : [`Prep ready: ${steps.length ? `${steps.length} ${steps.length === 1 ? "step" : "steps"}` : "no steps: a chat"} · Run, Edit or Drop`, "y"];
+  const title = (c && (c.fields.goal || c.raw)) || j.raw;
+  const head = `<div class="v-th${picked && boardPick === "t" ? " picked" : ""}" data-bpick="p" data-btask="${esc(j.id)}" tabindex="0" role="button" title="${esc(projectName(j.project_dir))}">
+    <div class="l1"><span class="st ${word[1]}">${sprite(word[2])}${word[0]}</span><span class="t">${esc(title)}</span><span class="age">${ago(snap.now - j.ts)}</span></div>
+    <div class="l2">${labHtml(j.id)}<span class="why${why[1] ? " " + why[1] : ""}" title="${esc(why[0])}">${esc(why[0])}</span><span class="cost">${c ? money(c.cost) : ""}</span></div></div>`;
+  const zero = `<div class="v-sr zero${j.state === "running" ? " cur" : j.state === "failed" ? "" : " wt"}${picked && boardPick === "p" ? " picked" : ""}" data-bpick="p" data-btask="${esc(j.id)}" tabindex="0" role="button">
+    ${sprite(word[2])}<span class="n">00</span><span class="k"><b>prep</b><span class="m">${esc(c ? `${alias(c.model || "haiku") || "haiku"} · ${c.turns} turns` : "haiku")}</span></span><span></span><span class="c">${c ? money(c.cost) : ""}</span></div>`;
+  const planned = steps.map((s, k) => `<div class="v-sr pl" data-bpick="p" data-btask="${esc(j.id)}" tabindex="-1" role="button">${sprite("planned")}<span class="n">${two(k + 1)}</span><span class="k"><b>${esc(s.kind)}</b></span><span></span><span class="c"></span></div>`).join("");
+  return `<div class="v-tk${j.state === "failed" ? " r" : j.state === "running" ? " act" : " y"}">${head}<div class="v-subs">${zero}${planned}</div></div>`;
+}
+function reviewHtml(j) {  // a rules review (plan 22): one head row; its proposals open in the inspector
+  const picked = boardTask === j.id, n = j.card ? j.card.proposals.length : 0;
+  const why = j.state === "running" ? `Haiku is reading ${projectName(j.project_dir)}'s rules` : j.state === "failed" ? j.error : n ? `${n} ${n === 1 ? "proposal" : "proposals"}` : "nothing to change";
+  return `<div class="v-tk${j.state === "failed" ? " r" : ""}"><div class="v-th${picked ? " picked" : ""}" data-bpick="p" data-btask="${esc(j.id)}" tabindex="0" role="button">
+    <div class="l1"><span class="st ${j.state === "failed" ? "r" : "g"}">${sprite(j.state === "running" ? "running" : j.state === "failed" ? "stuck" : "done")}Review</span><span class="t">Review rules: ${esc(projectName(j.project_dir))}</span><span class="age">${ago(snap.now - j.ts)}</span></div>
+    <div class="l2"><span class="why">${esc(why)}</span><span class="cost">${j.card ? money(j.card.cost) : ""}</span></div></div></div>`;
+}
+
+// the draw: the calendar, the chain, the inspector; the composer or, while selecting, the delete bar
 async function renderBoard() {
-  const tasks = boardTasks(), row = tasks.find((t) => t.id === boardTask) || tasks[0];
-  if (row && row.id !== boardTask) { boardTask = row.id; boardPick = "t"; boardData = null; }
-  $("bcrumb").textContent = `Board / ${scope ? projectName(scope) : "All projects"} · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
-  setHtml($("bfoot"), tasks.length ? `<span><span class="kbd">↑</span><span class="kbd">↓</span> step</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> chat</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
-    <button class="q" title="A step's context in cells of 10K; the chip between two steps is the handoff the next one received, its words in the inspector" aria-label="Legend">?</button>` : "");
-  const live = boardSessions(), liveHtml = live.map(boardSessionHtml).join("");
-  if (live.length) $("bcrumb").textContent += ` · ${live.length} live ${live.length === 1 ? "chat" : "chats"}`;
-  if (boardPick[0] === "l") await liveChatFetch(boardPick.slice(1));
+  calLoad();
+  renderCal();
+  const nb = snap.counts.needs;
+  $("needsbtn").hidden = !nb;
+  $("needsbtn").textContent = `${nb} ${nb === 1 ? "needs" : "need"} you`;
+  $("scopenm").textContent = scope ? projectName(scope) : "All projects";
+  await olderFetch();
+  if (page !== "board") return;
+  const job = boardTask && preps().find((j) => j.id === boardTask);
+  if (boardTask && !job && !boardRow(boardTask)) { boardTask = ""; boardPick = ""; }  // gone: deleted, or run (a Prep id becomes the task's)
+  setHtml($("bchain"), chainHtml());
+  $("vboard").classList.toggle("open", !!boardPick);
+  setHtml($("bfoot"), `<span><span class="kbd">↑</span><span class="kbd">↓</span> move</span><span><span class="kbd">Enter</span> chat</span><span><span class="kbd">C</span> copy label</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
+    <button class="q" title="A step's context in cells of 20K; a handoff shows on the step that received it when it was cut, carries the plan or went as written" aria-label="Legend">?</button>`);
+  renderCompose();
+  renderDelbar();
+  await renderInspector(job);
+}
+async function renderInspector(job) {
+  const prepOn = boardPick === "p" && job && job.card;
+  $("iprep").hidden = !prepOn;
+  $("bwrap").hidden = !!prepOn;
+  if (prepOn) {  // the card fills #pscroll once; a redraw would lose Fred's edits
+    if (prepShown !== job.id) { prepShown = job.id; if (job.kind === "review") { card = null; reviewCard = job.card; showReview(); } else { reviewCard = null; card = job.card; showPrep(); } }
+    $("bbackwhat").textContent = "00 prep";
+    return;
+  }
+  prepShown = "";
+  if (job) { setHtml($("bwrap"), `<div class="binsp">${inspJob(job)}</div>`, { sel: ".binsp", reset: boardWrapKey() }); return; }
+  if (boardPick[0] === "d") { setHtml($("bwrap"), `<div class="binsp">${inspDay(boardPick.slice(1))}</div>`, { sel: ".binsp", reset: boardWrapKey() }); $("bbackwhat").textContent = dayName(boardPick.slice(1)); return; }
+  if (boardPick === "x") { setHtml($("bwrap"), `<div class="binsp">${inspSelect()}</div>`, { sel: ".binsp", reset: boardWrapKey() }); $("bbackwhat").textContent = "selection"; return; }
+  const row = boardRow(boardTask);
   if (!row) {
-    setHtml($("bchain"), liveHtml ? `<div class="tk folded">${liveHtml}</div>` : emptyBoard());
-    setHtml($("bwrap"), liveHtml ? `<div class="binsp">${boardPick[0] === "l" ? inspLive(boardPick.slice(1)) : '<p class="note m">No task here. Pick a live chat on the left.</p>'}</div>` : "");
+    if (boardPick === "") await measureFetch();
+    if (page !== "board" || boardTask) return;
+    const project = boardProject();
+    setHtml($("bwrap"), `<div class="binsp">${project ? inspMeasure(measureData && measureData.project === project ? measureData.data : null, projectName(project))
+      : '<div class="ihead"><h2>Measure</h2></div><p class="note m">Pick a project to measure its tasks, or pick a task, a step or a day.</p>'}</div>`, { sel: ".binsp", reset: boardWrapKey() });
     return;
   }
   const sig = taskRowSig(row);
@@ -2760,41 +2707,28 @@ async function renderBoard() {
   }
   const d = boardData.data;
   if (d && boardPick[0] === "s") await boardChatFetch(d, row);
-  else if (boardPick === "") await measureFetch();
   if (page !== "board" || boardTask !== row.id) return;
-  setHtml($("bchain"), (liveHtml ? `<div class="tk folded">${liveHtml}</div>` : "") + tasks.map((t) => chainHtml(t, t.id === row.id ? d : null, t.id === row.id ? boardPick : null)).join(""));
-  setHtml($("bwrap"), `<div class="binsp">${await boardInspector(row, d)}</div>`, { sel: ".binsp", reset: boardWrapKey() });
+  $("bbackwhat").textContent = row.title;
+  setHtml($("bwrap"), `<div class="binsp">${boardInspector(row, d)}</div>`, { sel: ".binsp", reset: boardWrapKey() });
 }
-function boardSessions() {  // plain chats that need Fred or are working: the list shows them, so the Board does too (a step's chat belongs to its task)
-  const g = groups();
-  return [...g.needs, ...g.work].sort((a, b) => b.last_ts - a.last_ts);
+function inspJob(j) {  // a Prep job that runs or failed (a ready card fills #iprep)
+  const isReview = j.kind === "review", name = isReview ? "Review rules" : "00 prep";
+  if (j.state === "running") return `<div class="ihead"><div class="ln1"><span class="st n">${sprite("running")}Running</span><h2>${name} · ${esc(j.raw)}</h2></div>
+    <div class="meta"><span>${esc(projectName(j.project_dir))}</span><span>${ago(snap.now - j.ts)}</span>${isReview ? "" : `<span>task ${labHtml(j.id)}</span>`}</div></div>
+    <span class="loading"><span class="cells">${cellsHtml(["f live", "", "", "", "", ""])}</span>Haiku is reading ${esc(projectName(j.project_dir))}${isReview ? "'s rules" : ""}, 10 to 30 s</span>`;
+  return `<div class="ihead"><div class="ln1"><span class="st r">${sprite("stuck")}Failed</span><h2>${name} · ${esc(j.raw)}</h2></div></div>
+    <p class="note m">${esc(j.error)}</p><div class="lr"><button class="btn go sm" data-prep="${esc(j.id)}" data-pdo="retry">Try again</button>
+    ${isReview ? "" : `<button class="btn sm" data-prep="${esc(j.id)}" data-pdo="edit">Edit</button>`}<button class="btn sm" data-prep="${esc(j.id)}" data-pdo="drop">Dismiss</button></div>`;
 }
-function boardSessionHtml(s) {  // one folded row, like a task head; a click opens the session page and Esc returns to the Board
-  const [glyph, word, t] = stateWord(s);
-  return `<div class="thead sess${boardPick === "l" + s.id ? " picked" : ""}" data-bpick="l${esc(s.id)}" tabindex="0" role="button" title="${esc(s.project)}">
-    <div class="l1"><span class="st ${t}">${sessionMark(s, glyph, t)}${esc(word)}</span><span class="t">${esc(s.title)}</span><span class="age m">${ago(snap.now - s.last_ts)}</span></div>
-    <div class="l2 m"><span class="who">${esc(s.project)}</span><span class="cost">${spentText(s)}</span></div></div>`;
-}
-function inspLive(id) {  // a plain chat picked on the Board: its facts and the way in
-  const s = snap.sessions.find((x) => x.id === id);
-  if (!s) return '<p class="note m">This chat is gone from the list.</p>';
-  const [glyph, word, tn] = stateWord(s);
-  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sessionMark(s, glyph, tn)}${esc(word)}</span><h2>${esc(s.title)}</h2>
-    <span class="lr"><button class="btn sm" data-open="${esc(s.id)}" title="The session page, with its levers">Open chat</button></span></div>
-    <div class="meta"><span>${esc(s.project)}</span><span>spent <b>${spentText(s)}</b></span><span>${ago(snap.now - s.last_ts)}</span></div></div>
-    <div class="ipane">${boardChat && boardChat.sid === id && boardChat.chat ? chatPane(boardChat.chat, id, s.source || "chat", { compact: true, board: true }) : '<p class="note m">Reading the chat.</p>'}</div>`;
-}
-async function liveChatFetch(sid) {  // a picked plain chat: fetched when the pick changed, and every 2 s while it runs
-  const live = snap.sessions.find((x) => x.id === sid), running = !!live && live.state === "running", turn = live ? live.turn_ts : 0;
-  if (boardChat && boardChat.sid === sid && boardChat.running === running && (!running || (snap.now - boardChat.at < 2 && boardChat.turn === turn))) return;
-  const chat = await api("/api/chat?session=" + encodeURIComponent(sid)).catch(() => null);
-  if (page !== "board" || boardPick !== "l" + sid) return;
-  boardChat = chat ? { sid, at: snap.now, chat, running, turn } : null;
+function boardWrapKey() {  // true when the pick changed since the last draw: a new pick starts at the top, a redraw keeps the scroll
+  const k = boardTask + "|" + boardPick + "|" + itab + "|" + ptab, changed = boardWrapKey.last !== k;
+  boardWrapKey.last = k;
+  return changed;
 }
 async function boardChatFetch(d, row) {  // the picked step's chat: when the pick changed, and every 2 s while the step runs
   const s = d.task.steps.find((x) => "s" + x.n === boardPick);
   if (!s || !s.session) { boardChat = null; return; }
-  const live = snap.sessions.find((x) => x.id === s.session), running = s.state === "running";
+  const live = snap.sessions.find((x) => x.id === s.session), running = s.state === "running" || (!!live && BUSY.has(live.state));
   const turn = live ? live.turn_ts : 0;
   if (boardChat && boardChat.sid === s.session && boardChat.running === running && (!running || (snap.now - boardChat.at < 2 && boardChat.turn === turn))) return;
   const sid = s.session, chat = await api("/api/chat?session=" + encodeURIComponent(sid)).catch(() => null);
@@ -2810,57 +2744,135 @@ async function measureFetch() {  // the Measure table: once a minute per project
   measureData = { project, at: snap.now, data };
 }
 function boardInspector(row, d) {
-  if (boardPick[0] === "l") return inspLive(boardPick.slice(1));
-  if (d === false) return '<p class="note m">This task is gone: it was cleared or its folder was removed.</p>';
+  if (d === false) return '<p class="note m">This task is gone: it was deleted or its folder was removed.</p>';
   const t = d.task;
   if (boardPick === "t") return inspTask(t, d, row);
-  const m = /^([sc])(\d+)$/.exec(boardPick), s = m && t.steps.find((x) => x.n === Number(m[2]));
-  if (s && m[1] === "c") return inspConn(t, s, d, row);
-  if (s) {
-    if (s.kind === "replan" && s.n === t.current && String(t.why || "").startsWith("replanned:")) return inspReplan(t, s, d, row);
-    if (s.n === t.current && /^(asks: )?Plan gap:/.test(row.asks || row.why || "")) return inspGap(t, s, d, row);
-    return inspStep(t, s, d, row);
-  }
-  const project = boardProject();
-  if (!project) return '<div class="ihead"><h2>Measure</h2></div><p class="note m">Pick a project to measure its tasks.</p>';
-  return inspMeasure(measureData && measureData.project === project ? measureData.data : null, projectName(project));
-}
-function boardWrapKey() {  // true when the pick changed since the last draw: a new pick starts at the top, a redraw keeps the scroll
-  const k = boardTask + "|" + boardPick + "|" + itab, changed = boardWrapKey.last !== k;
-  boardWrapKey.last = k;
-  return changed;
+  if (boardPick === "p") return inspPrep(t, d, row);
+  const m = /^s(\d+)$/.exec(boardPick), s = m && t.steps.find((x) => x.n === Number(m[1]));
+  if (!s) return inspTask(t, d, row);
+  if (s.kind === "replan" && s.n === t.current && String(t.why || "").startsWith("replanned:")) return inspReplan(t, s, d, row);
+  if (s.n === t.current && /^(asks: )?Plan gap:/.test(row.asks || row.why || "")) return inspGap(t, s, d, row);
+  return inspStep(t, s, d, row);
 }
 
-function boardItems(row) {  // ["t", "s1", "c1", "s2", ...] in chain order; a connector only when it is not pending
-  const d = boardData && boardData.id === row.id ? boardData.data : null, t = d && d.task, steps = t ? t.steps : row.steps, out = ["t"];
-  steps.forEach((s, k) => {
-    out.push("s" + s.n);
-    if (t && k < steps.length - 1 && connCase(t, s, d).cls !== "pending") out.push("c" + s.n);
-  });
-  return out;
+// the day (a calendar click) and the selection (Select on a Done day)
+function inspDay(k) {
+  const r = calUsage && calUsage.days ? calUsage.days[k] : null, rows = doneOn(k), chats = rows.filter((t) => t.chat).length;
+  const tk = (label, n) => `<span><small>${label}</small><b>${tokText(n)}</b></span>`;
+  const fams = r ? Object.entries(r.models || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).map(([f, c]) => `${esc(f)} ${r.cost ? Math.round(100 * c / r.cost) : 0}`).join(" · ") : "";
+  return `<div class="ihead"><div class="ln1"><h2>${esc(dayName(k))}${k === todayKey() ? " · today" : ""}</h2><div class="lr"><button class="btn sm" data-go="usage">Usage</button></div></div>
+    <div class="meta"><span>${rows.length} ${rows.length === 1 ? "task" : "tasks"} done</span>${chats ? `<span>${chats} ${chats === 1 ? "chat" : "chats"}</span>` : ""}<span>~<b>$${money(daySpend(k))}</b></span></div></div>
+    ${r ? `<div class="v-figs">${tk("input", r.tokens[0])}${tk("output", r.tokens[1])}${tk("cache write", r.tokens[2])}${tk("cache read", r.tokens[3])}</div>` : '<p class="note m">No Claude Code use this day in the usage file.</p>'}
+    <div class="v-dayl">${rows.map((t) => `<div class="v-dayr" data-bpick="t" data-btask="${esc(t.id)}" role="button" tabindex="0">${labHtml(t.id)}<span class="t">${esc(t.title)}</span><span class="m">${t.chat ? "chat" : t.count + " steps"} · ${hhmm(t.updated)}</span><span class="c">${money(t.cost)}</span></div>`).join("") || '<p class="note m">No task finished this day.</p>'}</div>
+    ${fams ? `<p class="v-mix">models <b>${fams} %</b></p>` : ""}`;
 }
+function selRows() { return [...selected].map(boardRow).filter(Boolean); }
+function inspSelect() {
+  const rows = selRows(), cost = rows.reduce((a, t) => a + (t.cost || 0), 0);
+  return `<div class="ihead"><div class="ln1"><h2>${rows.length} ${rows.length === 1 ? "task" : "tasks"} selected</h2></div>
+    <div class="meta"><span>${esc(selecting ? dayLabel(selecting).replace(/<[^>]+>/g, "") : "")}</span><span>cost <b>${money(cost)}</b></span></div></div>
+    <div class="v-dayl">${rows.map((t) => `<div class="v-dayr">${labHtml(t.id)}<span class="t">${esc(t.title)}</span><span class="m">${t.chat ? "chat" : t.count + " steps"}</span><span class="c">${money(t.cost)}</span></div>`).join("") || '<p class="note m">Tick the tasks to delete on the left.</p>'}</div>
+    <p class="v-mix">Running, waiting and replied tasks have no checkbox, so a delete never races a step.</p>`;
+}
+function renderDelbar() {  // D10 (a): in select mode the composer is the delete bar; it names the folders and asks twice
+  const on = !!selecting, rows = selRows();
+  $("compose").hidden = on;
+  $("delbar").hidden = !on;
+  if (!on) return;
+  setHtml($("delbar"), `<div class="lr"><button class="btn stop" data-del="go"${rows.length ? "" : " disabled"}>Delete ${rows.length} ${rows.length === 1 ? "task" : "tasks"}</button><button class="btn" data-sel="">Cancel</button></div>
+    <div class="say">${rows.length ? `${rows.map((t) => "tasks/" + esc(t.id)).join(", ")} go, with their runs. A plan mirrored into the project stays. This cannot be undone.` : "Tick the finished tasks to delete."}</div><div id="del-msg" class="say"></div>`);
+}
+let delArm = null;
+async function deleteSelected(button) {
+  const ids = [...selected];
+  if (!ids.length) return;
+  if (!button.dataset.armed) {
+    button.dataset.armed = "1";
+    button.textContent = `Delete ${ids.length} ${ids.length === 1 ? "folder" : "folders"}? Click again`;
+    clearTimeout(delArm);
+    delArm = setTimeout(() => { delete button.dataset.armed; renderDelbar(); }, 3000);
+    return;
+  }
+  button.disabled = true;
+  try {
+    const r = await api("/api/tasks/delete", { ids });
+    const refused = Object.entries(r.refused || {});
+    selected.clear();
+    if (!refused.length) { selecting = ""; boardPick = ""; }
+    else for (const [id] of refused) selected.add(id);
+    olderRows = null;
+    await renderBoard();
+    if (refused.length) $("del-msg").innerHTML = `<span class="r">${refused.map(([id, why]) => `${esc(labelOf(id))}: ${esc(why)}`).join(" · ")}</span>`;
+  } catch (e) {
+    button.disabled = false;
+    $("del-msg").innerHTML = `<span class="r">${esc(e.message)}</span>`;
+  }
+}
+function setSelecting(k) {
+  if (k === "all") { for (const t of doneOn(selecting)) selected.add(t.id); boardPick = "x"; renderBoard(); return; }
+  selecting = k;
+  selected.clear();
+  boardPick = k ? "x" : "";
+  boardTask = "";
+  renderBoard();
+}
+
+// the label chip (D11 (a)): a click or C copies the task's folder name
+async function copyLabel(id) {
+  try { await navigator.clipboard.writeText(id); }
+  catch (e) {  // a page without the clipboard API: a hidden field and the copy command
+    const f = document.createElement("textarea");
+    f.value = id;
+    document.body.appendChild(f);
+    f.select();
+    try { document.execCommand("copy"); } catch (err) { /* nothing more to try */ }
+    f.remove();
+  }
+  copiedId = id;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => { copiedId = ""; if (page === "board") renderBoard(); }, 1200);
+  renderBoard();
+}
+
+function openTask(id) {  // a task from the session page or a card: picked on the Board
+  boardTask = id;
+  boardPick = "t";
+  boardData = boardChat = null;
+  showPage("board");
+}
+function boardItems() { return [...document.querySelectorAll("#bchain [data-bpick], #bchain .card[data-open]")].filter((el) => el.tabIndex >= 0); }
 function boardKey(e) {
-  const tasks = boardTasks(), k = tasks.findIndex((t) => t.id === boardTask), row = tasks[k];
-  e.preventDefault();
-  if (e.key === "Escape") { if (boardPick) { boardPick = ""; renderBoard(); } else closeBoard(); return; }
-  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-    const to = tasks[k + (e.key === "ArrowRight" ? 1 : -1)];
-    if (to) { boardTask = to.id; boardPick = "t"; boardData = boardChat = null; renderBoard(); }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (selecting) setSelecting("");
+    else if (boardPick) { boardPick = ""; boardTask = ""; renderBoard(); }
     return;
   }
-  if (!row) return;
-  const items = boardItems(row), at = items.indexOf(boardPick);
+  if (e.key === "c" || e.key === "C") {
+    const id = boardTask || "";
+    if (id) { e.preventDefault(); copyLabel(id); }
+    return;
+  }
+  const items = boardItems(), at = items.indexOf(document.activeElement);
   if (e.key === "Enter") {
-    if (boardPick[0] === "l") { backTo = { page: "board" }; openSession(boardPick.slice(1)); return; }
-    const s = boardPick[0] === "s" && row.steps.find((x) => "s" + x.n === boardPick);
-    if (s && s.session) { backTo = { page: "board" }; openSession(s.session); }
+    const s = boardData && boardData.id === boardTask && boardData.data && boardPick[0] === "s" && boardData.data.task.steps.find((x) => "s" + x.n === boardPick);
+    if (at >= 0 && !items[at].matches(".picked") && items[at].dataset.bpick !== undefined) { e.preventDefault(); items[at].click(); return; }  // Enter picks the focused row
+    if (s && s.session) { e.preventDefault(); backTo = { page: "board" }; openSession(s.session); }
     return;
   }
-  const to = items[at < 0 ? 0 : at + (e.key === "ArrowDown" ? 1 : -1)];
-  if (to) { boardPick = to; renderBoard().then(() => { const f = document.querySelector(`#bchain [data-bpick="${to}"]`); if (f) f.focus({ preventScroll: false }); }); }
+  e.preventDefault();
+  let to = null;
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") to = items[at < 0 ? 0 : at + (e.key === "ArrowDown" ? 1 : -1)];
+  else {  // Left / Right: the task heads
+    const heads = items.filter((el) => el.matches(".v-th")), cur = items[at] && items[at].closest(".v-tk"), k = heads.findIndex((h) => h.closest(".v-tk") === cur);
+    to = heads[k < 0 ? 0 : k + (e.key === "ArrowRight" ? 1 : -1)];
+  }
+  if (!to) return;
+  to.focus();
+  if (to.dataset.bpick !== undefined) to.click();
 }
 
-// the chain column
+// the chain's rows reuse the locked step pieces
 const BWORD = { running: ["Running", "n", "running"], done: ["Done", "g", "done"], failed: ["Fail", "r", "stuck"], planned: ["Planned", "q", "planned"],
   waiting: ["Waiting", "y", "waiting"], handed: ["Handed", "y", "done"] };  // [word, tone, sprite]
 const HINT_IN_W = 300, HINT_CTX = 100000;  // D4 (a): a small handoff in and a large context reached: the step read on its own
@@ -2875,100 +2887,19 @@ function stepCtx(s) {  // a running step's context is the live session row's; nu
 }
 const ctxUnknown = (s) => s.harness && s.harness !== "claude" ? `${s.harness} reports a turn's spend, not a context size` : "no context reading for this step";
 function ctxFigTone(tok) { const [y, r] = cfg ? cfg.gauge : [150000, 300000]; return tok >= r ? "r" : tok >= y ? "y" : ""; }
-function ctxMiniHtml(s) {  // a finished block: 15 cells and the figure, or the word
-  const tok = stepCtx(s);
-  if (tok == null) return `<span class="ctx" title="${esc(ctxUnknown(s))}">ctx unknown</span>`;
-  return `<span class="ctx" title="context reached ${kTokens(tok)}"><span class="cells">${cellsHtml(ctxClasses(tok).filter((_, k) => k % 2 === 0))}</span><b class="${ctxFigTone(tok)}">${kTokens(tok)}</b></span>`;
-}
-function ctxRowHtml(s, live) {  // a full block: 30 cells and the figure, or the word unknown
-  const tok = stepCtx(s);
-  if (tok == null) return `<span class="cx"><span>ctx</span><span class="unk" title="${esc(ctxUnknown(s))}">unknown</span><span></span></span>`;
-  const cls = ctxClasses(tok), last = cls.map((c) => c !== "").lastIndexOf(true);
-  if (live && last >= 0) cls[last] += " live";
-  return `<span class="cx"><span>ctx</span><span class="cells">${cellsHtml(cls)}</span><b class="${ctxFigTone(tok)}">${kTokens(tok)}</b></span>`;
-}
 function costUnknown(s) {  // plan 27 G7: a step whose cost no attempt reported (plan 5 README 3.6); a running attempt counts 0 until it ends
   const a = s.attempts || [];
   return s.cost == null || (a.length > 0 && a.every((x) => x.cost == null));
-}
-function stepCost(s) {  // plan 25 3: the service's s.cost, the sum of its attempts
-  if (s.state === "planned") return "";
-  return costUnknown(s) ? '<span class="cost unk" title="the harness reported no usage">cost unknown</span>' : `<span class="cost">${money(s.cost)}</span>`;
 }
 function rungTime(s) {
   const rung = modelText(rungOf(s.harness, s.model), s.effort);
   const t = stepTime(s);
   return `${esc(rung)}${t ? " · " + t : ""}`;
 }
-function triesHtml(s) {  // one 7 px square per attempt: red failed, green the one that passed, ink the live one
-  const a = s.attempts || [];
-  if (a.length < 2 && !a.some((x) => x.why)) return "";
-  const cls = a.map((x, k) => (x.why ? "r" : k === a.length - 1 ? (s.state === "running" ? "f" : s.state === "done" ? "g" : "") : ""));
-  return `<span class="tries" title="attempts: ${cls.map((c) => (c === "r" ? "failed" : c === "g" ? "passed" : c === "f" ? "live" : "stopped")).join(", ")}">${cls.map((c) => `<i class="${c}"></i>`).join("")}</span>`;
-}
 function scoutHint(t, s, d) {  // D4 (a): a step that received a small handoff and still reached a large context read too much on its own
   const prev = t.steps.find((x) => x.n === s.n - 1), meta = (prev && prev.brief_meta) || {}, ctx = stepCtx(s);
   if (meta.sent_w == null || ctx == null || meta.sent_w >= HINT_IN_W || ctx < HINT_CTX || s.state === "planned") return "";
   return `<span title="${meta.sent_w} w in, ${kTokens(ctx)} reached">△ scout first</span>`;
-}
-function stepBlock(t, s, d, row) {
-  const shown = stepShown(t, s, row), [word, tn, spr] = BWORD[shown], pick = "s" + s.n, isPicked = boardPick === pick && row && row.id === boardTask;
-  const from = s.part ? ' <span class="m" title="a write step the design step made">· from plan</span>' : "";
-  const l1 = `<div class="l1"><span class="st ${tn}">${sprite(spr)}${word}</span><span class="nm">${two(s.n)} ${esc(s.kind)}${from}</span>${stepCost(s)}</div>`;
-  const attr = `data-bpick="${pick}" tabindex="0" role="button"`;
-  if (shown === "planned") return `<div class="sb one${isPicked ? " picked" : ""}" ${attr} title="rung at start (rule ${esc(s.kind)})">${l1}</div>`;
-  const rung = `<span class="rt">${rungTime(s)}</span>`, tok = stepCtx(s), live = s.state === "running";
-  const hot = tok != null && cfg && tok >= cfg.gauge[0];
-  if (shown === "done" && !isPicked && s.n !== t.current && !hot) return `<div class="sb short" ${attr}>${l1}<div class="rung">${rung}${ctxMiniHtml(s)}</div></div>`;
-  const sub = [s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${s.verdict === "FAIL" ? "FAIL " + esc(s.verdict_detail || "") : "PASS"}</span>` : "",
-    scoutHint(t, s, d), shown === "waiting" && row ? `<span class="y">${esc(row.why || row.asks)}</span>` : ""].filter(Boolean).join(" · ");
-  return `<div class="sb${shown === "waiting" ? " y" : ""}${live ? " cur" : ""}${isPicked ? " picked" : ""}" ${attr}>${l1}<div class="rung">${rung}${triesHtml(s)}</div>${ctxRowHtml(s, live)}${sub ? `<div class="sub" title="${esc(s.verdict_detail || "")}">${sub}</div>` : ""}</div>`;
-}
-function connCase(t, s, d) {  // the handoff after step s: its class, chip and title (README 3.5)
-  const meta = s.brief_meta || {}, nn = two(s.n);
-  if (s.state === "running" || t.briefing === s.n) return { cls: "writing", chip: "writing", title: s.state === "running" ? `step ${nn} is writing its handoff` : `Haiku is compacting the handoff for step ${nn}` };
-  if (!(d.notes || {})[String(s.n)] && !s.brief_meta) return { cls: "pending", chip: "", title: "" };
-  if (meta.fallback) return { cls: "fallback", chip: "as written · not compacted", title: meta.fallback };
-  if (s.kind === "design" && t.plan && t.plan.from === s.n)
-    return { cls: "plan", chip: "handoff · <b>plan</b>", title: `the handoff of step ${nn}, compacted to ${meta.sent_w == null ? "?" : meta.sent_w} words, and plan.md (${Number(t.plan.words || 0).toLocaleString("en")} words, never cut), which every later step reads` };
-  if (meta.cut && meta.cut.length) {
-    const n = (meta.raw_w || 0) - (meta.sent_w || 0);
-    return { cls: "cut", chip: `handoff · <b>cut ${n} w</b>`, title: `step ${nn} wrote ${meta.raw_w} words; the next step received ${meta.sent_w} once compacted, Findings cut ${n} w` };
-  }
-  return { cls: "", chip: "handoff", title: `the handoff step ${nn} left for the next step${meta.sent_w == null ? "" : `, compacted to ${meta.sent_w} words`}` };
-}
-function connBlock(t, s, d) {  // after step s; none after the last
-  if (!t.steps.some((x) => x.n > s.n)) return "";
-  const c = connCase(t, s, d);
-  if (c.cls === "pending") return '<div class="conn pending"><span class="ln"></span></div>';
-  return `<div class="conn ${c.cls}${boardPick === "c" + s.n && boardData && boardData.id === boardTask ? " picked" : ""}" data-bpick="c${s.n}" tabindex="0" role="button"><span class="ln"></span><span class="chip" title="${esc(c.title)}">${c.chip}</span></div>`;
-}
-function chainHtml(row, d, picked) {  // a task of the chain: folded to its head, or (the picked one) unfolded to its steps
-  const [word, tn] = TASK_WORD[taskShown(row)] || TASK_WORD.running, folded = d == null, n = row.count;
-  const l2 = folded ? (row.state === "waiting" || row.asks ? `<span class="who y">${esc(row.why || row.asks)}</span>` : `<span class="who">${n} ${n === 1 ? "step" : "steps"}</span>`)
-    : `<span class="who">${row.state === "done" || !row.current ? `${n} ${n === 1 ? "step" : "steps"}` : `step ${row.current} of ${n}`}</span>`;
-  const head = `<div class="thead${picked === "t" ? " picked" : ""}" data-bpick="t" data-btask="${esc(row.id)}" tabindex="0" role="button" title="${esc(row.project)} · effort ${esc(row.effort)}">
-    <div class="l1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><span class="t">${esc(row.title)}</span><span class="age m">${ago(snap.now - row.updated)}</span></div>
-    <div class="l2 m">${l2}<span class="cost">${money(row.cost)}</span></div></div>`;
-  if (folded) return `<div class="tk folded">${head}</div>`;
-  if (d === false) return `<div class="tk">${head}<p class="note m">This task is gone.</p></div>`;
-  const t = d.task, steps = t.steps, block = (s) => stepBlock(t, s, d, row);
-  let html = head;
-  for (let k = 0; k < steps.length; k++) {
-    const s = steps[k], prev = steps[k - 1], nx = steps[k + 1];
-    if (prev && s.kind === "fix" && nx && nx.kind === "verify" && nx.checked === s.n) {  // the fix insert: a bracket under the failed verify
-      html += `<div class="branch"><span class="ln"></span><div class="in">${connBlock(t, prev, d)}${block(s)}${connBlock(t, s, d)}${block(nx)}</div></div>`;
-      k++;
-      continue;
-    }
-    html += (prev ? connBlock(t, prev, d) : "") + block(s);
-  }
-  return `<div class="tk">${html}</div>`;
-}
-function emptyBoard() {
-  const where = scope ? projectName(scope) : "any project";
-  return `<div class="empty"><div class="cells">${cellsHtml(Array(30).fill(""))}</div>
-    <p>No task in ${esc(where)}. Type a task in the list; its steps show here as they run.</p></div>`;
 }
 
 // the inspector (plan 25 Tasks 5 and 6): the picked step, handoff, task head or the Measure table
@@ -2997,17 +2928,57 @@ function stepHead(t, s, d, row, extra = "") {
     + (failedTry ? `<button class="btn sm" data-open="${esc(failedTry.session)}">Open try 1</button>` : "");
   const rung = s.state === "planned" ? "rung at start" : modelText(rungOf(s.harness, s.model), s.effort), time = stepTime(s);
   return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(spr)}${word}</span><h2>${stepNo(s)} ${esc(s.kind)}${extra}</h2><span class="lr">${buttons}</span></div>
-    <div class="meta"><span>${esc(rung)}</span><span>cost <b>${stepCostFig(s)}</b></span>${time ? `<span>${time}</span>` : ""}</div></div>${busyBox(t.id)}`;
+    <div class="meta"><span>${esc(rung)}</span><span>cost <b>${stepCostFig(s)}</b></span>${time ? `<span>${time}</span>` : ""}<span>task ${labHtml(t.id)}</span></div></div>${busyBox(t.id)}`;
 }
-function recvPane(t, s, d) {
-  if (s.n === 1) return '<p class="note m">No handoff: step 1 gets the task goal and Prep\'s context pack.</p>';
+function recvPane(t, s, d) {  // what the step received: Prep's handoff for step 1 (plan 29), else the brief of the step before
+  const pf = d.prep_files || {};
+  if (s.n === 1) return pf.handoff ? `<div class="blk"><div class="hd"><span class="lbl">From 00 prep</span><span class="m">${wc(pf.handoff)} w · Findings cut to 600 characters</span></div>
+    ${headingBlock(handoffSections(pf.handoff), [], ["goal", "findings", "questions", "next"])}</div>` : '<p class="note m">No handoff: step 1 gets the task goal and Prep\'s context pack.</p>';
   const prev = t.steps.find((x) => x.n === s.n - 1), brief = (d.briefs || {})[String(s.n - 1)] || "", meta = (prev && prev.brief_meta) || {};
-  if (!brief) return `<p class="note m">The brief of step ${two(s.n - 1)} is not on disk (cleared, or the step never ran).</p>`;
-  const w = meta.sent_w != null ? meta.sent_w : wc(brief);
+  const note = (d.notes || {})[String(s.n - 1)] || "", cut = (meta.cut || []).map(normItem);
+  if (!brief && !note) return `<p class="note m">The brief of step ${two(s.n - 1)} is not on disk (cleared, or the step never ran).</p>`;
+  const w = meta.sent_w != null ? meta.sent_w : wc(brief || note);
   const plan = prev && prev.kind === "design" && t.plan && t.plan.from === prev.n
     ? `<p class="note m">and plan.md, ${Number(t.plan.words || 0).toLocaleString("en")} w, never cut (the Plan tab)</p>` : "";
-  return `<div class="blk"><div class="hd"><span class="lbl">From ${two(s.n - 1)}</span><span class="m">${w} w · ${meta.by === "as is" ? "as is, under the cap" : meta.fallback ? "as written" : "compacted"}</span></div>${plan}
-    ${headingBlock(handoffSections(brief), [], ["goal", "findings", "questions", "next"])}</div>`;
+  let h = handoffSections(brief || note), open = ["goal", "findings", "questions", "next"];
+  if (cut.length && note) {  // the cut lines struck in place: the note as written, minus nothing (the locked handoff view, plan 25)
+    h = handoffSections(note);
+    const all = [].concat(h.findings, h.files, h.trouble, h.questions);
+    for (const c of cut) if (!all.includes(c)) h.findings.push(c);
+    open = open.concat(["files", "trouble"].filter((k) => h[k].some((x) => cut.includes(x))));
+  }
+  const how = meta.by === "as is" ? "as is, under the cap" : meta.fallback ? "as written" : cut.length ? `compacted, cut ${(meta.raw_w || 0) - (meta.sent_w || 0)} w` : "compacted";
+  return `<div class="blk"><div class="hd"><span class="lbl">From ${two(s.n - 1)}</span><span class="m">${w} w · ${how}</span></div>${plan}
+    ${headingBlock(h, cut, open, true)}</div>${checksFold(meta)}`;
+}
+function checksFold(meta) {  // what the code checked on the brief pass's answer (plan 23): closed unless one failed
+  const list = meta.checks || [];
+  if (!list.length) return "";
+  const bad = list.filter((c) => !c.ok);
+  const info = (bad.length ? `<span class="r">${bad.length} FAIL: ${esc(bad[0].name)}</span>` : `${list.length - bad.length} of ${list.length} pass`)
+    + (meta.by ? ` · compacted by ${esc(meta.by)}` : "") + (meta.cost != null ? ` · $${Number(meta.cost).toFixed(3)}` : "")
+    + (meta.turns ? ` · ${meta.turns} ${meta.turns === 1 ? "turn" : "turns"}` : "");
+  const rows = list.map((c) => `<span><span class="${c.ok ? "g" : "r"}">${c.ok ? "✓" : "✗"}</span> ${esc(c.name)}${c.why ? ": " + esc(c.why) : ""}</span>`).join("");
+  return fold("Checks", info, `<div class="checks">${rows}</div>`, { open: !!bad.length, force: !!bad.length, key: "checks" });
+}
+function filesPane(t, s, d) {  // plan 30: the step's folder (plan 28), each file read through GET /api/task/file
+  const names = (d.files || {})[String(s.n)] || [], key = t.id + ":" + s.n;
+  if (!names.length) return '<p class="note m">No file yet: the step folder fills as the step runs.</p>';
+  const why = { "role.md": "the prompt the step ran", "received.md": "what it was given", "notes.md": "its final message", "handoff.md": "its checked HANDOFF block",
+    "brief.md": "the handoff as the next step received it", "facts.md": "git and the last test, read by code", "verdict.md": "the verify verdict", "handed.md": "the session-handoff note",
+    "plan.md": "the plan this design step wrote", "proposal.json": "the replan's proposal" };
+  const rows = names.map((n) => `<div class="v-fr"><button class="olink" data-tfile="${esc(n)}" data-tid="${esc(t.id)}" data-n="${s.n}" aria-expanded="${!!fileView && fileView.key === key && fileView.name === n}">${esc(tasksDirName(s) + "/" + n)}</button>
+    <span class="w">${esc(why[n] || "an earlier attempt's final message")}</span></div>`).join("");
+  const open = fileView && fileView.key === key ? `<div class="blk"><div class="hd"><span class="lbl">${esc(fileView.name)}</span></div><pre class="text">${esc(fileView.text)}</pre></div>` : "";
+  return `<div class="v-files">${rows}</div>${open}`;
+}
+function tasksDirName(s) { return s.dir || `${two(s.n)}-${s.kind}`; }  // tasks.step_dir
+async function openStepFile(b) {
+  const key = b.dataset.tid + ":" + b.dataset.n, name = b.dataset.tfile;
+  if (fileView && fileView.key === key && fileView.name === name) { fileView = null; renderBoard(); return; }
+  const r = await api(`/api/task/file?task=${encodeURIComponent(b.dataset.tid)}&step=${b.dataset.n}&name=${encodeURIComponent(name)}`).catch((e) => ({ text: "Not readable: " + e.message }));
+  fileView = { key, name, text: r.text };
+  renderBoard();
 }
 function handPane(t, s, d) {
   const note = (d.notes || {})[String(s.n)] || "", meta = s.brief_meta || {}, nx = t.steps.find((x) => x.n === s.n + 1);
@@ -3060,8 +3031,11 @@ function inspStep(t, s, d, row) {
   const tabs = [["chat", "Chat"], ["recv", `Received${inW != null && prev ? ` <span class="n">${inW} w</span>` : ""}`],
     ["hand", `Handoff${outW != null ? ` <span class="n">${outW}${sentW != null && sentW < outW && nx ? " → " + sentW : ""} w</span>` : ""}`], ["route", "Route"]];
   if (has) tabs.push(["plan", `Plan <span class="n">${Number(t.plan.words || 0).toLocaleString("en")} w</span>`]);
+  const nf = ((d.files || {})[String(s.n)] || []).length;
+  tabs.push(["files", `Files${nf ? ` <span class="n">${nf}</span>` : ""}`]);  // plan 30
   const tab = tabs.some(([k]) => k === itab) ? itab : "chat";
-  const pane = tab === "chat" ? chatTab(t, s, d) : tab === "recv" ? recvPane(t, s, d) : tab === "hand" ? handPane(t, s, d) : tab === "route" ? routePane(s) : planPane(t, d, s);
+  const pane = tab === "chat" ? chatTab(t, s, d) : tab === "recv" ? recvPane(t, s, d) : tab === "hand" ? handPane(t, s, d) : tab === "route" ? routePane(s)
+    : tab === "files" ? filesPane(t, s, d) : planPane(t, d, s);
   return `${stepHead(t, s, d, row)}${tabsHtml(tabs, tab)}<div class="ipane">${pane}</div>`;
 }
 function tabsHtml(tabs, tab) {
@@ -3093,8 +3067,10 @@ function inspGap(t, s, d, row) {
   const has = d.plan && t.plan && s.n >= t.plan.from;
   const tabs = [["chat", "Chat"], ["recv", "Received"], ["hand", "Handoff"], ["route", "Route"]];
   if (has) tabs.push(["plan", `Plan <span class="n">${Number(t.plan.words || 0).toLocaleString("en")} w</span>`]);
+  tabs.push(["files", "Files"]);  // plan 30
   const tab = tabs.some(([k]) => k === itab) ? itab : "chat";
-  const pane = tab === "chat" ? chatTab(t, s, d) : tab === "recv" ? recvPane(t, s, d) : tab === "hand" ? handPane(t, s, d) : tab === "route" ? routePane(s) : planPane(t, d, s);
+  const pane = tab === "chat" ? chatTab(t, s, d) : tab === "recv" ? recvPane(t, s, d) : tab === "hand" ? handPane(t, s, d) : tab === "route" ? routePane(s)
+    : tab === "files" ? filesPane(t, s, d) : planPane(t, d, s);
   const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
   return `${stepHead(t, s, d, row, ' <span class="m mut">· from plan</span>')}
     <div class="askbox"><span class="st y">${sprite("waiting")}Plan gap <span class="lc">· step ${two(s.n)} stopped, nothing chosen</span></span>
@@ -3103,37 +3079,11 @@ function inspGap(t, s, d, row) {
       <div class="lr">${b("answer", " you", "Send answer").replace('data-tact="answer"', 'data-tact="gapanswer"')}${b("redo", "", "Redo design")}${b("stop", " stop", "Stop")}</div></div>
     ${tabsHtml(tabs, tab)}<div class="ipane">${pane}</div>`;
 }
-function checksFold(meta) {  // what the code checked on the brief pass's answer (plan 23): closed unless one failed
-  const list = meta.checks || [];
-  if (!list.length) return "";
-  const bad = list.filter((c) => !c.ok);
-  const info = (bad.length ? `<span class="r">${bad.length} FAIL: ${esc(bad[0].name)}</span>` : `${list.length - bad.length} of ${list.length} pass`)
-    + (meta.by ? ` · compacted by ${esc(meta.by)}` : "") + (meta.cost != null ? ` · $${Number(meta.cost).toFixed(3)}` : "")
-    + (meta.turns ? ` · ${meta.turns} ${meta.turns === 1 ? "turn" : "turns"}` : "");
-  const rows = list.map((c) => `<span><span class="${c.ok ? "g" : "r"}">${c.ok ? "✓" : "✗"}</span> ${esc(c.name)}${c.why ? ": " + esc(c.why) : ""}</span>`).join("");
-  return fold("Checks", info, `<div class="checks">${rows}</div>`, { open: !!bad.length, force: !!bad.length, key: "checks" });
-}
-function inspConn(t, s, d, row) {  // the handoff after step s: what the next step received, the cut lines struck in place
-  const nx = t.steps.find((x) => x.n === s.n + 1), meta = s.brief_meta || {}, note = (d.notes || {})[String(s.n)] || "";
-  const title = `<h2>Handoff from ${stepNo(s)} ${esc(s.kind)} to ${nx ? stepNo(nx) + " " + esc(nx.kind) : "the end"}</h2>`;
-  if (!note) {
-    const why = t.briefing === s.n || s.state === "running" ? `Haiku is compacting the handoff for step ${stepNo(s)}.` : meta.fallback ? esc(meta.fallback) : "Not written yet.";
-    return `<div class="ihead">${title}</div><p class="note m">${why}</p>`;
-  }
-  const h = handoffSections(note), cut = (meta.cut || []).map(normItem), all = [].concat(h.findings, h.files, h.trouble, h.questions);
-  for (const c of cut) if (!all.includes(c)) h.findings.push(c);  // a cut line the note no longer holds: listed under Findings, tagged cut
-  const open = ["questions", "next"].concat(["findings", "files", "trouble"].filter((k) => h[k].some((x) => cut.includes(x))));
-  const raw = meta.raw_w != null ? meta.raw_w : wc(note), got = meta.sent_w;
-  const cutMeta = meta.fallback ? "<span>sent as written</span>" : meta.cut && meta.cut.length ? `<span>cut <b>${raw - (got || 0)} w</b>, ${meta.cut.length} Findings lines</span>` : "";
-  return `<div class="ihead"><div class="ln1">${title}</div>
-    <div class="meta"><span>${stepNo(s)} wrote <b>${raw} w</b></span>${got != null ? `<span>${nx ? stepNo(nx) : "next"} received <b>${got} w</b></span>` : ""}${cutMeta}</div></div>${busyBox(t.id)}
-    <div class="blk"><span class="lbl">What ${nx ? stepNo(nx) : "the next step"} received</span>${headingBlock(h, cut, open, true)}</div>${checksFold(meta)}`;
-}
 function inspTask(t, d, row) {
   const shown = taskShown(row), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, lv = d.levers || {}, tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
   const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn sm${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
   const gap = /^(asks: )?Plan gap:/.test(row.asks || row.why || ""), replan = (t.why || "").startsWith("replanned:");
-  const buttons = b("stop", " stop", "Stop") + b("pause", "", "Pause") + b("resume", " go", "Resume") + b("retry", " go", "Retry") + b("clear", "", "Clear");
+  const buttons = b("stop", " stop", "Stop") + b("pause", "", "Pause") + b("resume", " go", "Resume") + b("retry", " go", "Retry");
   const nxt = cur && t.steps.find((x) => x.n === cur.n + 1);
   const now = cur && cur.state === "running"
     ? `<div class="now"><span class="cells"><i class="f live"></i></span><span>Now <b>${stepNo(cur)} ${esc(cur.kind)}</b> · ${rungTime(cur)}</span><span class="m">${nxt ? `next ${stepNo(nxt)} ${esc(nxt.kind)}` : "last step"}</span></div>` : "";
@@ -3145,23 +3095,48 @@ function inspTask(t, d, row) {
   } else if (gap || replan) {
     wait = `<div class="askbox"><span class="st y">${sprite("waiting")}${gap ? "Plan gap" : "Replanned"} <span class="lc">· answered in step ${cur ? two(cur.n) : ""}</span></span>
       <div class="lr">${cur ? `<button class="btn" data-bpick="s${cur.n}">Open step ${cur.n}</button>` : ""}</div></div>`;
+  } else if (t.state === "handed" && cur) {
+    wait = handedBox(d, t, cur, shown);
   } else if ((t.state === "waiting" || t.state === "stuck") && t.why) {
-    const c = lv.confirm === "" ? `<button class="btn you" data-tact="confirm" data-tid="${tid}">${esc(confirmLabel(t, row))}</button>` : "";
+    const c = (lv.confirm === "" ? `<button class="btn you" data-tact="confirm" data-tid="${tid}">${esc(confirmLabel(t, row))}</button>` : "")
+      + (lv.redo === "" && (t.state === "stuck" || /^plan .* KB, over /.test(t.why)) ? `<button class="btn" data-tact="redo" data-tid="${tid}" title="Runs the design step again">Redo design</button>` : "");
     wait = `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state === "stuck" ? "stuck" : "waiting")}${word}</span><div class="q">${esc(t.why)}</div>${c ? `<div class="lr">${c}</div>` : ""}</div>`;
   }
+  if (row.paused_after) wait += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
   const qs = d.questions || [], open = qs.filter((q) => !q.closed), closed = qs.filter((q) => q.closed);
   const qrow = (q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.opened)}${q.closed ? " · closed " + two(q.closed) : ""}</span></div>`;
   const doneWhen = (String(t.goal || "").match(/Done when:\s*([^\n]*)/) || [, ""])[1] || String(t.goal || "").split("\n")[0].slice(0, 80);
   const log = d.chain || [], last = log[log.length - 1];
   const move = (c) => `${c.step ? two(c.step) : "task"} ${esc(c.from)} -> ${esc(c.to)}`;
   const n = row.count;
+  const off = ["stop", "retry", "clear"].filter((k) => lv[k]).map((k) => `${k === "clear" ? "Delete" : k[0].toUpperCase() + k.slice(1)} off: ${esc(lv[k])}`).join(" · ");
+  const levers = `<div class="v-levers">${lv.done === "" ? `<button class="btn" data-tact="done" data-tid="${tid}">Mark done</button>` : ""}${lv.clear === "" ? `<button class="btn stop" data-tact="clear" data-tid="${tid}" title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays">Delete</button>` : ""}
+    <span class="m">${off || (lv.clear === "" ? "Delete asks once more" : "")}</span></div>`;
   return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
-    <div class="meta"><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span></div></div>${busyBox(t.id)}
+    <div class="meta">${labHtml(t.id)}<span title="the folder name the chip copies">${tid}</span><button class="olink" data-tact="folder" data-tid="${tid}" title="${esc(taskDir(t.id))}">Open folder</button></div>
+    <div class="meta"><span>${esc(t.project)}</span><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span>${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}</div></div>${busyBox(t.id)}
     ${now}${wait}
     ${fold("prompt.md", `Done when: ${esc(doneWhen)}`, `<pre class="text">${esc(t.goal)}</pre>`, { key: "promptmd" })}
     <div class="blk"><span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("") || '<p class="note m">none</p>'}</div>
       ${closed.length ? fold("", `${closed.length} closed`, `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf", key: "qclosed" }) : ""}</div>
-    ${log.length ? fold("Chain log", `${log.length} moves · last ${hhmm(last.ts)} ${move(last)}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}`;
+    ${log.length ? fold("Chain log", `${log.length} moves · last ${hhmm(last.ts)} ${move(last)}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}
+    ${levers}`;
+}
+function inspPrep(t, d, row) {  // step 00 of a task that ran: the card Prep left (task.prep, plan 29) and its 00-prep/ files
+  const p = t.prep && typeof t.prep === "object" ? t.prep : null, pf = d.prep_files || {};
+  if (!p) return `<div class="ihead"><h2>00 prep</h2></div><p class="note m">This task is from before Prep was step 0: its card is not kept.</p>`;
+  const skipped = p.state === "skipped", tabs = [["card", "Card"], ["scout", `Scouting${pf.scouting ? ` <span class="n">${pf.scouting.trim().split("\n").length} lines</span>` : ""}`], ["hand", "Handoff"]];
+  const tab = tabs.some(([k]) => k === ptab) ? ptab : "card", steps = p.steps || [], route = p.route || {};
+  const card = `${p.question ? `<div class="askbox" style="margin:0"><span class="st y">? Question</span><div class="q">${esc(p.question)}</div></div>` : ""}
+    <div class="blk"><span class="lbl">Prompt · the goal the steps ran on</span><pre class="text">${esc(pf.prompt || t.goal)}</pre></div>
+    <div class="blk"><span class="lbl">Route</span><p class="note m">${esc([route.type, modelText(route.model, route.effort)].filter(Boolean).join(" · ") || "none")}${p.reason ? " · " + esc(p.reason) : ""}</p></div>
+    <div class="blk"><span class="lbl">Steps proposed · ${steps.length}</span>${steps.map((x, k) => `<div class="pstep"><span class="n">${two(k + 1)}</span><span class="g">${esc(x.goal)}</span><span class="r">${esc(x.kind)}${x.model ? " · " + esc(x.model) : ""}</span></div>`).join("") || '<p class="note m">none: a chat</p>'}</div>`;
+  const pane = skipped ? '<p class="note m">Raw: Prep was skipped and the prompt ran as typed.</p>'
+    : tab === "scout" ? (pf.scouting ? `<pre class="text">${esc(pf.scouting)}</pre>` : '<p class="note m">Prep listed nothing it read.</p>')
+    : tab === "hand" ? (pf.handoff ? headingBlock(handoffSections(pf.handoff), [], ["goal", "findings", "questions", "next"]) : '<p class="note m">No handoff file in 00-prep.</p>') : card;
+  return `<div class="ihead"><div class="ln1"><span class="st ${skipped ? "q" : "g"}">${sprite(skipped ? "stopped" : "done")}${skipped ? "Skipped" : "Done"}</span><h2>00 prep · ${esc(t.title)}</h2></div>
+    <div class="meta"><span>${esc(alias(p.model) || p.model || "haiku")}</span>${p.turns ? `<span>${p.turns} turns</span>` : ""}<span>cost <b>${money(p.cost)}</b></span><span>task ${labHtml(t.id)}</span></div></div>
+    ${skipped ? "" : `<div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-ptab="${k}" aria-selected="${tab === k}" tabindex="${tab === k ? 0 : -1}">${l}</button>`).join("")}</div>`}<div class="ipane">${pane}</div>`;
 }
 function inspMeasure(m, name) {
   if (!m) return '<div class="ihead"><h2>Measure</h2></div><p class="note m">The measure is not available.</p>';
@@ -3187,21 +3162,21 @@ function inspMeasure(m, name) {
 
 // -- events ------------------------------------------------------------------------------
 async function go(name, button) {
-  if (name === "list") { backTo = null; showPage("list"); }
+  if (name === "list") { backTo = null; showPage("board"); }
   if (name === "back") goBack();
-  if (name === "board") openBoard(page === "task" ? taskId : "");
-  if (name === "new") { if (form === "pill") await setForm("open"); showPage("list"); $("c-prompt").focus(); }
+  if (name === "board") showPage("board");
+  if (name === "bback") { boardPick = ""; boardTask = ""; prepShown = ""; renderBoard(); }
+  if (name === "new") { if (form === "pill") await setForm("open"); showPage("board"); $("c-prompt").focus(); }
   if (name === "needs") {
     if (scope) pick("");
     const n = $("needsec");
     if (n) n.scrollIntoView({ block: "start", behavior: "smooth" });
   }
-  if (name === "moredone") { doneOpen = true; render(); }
   if (name === "cleardraft") { draft = ""; $("c-prompt").value = ""; draftKept = false; saveDraft(); renderCompose(); $("c-prompt").focus(); }
   if (name === "empties") { emptyOpen = !emptyOpen; render(); }
   if (name === "usage") showPage("usage");
   if (name === "models") showPage("models");  // plan 26: the Settings band's Models and tuning link
-  if (name === "fold") { if (page === "board") await closeBoard(); await setForm("pill"); }
+  if (name === "fold") await setForm("pill");
   if (name === "unfold") await setForm("open");
   if (name === "allow") allowRuns(button);
   if (name === "retry" && fail) {
@@ -3252,25 +3227,30 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
-  const gr = e.target.closest("[data-grow]");  // plan 25: a finished row opens its ctx gauge line in place
-  if (gr && !e.target.closest("button,a,.link")) {
-    const key = taskId + ":" + gr.dataset.grow;
-    if (grown.has(key)) grown.delete(key); else grown.add(key);
-    drawTask();
+  const b = e.target.closest("[data-copy],[data-check],[data-day],[data-cal],[data-dayfold],[data-older],[data-sel],[data-del],[data-ptab],[data-tfile]");
+  if (b) {  // plan 30: the Board's own controls (a label chip and a checkbox sit inside a task head: the head is not picked)
+    if (b.dataset.copy) { e.stopPropagation(); copyLabel(b.dataset.copy); }
+    else if (b.dataset.check) { if (b.checked) selected.add(b.dataset.check); else selected.delete(b.dataset.check); boardPick = "x"; renderBoard(); }
+    else if (b.dataset.day) pickDay(b.dataset.day);
+    else if (b.dataset.cal) { calWeeks = Math.min(0, calWeeks + Number(b.dataset.cal)); renderCal(); }
+    else if (b.dataset.dayfold) { const k = b.dataset.dayfold; dayOpen[k] = b.getAttribute("aria-expanded") !== "true"; if (!dayOpen[k] && selecting === k) setSelecting(""); else renderBoard(); }
+    else if (b.dataset.older !== undefined) { olderOpen = !olderOpen; renderBoard(); }
+    else if (b.dataset.sel !== undefined) setSelecting(b.dataset.sel);
+    else if (b.dataset.del) deleteSelected(b);
+    else if (b.dataset.ptab) { ptab = b.dataset.ptab; renderBoard(); }
+    else if (b.dataset.tfile) openStepFile(b);
     return;
   }
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],#brief,#today,#overpace");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],#brief,#overpace");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
-  if (t.dataset.open || t.dataset.task) {  // a session opened from a task returns to it, a task opened from a session too
-    const card = t.closest(".card.task");
-    backTo = t.dataset.open && t.closest("#bwrap,#bchain") ? { page: "board" }
-      : t.dataset.open && (t.closest("#tscroll") || card) ? { page: "task", id: card ? card.dataset.task : taskId }
-      : t.dataset.task && page === "session" ? { page: "session", id: openId } : null;
+  if (t.dataset.open || t.dataset.task) {  // a session opened from the Board returns to it, a task opened from a session too
+    backTo = t.dataset.open ? { page: "board" } : t.dataset.task && page === "session" ? { page: "session", id: openId } : null;
   }
-  if (t.dataset.bpick !== undefined) {  // plan 25: a pick on the Board's chain
-    if (t.dataset.btask && t.dataset.btask !== boardTask) { boardTask = t.dataset.btask; boardData = boardChat = null; }
+  if (t.dataset.bpick !== undefined) {  // a pick on the chain, or a row of the day's list
+    if (t.dataset.btask !== boardTask) { boardTask = t.dataset.btask || ""; boardData = boardChat = null; }
     boardPick = t.dataset.bpick;
+    if (boardPick !== "x" && selecting && boardPick !== "t") setSelecting("");
     renderBoard();
   } else if (t.dataset.itab) { itab = t.dataset.itab; saveDraft(); renderBoard(); }
   else if (t.dataset.eff) setEffort(t.dataset.eff);
@@ -3286,7 +3266,7 @@ document.addEventListener("click", async (e) => {
   else if (t.dataset.min !== undefined) { tlMin = tlBase() + Number(t.dataset.min); const s = current(); if (s) renderProc(s).catch(() => {}); }
   else if (t.dataset.act) act(t.dataset.act, t);
   else if (t.dataset.pact) prepAct(t.dataset.pact, t);
-  else if (t.dataset.here !== undefined) { pick(t.dataset.here); showPage("list"); $("c-prompt").focus(); }
+  else if (t.dataset.here !== undefined) { pick(t.dataset.here); showPage("board"); $("c-prompt").focus(); }
   else if (t.dataset.harness) harnessAct(t);
   else if (t.dataset.models) modelsAct(t);
   else if (t.dataset.proj !== undefined) pick(t.dataset.proj);
@@ -3298,10 +3278,9 @@ document.addEventListener("click", async (e) => {
     t.querySelector(".car").textContent = briefOpen ? "▴" : "▾";
     $("more").hidden = !briefOpen;
     saveDraft();
-  } else if (t.id === "today" || t.id === "overpace") {  // plan 18: the over-pace line opens the same breakdown
+  } else if (t.id === "overpace") {  // plan 18: the over-pace line opens today's breakdown under the calendar
     const open = t.getAttribute("aria-expanded") !== "true";
-    $("today").setAttribute("aria-expanded", String(open));
-    $("overpace").setAttribute("aria-expanded", String(open));
+    t.setAttribute("aria-expanded", String(open));
     $("todaymore").hidden = !open;
   }
 });
@@ -3330,9 +3309,9 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("change", (e) => {
-  if (e.target.id === "t-editpart" || e.target.id === "b-editpart") {  // the plan editor switches between the index and a part
+  if (e.target.id === "b-editpart") {  // the plan editor switches between the index and a part
     planEditPart = Number(e.target.value) || 0;
-    const onBoard = e.target.id === "b-editpart", d = onBoard ? boardData && boardData.data : taskData, box = $(onBoard ? "b-edit" : "t-edit");
+    const d = boardData && boardData.data, box = $("b-edit");
     if (d && box) box.value = planEditPart ? partText(d, planEditPart) : d.plan;
     return;
   }
@@ -3379,14 +3358,13 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
   const onCtl = e.key !== "Escape" && e.target.matches('[data-page="board"] button, [data-page="board"] select');  // plan 27: Enter presses it, the arrows scroll
-  if (page === "board" && form === "open" && BOARD_KEYS.has(e.key) && $("pop").hidden && !inField && !onCtl && !e.target.closest(".tabs")) return boardKey(e);
+  if (page === "board" && form === "open" && BOARD_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && $("pop").hidden && !inField && !onCtl && !e.target.closest(".tabs")) return boardKey(e);
   if (e.key === "Escape") {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();
-    else if (page === "prep") prepAct("back");
-    else if (page === "session" || page === "task" || page === "board") goBack();
-    else if (page === "usage") showPage("list");
-    else if (page === "models" && !inField && !Object.keys(modelChanges()).length) showPage("list");  // edits stay until Save or Discard
+    else if (page === "session") goBack();
+    else if (page === "usage") showPage("board");
+    else if (page === "models" && !inField && !Object.keys(modelChanges()).length) showPage("board");  // edits stay until Save or Discard
     return;
   }
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -3449,7 +3427,7 @@ function connect() {
   project = (cfg && cfg.project) || "";
   briefOpen = !!(cfg && cfg.brief);
   effortPick = cfg && EFF_LEVELS.includes(cfg.effort) ? cfg.effort : "auto";
-  itab = cfg && ["chat", "recv", "hand", "route", "plan"].includes(cfg.board_tab) ? cfg.board_tab : "chat";
+  itab = cfg && ["chat", "recv", "hand", "route", "plan", "files"].includes(cfg.board_tab) ? cfg.board_tab : "chat";
   foldState = (cfg && cfg.folds) || {};
   connect();
 })();

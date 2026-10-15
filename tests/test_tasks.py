@@ -1249,6 +1249,12 @@ def brief(*questions):
 class BoardTest(unittest.TestCase):
     """Plan 25 Task 1: open questions from the briefs, the chain log, the measure table."""
 
+    def test_label_is_mmdd_and_the_hex(self):  # plan 30 (D11)
+        self.assertEqual(tasks.label("20261015-093012-a3f2"), "1015-a3f2")
+        self.assertEqual(tasks.label(prep.new_id())[4], "-")
+        for bad in ("", "x", "20261015-093012-A3F2", "../20261015-093012-a3f2", None):
+            self.assertEqual(tasks.label(bad), "")
+
     def test_open_questions_open_and_close(self):
         task = make(("scout", "code", "document"))  # scout, code, verify, document
         briefs = {1: brief("Which exe is the real one?"), 2: brief("Which exe is the real one?", "Week or 7 days?"),

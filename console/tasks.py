@@ -444,6 +444,13 @@ def new_task(project_dir: str, project: str, title: str, goal: str, steps: list,
             "steps": copy.deepcopy(steps)}
 
 
+def label(task_id: str) -> str:
+    """The short form of a task id (plan 30, D11): `20261015-093012-a3f2` -> `1015-a3f2`, MMDD and the four hex
+    characters. The window's chip shows it and copies the full id; "" for an id of another shape."""
+    m = re.fullmatch(r"\d{4}(\d{4})-\d{6}-([0-9a-f]{4})", str(task_id or ""))
+    return f"{m.group(1)}-{m.group(2)}" if m else ""
+
+
 def prep_id(task: dict) -> str:
     """The Prep id of a task: task["prep"]["id"] (plan 29), or the bare id string of a task from before it."""
     p = task.get("prep")
@@ -796,6 +803,17 @@ def read_step_file(home, task: dict, step: dict, name: str) -> str:
         return (folder(home, task["id"]) / step_file(step, name)).read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def step_files(home, task: dict, step: dict) -> list:
+    """The STEP_FILES the step's folder holds, in that order, then its attempts' notes.<k>.md (plan 30, the Files
+    tab); [] for a step from before plan 28 or one that never started."""
+    try:
+        names = {p.name for p in (folder(home, task["id"]) / step_dir(step)).iterdir() if p.is_file()}
+    except OSError:
+        return []
+    tries = sorted((n for n in names if _ATTEMPT_NOTES.fullmatch(n)), key=lambda n: int(_ATTEMPT_NOTES.fullmatch(n)[1]))
+    return [n for n in STEP_FILES if n in names] + tries
 
 
 def read_note(home, task: dict, n: int) -> str:
