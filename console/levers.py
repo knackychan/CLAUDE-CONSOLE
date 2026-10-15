@@ -14,8 +14,8 @@ HANDOFF_TEXT = "/session-handoff"
 HANDOFF_ROUTE = ("sonnet", "medium")  # after a PASS: a fresh chat writes the note from a brief (Fred: c, 2026-10-13)
 HANDOFF_SKILL = Path("skills") / "session-handoff" / "SKILL.md"
 MISSES_FILE = "routing-misses.md"
-MISSES_HEAD = ("# Routing misses\n\nOne line per Escalate, written by Claude Console. "
-               "Prep reads the lines of its project.\n\n")
+MISSES_HEAD = ("# Routing misses\n\nOne line per Escalate, written by Claude Console, and one `floor ... used` line "
+               "when a step on that floor passed (it ends the floor). Prep reads the lines of its project.\n\n")
 MISSES_SHOWN = 20
 LESSONS_FILE = "lessons.md"
 LESSONS_HEAD = ("# Lessons\n\nOne line per lesson: a step's `Lesson:` line (written by Claude Console) or a "
@@ -73,6 +73,12 @@ def miss_line(project: str, task_type: str, route_from: str, route_to: str, deta
     why = redact.clip(redact.mask(detail), 120) or "verifier FAIL"
     return (f"- {_day(now)} - {project} - {task_type or 'unrouted'}: {route_from} failed ({why}); "
             f"next time start at {route_to}.")
+
+
+def used_line(project: str, kind: str, route: str, task_id: str, n: int, now: float = None) -> str:
+    """Plan 32: the floor `route` of `kind` did its job once (step `n` of `task_id` ran on it and passed); the next
+    step of that kind starts at its rule again (routing.live)."""
+    return f"- {_day(now)} - {project} - {kind}: floor {route} used by task {task_id} step {n:02d}; it passed."
 
 
 def lesson_line(project: str, kind: str, text: str, now: float = None) -> str:

@@ -297,6 +297,43 @@ def kinds_of(task):
 
 
 class ChainTest(unittest.TestCase):
+    def test_a_floor_is_spent_by_the_step_that_proves_it(self):
+        """Plan 32: a code step on its floor is proven by the verify that passes after it; a scout by its own end."""
+        task = make(("scout", "code"))
+        floored = {"scout": "haiku/medium", "code": "opus/high"}
+        for n, kind in ((1, "scout"), (2, "code")):
+            route = {"model": floored[kind].split("/")[0], "effort": floored[kind].split("/")[1], "hold": "",
+                     "notes": [f"rule {kind}: x/y", f"floor {kind}: {floored[kind]}"]}
+            tasks.start_step(task, n, f"s{n}", route, "abc1234", NOW + n)
+            self.assertEqual(tasks.floor_of(tasks.step(task, n)), floored[kind])
+            self.assertEqual(end(task, verdict="")[0], "next")
+            got = tasks.spend_floors(task, tasks.step(task, n), "", NOW + n)
+            self.assertEqual([(x["n"], r) for x, r in got], [(1, "haiku/medium")] if n == 1 else [])  # code waits
+        run(task, 3, "opus", "high")
+        self.assertEqual(end(task, verdict="PASS")[0], "done")
+        verify = tasks.step(task, 3)
+        self.assertEqual([(x["n"], r) for x, r in tasks.spend_floors(task, verify, "PASS", NOW)], [(2, "opus/high")])
+        self.assertEqual(tasks.spend_floors(task, verify, "PASS", NOW), [])  # once
+        self.assertEqual(tasks.spend_floors(task, tasks.step(task, 1), "", NOW), [])
+
+    def test_a_failed_verify_or_a_kept_pick_spends_nothing(self):
+        task = make(("code",))
+        route = {"model": "sonnet", "effort": "high", "hold": "",
+                 "notes": ["rule code: sonnet/medium", "floor code: opus/high -> pick sonnet/high kept"]}
+        tasks.start_step(task, 1, "s1", route, "abc1234", NOW)
+        self.assertEqual(tasks.floor_of(tasks.step(task, 1)), "")  # Fred's pick ran, not the floor
+        end(task)
+        run(task, 2, "opus", "high")
+        end(task, verdict="PASS")
+        self.assertEqual(tasks.spend_floors(task, tasks.step(task, 2), "PASS", NOW), [])
+        task = make(("code",))
+        route["notes"] = ["rule code: sonnet/medium", "floor code: opus/high"]
+        tasks.start_step(task, 1, "s1", route, "abc1234", NOW)
+        end(task)
+        run(task, 2, "opus", "high")
+        self.assertEqual(end(task, verdict="FAIL", verdict_detail="x")[0], "fix")
+        self.assertEqual(tasks.spend_floors(task, tasks.step(task, 2), "FAIL", NOW), [])
+
     def test_plan_steps_validates_and_appends_verify(self):
         proposed = [{"kind": "scout", "goal": "a"}, {"kind": "code", "goal": "b"},
                     {"kind": "bogus", "goal": "c"}, {"kind": "test"}]

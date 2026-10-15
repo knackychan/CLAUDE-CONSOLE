@@ -107,7 +107,7 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, pre
     and returns it; `prep_id` is the job's id, so the card, its job and its task share one name."""
     cmd = claude_cli.prep_command(exe, cfg["prep_model"], SCHEMA)
     days = cfg.get("miss_floor_days", 0)
-    misses = routing.fresh(levers.read_misses(folder, Path(project_dir).name), days)
+    misses = routing.live(routing.fresh(levers.read_misses(folder, Path(project_dir).name), days))  # plan 32
     prompt = build_prompt(raw, misses, days, paths.you(cfg, start=True), kinds.text(folder, "prep"))
     try:
         out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"),

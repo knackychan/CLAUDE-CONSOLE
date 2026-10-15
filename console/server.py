@@ -1285,6 +1285,11 @@ class Hub:
                 levers.add_lesson(self.folder, levers.lesson_line(task["project"], cs["kind"], lesson, now))
         if action == "fix":
             levers.add_miss(self.folder, task["miss"])
+        if action in ("next", "done"):  # plan 32: a floor that did its job once ends
+            for x, route in tasks.spend_floors(task, cs, verdict, now):
+                levers.add_miss(self.folder, levers.used_line(task["project"], x["kind"], route, task["id"], x["n"], now))
+                lines.append(tasks._line(now, cs, "done", "done",
+                                         f"floor {x['kind']}: {route} used; the next {x['kind']} step starts at its rule"))
         if ended:
             task["briefing"] = cs["n"]  # saved with the transition, so a restart finds the unfinished brief
         ask = replan.ask_line(block) if block and ended and cs["kind"] != "replan" else ""

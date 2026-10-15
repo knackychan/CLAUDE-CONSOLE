@@ -3,7 +3,7 @@ import time
 import unittest
 from pathlib import Path
 
-from console import levers, prep
+from console import levers, prep, routing
 
 
 class LeversTest(unittest.TestCase):
@@ -31,6 +31,10 @@ class LeversTest(unittest.TestCase):
             self.assertEqual(levers.read_misses(Path(tmp) / "nope", "CALC"), [])
             self.assertIn(line, prep.build_prompt("x", [line]))
             self.assertIn("\n(none)\n", prep.build_prompt("x"))
+            used = levers.used_line("CALC", "code", "opus/high", "20261015-085403-e56d", 3, now)
+            self.assertEqual(used, "- 2026-10-10 - CALC - code: floor opus/high used by task 20261015-085403-e56d "
+                                   "step 03; it passed.")
+            self.assertIsNone(routing.floor([used], "code"))  # a used line is never a floor itself
 
     def test_after_verify(self):
         self.assertEqual(levers.after_verify("PASS"), ("handoff", "done"))

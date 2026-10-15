@@ -878,6 +878,22 @@ class TaskServerTest(RunServerTest):
                          [("", "haiku", "low"), ("sonnet", "sonnet", "high"), ("", "opus", "high")])
         self.assertIn("floor code: opus/high -> pick sonnet/high kept", task["steps"][1]["notes"])
 
+    def test_a_floor_ends_when_a_step_on_it_passes(self):
+        """Plan 32, Fred's case of 2026-10-15: the code floor of one sonnet miss runs one code step on opus; its
+        verify passes, the floor is marked used and the next task's code step starts at its rule."""
+        levers.add_miss(self.folder, levers.miss_line("proj", "code", "sonnet/high", "opus/high", "const prepSeen"))
+        tid = self.make_task(words="HANDOFF-OK VERDICT-PASS")
+        task = self.until(tid, lambda t: t["state"] == "done", "the task ends")
+        self.assertEqual((task["steps"][1]["model"], task["steps"][1]["effort"]), ("opus", "high"))
+        self.assertIn("floor code: opus/high used; the next code step starts at its rule", self.whys(tid))
+        misses = levers.read_misses(self.folder, "proj")
+        self.assertEqual(len(misses), 2)
+        self.assertIn(f"code: floor opus/high used by task {tid} step 02; it passed.", misses[1])
+        self.assertEqual(self.prep_card()["floors"], {})
+        task = self.until(self.make_task(), self.at(2), "the next code step starts")
+        self.assertEqual((task["steps"][1]["model"], task["steps"][1]["effort"]), ("sonnet", "medium"))
+        self.assertFalse(any(n.startswith("floor") for n in task["steps"][1]["notes"]))
+
     def test_old_miss_is_no_floor_for_a_step(self):
         old = "- 2020-01-01 - proj - code: sonnet/medium failed (x); next time start at opus/high."
         levers.add_miss(self.folder, old)

@@ -47,6 +47,20 @@ class RoutingTest(unittest.TestCase):
                           "debug": {"route": "sonnet/high", "date": "2026-10-11"}})
         self.assertEqual(routing.floors([]), {})
 
+    def test_a_used_line_ends_the_floor_once(self):
+        """Plan 32: Fred's case of 2026-10-15. One sonnet miss pinned every code step to opus/high for 14 days; the
+        first step that passed on the floor ends it, and a later miss sets a floor again."""
+        miss = "- 2026-10-12 - APP - code: sonnet/high failed (x); next time start at opus/high."
+        debug = "- 2026-10-12 - APP - debug: sonnet/medium failed (z); next time start at sonnet/high."
+        used = levers.used_line("APP", "code", "opus/high", "20261015-085403-e56d", 3)
+        again = "- 2026-10-16 - APP - code: sonnet/medium failed (y); next time start at sonnet/high."
+        self.assertEqual(routing.live([miss, debug, used]), [debug])
+        self.assertIsNone(routing.floor([miss, debug, used], "code"))
+        self.assertEqual(routing.floor([miss, debug, used], "debug"), ("sonnet", "high"))  # another kind keeps its own
+        self.assertEqual(routing.floor([miss, used, again], "code"), ("sonnet", "high"))
+        self.assertEqual(routing.floors([miss, debug, used]), {"debug": {"route": "sonnet/high", "date": "2026-10-12"}})
+        self.assertEqual(routing.pick(route("sonnet", "medium", type_="code"), [miss, used]), ("sonnet", "medium"))
+
     def test_parse(self):
         self.assertEqual(routing.parse("sonnet/medium"), ("sonnet", "medium"))
         for bad in ("", None, "sonnet", "gpt/high", "sonnet/turbo"):

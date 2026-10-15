@@ -618,6 +618,37 @@ def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdi
     return "done", lines
 
 
+def floor_of(s: dict) -> str:
+    """The floor route step `s` ran on ("opus/high"), "" when no floor raised it or Fred's pick kept its model."""
+    for note in s.get("notes") or ():
+        if note.startswith(f"floor {s['kind']}: ") and "->" not in note:
+            return note.split(": ", 1)[1]
+    return ""
+
+
+def spend_floors(task: dict, s: dict, verdict: str, now: float) -> list:
+    """Plan 32: the floors step `s` proved, now that it ended done. A verify that passed proves the edit steps before
+    it; a step of a kind no verify checks (scout, explain, test, ...) proves its own; an edit step waits for its
+    verify. Marks each step `floor_spent` (once) and returns [(step, route)], one per kind."""
+    if s["state"] != "done" or s["kind"] == "fix" or (s["kind"] in EDIT_KINDS):
+        return []
+    if s["kind"] == "verify":
+        if verdict != "PASS":
+            return []
+        ran = [x for x in task["steps"] if x["n"] < s["n"] and x["state"] == "done" and x["kind"] in EDIT_KINDS]
+    else:
+        ran = [s]
+    out, kinds = [], set()
+    for x in ran:
+        route = floor_of(x)
+        if route and not x.get("floor_spent"):
+            x["floor_spent"] = now
+            if x["kind"] not in kinds:
+                kinds.add(x["kind"])
+                out.append((x, route))
+    return out
+
+
 def held(task: dict) -> bool:
     """The task waits because a step's model is over its pace (step_route's hold)."""
     return task["state"] == "waiting" and task["why"].endswith(" over its pace")
