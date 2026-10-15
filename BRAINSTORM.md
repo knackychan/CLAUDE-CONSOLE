@@ -185,7 +185,11 @@ window runs). Buttons:
   red or after 2 follow-ups.
 - **Open in terminal**, **Stop** (clean interrupt, not a kill).
 
-Run always starts a new session (one task = one chat).
+Run always starts a new session (one task = one chat). Plan 36 Stage A: at a completed turn the Board's
+footer adds **Add next step** (Code / Verify / Investigate / Plan / Chat, Auto or an exact model,
+instructions): a fresh session appended to the same task and folder with the previous step's handover
+saved as the new step's `received-handoff.md`; a task grown this way is `progression: "manual"` and
+stops after each step with `choose next step`. Earlier steps are read only.
 
 ### 7.4 Visual style (from square-orchestrator's UI design and interactive reference)
 

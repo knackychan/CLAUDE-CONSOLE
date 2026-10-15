@@ -1,6 +1,7 @@
 # Plan 36: Add the next session as a step of this task
 
-Status: **planned, not implemented**, 2026-10-15. Documentation only in this session.
+Status: **Stage A shipped** 2026-10-15 (Tasks 1-4, fake harnesses only; live provider checks open).
+Stage B (Tasks 5-6) not started. Section 6 is the log.
 
 Design contract: [next-step design guideline](../../design/brainstorm/2026-10-15-next-step.md).
 Master index: [PLAN.md](../../PLAN.md). Existing contracts: [task chains](../17-tasks/README.md),
@@ -342,4 +343,22 @@ implementation choices within this contract do not need a new approval round.
   unchanged source agree (3.4); `_chat_tick` no longer writes `last_good = 1` for every chat step.
   Check: 12 pure tests and 8 service tests pass; the rest of Task 1's check list is Task 2's and
   Task 3's subject.
-
+- 2026-10-15 - Task 2 placed (commit 53bbd41): the handover package, the exact route, preview and append
+  API; NextStepTest 13 and NextStepServerTest 20.
+- 2026-10-15 - Task 3 placed (commit f4cf339): the Board's Add next step footer and inline form;
+  NextStepUITest 13 in `tests/test_web.py`.
+- 2026-10-15 - Task 4 placed: Stage A acceptance. Bounded headless pass (Playwright, Chromium, fake claude,
+  a scratch `CC_CONSOLE_HOME`, the service in-process): at 900 px dark a real click on Add next step, typed
+  instructions and a click on Start step appended step 02 `code` to the same task with a new session id, wrote
+  `tasks/<id>/02-code/received-handoff.md` (the six sections) and `received.md`, selected step 02 on its Chat
+  tab, and the step ended at `choose next step` with step 01 unchanged. Then 900 light, 400 and 340 px light
+  and dark, reduced motion, and 130 % text scaling (device scale 1.3 at 400 and 340 px, as WebView2 does):
+  footer and form with no horizontal overflow, no motion in the form under reduce, Cancel returns focus to
+  Add next step, Enter reopens and Escape closes the form, nothing starts, no page errors. The first pass
+  found two `web/app.js` failures, both fixed: (1) Start after editing the instructions posted the revision of
+  the earlier preview, which covers the instructions, so the service answered "This step changed" and a second
+  click was needed; Start now previews the edited Work/Model/Instructions first (`nextStale`) and starts at
+  once unless the resolved route changed, which still needs Start again (3.2); (2) a Work switch reseeded the
+  draft but `setHtml` kept the field's old text over the redraw, so Verify showed "Go on" while Start would
+  send the Verify default; `setInstr` writes the open field too. Two tests in NextStepUITest. Fix pass and
+  one confirmation pass: 69 of 69 checks each. `node --check web/app.js` OK. Not done: live provider checks.

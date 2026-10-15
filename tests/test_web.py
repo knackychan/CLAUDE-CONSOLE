@@ -244,6 +244,24 @@ class NextStepUITest(unittest.TestCase):
         self.assertIn("Add next step is available when this turn finishes", html)
         self.assertNotIn("Continue", html)
 
+    def test_start_previews_edited_instructions_first(self):
+        """Plan 36 Task 4 (headless pass): the package carries the instructions, so Start after an edit refreshes
+        the preview instead of posting a revision the service answers with 'This step changed'."""
+        view = "{asked: {kind: 'code', model: 'auto', instr: 'Go on'}}"
+        self.assertEqual(render(f"[nextStale({view}, {{kind: 'code', model: 'auto', instr: ' Go on '}}), "
+                                f"nextStale({view}, {{kind: 'code', model: 'auto', instr: 'add a test'}}), "
+                                f"nextStale({view}, {{kind: 'verify', model: 'auto', instr: 'Go on'}}), "
+                                f"nextStale({view}, {{kind: 'code', model: 'opus', instr: 'Go on'}}), "
+                                "nextStale({}, {kind: 'code', model: 'auto', instr: 'Go on'})]"),
+                         [False, True, True, True, True])
+
+    def test_a_reseed_shows_in_the_open_field(self):
+        """Plan 36 Task 4 (headless pass): setHtml keeps a field's typed value over a redraw, so a Work switch
+        writes the reseeded instructions into the open field as well as the draft."""
+        out = render("(() => { const f = {value: 'Go on'}; document = {getElementById: (id) => id === 'b-ninstr' ? f : null}; "
+                     "const d = {instr: 'Go on'}; setInstr(d, VERIFY_DEFAULT); return [d.instr === VERIFY_DEFAULT, f.value === VERIFY_DEFAULT]; })()")
+        self.assertEqual(out, [True, True])
+
 
 if __name__ == "__main__":
     unittest.main()

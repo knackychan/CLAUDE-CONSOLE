@@ -27,7 +27,7 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
 - The plan a design step writes is saved by the service as tasks/<id>/plan.md and plan/NN-*.md, never cut; plan 24 README is its contract.
 - Handoffs (step notes, briefs, the session-handoff skill) use tasks.HEADINGS, six headings; facts (git and the last test) are code-read and never compacted; plan 23 README is the contract.
 - The Models and tuning page writes config.json only through POST /api/config/models (console/tuning.py whitelist, all or nothing); it never writes models.json.
-- The Board is a page of the one window (plan 25): WindowApi.board(on) alone widens and returns it; it reads GET /api/task, /api/chat and /api/measure and writes nothing but window.json, except a chat task's follow-up (Continue under its chat, the existing POST /api/continue; Fred decided 2026-10-15).
+- The Board is a page of the one window (plan 25): WindowApi.board(on) alone widens and returns it; it reads GET /api/task, /api/chat and /api/measure and writes nothing but window.json, except a chat task's follow-up (Continue under its chat, the existing POST /api/continue; Fred decided 2026-10-15) and plan 36's Add next step: POST /api/task/next/preview (local, starts nothing) then POST /api/task/next with the preview's revision and a request id, which appends one step to the same task in a fresh session (resume=None) and saves its received-handoff.md and received.md; availability comes only from GET /api/task levers.add_next and next_step, and Finish task is the existing POST /api/task/done.
 - No emojis or em-dashes in prose. Verify CLI flags and hook fields against code.claude.com docs
   before relying on them.
 

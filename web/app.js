@@ -125,7 +125,7 @@ document.addEventListener("input", (e) => {  // plan 36: the next-step draft sur
 document.addEventListener("change", (e) => {  // a new Work or Model resolves a fresh preview; a model change keeps the instructions
   if (!nextOpen) return;
   const d = nextDraft[nextOpen.key];
-  if (e.target.id === "b-nwork") { d.kind = e.target.value; if (!d.hi) d.instr = nextReseed(d.kind); return nextPreview(); }
+  if (e.target.id === "b-nwork") { d.kind = e.target.value; if (!d.hi) setInstr(d, nextReseed(d.kind)); return nextPreview(); }
   if (e.target.id === "b-nmodel") { d.model = e.target.value; return nextPreview(); }
 });
 let foldState = {};      // window.json folds: {key: open}
@@ -3108,6 +3108,11 @@ function nextReseed(kind) {  // a Work switch reseeds the instructions for the n
   const t = bd && bd.task, s = t && t.steps.find((x) => x.n === t.current);
   return t && s ? nextInstr(t, bd, s, kind, null) : "";
 }
+function setInstr(draft, text) {  // a reseed shows in the open field too: setHtml keeps a field's typed value over the redraw
+  draft.instr = text;
+  const f = $("b-ninstr");
+  if (f) f.value = text;
+}
 function nextModelOptions(draft, view) {  // Auto first, then the exact rungs the preview resolved; a disabled one carries its reason
   const rows = [["auto", "Auto", ""]].concat(((view && view.models) || [])
     .filter((m) => m.rung !== "auto")
@@ -3197,7 +3202,7 @@ async function openNextForm(tid, kind) {
   if (box) fuDraft[s.session] = box.value;
   nextOpen = { tid, key };
   nextDraftFor(t, bd, s);
-  if (kind) { nextDraft[key].kind = kind; nextDraft[key].instr = nextInstr(t, bd, s, kind, null); }
+  if (kind) { nextDraft[key].kind = kind; setInstr(nextDraft[key], nextInstr(t, bd, s, kind, null)); }
   nextView = null;
   focusWork = true;
   renderBoard();
@@ -3223,9 +3228,10 @@ async function nextPreview() {
   const instr = String(draft.instr || "").trim();
   if (!instr) { nextView = { key, busy: false, models: [], error: "Describe what this step should do (1 to 1000 characters)" }; renderBoard(); return; }
   try {
+    const asked = { kind: draft.kind, model: draft.model, instr };
     const data = await api("/api/task/next/preview", { task: tid, source_step: s.n, source_session: s.session,
-      kind: draft.kind, instructions: instr, model: draft.model });
-    nextView = { key, busy: false, ...data };
+      kind: asked.kind, instructions: instr, model: asked.model });
+    nextView = { key, busy: false, ...data, asked };
   } catch (e) {
     nextView = { key, busy: false, models: [], error: e.message };
   }
@@ -3246,6 +3252,15 @@ async function startNextStep(button) {
   const draft = nextDraftFor(t, bd, s), instr = String(draft.instr || "").trim();
   if (!instr) { nextView = { key: nextOpen.key, busy: false, models: [], error: "Describe what this step should do (1 to 1000 characters)" }; renderBoard(); const f = $("b-ninstr"); if (f) f.focus(); return; }
   if (!nextView || nextView.key !== nextOpen.key || !nextView.revision) return;
+  if (nextStale(nextView, draft)) {  // edited instructions: the package carries them, so preview them first
+    const was = nextView.route || {};
+    button.disabled = true;
+    await nextPreview();
+    const r = (nextView && nextView.route) || {};
+    if (!nextOpen || !nextView || nextView.error || !nextView.revision || nextStale(nextView, draft)) return;
+    if (r.rung !== was.rung || r.effort !== was.effort) return;  // the route changed: Fred sees it and presses Start again
+    button = document.querySelector('[data-tact="nextstart"]') || button;
+  }
   button.disabled = true;
   try {
     const data = await api("/api/task/next", { task: tid, source_step: s.n, source_session: s.session, kind: draft.kind,
@@ -3259,6 +3274,10 @@ async function startNextStep(button) {
     nextView = { ...(nextView || {}), key: nextOpen.key, busy: false, error: e.message };
     renderBoard();
   }
+}
+function nextStale(view, draft) {  // the shown preview was resolved for other Work, Model or Instructions
+  const a = view && view.asked;
+  return !a || a.kind !== draft.kind || a.model !== draft.model || a.instr !== String(draft.instr || "").trim();
 }
 function uuid() {  // 32 hex characters: the append API's stable request id
   return "xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/[xy]/g, (c) => {
