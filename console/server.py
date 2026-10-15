@@ -423,7 +423,6 @@ class Hub:
 
     def run(self) -> None:
         self.runs.reconcile()
-        self.reconcile_next_steps()
         last_tick = time.monotonic()
         while not self._stop.is_set():
             self.poll_once()
@@ -990,45 +989,13 @@ class Hub:
         return {"available": not why, "reason": why, "source_step": source["n"] if source else 0,
                 "source_session": source.get("session", "") if source else ""}
 
-    def reconcile_next_steps(self) -> list:
-        """Plan 36 (3.4): a manual step reserved before its launch whose outcome a crash left unknown, recovered at
-        startup. A reserved step that recorded no session was never confirmed as launched: the task goes stuck with
-        a recoverable reason, and Fred's Retry runs the same step again (never a second numbered step, never a
-        silent launch). One that did record a session was launched and goes on as a normal running step. Returns
-        [(task id, action)]."""
-        acted = []
-        with self.tlock:
-            for task in self.tasks.values():
-                step = next((s for s in task["steps"] if s.get("request_status") == "starting"), None)
-                if step is None:
-                    continue
-                if step["session"] or tasks.attempts(step):
-                    step["request_status"] = "running"
-                    self._commit(task)
-                    acted.append((task["id"], "recovered"))
-                    continue
-                if task["state"] == "stuck":
-                    continue
-                lines = []
-                tasks._task_to(task, "stuck", "the step did not start: Retry runs it again", time.time(), step, lines)
-                task["owner"] = "fred"
-                step["state"], step["request_status"] = "planned", "failed"
-                self._commit(task, lines)
-                acted.append((task["id"], "stuck"))
-        return acted
-
     def _next_package(self, task, source, meta, kind, instructions, requested, route):
         sid = source["session"]
         reply, _ = self.final_message(sid)
-        if not reply and source["state"] == "done":  # plan 36: a done task's stream is cleared; its saved note stands
-            saved = tasks.read_note(self.folder, task, source["n"])
-            reply = ("HANDOFF\n" + saved.split("\n\n", 1)[-1] + "\nEND HANDOFF") if saved else ""
         block = tasks.parse_handoff(reply)
         valid = block is not None and not tasks.check_handoff(block)
         old_facts = tasks.read_facts(self.folder, task, source["n"])
         stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        started = (meta or {}).get("started") or source.get("started") or "unknown"
-        ended = (meta or {}).get("ended") or source.get("ended") or "unknown"
         head = claude_cli.git_head(task["project_dir"])
         status = claude_cli.git_status(task["project_dir"])
         state = f"HEAD {head or 'not recorded'}\n" + "\n".join(status or ["Working tree status not recorded"])
@@ -1048,16 +1015,16 @@ class Hub:
         sections["## Next"] = "\n\n".join(x for x in (sections["## Next"].strip(),
             "Instructions for this step:\n" + instructions) if x)
         structured = "\n\n".join([f"## {h[3:]}\n{sections[h].strip() or 'Not recorded.'}" for h in tasks.HEADINGS])
-        source_ref = tasks.note_file(task, source)
+        source_ref = tasks.step_file(source, "notes.md")
         package = (f"Handover from task {task['id']}, step {source['n']:02d}, session {sid}, "
-                   f"turn started {started} and ended {ended}.\n"
+                   f"turn started {meta.get('started') or 'unknown'} and ended {meta.get('ended') or 'unknown'}.\n"
                    f"Latest source reply: {'validated HANDOFF' if valid else 'fallback, built from the last reply'} "
                    f"(inspect {tasks.step_file(source, 'source-reply.md')}).\n"
                    f"Source note: {source_ref}.\n"
                    f"Selected work/model: {kind} / {requested} -> {route['rung']} ({route['effort']}).\n\n"
                    f"{structured}\n")
-        data = {"task": task["id"], "source": source["n"], "session": sid, "turn": started,
-                "ended": ended, "reply": reply, "handoff": block if valid else "",
+        data = {"task": task["id"], "source": source["n"], "session": sid, "turn": meta.get("started"),
+                "ended": meta.get("ended"), "reply": reply, "handoff": block if valid else "",
                 "facts": old_facts, "current": current_facts, "goal": task.get("goal"),
                 "plan": task.get("plan"), "kind": kind, "instructions": instructions,
                 "requested": requested, "route": route, "package": package}
@@ -1141,7 +1108,7 @@ class Hub:
             return 400, {"error": "unknown work kind"}
         if not isinstance(instructions, str) or not instructions.strip() or len(instructions) > tasks.STEP_GOAL_MAX:
             return 400, {"error": "Describe what this step should do (1 to 1000 characters)"}
-        if not isinstance(requested, str) or not requested.strip() or len(requested) > 200:
+        if not isinstance(requested, str) or not requested or len(requested) > 200:
             return 400, {"error": "choose Auto or an exact registered model"}
         route, why = self._next_route(task, source, kind, requested)
         if why:
@@ -1150,27 +1117,24 @@ class Hub:
         return 200, {**package, "models": self.next_model_options(task, source, kind)}
 
     def request_next(self, request):
+        preview_status, preview = self.preview_next(request)
+        if preview_status != 200:
+            return preview_status, preview
         request_id = request.get("request_id")
         if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f-]{16,36}", request_id):
             return 400, {"error": "request_id must be a UUID"}
         payload = {k: request.get(k) for k in ("task", "source_step", "source_session", "kind", "instructions", "model")}
         signature = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
-        with self.tlock:  # a repeated request id returns its step whatever the source state is now (plan 36 3.4)
-            task = self.tasks.get(payload["task"]) if tasks.safe_id(payload["task"]) else None
-            if task is None:
-                return 409, {"error": "unknown task"}
+        if request.get("revision") != preview["revision"]:
+            return 409, {"error": "This step changed. Refresh the handover before starting."}
+        with self.tlock:
+            task = self.tasks[payload["task"]]
             prior = next((s for s in task["steps"] if s.get("request_id") == request_id), None)
             if prior:
                 if prior.get("request_hash") != signature:
                     return 409, {"error": "request_id was already used with different content"}
                 return 200, {"task": task["id"], "step": prior["n"], "request_id": request_id,
                              "status": prior.get("request_status", "starting")}
-        preview_status, preview = self.preview_next(request)
-        if preview_status != 200:
-            return preview_status, preview
-        if request.get("revision") != preview["revision"]:
-            return 409, {"error": "This step changed. Refresh the handover before starting."}
-        with self.tlock:
             found, why = self._next_source(payload["task"], payload["source_step"], payload["source_session"])
             if not found:
                 return 409, {"error": why}
@@ -1185,17 +1149,14 @@ class Hub:
             step.update(request_id=request_id, request_hash=signature, request_status="starting",
                         manual_route=route, requested_model=payload["model"])
             step["attempts"] = []
-            # the reservation waits until the launch records a session, so the hub loop cannot start it too
-            updated.update(state="waiting", owner="fred", why=f"starting step {step['n']:02d}")
-            try:
-                tasks.write_step_file(self.folder, updated, step, "received-handoff.md", current[1]["text"])
-                tasks.write_step_file(self.folder, updated, step, "source-reply.md", current[1]["source_reply"])
-                tasks.write_step_file(self.folder, updated, step, "received.md",
-                                      tasks.received_manifest(updated, step, source))
-                self._commit(updated, [tasks._line(time.time(), step, "reserved", "planned",
-                                                   f"manual request {request_id}")])
-            except OSError as exc:  # the task is unchanged and nothing launches (plan 36 Task 2)
-                return 500, {"error": f"the step was not saved: {exc}"}
+            rel = tasks.step_file(step, "received-handoff.md")
+            received = (f"# Step {step['n']:02d}: what it received\n\n- {rel} (saved handover from step {source['n']:02d})\n"
+                        f"- {tasks.facts_file(updated, source)} (source facts, if recorded)\n"
+                        f"- Same project folder: {updated['project_dir']}\n")
+            tasks.write_step_file(self.folder, updated, step, "received-handoff.md", current[1]["text"])
+            tasks.write_step_file(self.folder, updated, step, "source-reply.md", current[1]["source_reply"])
+            tasks.write_step_file(self.folder, updated, step, "received.md", received)
+            self._commit(updated, [tasks._line(time.time(), step, "reserved", "planned", f"manual request {request_id}")])
             self.tasks[updated["id"]] = updated
         self.start_step(updated, step["n"])
         status = "running" if step["state"] == "running" else "held" if updated["state"] == "waiting" else "failed"
@@ -1385,11 +1346,6 @@ class Hub:
                     got.append("every part of the plan")
         lessons = tasks.lessons_for(levers.read_lessons(self.folder, task["project"], tasks.LESSONS_READ), kind)
         facts_text = tasks.read_facts(self.folder, task, last)
-        if "source_step" in s:  # plan 36: a manual step reads its saved handover package, not a fresh brief
-            package = tasks.read_step_file(self.folder, task, s, "received-handoff.md")
-            if package:
-                prev, facts_text = package, ""
-                read = [f"handover from step {s['source_step']:02d}"]
         prompt = tasks.step_prompt(task, s, prev, retry, role=role, plan=plan_text, part=part_text,
                                    facts=facts_text, lessons=lessons, you=you)
         route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
@@ -1401,9 +1357,8 @@ class Hub:
                + [f"kinds/{kind}.md (as role.md)"] + ([f"retry: {retry}"] if retry else []))
         try:  # plan 28: the folder alone tells what the step ran with and what it was given
             tasks.write_step_file(self.folder, task, s, "role.md", f"# {kind}\n\n{role}")
-            if "source_step" not in s:  # plan 36: the manual received.md stands as request_next wrote it
-                tasks.write_step_file(self.folder, task, s, "received.md",
-                                      f"# Step {n:02d}: what it received\n\n" + "\n".join(f"- {x}" for x in got))
+            tasks.write_step_file(self.folder, task, s, "received.md",
+                                  f"# Step {n:02d}: what it received\n\n" + "\n".join(f"- {x}" for x in got))
         except OSError:
             pass  # the step still runs; the prompt is in its stream
         adapter = harness.get(hname)

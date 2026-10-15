@@ -532,15 +532,6 @@ def append_step(task: dict, kind: str, goal: str, pick: str = "", now: float = N
     return new
 
 
-def received_manifest(task: dict, step: dict, source: dict) -> str:
-    """Plan 36: what a reserved manual step received, written once at reservation. start_step never rewrites it,
-    so a launch or a retry keeps the manifest the preview and the append agreed on."""
-    return (f"# Step {step['n']:02d}: what it received\n\n"
-            f"- {step_file(step, 'received-handoff.md')} (saved handover from step {source['n']:02d})\n"
-            f"- {facts_file(task, source)} (source facts, if recorded)\n"
-            f"- Same project folder: {task['project_dir']}\n")
-
-
 def _line(now: float, s, frm: str, to: str, why: str = "") -> dict:
     return {"ts": now, "step": s["n"] if s else 0, "from": frm, "to": to, "why": why,
             "session": s["session"] if s else ""}
