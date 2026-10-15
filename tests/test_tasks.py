@@ -1490,6 +1490,16 @@ class NextStepTest(unittest.TestCase):
         self.assertEqual((new["kind"], new["checked"], new["pick"]), (tasks.CHAT, 0, ""))
         self.assertEqual(task["progression"], "manual")
 
+    def test_received_manifest_names_the_handover_and_the_source_facts(self):
+        """Plan 36 Task 2: what a reserved manual step received is written once, at reservation, not by start_step."""
+        task = self.manual()
+        new = tasks.append_step(task, "code", "write it", now=NOW)
+        text = tasks.received_manifest(task, new, task["steps"][0])
+        self.assertEqual(text.splitlines()[0], "# Step 02: what it received")
+        self.assertIn("02-code/received-handoff.md (saved handover from step 01)", text)
+        self.assertIn("01-scout/facts.md (source facts, if recorded)", text)
+        self.assertIn(task["project_dir"], text)
+
 
 if __name__ == "__main__":
     unittest.main()
