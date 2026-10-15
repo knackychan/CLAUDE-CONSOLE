@@ -1,0 +1,652 @@
+<title>Board One View</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Proposal (2026-10-15, plan 30): the Board as the one view of the window. Calendar header on top, the chain of tasks
+   on the left with each task's steps indented under it as sub-steps (step 0 is Prep), one picked thing on the right.
+   Tokens, type and the cell motif are the locked Console Cells / Cells Board ones, unchanged. */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --edge: rgb(255 255 255 / 6%); --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a; --wip: #7aa7ff; --me: #c4a7ff; --ai: #7aa7ff; --on-you: #1a0d00; --on-ok: #04180e;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --me: #6a48c9; --ai: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --me: #6a48c9; --ai: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding-block: 28px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 22px; }
+header h1 { font: 700 34px/1 var(--dot); margin: 0 0 8px; letter-spacing: .02em; text-wrap: balance; }
+header p { margin: 0; color: var(--mut); max-width: 74ch; text-wrap: pretty; }
+header p + p { margin-top: 6px; }
+.views { display: flex; gap: 4px; flex-wrap: wrap; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; min-height: 36px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.sample { font: 11px var(--mono); color: var(--mut); margin: 0; }
+.stage { overflow-x: auto; padding-bottom: 4px; }
+.cap { font-size: 12.5px; color: var(--mut); max-width: 900px; margin: 0; text-wrap: pretty; }
+.cap b { color: var(--ink); font-weight: 600; }
+.mut { color: var(--mut); }
+.lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 28px 36px; margin-top: 8px; }
+.notes section { min-width: 0; }
+.notes h3 { font: 600 15px var(--ui); margin: 0 0 8px; text-wrap: balance; }
+.notes p, .notes li { font-size: 13px; color: var(--mut); text-wrap: pretty; }
+.notes p { margin: 0 0 8px; }
+.notes ol, .notes ul { margin: 0; padding-left: 18px; }
+.notes li { margin-bottom: 6px; }
+.notes b { color: var(--ink); font-weight: 600; }
+.notes code { font: 11.5px var(--mono); color: var(--ink); }
+
+/* cells and sprites (locked) */
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); } .cells i.y { background: var(--you); } .cells i.r { background: var(--bad); }
+.cells i.g { background: var(--ok); } .cells i.w { background: var(--wip); } .cells i.q { background: var(--mut); }
+.cells i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+.cells i.mk { box-shadow: inset 0 0 0 1px var(--you); }
+.cells i.l1 { background: color-mix(in srgb, var(--ink) 22%, var(--off)); }
+.cells i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.cells i.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+.cells i.l4 { background: var(--ink); }
+@media (prefers-reduced-motion: no-preference) { .cells i.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+@keyframes blink { 50% { background: var(--off); } }
+.spr { display: inline-grid; flex: none; vertical-align: middle; }
+.spr .cells { grid-template-columns: repeat(5, 3px); }
+.spr.g3 .cells { grid-template-columns: repeat(3, 5px); gap: 2px; }
+.spr.s .cells { grid-template-columns: repeat(5, 2px); }
+.spr.s.g3 .cells { grid-template-columns: repeat(3, 3px); gap: 1px; }
+.st { font: 600 10.5px var(--mono); white-space: nowrap; letter-spacing: .02em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 6px; }
+.st.y { color: var(--you); } .st.r { color: var(--bad); } .st.g { color: var(--ok); } .st.n { color: var(--ink); } .st.q { color: var(--mut); }
+
+/* shared pieces (locked) */
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 30px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.you { background: var(--you); border-color: var(--you); color: var(--on-you); }
+.btn.stop { color: var(--bad); }
+.btn.sm { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+.kbd { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.fold { display: grid; gap: 6px; min-width: 0; }
+.fh { display: flex; gap: 8px; align-items: baseline; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--mut); font: 11px var(--mono); cursor: pointer; text-align: left; min-height: 24px; }
+.fh .lbl { flex: none; }
+.fh .fi { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fh .fi b { color: var(--ink); font-weight: 400; }
+.fh .fi .y { color: var(--you); }
+.fh .car { font-size: 9px; flex: none; }
+.fh[aria-expanded="true"] .car { display: inline-block; transform: rotate(180deg); }
+.fh:hover { color: var(--ink); }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* the window: 900 x 700 as the one view; under 700 px it is one column (the compact view) */
+.win { width: 900px; max-width: none; height: 700px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; position: relative; }
+.win.narrow { width: 400px; height: 680px; }
+.top { height: 36px; flex: none; display: flex; align-items: center; gap: 6px; padding-left: 10px; border-bottom: 1px solid var(--line); user-select: none; }
+.top .sp { flex: 1; align-self: stretch; cursor: grab; min-width: 8px; }
+.grip { color: var(--mut); letter-spacing: -2px; font-size: 12px; cursor: grab; margin-right: 2px; }
+.rb { width: 34px; height: 36px; border: 0; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); display: grid; place-items: center; flex: none; }
+.rb:hover { background: var(--raise); color: var(--ink); }
+.rb.x:hover { background: #c42b1c; color: #fff; }
+.scope { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 170px; height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 600 12px var(--mono); cursor: pointer; }
+.scope .car, .car { color: var(--mut); font-size: 9px; }
+.needs { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); background: transparent; border-radius: 4px; padding: 1px 7px; cursor: pointer; white-space: nowrap; flex: none; }
+.pg { font: 500 11px var(--mono); color: var(--mut); border: 1px solid var(--line); background: transparent; border-radius: 4px; padding: 1px 7px; cursor: pointer; white-space: nowrap; flex: none; }
+.pg:hover { color: var(--ink); border-color: var(--ink); }
+
+/* the calendar header: the picked day's spend (the one Doto figure), then two weeks of days, Monday first */
+.calh { flex: none; display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 0 14px; padding: 10px 12px 9px; border-bottom: 1px solid var(--line); align-items: center; }
+.calh .fig { display: grid; gap: 5px; min-width: 0; }
+.calh .big { font: 700 30px/.9 var(--dot); letter-spacing: .02em; }
+.calh .big .est { font: 500 14px var(--mono); color: var(--mut); margin-right: 2px; }
+.calh .sub { font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calh .sub b { color: var(--ink); font-weight: 500; }
+.calh .row30 { grid-template-columns: repeat(30, minmax(0, 1fr)); }
+.calh .row30 i { aspect-ratio: auto; height: 6px; }
+.cal { display: grid; grid-template-columns: 18px minmax(0, 1fr) 18px; gap: 6px; align-items: center; min-width: 0; }
+.cal .nav { width: 18px; height: 40px; border: 0; background: transparent; color: var(--mut); cursor: pointer; font: 12px var(--mono); border-radius: 4px; padding: 0; }
+.cal .nav:hover { color: var(--ink); background: var(--raise); }
+.cal .nav:disabled { opacity: .3; cursor: default; background: transparent; }
+.days { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 3px; min-width: 0; }
+.days .wk { font: 9.5px var(--mono); color: var(--mut); text-align: center; text-transform: uppercase; letter-spacing: .04em; }
+.days .wk.gap, .days .d.gap { margin-left: 6px; }
+.d { position: relative; height: 38px; border-radius: 4px; border: 1px solid transparent; background: var(--off); color: var(--ink); font: 10.5px var(--mono); padding: 2px 4px; text-align: left; cursor: pointer; display: grid; align-content: space-between; min-width: 0; }
+.d .dn { line-height: 1; }
+.d .dc { justify-self: end; line-height: 1; font-variant-numeric: tabular-nums; }
+.d.t1 { background: color-mix(in srgb, var(--ink) 22%, var(--off)); }
+.d.t2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.d.t3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); color: var(--win); }
+.d.t4 { background: var(--ink); color: var(--win); }
+.d.fut { background: transparent; border-color: var(--line); color: var(--mut); cursor: default; }
+.d.today::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: -5px; height: 2px; border-radius: 1px; background: var(--ink); }
+.d.pick { outline: 2px solid var(--ink); outline-offset: 1px; }
+.d:not(.fut):hover { border-color: var(--ink); }
+.calk { grid-column: 2; display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; font: 10px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; }
+.calk .y { color: var(--you); }
+
+/* the body: chain left, inspector right */
+.board { flex: 1; min-height: 0; display: grid; grid-template-columns: 330px minmax(0, 1fr); }
+.left { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+.chain { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 8px 12px; scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
+.insp { overflow-y: auto; min-height: 0; padding: 12px 14px 16px; scrollbar-width: thin; scrollbar-color: var(--off) transparent; display: grid; gap: 14px; align-content: start; grid-template-columns: minmax(0, 1fr); }
+.bfoot { flex: none; border-top: 1px solid var(--line); padding: 5px 12px; display: flex; gap: 14px; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; }
+.bfoot .kbd { margin-right: 2px; }
+
+/* a group: a section label, optionally folded, with a quiet action at the right */
+.sec { display: flex; align-items: center; gap: 8px; padding: 14px 4px 6px; }
+.sec .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sec .lbl.y { color: var(--you); }
+.sec .lbl b { color: var(--ink); font-weight: 500; }
+.sec.fd { padding-block: 6px; cursor: pointer; border-top: 1px solid var(--line); }
+.sec.fd:hover .lbl { color: var(--ink); }
+.sec .act { font: 500 10.5px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; min-height: 20px; cursor: pointer; }
+.sec .act:hover { color: var(--ink); border-color: var(--ink); }
+.sec.hit { box-shadow: inset 2px 0 0 var(--ink); padding-left: 8px; }
+
+/* a task: its head row, then its steps indented under it on a tree line */
+.tk { display: grid; margin-bottom: 4px; }
+.th { display: grid; gap: 2px; padding: 6px 8px 6px 8px; border-radius: 7px; cursor: pointer; border: 1px solid transparent; }
+.th:hover { background: var(--raise); }
+.tk.act > .th { background: var(--raise); }
+.tk.y > .th { background: color-mix(in srgb, var(--you) 7%, var(--raise)); border-color: color-mix(in srgb, var(--you) 40%, transparent); }
+.th.picked, .sr.picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+.th .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.th .t { flex: 1; min-width: 0; font: 600 13px/1.3 var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk.done > .th .t { font-weight: 500; }
+.th .age { font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.th .l2 { display: flex; align-items: center; gap: 8px; min-width: 0; font: 11px var(--mono); color: var(--mut); }
+.th .l2 .why { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th .l2 .why.y { color: var(--you); }
+.th .l2 .cost { color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.th .l2 .more { color: var(--mut); white-space: nowrap; }
+.th .chk { width: 15px; height: 15px; margin: 0; accent-color: var(--ink); flex: none; }
+.th .chk.no { visibility: hidden; }
+/* the label chip: MMDD-xxxx; a click copies the task's folder name */
+.lab { flex: none; font: 500 10.5px/16px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; cursor: copy; white-space: nowrap; }
+.lab:hover { color: var(--ink); border-color: var(--ink); }
+.lab.cp { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+/* the steps: one plain row each, indented under the task on a tree line; no blocks, no pills */
+.subs { display: grid; margin: 2px 0 6px 15px; padding-left: 0; border-left: 2px solid var(--line); }
+.subs .subs { margin: 0 0 0 26px; border-left-style: dashed; }
+.sr { position: relative; display: grid; grid-template-columns: 11px 22px minmax(0, 1fr) auto auto; gap: 0 7px; align-items: center; padding: 3px 8px 3px 12px; margin-left: 0; border-radius: 5px; cursor: pointer; font: 12px var(--ui); min-height: 24px; }
+.sr::before { content: ""; position: absolute; left: 0; top: 50%; width: 7px; height: 2px; background: var(--line); }
+.sr:hover { background: var(--raise); }
+.sr .n { font: 11px var(--mono); color: var(--mut); font-variant-numeric: tabular-nums; }
+.sr .k { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr .k b { font-weight: 600; }
+.sr .k .m { font: 11px var(--mono); color: var(--mut); margin-left: 6px; }
+.sr .mini { display: inline-flex; align-items: center; gap: 4px; font: 10.5px var(--mono); color: var(--mut); }
+.sr .mini .cells { grid-template-columns: repeat(8, 3px); }
+.sr .mini b { font-weight: 400; color: var(--ink); width: 26px; text-align: right; }
+.sr .mini b.y { color: var(--you); }
+.sr .c { font: 11px var(--mono); color: var(--ink); text-align: right; min-width: 30px; font-variant-numeric: tabular-nums; }
+.sr .c.u { color: var(--mut); }
+.sr .s2 { grid-column: 3 / -1; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr .s2 .r { color: var(--bad); } .sr .s2 .y { color: var(--you); } .sr .s2 .w { color: var(--wip); }
+.sr.cur { box-shadow: inset 2px 0 0 var(--ink); background: var(--raise); }
+.sr.cur .k b { font-weight: 700; }
+.sr.pl { color: var(--mut); }
+.sr.pl .k b { font-weight: 400; }
+.sr.wt { background: color-mix(in srgb, var(--you) 7%, transparent); }
+.sr.zero .n { color: var(--me); }
+.sr.skip { color: var(--mut); }
+.sr.skip .k b { font-weight: 400; }
+
+/* the composer stays at the foot of the chain; in select mode the foot is the delete bar */
+.compose { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+.compose textarea { width: 100%; resize: none; min-height: 34px; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid transparent; border-radius: 6px; padding: 7px 9px; }
+.compose .say { display: flex; gap: 8px; align-items: center; font: 11px var(--mono); color: var(--mut); }
+.compose .say .sp { flex: 1; }
+.delbar { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; background: color-mix(in srgb, var(--bad) 6%, var(--win)); }
+.delbar .lr { display: flex; gap: 6px; align-items: center; }
+.delbar .say { font: 11px/1.45 var(--mono); color: var(--mut); overflow-wrap: anywhere; }
+
+/* the inspector (locked pieces, plus step 0 and the day) */
+.ihead { display: grid; gap: 4px; }
+.ihead .ln1 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ihead h2 { font: 600 16px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap: anywhere; min-width: 0; }
+.ihead .meta { display: flex; gap: 12px; flex-wrap: wrap; font: 11.5px var(--mono); color: var(--mut); align-items: center; }
+.ihead .meta b { color: var(--ink); font-weight: 400; }
+.ihead .ln1 .lr { margin-left: auto; display: flex; gap: 6px; }
+.olink { font: 11.5px var(--mono); color: var(--ink); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; background: none; border: 0; padding: 0; }
+.tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--line); margin-top: -4px; }
+.tabs button { font: 12px var(--ui); color: var(--mut); background: transparent; border: 0; padding: 0; min-height: 32px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px var(--ink); }
+.tabs .n { font: 11px var(--mono); }
+.chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.turn { display: grid; gap: 3px; max-width: 84%; min-width: 0; padding: 7px 10px 8px; border-radius: 8px; background: var(--raise); }
+.turn p { margin: 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn > .lbl { letter-spacing: .06em; }
+.turn.ai { justify-self: start; border-top-left-radius: 2px; background: color-mix(in srgb, var(--ai) 9%, var(--raise)); box-shadow: inset 2px 0 0 var(--ai); }
+.turn.ai > .lbl { color: var(--ai); }
+.turn.me { justify-self: end; border-top-right-radius: 2px; background: color-mix(in srgb, var(--me) 11%, var(--raise)); box-shadow: inset -2px 0 0 var(--me); }
+.turn.me > .lbl { color: var(--me); justify-self: end; }
+.turn > .lbl .cells { display: inline-grid; grid-template-columns: 6px; vertical-align: -1px; margin-left: 6px; }
+.turn.prompt { padding: 3px 8px 3px 10px; justify-self: end; }
+.turn.prompt .fh .lbl { color: var(--me); letter-spacing: .06em; }
+.tools { justify-self: center; display: inline-flex; gap: 6px; align-items: center; font: 10.5px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 10px; padding: 1px 9px; cursor: pointer; max-width: 100%; }
+.tools span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.blkh { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.blkh .m { font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pq { display: grid; gap: 4px; padding: 0 2px 0 10px; box-shadow: inset 2px 0 0 var(--me); }
+.pq > .lbl { color: var(--me); }
+.pq .text { font: 13.5px/1.45 var(--ui); }
+.pcard { display: grid; background: var(--win); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.pcard > .ph { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--line); }
+.pcard > .ph .nm { font: 600 12.5px var(--ui); }
+.pcard > .ph .m { flex: 1; min-width: 0; text-align: right; color: var(--mut); font: 11px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .pt { padding: 9px 12px 10px; font: 13px/1.5 var(--ui); margin: 0; }
+.pcard .route { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 9px 12px; font: 11.5px var(--mono); }
+.pcard .route .chip { border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px; }
+.pcard .route .m { color: var(--mut); }
+.pstep { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 8px; padding: 7px 12px 7px 10px; }
+.pstep + .pstep { border-top: 1px solid var(--line); }
+.pstep .n { font: 11px var(--mono); color: var(--mut); padding-top: 2px; }
+.pstep .g { font: 13px/1.4 var(--ui); overflow-wrap: anywhere; }
+.pstep .r { grid-column: 2; font: 11px var(--mono); color: var(--mut); }
+.addst { justify-self: start; margin: 6px 12px 8px; }
+.pact { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pact .m { font: 11px var(--mono); color: var(--mut); margin-left: auto; }
+.scout { display: grid; gap: 3px; font: 12px/1.45 var(--mono); }
+.scout div { display: grid; grid-template-columns: minmax(0, 240px) minmax(0, 1fr); gap: 10px; }
+.scout div span:first-child { color: var(--ink); overflow-wrap: anywhere; }
+.scout div span:last-child { color: var(--mut); font-family: var(--ui); }
+.files { display: grid; gap: 1px; }
+.fr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font: 12px var(--mono); }
+.fr:first-child { border-top: 0; }
+.fr .w { color: var(--mut); font-size: 11px; }
+.fr .w.wip { color: var(--wip); }
+.fr .why { grid-column: 1 / -1; font: 11.5px var(--ui); color: var(--mut); margin-top: -2px; }
+.now { display: flex; gap: 8px; align-items: center; font: 12px var(--mono); }
+.now .cells { grid-template-columns: 7px; }
+.now .m { color: var(--mut); margin-left: auto; }
+.oqr { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 12.5px; }
+.oqr .gl { font: 11px var(--mono); color: var(--ok); }
+.oqr .m { color: var(--mut); white-space: nowrap; font: 11px var(--mono); }
+.clog { display: grid; gap: 1px; }
+.clog > div { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; font: 11.5px/19px var(--mono); color: var(--mut); }
+.clog > div > span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.levers { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
+.levers .m { font: 11px var(--mono); color: var(--mut); }
+.levers input { flex: 1 1 200px; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+.confirm { display: grid; gap: 6px; padding: 10px; border-radius: 8px; background: color-mix(in srgb, var(--bad) 8%, var(--win)); border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); }
+.confirm .q { font: 600 13.5px/1.4 var(--ui); }
+.confirm .say { font: 11px/1.5 var(--mono); color: var(--mut); overflow-wrap: anywhere; }
+.dayl { display: grid; gap: 1px; }
+.dayr { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 12.5px; cursor: pointer; }
+.dayr:first-child { border-top: 0; }
+.dayr .lab { justify-self: start; }
+.dayr .t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dayr .m { font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.dayr .c { font: 11px var(--mono); text-align: right; min-width: 34px; }
+.mix { font: 11.5px var(--mono); color: var(--mut); }
+.mix b { color: var(--ink); font-weight: 400; }
+.figs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 10px; }
+.figs span { display: grid; gap: 3px; min-width: 0; }
+.figs small { font: 10.5px/1 var(--mono); color: var(--mut); }
+.figs b { font: 500 12.5px var(--mono); }
+.back { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--mut); padding: 6px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.back button { font: 12px var(--mono); color: var(--ink); background: transparent; border: 0; cursor: pointer; padding: 0; }
+
+/* under 700 px the same view in one column: the chain, then a pick opens the inspector over it */
+@container (max-width: 699px) {
+  .calh { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .calh .fig { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 12px; }
+  .calh .fig .big { grid-row: span 2; }
+  .days { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .days .w1 { display: none; }
+  .days .wk.gap, .days .d.gap { margin-left: 0; }
+  .calk { grid-column: 1 / -1; }
+  .board { grid-template-columns: minmax(0, 1fr); }
+  .left { border-right: 0; }
+  .board.open .left { display: none; }
+  .board:not(.open) .insp { display: none; }
+  .bfoot { display: none; }
+  .top .pg { display: none; }
+}
+@media (max-width: 960px) { .win { width: 900px; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Board, one view</h1>
+    <p>Plan 30 proposal for Fred's review. The window becomes one view: the calendar on top, the tasks on the left with their steps indented under each task as sub-steps, the one picked thing on the right. The list page, the Task page and the Prep page fold into it; Usage and Models stay pages behind the header buttons.</p>
+    <p>Same tokens, type and cells as the locked Cells Board. Orange still means "needs you" and nothing else. Prep is step 00 of every task, done days group by date, every task carries a copiable label.</p>
+  </header>
+
+  <div class="views" role="group" aria-label="Mock view">
+    <button data-v="step" aria-pressed="true">Step running</button>
+    <button data-v="prep" aria-pressed="false">Prep card waits (step 00)</button>
+    <button data-v="task" aria-pressed="false">Task picked, label copied</button>
+    <button data-v="chat" aria-pressed="false">A chat as a task</button>
+    <button data-v="day" aria-pressed="false">A day picked</button>
+    <button data-v="select" aria-pressed="false">Select and delete</button>
+    <button data-v="narrow" aria-pressed="false">Under 700 px</button>
+    <button data-v="narrowopen" aria-pressed="false">Under 700 px, step open</button>
+  </div>
+  <p class="sample">Every task, step, figure and cost on this page is sample data. Thursday 15 Oct 2026, 14:41. Sprites show their still frame; the live cell blinks.</p>
+
+  <div class="stage"><div class="win" id="win"></div></div>
+  <p class="cap" id="cap"></p>
+
+  <div class="notes">
+    <section>
+      <h3>What changes from the locked Board</h3>
+      <ul>
+        <li><b>One view.</b> The Board is the window. From 700 px it has two columns; under 700 px the same view is one column and a pick opens the inspector over the chain with <code>‹ Board</code> to go back. The pill stays the folded form. The list page, the Task page and the Prep page are gone; the session page lives on as a step's Chat tab.</li>
+        <li><b>Calendar header.</b> It replaces the today strip. The picked day's spend is the one Doto figure, with the spend cells against the limit under it. Two weeks of days run Monday first: tone is the day's spend (the Usage scale), the number is the tasks done that day, today is underlined. A click picks that day: its Done group opens and scrolls into view, and the inspector shows the day. The arrows move a week.</li>
+        <li><b>Steps are sub-steps.</b> Each step is one plain row on a tree line, indented under its task. There are no blocks or pills. A fix and its re-verify indent one level further under the verify that failed. Step 00 is Prep, in violet like the prompt it came from, and every row is a button.</li>
+        <li><b>No connector rows.</b> A handoff shows on the step that received it, and only when it has something to say: <code>received cut 122 w</code>, <code>+ plan</code> or <code>as written</code>. The whole handoff is the Received tab, where the cut lines are struck in place. The picked-handoff view becomes that tab.</li>
+        <li><b>Done by day</b> (D8 a). Groups are Needs you, Replied, Working, then Done by local day: today open, older days folded to their label and count. Past 14 days, everything sits under one <code>Older · 23</code> row that opens in place.</li>
+        <li><b>Label</b> (D11 a). Every task head carries <code>MMDD-xxxx</code>. A click copies the folder name and the chip says <code>copied</code> for a second; <code>C</code> does the same for the picked task. The task inspector adds <code>Open folder</code>.</li>
+        <li><b>Select and delete</b> (D10 a). A <code>Select</code> button sits on each Done day. Live tasks have no checkbox. The composer becomes a delete bar that names the folders, and you confirm with a second click.</li>
+        <li><b>A chat is a task</b> (plan 29). It shows as 00 prep and 01 chat. The chat's inspector keeps the session levers: Continue, Verify, Handoff, Escalate and Stop.</li>
+      </ul>
+    </section>
+    <section>
+      <h3>Open for Fred (the mock shows option a)</h3>
+      <ol>
+        <li><b>Size at start.</b> (a) The window opens at 900 x 700 and keeps the size you drag it to; under 700 px it is one column. (b) It opens at 400 px wide, as today.</li>
+        <li><b>Calendar range.</b> (a) Two weeks in one row. (b) A month grid, as on the Usage page, which is taller. (c) One week only.</li>
+        <li><b>A calendar click.</b> (a) It opens and scrolls to that day's group, and the inspector shows the day. (b) It filters the chain to that day only, with a chip to clear the filter.</li>
+        <li><b>Done tasks.</b> (a) They fold to their head row, and a click opens the steps. (b) Their steps always show.</li>
+        <li><b>Composer.</b> (a) At the foot of the chain column. (b) Across the whole window width.</li>
+      </ol>
+      <h3 style="margin-top:18px">What stays as locked</h3>
+      <p>The step inspector and its tabs (Chat first, Received, Handoff, Route, Plan), the chat grammar, folds with their closed line, the context cells (yellow from 150K), the replan and Plan gap waits, the keyboard, the Usage and Models pages. The one addition is a <b>Files</b> tab on each step: the step's folder from plan 28, read through <code>/api/task/file</code>.</p>
+    </section>
+  </div>
+</div>
+
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const cellsHtml = (a) => a.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("");
+const px = (tone, ...rows) => rows.join("").split("").map((c) => (c === "x" ? tone : ""));
+const SPR = {
+  running: { g3: true, f: ["l4", "l2", "l3", "l3", "l4", "l2", "l2", "l3", ""] },
+  waiting: { f: px("y", ".xxx.", "x...x", "...x.", ".....", "..x..") },
+  done: { f: px("g", ".....", "....x", "...x.", "x.x..", ".x...") },
+  failed: { f: px("r", "x...x", ".x.x.", "..x..", ".x.x.", "x...x") },
+  replied: { f: px("f", ".....", "xxxx.", "x..x.", "xxxx.", "x....") },
+  planned: { f: Array.from({ length: 25 }, (_, k) => (k === 12 ? "l2" : "")) },
+  skipped: { f: px("q", ".....", ".....", "xxxxx", ".....", ".....") },
+};
+const sprite = (n, small) => SPR[n] ? `<span class="spr${SPR[n].g3 ? " g3" : ""}${small ? " s" : ""}" aria-hidden="true"><span class="cells">${cellsHtml(SPR[n].f)}</span></span>` : "";
+const WORD = { running: ["Running", "n"], done: ["Done", "g"], failed: ["Fail", "r"], planned: ["Planned", "q"], waiting: ["Waiting", "y"], replied: ["Replied", "n"], skipped: ["Skipped", "q"] };
+const stWord = (s) => { const [w, t] = WORD[s]; return `<span class="st ${t}">${sprite(s)}${w}</span>`; };
+const mini = (k, live) => k == null ? `<span class="mini" title="this harness reports a turn's spend, not a context size"><span class="cells">${cellsHtml(Array(8).fill(""))}</span><b>?</b></span>`
+  : `<span class="mini" title="context reached ${k}K (a cell is 20K)"><span class="cells">${cellsHtml(Array.from({ length: 8 }, (_, i) => i < Math.round(k / 20) ? (live && i === Math.round(k / 20) - 1 ? "f live" : "f") : ""))}</span><b class="${k >= 150 ? "y" : ""}">${k}K</b></span>`;
+function fold(label, info, body, open = false) {
+  return `<div class="fold"><button class="fh" data-fold aria-expanded="${open}"><span class="lbl">${label}</span><span class="fi">${info}</span><span class="car">▾</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
+}
+
+// ---- sample data ------------------------------------------------------------------------------------------------
+const T = {
+  gap: { id: "20261015-101533-a3f2", lab: "1015-a3f2", title: "Models and tuning page (plan 26)", state: "waiting", age: "2m", cost: "3.17",
+    why: "plan gap from 04: does the drag order write the ladder in config.json or models.json?",
+    steps: [
+      { n: "00", kind: "prep", rung: "haiku · low", st: "done", c: "0.03", zero: true },
+      { n: "01", kind: "scout", rung: "haiku · low", st: "done", c: "0.05", k: 41 },
+      { n: "02", kind: "design", rung: "opus · high", st: "done", c: "1.64", k: 88 },
+      { n: "03", kind: "code", rung: "sonnet · medium", st: "done", c: "0.71", k: 102, s2: "received + plan" },
+      { n: "04", kind: "code", rung: "sonnet · medium", st: "waiting", c: "0.74", k: 64, wt: true, s2: '<span class="y">Plan gap: answer to continue</span>' },
+      { n: "05", kind: "4 more planned", rung: "test, verify, document, commit", st: "planned", pl: true },
+    ] },
+  card: { id: "20261015-143902-e2b9", lab: "1015-e2b9", title: "Clear all button for done chats", state: "waiting", age: "now", cost: "0.03",
+    why: "Prep ready: 3 steps · Run, Edit or Drop",
+    steps: [
+      { n: "00", kind: "prep", rung: "haiku · low · 3 turns", st: "waiting", c: "0.03", zero: true, wt: true },
+      { n: "01", kind: "code", rung: "sonnet · medium", st: "planned", pl: true },
+      { n: "02", kind: "test", rung: "haiku · low", st: "planned", pl: true },
+      { n: "03", kind: "verify", rung: "opus · medium", st: "planned", pl: true },
+    ] },
+  chat: { id: "20261015-140211-41d0", lab: "1015-41d0", title: "Why does the pill flicker on resize?", state: "replied", age: "6m", cost: "0.42",
+    why: "a chat · 3 turns",
+    steps: [
+      { n: "00", kind: "prep", rung: "haiku · low · no steps: a chat", st: "done", c: "0.03", zero: true },
+      { n: "01", kind: "chat", rung: "sonnet · medium", st: "replied", c: "0.39", k: 41 },
+    ] },
+  run: { id: "20261015-131204-7c1e", lab: "1015-7c1e", title: "Harness adapters: Codex exec and the Steps tab", state: "running", age: "3m", cost: "4.62",
+    why: "step 5c of 8 · 5c verify · opus · medium",
+    steps: [
+      { n: "00", kind: "prep", rung: "haiku · low", st: "done", c: "0.03", zero: true },
+      { n: "01", kind: "scout", rung: "haiku · low", st: "done", c: "0.04", k: 38 },
+      { n: "02", kind: "design", rung: "opus · high", st: "done", c: "1.92", k: 92 },
+      { n: "03", kind: "code", rung: "codex · gpt-6.1-sol · medium", st: "done", c: "0.84", s2: "received + plan" },
+      { n: "04", kind: "test", rung: "opencode · deepseek-v4.1-flash", st: "done", c: "?", u: true, s2: "received cut 122 w" },
+      { n: "05", kind: "verify", rung: "sonnet · medium", st: "failed", c: "0.31", k: 61, s2: '<span class="r">FAIL test_resume_command: options after resume</span>',
+        fix: [
+          { n: "5b", kind: "fix", rung: "sonnet · high", st: "done", c: "0.77", k: 47 },
+          { n: "5c", kind: "verify", rung: "opus · medium", st: "running", c: "0.63", k: 54, cur: true, s2: '<span class="w">writing</span> · reads the fix diff' },
+        ] },
+      { n: "06", kind: "document", rung: "haiku · low", st: "planned", pl: true },
+    ] },
+};
+const DONE_TODAY = [
+  { id: "20261015-112040-0b7a", lab: "1015-0b7a", title: "Plan 32: floor used once", cost: "2.18", age: "11:52", n: 6,
+    steps: [
+      { n: "00", kind: "prep", rung: "haiku · low", st: "done", c: "0.02", zero: true },
+      { n: "01", kind: "scout", rung: "haiku · low", st: "done", c: "0.04", k: 33 },
+      { n: "02", kind: "design", rung: "opus · high", st: "done", c: "1.21", k: 74 },
+      { n: "03", kind: "code", rung: "sonnet · medium", st: "done", c: "0.52", k: 81, s2: "received + plan" },
+      { n: "04", kind: "verify", rung: "opus · medium", st: "done", c: "0.31", k: 39, s2: '<span style="color:var(--ok)">PASS 569 tests OK</span>' },
+      { n: "05", kind: "commit", rung: "haiku · low", st: "done", c: "0.08", k: 12 },
+    ] },
+  { id: "20261015-094410-9d13", lab: "1015-9d13", title: "Usage page: fills per model", cost: "1.04", age: "10:21", n: 4 },
+  { id: "20261015-085901-5f60", lab: "1015-5f60", title: "List the routing misses for CLAUDE CONSOLE", cost: "0.12", age: "09:03", n: 1, chat: true, raw: true },
+];
+const DONE_YDAY = [
+  { lab: "1014-c81e", title: "PR #1 review fixes (plan 27)", cost: "5.12", age: "22:40", n: 9 },
+  { lab: "1014-77a0", title: "Plan 24: plan and replan", cost: "3.84", age: "19:12", n: 7 },
+  { lab: "1014-1f4d", title: "Settings page rework", cost: "2.10", age: "16:05", n: 5 },
+  { lab: "1014-90b2", title: "Tray icon: pywebview menu on Windows 11", cost: "0.88", age: "13:37", n: 1, chat: true },
+  { lab: "1014-3e66", title: "Fix the effort pill overlap at 340 px", cost: "0.31", age: "10:02", n: 3 },
+];
+// two weeks, Monday first: [date, spend $, tasks done]; the 16th to the 18th are still to come
+const DAYS = [[5, 88, 6], [6, 95, 7], [7, 12, 1], [8, 45, 3], [9, 141, 8], [10, 248, 11], [11, 7, 1], [12, 34, 2], [13, 61, 4], [14, 52, 5], [15, 7.41, 3], [16], [17], [18]];
+const WD = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+const tone = (usd) => usd == null ? "fut" : usd < 15 ? "t1" : usd < 45 ? "t2" : usd < 90 ? "t3" : "t4";
+
+// ---- pieces -----------------------------------------------------------------------------------------------------
+function calHtml(pick) {
+  const today = DAYS.find((d) => d[0] === 15);
+  const p = DAYS.find((d) => d[0] === pick) || today;
+  const isToday = p[0] === 15;
+  const spend = isToday ? `<span class="est"></span>7.41` : `<span class="est">~</span>${p[1].toFixed(2)}`;
+  const used = Math.min(30, Math.round(((isToday ? 7.41 : p[1]) / 15) * 30));
+  const row = Array.from({ length: 30 }, (_, i) => (i < used ? (i >= 24 && !isToday ? "y" : "h") : i === 24 ? "mk" : ""));
+  const sub = isToday ? `today · <b>$0.09</b>/min · limit 15` : `${["", "", "", "", "", "Mon", "Tue", "Wed"][p[0] - 7] || ""} ${p[0]} Oct, USD · ${p[2]} tasks done`;
+  const days = DAYS.map((d, i) => {
+    const cls = ["d", tone(d[1]), d[0] === 15 ? "today" : "", d[0] === p[0] ? "pick" : "", i === 7 ? "gap" : "", i < 7 ? "w1" : ""].filter(Boolean).join(" ");
+    const title = d[1] == null ? `${d[0]} Oct` : `${WD[i % 7]} ${d[0]} Oct · ${d[2]} tasks done · ~$${d[1]}`;
+    return `<button class="${cls}" data-day="${d[0]}" title="${title}"${d[1] == null ? " disabled" : ""}><span class="dn">${d[0]}</span><span class="dc">${d[2] ?? ""}</span></button>`;
+  }).join("");
+  const wk = WD.concat(WD).map((w, i) => `<span class="wk${i === 7 ? " gap" : ""}${i < 7 ? " w1" : ""}">${w}</span>`).join("");
+  return `<div class="calh"><div class="fig"><span class="big">${spend}</span><span class="sub">${sub}</span><span class="cells row30">${cellsHtml(row)}</span></div>
+    <div class="cal"><button class="nav" title="the week before">‹</button><div class="days">${wk}${days}</div><button class="nav" disabled title="the week after">›</button>
+    <div class="calk"><span>tone: the day's spend · figure: tasks done</span><span class="y">3 models over pace · fills ▾</span></div></div></div>`;
+}
+
+function stepRow(s, o) {
+  const pick = o.picked === s.n ? " picked" : "";
+  const cls = ["sr", s.cur ? "cur" : "", s.pl ? "pl" : "", s.wt ? "wt" : "", s.zero ? "zero" : "", s.st === "skipped" ? "skip" : "", pick].filter(Boolean).join(" ");
+  const st = s.st === "planned" ? sprite("planned", true) : sprite(s.st, true);
+  const cost = s.c ? `<span class="c${s.u ? " u" : ""}">${s.c}</span>` : `<span class="c"></span>`;
+  const ctx = s.k != null ? mini(s.k, s.st === "running") : s.pl || s.zero || s.st === "skipped" ? "<span></span>" : mini(null);
+  const kind = `<span class="k"><b>${esc(s.kind)}</b>${s.rung ? `<span class="m">${esc(s.rung)}</span>` : ""}</span>`;
+  const title = s.zero ? ' title="step 00: the Prep card. Open it to read the enhanced prompt, the route and what Prep read"' : "";
+  let h = `<div class="${cls}" role="button" tabindex="0" data-step="${s.n}"${title}>${st}<span class="n">${s.nn || s.n}</span>${kind}${ctx}${cost}${s.s2 ? `<span></span><span></span><span class="s2">${s.s2}</span>` : ""}</div>`;
+  if (s.fix) h += `<div class="subs" title="the fix insert: what verify 05 found, fixed, then verified again">${s.fix.map((f) => stepRow(f, o)).join("")}</div>`;
+  return h;
+}
+
+function taskHtml(t, o = {}) {
+  const open = o.open !== false;
+  const cls = ["tk", t.state === "waiting" ? "y" : "", t.state === "running" || o.pickedTask ? "act" : "", t.state === "done" || !t.state ? "done" : ""].filter(Boolean).join(" ");
+  const st = t.state ? stWord(t.state) : `<span class="st g">${sprite("done")}</span>`;
+  const chk = o.select ? `<input type="checkbox" class="chk" aria-label="select ${esc(t.title)}"${o.checked ? " checked" : ""}>` : "";
+  const lab = `<button class="lab${o.copied ? " cp" : ""}" title="copy the folder name: ${esc(t.id || "2026" + t.lab.replace("-", "-…-"))}">${o.copied ? "copied" : t.lab}</button>`;
+  const why = t.state ? `<span class="why${t.state === "waiting" ? " y" : ""}">${esc(t.why)}</span>` : `<span class="why">${t.chat ? (t.raw ? "a chat · Raw, prep skipped" : "a chat") : `${t.n} steps`} · ${t.age}</span>`;
+  const more = !open && t.state !== "running" ? `<span class="more">▸</span>` : "";
+  const head = `<div class="th${o.pickedHead ? " picked" : ""}" role="button" tabindex="0"><div class="l1">${chk}${st}<span class="t">${esc(t.title)}</span>${t.state ? `<span class="age">${t.age}</span>` : ""}</div><div class="l2">${lab}${why}<span class="cost">${t.cost}</span>${more}</div></div>`;
+  const steps = open && t.steps ? `<div class="subs">${t.steps.map((s) => stepRow(s, o)).join("")}</div>` : "";
+  return `<div class="${cls}">${head}${steps}</div>`;
+}
+
+function chainHtml(v) {
+  const sel = v === "select", dayPick = v === "day";
+  let h = `<div class="sec"><span class="lbl y">Needs you · 2</span></div>`;
+  h += taskHtml(T.gap, { open: true, picked: v === "gap" ? "04" : null });
+  h += taskHtml(T.card, { open: true, picked: v === "prep" ? "00" : null });
+  h += `<div class="sec"><span class="lbl">Replied · 1</span></div>`;
+  h += taskHtml(T.chat, { open: v === "chat", picked: v === "chat" ? "01" : null, pickedTask: v === "chat" });
+  h += `<div class="sec"><span class="lbl">Working · 1</span></div>`;
+  h += taskHtml(T.run, { open: true, picked: ["step", "narrow", "narrowopen"].includes(v) ? "5c" : null });
+  h += `<div class="sec${dayPick ? "" : ""}"><span class="lbl">Done today · <b>Thu 15 Oct</b> · 3</span>${sel ? `<button class="act">Select all</button><button class="act">Cancel</button>` : `<button class="act" title="pick done tasks to delete them">Select</button>`}</div>`;
+  DONE_TODAY.forEach((t, i) => { h += taskHtml(t, { open: v === "task" && i === 0, pickedHead: v === "task" && i === 0, copied: v === "task" && i === 0, select: sel, checked: sel && i !== 1 }); });
+  if (dayPick) {
+    h += `<div class="sec hit"><span class="lbl">Done yesterday · <b>Wed 14 Oct</b> · 5</span><button class="act">Select</button></div>`;
+    DONE_YDAY.forEach((t) => { h += taskHtml(t, { open: false }); });
+  } else h += `<div class="sec fd"><span class="lbl">Done yesterday · Wed 14 Oct · 5</span><span class="car">▾</span></div>`;
+  h += `<div class="sec fd"><span class="lbl">Done Tue 13 Oct · 4</span><span class="car">▾</span></div>`;
+  h += `<div class="sec fd"><span class="lbl">Done Mon 12 Oct · 2</span><span class="car">▾</span></div>`;
+  h += `<div class="sec fd"><span class="lbl">Done Sun 11 Oct · 1</span><span class="car">▾</span></div>`;
+  h += `<div class="sec fd" title="tasks done more than 14 days ago; opens by day in place"><span class="lbl">Older · 23</span><span class="car">▾</span></div>`;
+  return h;
+}
+
+// ---- the inspector ------------------------------------------------------------------------------------------------
+function inspStep() {
+  return `<div class="ihead"><div class="ln1">${stWord("running")}<h2>5c verify</h2><div class="lr"><button class="btn sm">Open chat</button><button class="btn sm stop">Stop</button></div></div>
+    <div class="meta"><span>opus · medium</span><span>cost <b>0.63</b></span><span>2m 40s</span><span>task <button class="lab">1015-7c1e</button></span></div></div>
+    <div class="tabs" role="tablist"><button aria-selected="true">Chat</button><button aria-selected="false">Received <span class="n">290 w</span></button><button aria-selected="false">Handoff</button><button aria-selected="false">Route</button><button aria-selected="false">Files <span class="n">3</span></button></div>
+    <div class="chat">
+      <div class="turn me prompt">${fold("Prompt", "goal and the handoff of 5b · 290 w", "")}</div>
+      <button class="tools"><span>3 tool events · Read codex.py, git diff</span><span class="car">▾</span></button>
+      <div class="turn ai"><span class="lbl">Opus</span><p>The fix moves the options before the subcommand: codex exec --json -c model_reasoning_effort=medium resume &lt;id&gt; -. That matches the help text, and test_resume_command now asserts the order.</p></div>
+      <button class="tools"><span>1 tool event · py -m unittest tests.test_harness</span><span class="car">▾</span></button>
+      <div class="turn ai"><span class="lbl">Opus <span class="cells"><i class="f live"></i></span></span><p>9 tests pass. Checking the one live codex exec run in the scratch folder against the FAIL detail before I write the verdict.</p></div>
+    </div>`;
+}
+
+function inspPrep() {
+  return `<div class="ihead"><div class="ln1">${stWord("waiting")}<h2>00 prep · Clear all button for done chats</h2></div>
+    <div class="meta"><span>haiku · low</span><span>3 turns</span><span>cost <b>0.03</b></span><span>task <button class="lab">1015-e2b9</button></span></div></div>
+    <div class="tabs" role="tablist"><button aria-selected="true">Card</button><button aria-selected="false">Scouting <span class="n">5 lines</span></button><button aria-selected="false">Handoff</button><button aria-selected="false">Files <span class="n">5</span></button></div>
+    <div class="pq"><span class="lbl">You typed</span><span class="text">add a clear all button on the done section so I can drop finished chats in one go</span></div>
+    <div class="pcard"><div class="ph"><span class="nm">Prompt</span><span class="m">as Prep wrote it · Edit to change</span></div>
+      <p class="pt">Add a "Clear all" action to the Done group header in web/app.js that removes the finished chat sessions of the scope through one POST, behind a confirm line. Keep running and waiting chats out of it. Tests: the endpoint in tests/test_server.py.</p></div>
+    <div class="pcard"><div class="ph"><span class="nm">Route</span><span class="m">reasoning medium · a server endpoint and one list action</span></div>
+      <div class="route"><span class="chip">write tier</span><span class="chip">sonnet · medium</span><span class="m">verify one tier up: opus</span></div></div>
+    <div class="pcard"><div class="ph"><span class="nm">Steps · 3</span><span class="m">proposed by Prep</span></div>
+      <div class="pstep"><span class="n">01</span><span class="g">Add POST /api/sessions/clear and the Clear all action with its confirm line</span><span class="r">code · sonnet · medium</span></div>
+      <div class="pstep"><span class="n">02</span><span class="g">Run the suite and the new endpoint test</span><span class="r">test · haiku · low</span></div>
+      <div class="pstep"><span class="n">03</span><span class="g">Check the diff against the goal: no running chat can be cleared</span><span class="r">verify · opus · medium</span></div>
+      <button class="btn sm addst">+ step</button></div>
+    <div class="pact"><button class="btn go">Run 3 steps</button><button class="btn">Edit</button><button class="btn">Drop</button><span class="m">Drop deletes the folder: nothing ran yet</span></div>`;
+}
+
+function inspTask() {
+  const t = DONE_TODAY[0];
+  return `<div class="ihead"><div class="ln1">${stWord("done")}<h2>${esc(t.title)}</h2></div>
+    <div class="meta"><button class="lab cp" title="copied: ${t.id}">copied</button><span title="the folder name the chip copies">${t.id}</span><button class="olink">Open folder</button></div>
+    <div class="meta"><span>CLAUDE-CONSOLE</span><span>6 steps</span><span>cost <b>2.18</b></span><span>41m</span><span>done <b>11:52</b></span></div></div>
+    ${fold("Plan", "from 02 design · <b>1,380 w</b> · mirrored to .claude/console/plans/1015-0b7a-floor-used-once", "")}
+    <div class="fold"><span class="lbl">Open questions · 0 open</span><div class="oqr"><span class="gl">✓</span><span class="mut">Does one verify end the floors of two code steps?</span><span class="m">closed 04</span></div></div>
+    ${fold("prompt.md", "Done when: a floor ends after one proven step on its route", "")}
+    ${fold("Chain log", "14 moves · last 11:52 05 commit done", `<div class="clog"><div><span>11:12</span><span>00 prep done · 3 steps</span></div><div><span>11:13</span><span>01 scout running · rule scout: haiku/low</span></div><div><span>11:52</span><span>05 commit done</span></div></div>`, true)}
+    <div class="levers"><button class="btn" title="keeps the last good note of each step, drops the rest">Trim notes</button><button class="btn stop">Delete</button><span class="m">Delete asks once more and names the folder</span></div>`;
+}
+
+function inspChat() {
+  return `<div class="ihead"><div class="ln1">${stWord("replied")}<h2>01 chat · Why does the pill flicker on resize?</h2><div class="lr"><button class="btn sm">Handoff</button><button class="btn sm">Escalate</button></div></div>
+    <div class="meta"><span>sonnet · medium</span><span>3 turns</span><span>cost <b>0.39</b></span><span>task <button class="lab">1015-41d0</button></span></div></div>
+    <div class="tabs" role="tablist"><button aria-selected="true">Chat</button><button aria-selected="false">Route</button><button aria-selected="false">Files <span class="n">2</span></button></div>
+    <div class="chat">
+      <div class="turn me"><span class="lbl">Fred</span><p>why does the pill flicker on resize?</p></div>
+      <button class="tools"><span>4 tool events · Read window.py, style.css</span><span class="car">▾</span></button>
+      <div class="turn ai"><span class="lbl">Sonnet</span><p>The pill re-measures on every resize event and toggles .narrow at 372 px both ways, so a drag across that width flips the layout each frame. A 4 px dead band in window.py:212 stops it.</p></div>
+      <div class="turn me"><span class="lbl">Fred</span><p>do it, and keep the 372 rule</p></div>
+      <button class="tools"><span>2 tool events · Edit window.py · 1 test</span><span class="car">▾</span></button>
+      <div class="turn ai"><span class="lbl">Sonnet</span><p>Done: the band is 368 to 376 px, the rule still flips at 372 on a click. tests/test_window.py has the case.</p></div>
+    </div>
+    <div class="levers"><input id="cont" placeholder="Continue this chat"><button class="btn">Verify</button><button class="btn">Mark done</button><button class="btn stop">Stop</button></div>`;
+}
+
+function inspDay() {
+  return `<div class="ihead"><div class="ln1"><h2>Wednesday 14 Oct</h2><div class="lr"><button class="btn sm">Usage</button></div></div>
+    <div class="meta"><span>5 tasks done</span><span>2 chats</span><span>window runs 9</span></div></div>
+    <div class="figs"><span><small>input</small><b>412</b></span><span><small>output</small><b>1.1M</b></span><span><small>cache read</small><b>94.2M</b></span><span><small>over $15</small><b>yes</b></span></div>
+    <div class="dayl">${DONE_YDAY.map((t) => `<div class="dayr"><button class="lab">${t.lab}</button><span class="t">${esc(t.title)}</span><span class="m">${t.chat ? "chat" : t.n + " steps"} · ${t.age}</span><span class="c">${t.cost}</span></div>`).join("")}</div>
+    <p class="mix">models <b>opus 44 · sonnet 31 · codex 15 · haiku 10 %</b></p>
+    ${fold("Measure", "last 20 tasks · median per kind", "")}`;
+}
+
+function inspSelect() {
+  return `<div class="ihead"><div class="ln1"><h2>2 tasks selected</h2></div><div class="meta"><span>Done today</span><span>cost <b>2.30</b></span></div></div>
+    <div class="dayl">${[DONE_TODAY[0], DONE_TODAY[2]].map((t) => `<div class="dayr"><button class="lab">${t.lab}</button><span class="t">${esc(t.title)}</span><span class="m">${t.chat ? "chat" : t.n + " steps"}</span><span class="c">${t.cost}</span></div>`).join("")}</div>
+    <div class="confirm"><span class="q">Delete these 2 task folders?</span><span class="say">tasks/20261015-112040-0b7a and tasks/20261015-085901-5f60 go, with their runs. The plan mirrored into the project stays. This cannot be undone.</span><div class="pact"><button class="btn stop">Delete 2 tasks</button><button class="btn">Cancel</button></div></div>
+    <p class="mix">Running, waiting and replied tasks have no checkbox, so a delete never races a step.</p>`;
+}
+
+const CAP = {
+  step: "<b>Step running.</b> The working task shows its steps as sub-steps on a tree line: 00 prep in violet, the fix and its re-verify one level further under the failed verify, the live step with the ink edge and the blinking cell. A handoff shows on the step that received it only when it was cut or carries the plan. The inspector is the locked step inspector with one new tab, Files.",
+  prep: "<b>Prep card waits.</b> A prompt is a task from the moment it is sent (plan 29). Its Prep card is step 00 and opens in the inspector with the same Run, Edit and Drop as the old Prep page. The proposed steps already show under the task as planned rows.",
+  task: "<b>Task picked, label copied.</b> A click on the label chip copies the folder name and the chip reads <code>copied</code> for a second. The task inspector shows the full id, Open folder, and the plan with the folder it was mirrored to. Clear is renamed Trim notes; Delete asks once more.",
+  chat: "<b>A chat as a task.</b> A prompt with no steps is a task with 00 prep and 01 chat. The chat keeps every session lever (Continue, Verify, Handoff, Escalate, Stop, Mark done), so nothing is lost from the old session page.",
+  day: "<b>A day picked.</b> A click on Wed 14 in the calendar puts that day's spend in the figure, opens its Done group with the ink edge, scrolls to it, and shows the day in the inspector: its tasks with their labels, the tokens and the model mix.",
+  select: "<b>Select and delete.</b> Select on a Done day turns its rows into checkboxes; live tasks have none. The inspector lists the selection and confirms with the folder names. Delete never needs a second view.",
+  narrow: "<b>Under 700 px.</b> The same view in one column: one week of days, the chain and the composer. Nothing is a separate page.",
+  narrowopen: "<b>Under 700 px, step open.</b> A pick opens the inspector over the chain with <code>‹ Board</code> to go back. It has the same tabs, the same content and the same keys.",
+};
+
+function render(v) {
+  const narrow = v === "narrow" || v === "narrowopen";
+  const win = document.getElementById("win");
+  win.className = "win" + (narrow ? " narrow" : "");
+  const day = v === "day" ? 14 : 15;
+  const insp = { step: inspStep, narrow: inspStep, narrowopen: inspStep, prep: inspPrep, task: inspTask, chat: inspChat, day: inspDay, select: inspSelect }[v]();
+  const foot = v === "select"
+    ? `<div class="delbar"><div class="lr"><button class="btn stop sm">Delete 2 tasks</button><button class="btn sm">Cancel</button><span class="mut" style="font:11px var(--mono)">2 of 3 selected</span></div></div>`
+    : `<div class="compose"><textarea id="task" rows="1" placeholder="New task in CLAUDE-CONSOLE"></textarea><div class="say"><span>effort auto</span><span class="sp"></span><span class="kbd">Enter</span>Prep<span class="kbd">Ctrl+Enter</span>Raw</div></div>`;
+  win.innerHTML = `<div class="top"><span class="grip">⋮⋮</span><button class="scope">CLAUDE-CONSOLE <span class="car">▾</span></button><button class="needs">2 need you</button><span class="sp"></span><button class="pg">Usage</button><button class="pg">Models</button><button class="rb" title="settings">⚙</button><button class="rb" title="fold to the pill">–</button><button class="rb x" title="close">✕</button></div>
+    ${narrow && v === "narrowopen" ? "" : calHtml(day)}
+    ${v === "narrowopen" ? `<div class="back"><button>‹ Board</button><span>/ Harness adapters / 5c verify</span></div>` : ""}
+    <div class="board${v === "narrowopen" ? " open" : ""}"><div class="left"><div class="chain">${chainHtml(v)}</div>${foot}</div><div class="insp">${insp}</div></div>
+    <div class="bfoot"><span><span class="kbd">↑</span><span class="kbd">↓</span> step</span><span><span class="kbd">←</span><span class="kbd">→</span> task</span><span><span class="kbd">Enter</span> open chat</span><span><span class="kbd">C</span> copy label</span><span><span class="kbd">Esc</span> clear the pick</span></div>`;
+  document.getElementById("cap").innerHTML = CAP[v];
+  if (v === "day") { const hit = win.querySelector(".sec.hit"); if (hit) win.querySelector(".chain").scrollTop = hit.offsetTop - 8; }
+  const ch = win.querySelector(".chain"), at = (el, off) => { if (el) ch.scrollTop = el.offsetTop - off; };
+  if (v === "step" || v === "narrow") at([...win.querySelectorAll(".sec")].find((x) => x.textContent.startsWith("Working")), 0);
+  if (v === "chat") at([...win.querySelectorAll(".sec")].find((x) => x.textContent.startsWith("Replied")), 0);
+  if (v === "task" || v === "select") at([...win.querySelectorAll(".sec")].find((x) => x.textContent.startsWith("Done today")), 0);
+  document.querySelectorAll(".views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+}
+
+document.querySelectorAll(".views button").forEach((b) => b.addEventListener("click", () => { render(b.dataset.v); try { history.replaceState(null, "", "#" + b.dataset.v); } catch (e) {} }));
+document.addEventListener("click", (e) => {
+  const f = e.target.closest("[data-fold]");
+  if (f) { const open = f.getAttribute("aria-expanded") !== "true"; f.setAttribute("aria-expanded", String(open)); f.nextElementSibling.hidden = !open; return; }
+  const lab = e.target.closest(".lab");
+  if (lab && !lab.classList.contains("cp")) { const was = lab.textContent; lab.classList.add("cp"); lab.textContent = "copied"; setTimeout(() => { lab.classList.remove("cp"); lab.textContent = was; }, 1000); return; }
+  const d = e.target.closest(".d[data-day]");
+  if (d && Number(d.dataset.day) === 14) render("day");
+  else if (d && Number(d.dataset.day) === 15) render("step");
+  const sr = e.target.closest(".sr[data-step]");
+  if (sr) { const n = sr.dataset.step; if (n === "00" && sr.closest(".tk.y")) render("prep"); else if (n === "01" && sr.closest(".tk") && sr.closest(".tk").textContent.includes("pill flicker")) render("chat"); else if (document.getElementById("win").classList.contains("narrow")) render("narrowopen"); }
+  if (e.target.closest(".back button")) render("narrow");
+});
+const start = location.hash.slice(1);
+render(CAP[start] ? start : "step");
+</script>
