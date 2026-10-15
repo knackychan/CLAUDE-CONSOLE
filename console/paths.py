@@ -34,7 +34,7 @@ DEFAULTS = {
     "daily_budget_usd": 15,
     "cold_after_s": 3600,  # idle this long: both prompt-cache lifetimes (5 min, 1 h) are gone
     # plan 17, task chain: see plans/17-tasks/README.md section 4
-    "task_retention_days": 90,
+    "task_retention_days": 0,  # plan 28 (D9): 0 keeps every task folder; runs/ and preps/ keep retention_days
     "task_step_budget_usd": 3,
     "task_max_steps": 6,
     "design_max_turns": 30,  # plan 24 D2: --max-turns of a design step on any rung

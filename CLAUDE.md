@@ -14,7 +14,7 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
   always exit 0, must not touch the network, and logs summaries only (masked by `console/redact.py`).
 - The service binds 127.0.0.1 only and every request passes `console/guard.py`.
 - Data lives in `~/.claude/console/` (or env `CC_CONSOLE_HOME`, which the tests use). Never write
-  anywhere else, and never edit `~/.claude/settings.json` from code that Claude runs: Fred runs
+  anywhere else (one exception, plan 28: a task's plan is mirrored into `<project>/.claude/console/plans/`), and never edit `~/.claude/settings.json` from code that Claude runs: Fred runs
   `install_hooks.py` himself.
 - All styling is in `web/style.css`, tokens first. The visual rework target is locked: BRAINSTORM 7.5,
   `design/rework/locked/cells-drawer.html` (tokens and cell motif: `console-cells.html`; Usage page: `usage.html`); files in

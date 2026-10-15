@@ -5,8 +5,8 @@ Task: $title
 $goal
 
 Step $n of $m: $kind. $step_goal
-$special
-$retry
+
+${role}$retry
 ${plan}What the earlier steps left you:
 $prev
 

@@ -3,6 +3,7 @@ import copy
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -763,6 +764,13 @@ class TaskServerTest(RunServerTest):
         return self.call("/api/task", {"prep": card["id"], "prompt": f"{card['prompt']}\n{words}".strip(),
                                        "steps": steps, "effort": effort})
 
+    def brief_pass_always(self):
+        """Plan 28 (D14): the fake notes fit brief_max_words, so their brief is the note as is; a test of the Haiku
+        pass turns that off."""
+        patch = mock.patch.object(server.compact, "as_is", return_value="")
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def make_task(self, text="CHAIN fix add", **kwargs):
         status, data = self.post_task(self.prep_card(text), **kwargs)
         self.assertEqual(status, 200, data)
@@ -824,10 +832,10 @@ class TaskServerTest(RunServerTest):
         tid = self.make_task()
         task = self.until(tid, self.at(2), "step 2 starts")
         step1, step2 = task["steps"][0], task["steps"][1]
-        note = (self.folder / "tasks" / tid / "steps" / "01-scout.md").read_text(encoding="utf-8")
+        note = (self.folder / "tasks" / tid / "01-scout" / "handoff.md").read_text(encoding="utf-8")
         self.assertTrue(note.startswith(f"# Step 01: scout on haiku/low, session {step1['session']}\n\n"))
         self.assertIn("## Findings\nadd() is in calc.py:2", note)
-        self.assertEqual((step1["state"], step1["handoff"], task["last_good"]), ("done", "steps/01-scout.md", 1))
+        self.assertEqual((step1["state"], step1["handoff"], task["last_good"]), ("done", "01-scout/handoff.md", 1))
         self.assertEqual((step2["model"], step2["effort"]), ("sonnet", "medium"))
         task = self.until(tid, self.at(3), "the verify step starts")
         verify = task["steps"][2]
@@ -847,7 +855,7 @@ class TaskServerTest(RunServerTest):
         tid = data["task"]
         task = self.until(tid, self.at(3), "the verify step starts")
         self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "debug", "verify"])
-        note = (self.folder / "tasks" / tid / "steps" / "01-scout.md").read_text(encoding="utf-8")
+        note = (self.folder / "tasks" / tid / "01-scout" / "handoff.md").read_text(encoding="utf-8")
         self.assertIn("Next model: opus/high", note)  # the hint was there to be read
         self.assertEqual([(s["pick"], s["model"], s["effort"]) for s in task["steps"]],
                          [("", "haiku", "low"), ("sonnet", "sonnet", "high"), ("", "opus", "high")])
@@ -971,6 +979,7 @@ class TaskServerTest(RunServerTest):
         self.assertIn("git_base", self.hub.tasks[tid]["steps"][0])  # a copy was trimmed, not the hub's task
 
     def test_brief_check_reads_every_path_a_step_touched(self):  # plan 27 (23 nit): not the facts text's 30 lines
+        self.brief_pass_always()
         try:
             self.git("init", "-q")
         except (OSError, subprocess.CalledProcessError):
@@ -1118,9 +1127,9 @@ class TaskServerTest(RunServerTest):
         self.wait_idle(sid)
         task = self.until(tid, lambda t: t["steps"][0]["state"] == "done", "step 1 closed while paused")
         self.assertEqual((task["owner"], task["steps"][1]["session"]), ("fred", ""))
-        self.assertTrue((self.folder / "tasks" / tid / "steps" / "01-scout.md").exists())
+        self.assertTrue((self.folder / "tasks" / tid / "01-scout" / "handoff.md").exists())
         self.until(tid, lambda t: not t.get("briefing"), "the brief ran while paused")
-        self.assertTrue((self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").exists())
+        self.assertTrue((self.folder / "tasks" / tid / "01-scout" / "brief.md").exists())
         self.assertEqual(self.hub.advance(), [])  # nothing starts while paused
         self.assertEqual(self.hub.tasks[tid]["steps"][1]["session"], "")
         row = next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)
@@ -1263,13 +1272,13 @@ class TaskServerTest(RunServerTest):
         self.hub.advance()
         self.assertEqual((task["state"], task["steps"][1]["state"]), ("handed", "planned"))  # nothing starts after
         self.assertEqual(self.session(sid)["kind"], "handoff")
-        self.assertEqual(task["handoff_note"], "steps/01-handoff.md")  # the skill's last message, kept in the task
-        self.assertIn("echo: /session-handoff", (self.folder / "tasks" / tid / "steps" / "01-handoff.md").read_text(
+        self.assertEqual(task["handoff_note"], "01-scout/handed.md")  # the skill's last message, kept in the task
+        self.assertIn("echo: /session-handoff", (self.folder / "tasks" / tid / "01-scout" / "handed.md").read_text(
             encoding="utf-8"))
         self.assertIn(("handing", "handed"), [(c["from"], c["to"]) for c in self.chain(tid)])
         row = next(r for r in self.hub.snapshot()["tasks"] if r["id"] == tid)
         self.assertEqual((row["group"], row["handoff_note"], row["steps"][0]["note"]),
-                         ("needs", "steps/01-handoff.md", "handed"))  # a pending handoff: Start next task
+                         ("needs", "01-scout/handed.md", "handed"))  # a pending handoff: Start next task
         page = self.task(tid)[1]
         self.assertIn("echo: /session-handoff", page["handoff"])
         status, seed = self.call(f"/api/brief?session={sid}&kind=next")
@@ -1286,7 +1295,10 @@ class TaskServerTest(RunServerTest):
         self.settled(tid)
         self.assertEqual(list(self.project.iterdir()), [])  # the fake claude writes no file, and nor does the service
         folder = self.folder / "tasks" / tid
-        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["chain.jsonl", "prompt.md", "steps", "task.json"])
+        self.assertEqual(sorted(p.name for p in folder.iterdir()),
+                         ["01-scout", "02-explain", "chain.jsonl", "prompt.md", "task.json"])  # plan 28: a folder a step
+        self.assertEqual(sorted(p.name for p in (folder / "01-scout").iterdir()),
+                         ["brief.md", "facts.md", "handoff.md", "notes.md", "received.md", "role.md"])
 
     def test_done_task_is_cleared(self):
         tid = self.make_task(steps=self.TWO)
@@ -1297,14 +1309,16 @@ class TaskServerTest(RunServerTest):
             self.assertFalse(self.hub.runs.stream_path(sid).exists())
             self.assertFalse(self.hub.runs.meta_path(sid).exists())
         folder = self.folder / "tasks" / tid
-        self.assertEqual(sorted(p.name for p in (folder / "steps").iterdir()),
-                         ["02-explain.brief.md", "02-explain.facts.md", "02-explain.md"])  # the last note, its brief and facts
+        self.assertEqual(sorted(p.name for p in (folder / "01-scout").iterdir()),
+                         ["brief.md", "facts.md", "handoff.md", "notes.md", "received.md", "role.md"])  # plan 28: kept
         saved = tasks.load(self.folder, tid)
-        self.assertTrue(saved["cleared"])
+        self.assertTrue(saved["streams_freed"])
+        self.assertFalse(saved.get("cleared"))
         self.assertEqual((saved["state"], saved["steps"][0]["handoff"], saved["steps"][1]["handoff"]),
-                         ("done", "", "steps/02-explain.md"))
+                         ("done", "01-scout/handoff.md", "02-explain/handoff.md"))
         last = self.chain(tid)[-1]
-        self.assertEqual((last["from"], last["to"]), ("task:done", "task:cleared"))
+        self.assertEqual((last["from"], last["to"]), ("task:done", "task:done"))
+        self.assertRegex(last["why"], r"^streams forgotten: \d+ bytes freed$")
         self.assertIsNotNone(self.session(sids[0]))  # the session rows (the event log) stay
 
     def test_done_task_stays_whole_without_the_setting(self):
@@ -1313,8 +1327,8 @@ class TaskServerTest(RunServerTest):
         self.settled(tid)
         sids = [s["session"] for s in self.hub.tasks[tid]["steps"]]
         self.assertTrue(all(self.hub.runs.stream_path(sid).exists() for sid in sids))
-        self.assertIn("01-scout.md", [p.name for p in (self.folder / "tasks" / tid / "steps").iterdir()])
-        self.assertFalse(self.hub.tasks[tid].get("cleared"))
+        self.assertTrue((self.folder / "tasks" / tid / "01-scout" / "handoff.md").is_file())
+        self.assertFalse(self.hub.tasks[tid].get("streams_freed"))
 
     def test_clear_removes_a_stuck_task(self):
         tid = self.make_task(words="", steps=self.TWO)
@@ -1329,12 +1343,13 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.call("/api/task/clear", {"task": tid})[0], 404)
 
     def test_brief_runs_between_steps(self):
+        self.brief_pass_always()
         tid = self.make_task(steps=self.TWO)
         self.until(tid, lambda t: t.get("briefing") == 1, "step 1 is briefed")
         row = self.hub.snapshot()["tasks"][0]
         self.assertEqual((row["id"], row["briefing"]), (tid, 1))
         task = self.until(tid, self.at(2), "step 2 starts")
-        brief_file = self.folder / "tasks" / tid / "steps" / "01-scout.brief.md"
+        brief_file = self.folder / "tasks" / tid / "01-scout" / "brief.md"
         text = brief_file.read_text(encoding="utf-8")
         for heading in tasks.HEADINGS:
             self.assertIn(heading, text)
@@ -1353,22 +1368,24 @@ class TaskServerTest(RunServerTest):
             tid = self.make_task(steps=self.TWO)
             task = self.until(tid, self.at(2), "step 2 starts")
         self.assertEqual(ask.call_count, 0)
-        text = (self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").read_text(encoding="utf-8")
+        text = (self.folder / "tasks" / tid / "01-scout" / "brief.md").read_text(encoding="utf-8")
         self.assertIn("add() is in calc.py:2", text)
         self.assertNotIn("test_add covers it", text)
         self.assertTrue(any(c["why"].startswith("brief fallback:") for c in self.chain(tid)))
         self.assertNotIn("# Step 01:", self.prompt_of(task["steps"][1]["session"]))
 
     def test_brief_fallback_never_blocks_the_chain(self):
+        self.brief_pass_always()
         # the brief request holds the next step's goal, so HUGE goes in step 2's
         tid = self.make_task(steps=[self.TWO[0], {"kind": "explain", "goal": "say it HUGE"}])
         task = self.until(tid, self.at(2), "step 2 starts")
         self.assertIn("brief fallback: over 500 words", [c["why"] for c in self.chain(tid)])
-        text = (self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").read_text(encoding="utf-8")
+        text = (self.folder / "tasks" / tid / "01-scout" / "brief.md").read_text(encoding="utf-8")
         self.assertIn("add() is in calc.py:2", text)
         self.assertEqual(task["steps"][1]["state"], "running")
 
     def test_a_long_brief_is_cut_not_dropped(self):
+        self.brief_pass_always()
         tid = self.make_task(steps=[self.TWO[0], {"kind": "explain", "goal": "say it LONG"}])
         self.until(tid, self.at(2), "step 2 starts")
         whys = [c["why"] for c in self.chain(tid)]
@@ -1376,6 +1393,7 @@ class TaskServerTest(RunServerTest):
         self.assertFalse(any(w.startswith("brief fallback") for w in whys))
 
     def test_task_snapshot_and_get(self):
+        self.brief_pass_always()
         tid = self.make_task()
         row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
         for key in ("id", "title", "project", "project_dir", "state", "owner", "current", "count", "why", "updated",
@@ -1773,7 +1791,7 @@ class TaskServerTest(RunServerTest):
                          ("running", "service", "running", sid))  # the same session, resumed
         task = self.until(tid, self.at(3), "step 3 starts")
         self.assertEqual((step["state"], step["handoff"], step["retries"], task["last_good"]),
-                         ("done", "steps/02-code.md", 0, 2))
+                         ("done", "02-code/handoff.md", 0, 2))
         self.assertNotEqual(task["steps"][2]["session"], sid)
         moves = [(c["step"], c["from"], c["to"], c["why"]) for c in self.chain(tid)]
         self.assertIn((2, "failed", "running", "continued by Fred"), moves)
@@ -1829,7 +1847,7 @@ class TaskServerTest(RunServerTest):
         tid = self.plan_task()
         task = self.until(tid, self.at(3), "step 3 starts")
         folder = self.folder / "tasks" / tid
-        self.assertIn("## Goal", (folder / "plan.md").read_text(encoding="utf-8"))
+        self.assertIn("## Goal", (folder / "02-design" / "plan.md").read_text(encoding="utf-8"))
         self.assertEqual(task["plan"]["from"], 2)
         self.assertGreater(task["plan"]["words"], 0)
         self.assertTrue(any(w.startswith("plan saved: ") for w in self.whys(tid)))
@@ -1839,7 +1857,7 @@ class TaskServerTest(RunServerTest):
         self.assertRegex(task["steps"][2]["notes"][-1], r"^read: brief 02 · plan [\d.]+ KB · step 3 section$")
         row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
         self.assertEqual(row["plan"]["from"], 2)
-        self.assertEqual(self.task(tid)[1]["plan"], (folder / "plan.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.task(tid)[1]["plan"], (folder / "02-design" / "plan.md").read_text(encoding="utf-8"))
 
     def test_design_step_reads_the_raw_notes_whole(self):
         tid = self.plan_task()
@@ -1869,8 +1887,8 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "code", "verify", "test"])
         self.assertEqual(task["steps"][4]["checked"], 4)
         folder = self.folder / "tasks" / tid
-        self.assertTrue((folder / "plan" / "01-calc-module.md").is_file())
-        self.assertTrue((folder / "plan" / "02-report-module.md").is_file())
+        self.assertTrue((folder / "02-design" / "plan" / "01-calc-module.md").is_file())
+        self.assertTrue((folder / "02-design" / "plan" / "02-report-module.md").is_file())
         self.assertIn("design split into 2 sub-plans: 2 code steps (Prep had 1)", self.whys(tid))
         self.assertIn("Your part of the plan:\n# Part 2: Report module", self.full_prompt(task["steps"][3]["session"]))
         self.assertEqual([(s["part"], s["hard"]) for s in self.task(tid)[1]["task"]["steps"][2:4]],
@@ -1908,11 +1926,11 @@ class TaskServerTest(RunServerTest):
         tid = self.plan_task()
         task = self.until(tid, lambda t: t["state"] == "waiting", "the task holds")
         self.assertEqual(task["why"], "plan ready: confirm")
-        text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        text = (self.folder / "tasks" / tid / "02-design" / "plan.md").read_text(encoding="utf-8")
         edited = text.replace("## Out of scope", "- Fred, 2026-10-14: use ints\n\n## Out of scope", 1)
         status, data = self.call("/api/task/plan", {"task": tid, "text": edited})
         self.assertEqual(status, 200, data)
-        self.assertIn("Fred, 2026-10-14: use ints", (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8"))
+        self.assertIn("Fred, 2026-10-14: use ints", (self.folder / "tasks" / tid / "02-design" / "plan.md").read_text(encoding="utf-8"))
         status, data = self.call("/api/task/plan", {"task": tid, "text": text.replace("## Goal", "## Aim")})
         self.assertEqual((status, data["error"]), (409, "plan: missing: ## Goal"))
         self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": "x", "part": -1})[0], 400)
@@ -1931,7 +1949,7 @@ class TaskServerTest(RunServerTest):
         status, data = self.call("/api/task/answer", {"task": tid, "text": "config.json"})
         self.assertEqual(status, 200, data)
         self.assertTrue(data["session"])
-        plan_text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        plan_text = (self.folder / "tasks" / tid / "02-design" / "plan.md").read_text(encoding="utf-8")
         decisions = plan_text.split("## Decisions")[1].split("## Out of scope")[0].strip()
         self.assertTrue(decisions.endswith(f"- Fred, {__import__('datetime').date.today().isoformat()}: config.json"))
         self.assertIn("plan gap answered by Fred: config.json", self.whys(tid))
@@ -1970,7 +1988,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "replan", "design", "code", "verify", "test"])
         step = task["steps"][1]
         self.assertEqual((step["state"], step["session"], step["model"]), ("done", "", self.hub.cfg["brief_model"]))
-        self.assertTrue((self.folder / "tasks" / tid / "steps" / "02-replan.md").is_file())
+        self.assertTrue((self.folder / "tasks" / tid / "02-replan" / "handoff.md").is_file())
         self.assertEqual(task["why"], "replanned: 1 steps added")
         self.assertEqual(task["replan"]["after"][0]["kind"], "search")
         self.assertEqual(self.task(tid)[1]["levers"]["keep"], "")
@@ -2011,9 +2029,71 @@ class TaskServerTest(RunServerTest):
         task = self.until(tid, lambda t: not t.get("briefing"), "the last brief is written")
         self.hub._clear_done(task, task["steps"][-1])
         folder = self.folder / "tasks" / tid
-        self.assertTrue((folder / "plan.md").is_file())
-        self.assertTrue(any((folder / "plan").glob("*.md")))
+        self.assertTrue((folder / "02-design" / "plan.md").is_file())
+        self.assertTrue(any((folder / "02-design" / "plan").glob("*.md")))
         self.assertTrue((folder / "task.json").is_file())
+
+    # -- plan 28: step folders, kind files, the plan mirror ---------------------------------------------------
+
+    def test_step_folder_says_what_the_step_received(self):
+        tid = self.make_task(steps=self.TWO)
+        self.settled(tid)
+        folder = self.folder / "tasks" / tid
+        role = (folder / "01-scout" / "role.md").read_text(encoding="utf-8")
+        self.assertTrue(role.startswith("# scout\n\n## Role\n"))
+        received = (folder / "02-explain" / "received.md").read_text(encoding="utf-8")
+        self.assertTrue(received.startswith("# Step 02: what it received\n\n- prompt.md (the goal)\n"))
+        self.assertIn("- 01-scout/brief.md (the brief of step 01)", received)
+        self.assertIn("- kinds/explain.md (as role.md)", received)
+        self.assertIn("add() is in calc.py:2", (folder / "01-scout" / "notes.md").read_text(encoding="utf-8")
+                      + (folder / "01-scout" / "handoff.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.hub.tasks[tid]["steps"][0]["dir"], "01-scout")
+
+    def test_a_short_note_is_its_own_brief(self):
+        with mock.patch.object(server.compact, "run_brief", side_effect=AssertionError("no second claude")) as ask:
+            tid = self.make_task(steps=self.TWO)
+            task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertEqual(ask.call_count, 0)
+        self.assertEqual(task["steps"][0]["brief_meta"]["by"], "as is")
+        self.assertTrue(any(re.match(r"^brief: as is, \d+ words, under 500$", w) for w in self.whys(tid)))
+        text = (self.folder / "tasks" / tid / "01-scout" / "brief.md").read_text(encoding="utf-8")
+        self.assertIn("test_add in tests/test_calc.py covers it", text)  # nothing cut
+
+    def test_task_file_reads_one_step_file(self):
+        tid = self.make_task(steps=self.TWO)
+        self.settled(tid)
+        status, data = self.call(f"/api/task/file?task={tid}&step=1&name=received.md")
+        self.assertEqual(status, 200, data)
+        self.assertEqual((data["file"], data["step"]), ("01-scout/received.md", 1))
+        self.assertTrue(data["text"].startswith("# Step 01: what it received"))
+        for bad in (f"task={tid}&step=1&name=../task.json", f"task={tid}&step=9&name=role.md",
+                    f"task={tid}&step=1&name=plan.md", "task=../x&step=1&name=role.md"):
+            self.assertEqual(self.call(f"/api/task/file?{bad}")[0], 404, bad)
+
+    def test_kind_file_is_read_saved_and_reset(self):
+        status, data = self.call("/api/kind?kind=scout")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["text"], data["seed"])
+        self.assertEqual(self.call("/api/kind?kind=nope")[0], 404)
+        mine = "# scout\n\n## Role\nLook twice.\n"
+        self.assertEqual(self.call("/api/kind", {"kind": "scout", "text": mine}), (200, dict(data, text=mine)))
+        self.assertEqual((self.folder / "kinds" / "scout.md").read_text(encoding="utf-8"), mine)
+        self.assertEqual(self.call("/api/kind", {"kind": "scout", "text": "# code\nx"}),
+                         (400, {"error": "the first line must be # scout"}))
+        tid = self.make_task(steps=self.TWO)
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("Look twice.", self.prompt_of(task["steps"][0]["session"]))  # used from the next step
+        self.assertIn("Look twice.", (self.folder / "tasks" / tid / "01-scout" / "role.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.call("/api/kind", {"kind": "scout", "reset": True})[1]["text"], data["seed"])
+
+    def test_design_step_mirrors_the_plan_into_the_project(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(3), "step 3 starts")
+        where = self.project / ".claude" / "console" / "plans" / f"{tid}-{task['slug']}"
+        text = (where / "plan.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("> Mirrored by Claude Console from its task folder"))
+        self.assertIn("## Goal", text)
+        self.assertIn(f"plan mirrored: .claude/console/plans/{tid}-{task['slug']}", self.whys(tid))
 
     # -- plan 27 Task 2: plan and replan edges --------------------------------------------------------------
 
@@ -2033,7 +2113,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.task(tid)[1]["levers"]["answer"], "no plan gap waits")
         self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": "config.json"}),
                          (409, {"error": "no plan gap waits"}))
-        self.assertFalse((self.folder / "tasks" / tid / "plan.md").exists())
+        self.assertFalse((self.folder / "tasks" / tid / "02-design" / "plan.md").exists())
 
     def test_redo_to_a_single_plan_drops_the_parts(self):
         tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT", kinds=("scout", "design", "code"))
@@ -2103,7 +2183,7 @@ class TaskServerTest(RunServerTest):
         self.hub.cfg["plan_hold"] = True
         tid = self.plan_task()
         self.until(tid, lambda t: t["state"] == "waiting", "the task holds")
-        text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        text = (self.folder / "tasks" / tid / "02-design" / "plan.md").read_text(encoding="utf-8")
         self.assertEqual(self.call("/api/task/stop", {"task": tid})[0], 200)
         self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": text}),
                          (409, {"error": "the plan can be edited while the task waits on it or is paused"}))

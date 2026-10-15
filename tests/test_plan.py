@@ -1,6 +1,7 @@
 """Plan 24: the design step's plan (console/plan.py): parse, check, split, files, answers, prompt parts."""
 import os
 import tempfile
+import shutil
 import unittest
 
 from console import plan, tasks
@@ -184,10 +185,11 @@ class FilesTest(unittest.TestCase):
 
     def test_save_writes_the_index_and_the_parts(self):
         meta = plan.save(self.home, self.t, plan.parse(split()), 2)
-        self.assertEqual(meta["parts"][1]["file"], "plan/02-report-module.md")
+        self.assertEqual(meta["dir"], "02-design")  # plan 28: in the design step's folder
+        self.assertEqual(meta["parts"][1]["file"], "02-design/plan/02-report-module.md")
         self.assertTrue(meta["parts"][1]["hard"])
         self.assertEqual(meta["parts"][1]["owns"], ["report.py", "calc.py"])
-        self.assertTrue(os.path.exists(os.path.join(self.home, "tasks", self.t["id"], "plan.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.home, "tasks", self.t["id"], "02-design", "plan.md")))
         self.t["plan"] = meta
         self.assertTrue(plan.read_part(self.home, self.t, 2).startswith("# Part 2: Report module"))
         self.assertIn("## Sub-plans", plan.read(self.home, self.t))
@@ -215,10 +217,55 @@ class FilesTest(unittest.TestCase):
 
     def test_write_replaces_the_index_or_a_part(self):
         self.t["plan"] = plan.save(self.home, self.t, plan.parse(split()), 2)
-        self.assertEqual(plan.write(self.home, self.t, "# edited\n"), "plan.md")
+        self.assertEqual(plan.write(self.home, self.t, "# edited\n"), "02-design/plan.md")
         self.assertEqual(plan.read(self.home, self.t), "# edited\n")
-        self.assertEqual(plan.write(self.home, self.t, "## Files\n- b\n", 2), "plan/02-report-module.md")
+        self.assertEqual(plan.write(self.home, self.t, "## Files\n- b\n", 2), "02-design/plan/02-report-module.md")
         self.assertEqual(plan.read_part(self.home, self.t, 2), "# Part 2: Report module\n\n## Files\n- b\n")
+
+    def test_a_plan_from_before_plan_28_reads_from_the_root(self):
+        legacy = dict(plan.save(self.home, self.t, plan.parse(single()), 2), dir="")
+        legacy.pop("dir")
+        self.t["plan"] = legacy
+        root = os.path.join(self.home, "tasks", self.t["id"])
+        with open(os.path.join(root, "plan.md"), "w", encoding="utf-8") as fh:
+            fh.write("# old plan\n")
+        self.assertEqual((plan.index_file(self.t), plan.read(self.home, self.t)), ("plan.md", "# old plan\n"))
+        self.t["plan"] = dict(legacy, dir="02-design")
+        self.assertEqual(plan.index_file(self.t), "02-design/plan.md")
+
+    def test_a_redo_saves_into_the_same_design_folder(self):
+        tasks.step(self.t, 2)["dir"] = "02-design"
+        self.t["plan"] = plan.save(self.home, self.t, plan.parse(split()), 2)
+        tasks.step(self.t, 2)["n"] = 3  # renumbered by an insert: the folder stays the one it started in
+        plan.drop_parts(self.home, self.t, 3)
+        self.assertFalse(os.path.exists(os.path.join(self.home, "tasks", self.t["id"], "02-design", "plan")))
+        self.t["plan"] = plan.save(self.home, self.t, plan.parse(single()), 3)
+        self.assertEqual((self.t["plan"]["dir"], self.t["plan"]["from"]), ("02-design", 3))
+
+    def test_mirror_copies_the_plan_into_the_project(self):
+        project = tempfile.mkdtemp()
+        self.t.update(project_dir=project, slug="usage-export")
+        self.t["plan"] = plan.save(self.home, self.t, plan.parse(split()), 2)
+        rel, why = plan.mirror(self.home, self.t)
+        self.assertEqual((rel, why), (f".claude/console/plans/{self.t['id']}-usage-export", ""))
+        where = os.path.join(project, rel)
+        with open(os.path.join(where, "plan.md"), encoding="utf-8") as fh:
+            index = fh.read()
+        self.assertTrue(index.startswith(f"> Mirrored by Claude Console from its task folder tasks/{self.t['id']}/02-design/"))
+        self.assertIn(plan.read(self.home, self.t), index)
+        self.assertEqual(sorted(os.listdir(os.path.join(where, "plan"))), ["01-calc-module.md", "02-report-module.md"])
+        self.t["plan"] = plan.save(self.home, self.t, plan.parse(single()), 2)  # a redo with one plan: old parts go
+        self.assertEqual(plan.mirror(self.home, self.t)[1], "")
+        self.assertFalse(os.path.exists(os.path.join(where, "plan")))
+        blocked = os.path.join(project, ".claude", "console", "plans", f"{self.t['id']}-usage-export")
+        shutil.rmtree(blocked)
+        with open(blocked, "w", encoding="utf-8") as fh:  # a file where the folder goes: the mirror fails, never raises
+            fh.write("x")
+        rel, why = plan.mirror(self.home, self.t)
+        self.assertEqual(rel, "")
+        self.assertTrue(why)
+        del self.t["slug"]
+        self.assertTrue(str(plan.mirror_dir(self.t)).endswith(f"{self.t['id']}-{tasks.slug(self.t['title'])}"))
 
     def test_write_and_add_answer_mask_and_keep_one_line(self):
         self.t["plan"] = plan.save(self.home, self.t, plan.parse(split()), 2)

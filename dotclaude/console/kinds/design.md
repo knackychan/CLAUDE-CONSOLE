@@ -1,3 +1,5 @@
+# design
+
 You are the design step: the one step of this task that thinks. The steps after you only write what you decide,
 on cheaper models, each in a fresh session that sees your plan and nothing of your reasoning. A writer that meets
 a question your plan does not answer stops and waits for $you, so every fork a writer could meet is closed here,

@@ -4,9 +4,12 @@ run, handed on through a note. This module is pure: rules, routes, the handoff c
 reads the final messages and writes every file. A model never writes into the task folder.
 
     <home>/tasks/<id>/   task.json   the task and its steps (written whole, through a temp file)
-                         prompt.md   the task text as Fred ran it (the service writes it)
-                         steps/NN-<kind>.md   the handoff note of a finished step
-                         chain.jsonl one line per transition"""
+                         prompt.md   the task text as it was run (the service writes it)
+                         chain.jsonl one line per transition
+                         NN-<kind>/  one folder per step (plan 28): role.md, received.md, notes.md, handoff.md,
+                                     brief.md, facts.md, verdict.md, handed.md, notes.<k>.md of a failed attempt;
+                                     the design step's plan.md and plan/
+    A step that ran before plan 28 has no "dir": its files are the flat steps/NN-<kind>.* of plan 17 and 23."""
 import copy
 import json
 import os
@@ -17,7 +20,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, fills, levers, redact, routing
+from . import claude_cli, fills, kinds, levers, redact, routing
 from .fills import RANK_TIER, TIER_RANK, TIERS  # plan 18: the job tiers (the contract names them here)
 
 RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify and fix are computed.
@@ -57,10 +60,8 @@ EFFORT_CAP = {m: claude_cli.EFFORTS[-1] for m in claude_cli.MODELS}  # every ali
 _TOP = ("opus", "high")  # the most a step runs on unless Fred picks fable
 _HINT = re.compile(r"Next model:\s*([a-z]+)/([a-z]+)")
 PROMPT_FILE = Path(__file__).resolve().parent / "step_prompt.md"
-VERIFY_STEP = ("Check the work of step $checked as the handoff note above describes it: read the files it "
-               "touched and run the project's tests or checks once. Do not edit any file. Put one line "
-               "`VERDICT: PASS` or `VERDICT: FAIL <shortest failing line>` in your final message, just before "
-               "the HANDOFF block.")  # a step's own text: levers.VERIFY_TEXT is the session lever's
+# plan 28: a kind's own text (the verify and fix rules, the design prompt) lives in its kind file (console/kinds.py);
+# levers.VERIFY_TEXT and levers.escalate_text stay the session levers' texts
 
 
 def safe_id(text) -> str:
@@ -303,23 +304,56 @@ def lesson_of(block: str) -> str:
     return "" if text.rstrip(".").lower() in _NO_QUESTION else text
 
 
+STEP_FILES = ("role.md", "received.md", "notes.md", "handoff.md", "brief.md", "facts.md", "verdict.md", "handed.md",
+              "plan.md", "proposal.json")  # plan 28: what a step folder may hold (GET /api/task/file reads these)
+_ATTEMPT_NOTES = re.compile(r"notes\.(\d{1,2})\.md")  # a failed attempt's final message
+_STEP_DIR = re.compile(r"\d\d-[a-z]+")
+
+
+def step_dir(step: dict) -> str:
+    """The step's folder in the task folder (plan 28): the name fixed when it first started (`dir`, so a step
+    renumbered by an insert keeps its folder), else `NN-<kind>` from its number and kind now."""
+    return step.get("dir") or f"{step['n']:02d}-{step['kind']}"
+
+
+def step_file(step: dict, name: str) -> str:
+    """`name` (one of STEP_FILES, or notes.<k>.md) in the step's folder, relative to the task folder."""
+    return f"{step_dir(step)}/{name}"
+
+
+def file_name_ok(name) -> bool:
+    return isinstance(name, str) and (name in STEP_FILES or bool(_ATTEMPT_NOTES.fullmatch(name)))
+
+
 def note_file(task: dict, step: dict) -> str:
-    return f"steps/{step['n']:02d}-{step['kind']}.md"
+    """The step's checked HANDOFF block (handoff.md); a step from before plan 28 has its flat steps/NN-<kind>.md."""
+    return step_file(step, "handoff.md") if "dir" in step else f"steps/{step['n']:02d}-{step['kind']}.md"
 
 
 def handoff_file(task: dict, step: dict) -> str:
-    """The session-handoff skill's note of the step Fred handed off."""
-    return f"steps/{step['n']:02d}-handoff.md"
+    """The session-handoff skill's note of the step handed off: handed.md (plan 28 renamed it, so handoff.md is
+    always the HANDOFF block), or the flat steps/NN-handoff.md of a step from before plan 28."""
+    return step_file(step, "handed.md") if "dir" in step else f"steps/{step['n']:02d}-handoff.md"
 
 
 def facts_file(task: dict, step: dict) -> str:
     """The facts the service read when the step ended (git and its last test command): never compacted."""
-    return f"steps/{step['n']:02d}-{step['kind']}.facts.md"
+    return step_file(step, "facts.md") if "dir" in step else f"steps/{step['n']:02d}-{step['kind']}.facts.md"
 
 
 def brief_file(task: dict, step: dict) -> str:
     """The compacted note the next step reads (compact.py)."""
-    return f"steps/{step['n']:02d}-{step['kind']}.brief.md"
+    return step_file(step, "brief.md") if "dir" in step else f"steps/{step['n']:02d}-{step['kind']}.brief.md"
+
+
+def notes_of(text: str) -> str:
+    """The final message before its PLAN and HANDOFF blocks (plan 28, notes.md): every line up to the first marker
+    line PLAN or HANDOFF, as tasks._mark reads a marker; the whole text when it has neither."""
+    lines = str(text or "").splitlines()
+    for i, line in enumerate(lines):
+        if _mark(line) in ("PLAN", MARK_START):
+            return "\n".join(lines[:i]).strip()
+    return "\n".join(lines).strip()
 
 
 def note_text(task: dict, step: dict, block: str, what: str = "") -> str:
@@ -382,6 +416,15 @@ def room_after(task: dict, n: int, max_steps: int) -> int:
     return max_steps - n - kept
 
 
+def slug(title: str) -> str:
+    """The task's name in a folder name (plan 28: the plan mirror's <id>-<slug>): lower case words joined by `-`,
+    at most 40 characters, cut after a whole word; "task" when nothing is left."""
+    words = re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")
+    if len(words) > 40:
+        words = words[:41].rsplit("-", 1)[0] if "-" in words[:41] else words[:40]
+    return words.strip("-") or "task"
+
+
 def new_task(project_dir: str, project: str, title: str, goal: str, steps: list, type_: str, demand,
              prep: str, effort: str, now: float) -> dict:
     if not steps:
@@ -389,7 +432,7 @@ def new_task(project_dir: str, project: str, title: str, goal: str, steps: list,
     if effort != "auto" and effort not in claude_cli.EFFORTS:
         raise ValueError(f"unknown effort: {effort}")
     from .prep import new_id  # here, not at the top: prep imports this module for PREP_KINDS
-    return {"id": new_id(), "project_dir": project_dir, "project": project, "title": title,
+    return {"id": new_id(), "project_dir": project_dir, "project": project, "title": title, "slug": slug(title),
             "goal": str(goal or "")[:GOAL_MAX], "type": type_, "demand": dict(demand or {}), "effort": effort,
             "state": "planned", "owner": "service", "current": 0, "last_good": 0, "escalated": "",
             "fable_ok": False, "prep": prep, "why": "", "created": now, "updated": now,
@@ -452,6 +495,7 @@ def _finish(task: dict, s: dict, state: str, now: float, lines: list, why: str =
 
 def start_step(task: dict, n: int, session: str, route: dict, start_commit: str, now: float) -> list:
     s = step(task, n)
+    s.setdefault("dir", step_dir(s))  # plan 28: the folder is named once, at the first attempt
     lines = [_line(now, dict(s, session=session), s["state"], "running", " · ".join(route["notes"]))]
     s["attempts"] = list(attempts(s)) + [{"session": session, "cost": 0, "started": now, "ended": None, "why": "",
                                           "final": False}]
@@ -704,6 +748,36 @@ def write_note(home, task: dict, step: dict, block: str) -> str:
     return rel
 
 
+def write_step_file(home, task: dict, step: dict, name: str, text: str, head: bool = False) -> str:
+    """Plan 28: one file of the step's folder (role.md, received.md, notes.md, verdict.md, proposal.json, notes.<k>.md),
+    masked and cut at 20 KB like a note; with `head` it starts with the note's head line (`# Step NN: <kind> on
+    <route>, session <id>`). Returns the relative name."""
+    if not file_name_ok(name):
+        raise ValueError(f"not a step file: {name}")
+    rel = step_file(step, name)
+    path = folder(home, task["id"]) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if head:
+        body = note_text(task, step, text)
+    else:
+        body = redact.mask(str(text or ""))
+        raw = body.encode("utf-8")
+        if len(raw) > NOTE_MAX:
+            body = raw[:NOTE_MAX].decode("utf-8", "ignore").rstrip() + "\n[cut at 20 KB]"
+    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+    return rel
+
+
+def read_step_file(home, task: dict, step: dict, name: str) -> str:
+    """A file of the step's folder (plan 28), "" when absent or not a step file name."""
+    if not file_name_ok(name):
+        return ""
+    try:
+        return (folder(home, task["id"]) / step_file(step, name)).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def read_note(home, task: dict, n: int) -> str:
     try:
         return (folder(home, task["id"]) / note_file(task, step(task, n))).read_text(encoding="utf-8")
@@ -764,7 +838,10 @@ def read_facts(home, task: dict, n: int) -> str:
 
 
 def prune(home, days: float, now: float = None) -> list:
-    """Remove the task folders of `done`, `stopped`, `stuck` and `handed` tasks whose task.json is older than `days`."""
+    """Remove the task folders of `done`, `stopped`, `stuck` and `handed` tasks whose task.json is older than `days`.
+    `days` 0 (the default since plan 28, D9) keeps every task folder: nothing is erased by a sweep."""
+    if not days or days <= 0:
+        return []
     cutoff = (time.time() if now is None else now) - days * 86400
     root, removed = Path(home) / "tasks", []
     if not root.is_dir():
@@ -783,20 +860,37 @@ def prune(home, days: float, now: float = None) -> list:
     return removed
 
 
+def sessions_of(task: dict) -> list:
+    """Every session the task's steps ran in, once each, in step order."""
+    return list(dict.fromkeys(a["session"] for s in task["steps"] for a in attempts(s) if a["session"]))
+
+
 def clear(home, task: dict, keep_last: bool = True) -> list:
-    """Remove what is only history. `keep_last`: every note but the last good one and its brief (task.json,
-    chain.jsonl and prompt.md stay); else the whole folder. Returns the step session ids so the caller can
-    forget their runs."""
-    sessions = list(dict.fromkeys(a["session"] for s in task["steps"] for a in attempts(s) if a["session"]))
+    """Remove what is only history. `keep_last` (Fred's Clear lever): every step file but the last good step's
+    handoff, brief and facts, the handed note and the plan (task.json, chain.jsonl and prompt.md stay; plan 28: in the
+    step folders and the flat steps/ of an older task alike; a step folder left empty goes); else the whole folder.
+    Returns the step session ids so the caller can forget their runs."""
+    sessions = sessions_of(task)
     root = folder(home, task["id"])
     if keep_last:
         last = step(task, task["last_good"]) if task["last_good"] else None
         keep = note_file(task, last) if last else ""
         kept = {keep, brief_file(task, last) if last else "", facts_file(task, last) if last else "",
                 task.get("handoff_note") or ""}
+        plan_dir = (task.get("plan") or {}).get("dir") or ""
         for path in sorted((root / "steps").glob("*.md")):
             if f"steps/{path.name}" not in kept:
                 path.unlink(missing_ok=True)
+        for sub in sorted(p for p in root.iterdir() if p.is_dir() and _STEP_DIR.fullmatch(p.name)) \
+                if root.is_dir() else ():
+            for path in sorted(sub.iterdir()):
+                rel = f"{sub.name}/{path.name}"
+                if sub.name == plan_dir and (path.name == "plan.md" or path.name == "plan"):
+                    continue
+                if path.is_file() and rel not in kept:
+                    path.unlink(missing_ok=True)
+            if not any(sub.iterdir()):
+                sub.rmdir()
         for s in task["steps"]:
             if s["handoff"] != keep:
                 s["handoff"] = ""
@@ -934,14 +1028,29 @@ def measure(home, project: str, n: int = 10) -> dict:
 
 # -- prompts ----------------------------------------------------------------------------------------------
 
-def _fix_text(task: dict, s: dict) -> str:
+def role_slots(task: dict, s: dict) -> dict:
+    """The kind file's own slots (plan 28): verify `checked` (the step it checks); fix `failed` (the verdict line),
+    `model` and `effort` (its escalated route); {} for every other kind."""
+    if s["kind"] == "verify":
+        return {"checked": s["checked"] or s["n"] - 1}
+    if s["kind"] != "fix":
+        return {}
     before = next((x for x in reversed(task["steps"][:task["steps"].index(s)]) if x["kind"] == "verify"), None)
     if s["model"] and s["effort"]:
         route = (s["model"], s["effort"])
     else:  # the service builds the prompt before the step starts
         found = step_route("fix", checked=checked_route(task, s), effort=task["effort"])
         route = (found["model"], found["effort"])
-    return levers.escalate_text(before["verdict_detail"] if before else "", *route)
+    detail = before["verdict_detail"] if before else ""
+    return {"failed": detail or "see the last VERDICT line", "model": route[0], "effort": route[1]}
+
+
+def role_text(task: dict, s: dict, raw: str, slots: dict = None, you: str = "the user") -> str:
+    """A kind file as step `s` runs it (plan 28): its body (the `# <kind>` line left out) with role_slots, `slots`
+    (the design step's, plan.design_slots) and $you / $You filled in. The service writes it as the step's role.md."""
+    you = you or "the user"
+    values = {**role_slots(task, s), **(slots or {}), "you": you, "You": you[:1].upper() + you[1:]}
+    return Template(kinds.body_of(raw)).safe_substitute(values)
 
 
 _LESSON_LINE = re.compile(r"^- (\d{4}-\d\d-\d\d) - .*? - ([a-z]+): (.+)$")
@@ -976,18 +1085,19 @@ def prompt_goal(task: dict, step: dict) -> str:
     return goal[:PROMPT_GOAL_MAX - 1].rstrip() + "\u2026"
 
 
-def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", special: str = "",
+def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", role: str = None,
                 plan: str = "", part: str = "", facts: str = "", lessons=(), you: str = "the user") -> str:
-    """The prompt of one step (console/step_prompt.md); `you` is paths.you(cfg), the person a question waits for."""
+    """The prompt of one step (console/step_prompt.md); `you` is paths.you(cfg), the person a question waits for.
+    `role` is the step's kind file as role_text rendered it (plan 28); None renders the repo's seed copy."""
     kind = step["kind"]
-    special = special or (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1)
-                          if kind == "verify" else _fix_text(task, step) if kind == "fix" else "")
+    if role is None:
+        role = role_text(task, step, kinds.seed_text(kind), you=you)
     retry = (f"Your earlier attempt at this step ended without a handoff: {retry_reason}. "
              "Start again from the handoff below.") if retry_reason else ""
     taught = (f"Lessons from earlier {kind} steps in this project (use one only where it applies):\n"
               + "\n".join(f"- {line}" for line in lessons) + "\n\n") if lessons else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
         title=task["title"], goal=prompt_goal(task, step), n=step["n"], m=len(task["steps"]),
-        kind=kind, step_goal=step["goal"], special=special, retry=retry,
+        kind=kind, step_goal=step["goal"], role=role + "\n" if role else "", retry=retry,
         plan=plan + "\n\n" if plan else "", lessons=taught, part=part + "\n\n" if part else "",
         prev=received(prev_note, facts), you=you)

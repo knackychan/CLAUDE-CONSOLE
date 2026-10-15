@@ -748,6 +748,14 @@ html:not(.native) .native-only { display: none; }
 .krow .pick.r select { max-width: 190px; }
 .krow .sub { grid-column: 1 / -1; grid-row: 2; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .krow .sub .r { color: var(--bad); }
+.kroles { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px; }
+.kroles .btn.on { color: var(--ink); border-color: var(--ink); }
+.role { padding: 0 12px 10px; }
+.role .rhd { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; }
+.role .rhd .nm { font: 500 13px var(--ui); color: var(--ink); }
+.role .sub { font: 10.5px var(--mono); color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role textarea { width: 100%; min-height: 220px; resize: vertical; box-sizing: border-box; font: 12px/1.45 var(--mono); color: var(--ink); background: transparent; border: 1px solid var(--line); padding: 6px 8px; }
+.role .rbar { display: flex; gap: 6px; align-items: center; padding-top: 6px; }
 .krow.fixed .nm { color: var(--mut); }
 .krow.fixed .lock { grid-column: 2 / -1; grid-row: 1 / span 2; font: 11px var(--mono); color: var(--mut); text-align: right; }
 .ed { box-shadow: inset 2px 0 0 var(--wip); }

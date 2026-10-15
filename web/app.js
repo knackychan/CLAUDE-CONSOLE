@@ -2434,7 +2434,31 @@ function kindsTab() {
   return `<p class="hint">Which model and effort each kind of step takes. Auto lets Prep and the router decide (the tier's emptiest model; the effort from the kind's start, raised when Prep judges the step hard); a picked model or effort pins it as this kind's default. The Prep card can still change one step.</p>
     ${["read", "write", "think"].map((t) => `<div class="pcard">${cardHead("k" + t, KCARD[t][0], KCARD[t][1], KCARD[t][2] + " Kinds: " + byTier[t].join(", ") + ".")}${byTier[t].map(kindRow).join("")}</div>`).join("")}
     <div class="pcard">${cardHead("kchecks", "Checks", "set by the rule, not here", "Verify and fix are set by a rule: verify runs one rank above the model that wrote the step; fix takes the failed step's tier. They cannot be changed here.")}
-      ${fixed("verify", "one rank above", "the rung that wrote the step; never opencode or cmd")}${fixed("fix", "the failed step's tier", "after a FAIL; never opencode or cmd")}</div>`;
+      ${fixed("verify", "one rank above", "the rung that wrote the step; never opencode or cmd")}${fixed("fix", "the failed step's tier", "after a FAIL; never opencode or cmd")}</div>
+    ${roleCard()}`;
+}
+
+// Plan 28: each kind's role file (~/.claude/console/kinds/<kind>.md), the text a step of that kind runs with;
+// saved on its own (not by the bar's Save), used from the next step that starts
+let mrole = null;  // {kind, text, seed, path, msg} while one is open
+function roleCard() {
+  const names = [...cfg.kinds, "verify", "fix"].filter((k, i, a) => a.indexOf(k) === i);
+  const open = mrole ? `<div class="role"><div class="rhd"><span class="nm">${esc(mrole.kind)}.md</span><span class="sub">${esc(mrole.path || "")}</span></div>
+      <textarea id="mrole" spellcheck="false" aria-label="${esc(mrole.kind)} role file">${esc(mrole.text)}</textarea>
+      <div class="rbar"><button class="btn sm" data-mroleact="save"${mrole.text === mrole.loaded ? " disabled" : ""}>Save</button><button class="btn sm" data-mroleact="reset"${mrole.loaded === mrole.seed ? " disabled" : ""} title="Put the repo's copy back">Reset to repo copy</button><button class="btn sm" data-mroleact="close">Close</button><span class="sub">${esc(mrole.msg || (mrole.loaded === mrole.seed ? "the repo's copy" : "edited"))}</span></div></div>` : "";
+  return `<div class="pcard">${cardHead("krole", "Role files", "the text each kind runs with", "Each step's prompt carries its kind's role file, copied into the step's folder as role.md. An edit counts from the next step that starts. The first line stays # <kind>.")}
+    <div class="kroles">${names.map((k) => `<button class="btn sm${mrole && mrole.kind === k ? " on" : ""}" data-mrole="${esc(k)}">${esc(k)}</button>`).join("")}</div>${open}</div>`;
+}
+async function roleAct(kind, act) {
+  try {
+    if (act === "open") { const d = await api("/api/kind?kind=" + encodeURIComponent(kind)); mrole = { ...d, loaded: d.text, msg: "" }; }
+    else if (act === "close") mrole = null;
+    else {
+      const d = await api("/api/kind", act === "reset" ? { kind: mrole.kind, reset: true } : { kind: mrole.kind, text: mrole.text });
+      mrole = { ...d, loaded: d.text, msg: act === "reset" ? "the repo's copy is back" : "saved: the next step uses it" };
+    }
+  } catch (err) { if (mrole) mrole.msg = err.message; }
+  renderModels();
 }
 
 // Tiers: each tier's rungs in order (drag, or Alt+Up / Alt+Down on a row); hidden rungs keep their place
@@ -2602,7 +2626,10 @@ $("mscroll").addEventListener("change", (e) => {
   mmsg = "";
   renderModels();
 });
+$("mscroll").addEventListener("input", (e) => { if (e.target.id === "mrole" && mrole) { mrole.text = e.target.value; mrole.msg = ""; } });
 $("mscroll").addEventListener("click", (e) => {
+  const r = e.target.closest("[data-mrole],[data-mroleact]");
+  if (r) { if (!r.disabled) roleAct(r.dataset.mrole || "", r.dataset.mrole ? "open" : r.dataset.mroleact); return; }
   const t = e.target.closest("[data-q],[data-mreset],[data-mrm],[data-mbool]");
   if (!t) return;
   if (t.dataset.q) { if (!mqOpen.delete(t.dataset.q)) mqOpen.add(t.dataset.q); }
@@ -2979,7 +3006,7 @@ function recvPane(t, s, d) {
   const w = meta.sent_w != null ? meta.sent_w : wc(brief);
   const plan = prev && prev.kind === "design" && t.plan && t.plan.from === prev.n
     ? `<p class="note m">and plan.md, ${Number(t.plan.words || 0).toLocaleString("en")} w, never cut (the Plan tab)</p>` : "";
-  return `<div class="blk"><div class="hd"><span class="lbl">From ${two(s.n - 1)}</span><span class="m">${w} w · ${meta.fallback ? "as written" : "compacted"}</span></div>${plan}
+  return `<div class="blk"><div class="hd"><span class="lbl">From ${two(s.n - 1)}</span><span class="m">${w} w · ${meta.by === "as is" ? "as is, under the cap" : meta.fallback ? "as written" : "compacted"}</span></div>${plan}
     ${headingBlock(handoffSections(brief), [], ["goal", "findings", "questions", "next"])}</div>`;
 }
 function handPane(t, s, d) {
@@ -2988,7 +3015,7 @@ function handPane(t, s, d) {
   if (s.state === "planned") return '<p class="note m">Not started.</p>';
   if (!note) return '<p class="note m">No handoff: the step ended without a HANDOFF block.</p>';
   const raw = meta.raw_w != null ? meta.raw_w : wc(note), got = meta.sent_w;
-  const info = nx ? `wrote ${raw} w · ${two(nx.n)} received ${got == null ? "?" : got} w${meta.fallback ? " · sent as written" : ""}` : `wrote ${raw} w`;
+  const info = nx ? `wrote ${raw} w · ${two(nx.n)} received ${got == null ? "?" : got} w${meta.fallback ? " · sent as written" : meta.by === "as is" ? " · sent as is" : ""}` : `wrote ${raw} w`;
   return `<div class="blk"><div class="hd"><span class="lbl">${nx ? "For " + two(nx.n) : "For the task's end"}</span><span class="m">${info}</span></div>
     ${headingBlock(handoffSections(note), (meta.cut || []).map(normItem))}${factsFold(s, (d.facts || {})[String(s.n)])}</div>`;
 }

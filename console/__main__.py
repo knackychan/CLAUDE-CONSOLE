@@ -7,7 +7,7 @@ import sys
 import threading
 import urllib.request
 
-from . import events, paths, runs, server, tasks
+from . import events, kinds, paths, runs, server, tasks
 
 
 def already_running(port: int) -> bool:
@@ -47,7 +47,8 @@ def main(argv=None) -> int:
         return open_window(url)
     events.prune(paths.home(), cfg["retention_days"])
     runs.prune(paths.home(), cfg["retention_days"])
-    tasks.prune(paths.home(), cfg["task_retention_days"])
+    tasks.prune(paths.home(), cfg["task_retention_days"])  # plan 28: 0 (the default) keeps every task folder
+    kinds.ensure(paths.home())  # plan 28: the kind files the console runs with, seeded once, then Fred's to edit
 
     httpd = None
     try:

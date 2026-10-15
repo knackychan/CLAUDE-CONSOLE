@@ -142,6 +142,19 @@ class BriefTest(unittest.TestCase):
         self.assertEqual(tasks.check_handoff(compact.fallback("", "")), "")  # nothing to cut from still checks out
         self.assertEqual(tasks.check_handoff(compact.fallback("", OLD_RAW)), "")  # an old note gives six headings
 
+    def test_a_note_under_the_cap_is_its_own_brief(self):
+        """Plan 28 (D14): no pass rewrites a handoff that fits brief_max_words; nothing of it is cut."""
+        cfg = copy.deepcopy(paths.DEFAULTS)
+        text = compact.as_is(cfg, "", RAW)
+        self.assertEqual(tasks.check_handoff(text), "")
+        self.assertIn("test_add in tests/test_calc.py covers it and fails on a negative number", text)
+        self.assertEqual(text, compact.fallback("", RAW, cut=False))
+        self.assertEqual(compact.as_is(dict(cfg, brief_max_words=20), "", RAW), "")  # over the cap: the pass runs
+        self.assertEqual(compact.as_is(cfg, "", "no headings at all"), "")
+        long_raw = RAW.replace("add() is in calc.py:2", "a" * 3000)
+        self.assertIn("a" * 3000, compact.as_is(cfg, "", long_raw))  # one long word: under the cap, kept whole
+        self.assertNotIn("a" * 3000, compact.fallback("", long_raw))  # the old fallback cuts it
+
     def test_build_prompt(self):
         task = make_task()
         text = compact.build_prompt(task, tasks.step(task, 1), tasks.step(task, 2), "", RAW + "\ncost $HOME")
