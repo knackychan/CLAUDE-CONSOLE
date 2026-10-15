@@ -204,6 +204,13 @@ class HandoffTest(unittest.TestCase):
             self.assertEqual(tasks.parse_handoff(f"text\n{start}\n{body}\n{end}\n"), body, start)
         self.assertIsNone(tasks.parse_handoff("**HANDOFF block follows**\n" + body + "\nEND HANDOFF"))
 
+    def test_missing_block_says_which_marker_is_missing(self):  # plan 33
+        self.assertEqual(tasks.missing_block(f"Done.\n\nHANDOFF\n{GOOD}"), "HANDOFF has no END HANDOFF line")
+        self.assertEqual(tasks.missing_block(f"**HANDOFF**\n{GOOD}"), "HANDOFF has no END HANDOFF line")
+        self.assertEqual(tasks.missing_block("Done, no block."), "no HANDOFF block")
+        self.assertEqual(tasks.missing_block("see the HANDOFF block: x"), "no HANDOFF block")  # not a whole line
+        self.assertEqual(tasks.missing_block(""), "no HANDOFF block")
+
     def test_check_handoff_reasons(self):
         self.assertEqual(tasks.check_handoff(GOOD), "")
         self.assertEqual(tasks.HEADINGS, ("## Goal", "## Findings", "## Files touched", "## Troubleshooting",
@@ -254,6 +261,10 @@ class HandoffTest(unittest.TestCase):
         self.assertEqual(tasks.reply_verdict("VERDICT: FAIL\nVERDICT: PASS"), ("PASS", ""))  # the last one
         self.assertEqual(tasks.reply_verdict("end with `VERDICT: PASS` or not"), ("", ""))  # not a whole line
         self.assertEqual(tasks.reply_question("text\n- STOP: which file?\n"), "which file?")
+        self.assertEqual(tasks.reply_question("Done.\n\nShall I fix those two lines? They're small. Also still open: the flaky test."),
+                         "Shall I fix those two lines?")
+        self.assertEqual(tasks.reply_question("I checked why this failed? The cause is the missing file."), "")
+        self.assertEqual(tasks.reply_question("## Open questions\n- Which file?\n\nEND HANDOFF"), "")
         for none in ("STOP: none", "STOP: N/A.", "STOP: -", "no question"):
             self.assertEqual(tasks.reply_question(none), "", none)
 
@@ -632,7 +643,16 @@ class ChainTest(unittest.TestCase):
         ok, _, _ = tasks.fred(stuck, "retry", NOW + 15)
         self.assertEqual((ok, stuck["state"], tasks.step(stuck, 1)["state"], tasks.step(stuck, 1)["retries"]),
                          (True, "running", "planned", 1))
+        self.assertEqual((stuck.get("retry_why"), stuck.get("retry_note")), ("x", None))  # plan 33: why it ended, no note
         self.assertEqual(tasks.fred(stuck, "confirm", NOW + 16)[:2], (False, "nothing to confirm"))
+        again = make(("scout", "explain"))
+        run(again, 1)
+        end(again, block_error="x")
+        run(again, 1)
+        end(again, block_error="x")
+        ok, _, lines = tasks.fred(again, "retry", NOW + 15, note="use the other file")
+        self.assertEqual((ok, again["retry_note"], again["retry_why"]), (True, "use the other file", "x"))
+        self.assertEqual(lines[0]["why"], "retry by Fred: use the other file")
         waiting = make(("scout", "explain"))
         waiting["state"], waiting["why"] = "waiting", "confirm Fable"
         ok, _, _ = tasks.fred(waiting, "confirm", NOW + 17)
@@ -985,6 +1005,10 @@ class ChainTest(unittest.TestCase):
         self.assertIn("Your earlier attempt at this step ended without a handoff: no HANDOFF block. "
                       "Start again from the handoff below.", retry)
         self.assertNotIn("Your earlier attempt", code)
+        noted = tasks.step_prompt(task, tasks.step(task, 2), "note", "no HANDOFF block", note="close it with END HANDOFF", you="Fred")
+        self.assertIn("Start again from the handoff below.\nFred adds for this retry: close it with END HANDOFF", noted)
+        self.assertIn("Fred adds for this retry: try again", tasks.step_prompt(task, tasks.step(task, 2), "note", note="try again", you="Fred"))
+        self.assertNotIn("adds for this retry", retry)
         long = dict(task, goal="g" * 9000)
         self.assertLess(len(tasks.step_prompt(long, tasks.step(long, 1), "")), 9000)
 
@@ -1489,6 +1513,16 @@ class NextStepTest(unittest.TestCase):
         new = tasks.append_step(task, tasks.CHAT, "keep talking", now=NOW)
         self.assertEqual((new["kind"], new["checked"], new["pick"]), (tasks.CHAT, 0, ""))
         self.assertEqual(task["progression"], "manual")
+
+    def test_received_manifest_names_the_handover_and_the_source_facts(self):
+        """Plan 36 Task 2: what a reserved manual step received is written once, at reservation, not by start_step."""
+        task = self.manual()
+        new = tasks.append_step(task, "code", "write it", now=NOW)
+        text = tasks.received_manifest(task, new, task["steps"][0])
+        self.assertEqual(text.splitlines()[0], "# Step 02: what it received")
+        self.assertIn("02-code/received-handoff.md (saved handover from step 01)", text)
+        self.assertIn("01-scout/facts.md (source facts, if recorded)", text)
+        self.assertIn(task["project_dir"], text)
 
 
 if __name__ == "__main__":

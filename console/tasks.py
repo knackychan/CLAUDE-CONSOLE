@@ -298,10 +298,14 @@ def reply_verdict(text: str) -> tuple:
 
 
 def reply_question(text: str) -> str:
-    """The last whole `STOP: <question>` line's question; "" for none (`STOP: none` is not a question)."""
+    """A STOP line, or a direct question opening the final paragraph when the marker was omitted."""
     found = _STOP.findall(str(text or ""))
     question = found[-1].strip() if found else ""
-    return "" if question.rstrip(".").lower() in _NO_QUESTION else redact.clip(redact.mask(question), 200)
+    if found:
+        return "" if question.rstrip(".").lower() in _NO_QUESTION else redact.clip(redact.mask(question), 200)
+    last = str(text or "").strip().split("\n\n")[-1].strip()
+    match = re.match(r"^(?:Shall|Should|Would|Could|Can|Do|Does|Is|Are|Which|What|Where|When|Who|How|May|Will)\b[^?\n]*\?", last, re.I)
+    return redact.clip(redact.mask(match.group()), 200) if match else ""
 
 
 _LESSON = re.compile(r"^[\s`*>\-]*Lesson:\**\s*(.+?)[\s`*]*$", re.M)
@@ -532,6 +536,15 @@ def append_step(task: dict, kind: str, goal: str, pick: str = "", now: float = N
     return new
 
 
+def received_manifest(task: dict, step: dict, source: dict) -> str:
+    """Plan 36: what a reserved manual step received, written once at reservation. start_step never rewrites it,
+    so a launch or a retry keeps the manifest the preview and the append agreed on."""
+    return (f"# Step {step['n']:02d}: what it received\n\n"
+            f"- {step_file(step, 'received-handoff.md')} (saved handover from step {source['n']:02d})\n"
+            f"- {facts_file(task, source)} (source facts, if recorded)\n"
+            f"- Same project folder: {task['project_dir']}\n")
+
+
 def _line(now: float, s, frm: str, to: str, why: str = "") -> dict:
     return {"ts": now, "step": s["n"] if s else 0, "from": frm, "to": to, "why": why,
             "session": s["session"] if s else ""}
@@ -695,7 +708,7 @@ def held(task: dict) -> bool:
     return task["state"] == "waiting" and task["why"].endswith(" over its pace")
 
 
-def fred(task: dict, lever: str, now: float, next_n: int = 0):
+def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = ""):
     """Fred's levers on the task state. (True, "", chain lines) when it applies, else (False, why, []).
     Confirm is the Fable confirm, or Run anyway for a budget hold of step `next_n` (that step only). Continue is
     Fred's Continue in the session of a stopped task's current step: the task runs on in that session. Handoff is
@@ -727,8 +740,13 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0):
         if state not in ("stuck", "stopped"):
             return False, "not stuck or stopped", []
         if s and s["state"] != "done":  # a finished step is not run twice: the next one is already planned
-            lines.append(_line(now, s, s["state"], "planned", "retry by Fred"))
+            lines.append(_line(now, s, s["state"], "planned",
+                               "retry by Fred" + (f": {redact.clip(redact.mask(note), 160)}" if note else "")))
             s["state"] = "planned"
+            if note:  # plan 33: the retry's prompt carries Fred's words, and the reason a stuck step ended
+                task["retry_note"] = note
+            if state == "stuck" and (attempts(s) or [{}])[-1].get("why"):
+                task["retry_why"] = attempts(s)[-1]["why"]
         _task_to(task, "running" if s else "planned", "", now, s, lines)
         task["owner"] = "service"
     elif lever == "continue":  # Fred's Continue in the stopped step's own session: the step runs on there
@@ -1198,14 +1216,18 @@ def prompt_goal(task: dict, step: dict) -> str:
 
 
 def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", role: str = None,
-                plan: str = "", part: str = "", facts: str = "", lessons=(), you: str = "the user") -> str:
+                plan: str = "", part: str = "", facts: str = "", lessons=(), you: str = "the user",
+                note: str = "") -> str:
     """The prompt of one step (console/step_prompt.md); `you` is paths.you(cfg), the person a question waits for.
-    `role` is the step's kind file as role_text rendered it (plan 28); None renders the repo's seed copy."""
+    `role` is the step's kind file as role_text rendered it (plan 28); None renders the repo's seed copy.
+    `note` is what `you` typed with Retry (plan 33)."""
     kind = step["kind"]
     if role is None:
         role = role_text(task, step, kinds.seed_text(kind), you=you)
     retry = (f"Your earlier attempt at this step ended without a handoff: {retry_reason}. "
              "Start again from the handoff below.") if retry_reason else ""
+    if note:
+        retry += ("\n" if retry else "") + f"{you} adds for this retry: {note}"
     taught = (f"Lessons from earlier {kind} steps in this project (use one only where it applies):\n"
               + "\n".join(f"- {line}" for line in lessons) + "\n\n") if lessons else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(

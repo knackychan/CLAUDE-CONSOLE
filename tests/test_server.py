@@ -64,6 +64,16 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["sessions"][0]["title"], "hello")
 
+    def test_recent_run_without_stop_marker_recovers_its_final_question(self):
+        now = time.time()
+        events.append(self.hub.folder, {"event": "run_started", "session_id": "ask", "ts": now})
+        events.append(self.hub.folder, {"event": "run_ended", "session_id": "ask", "ts": now + 1,
+                                        "subtype": "success"})
+        with mock.patch.object(self.hub, "final_message", return_value=("Done.\n\nShall I fix those lines?", "success")):
+            self.hub.poll_once()
+        row = next(r for r in self.hub.snapshot()["sessions"] if r["id"] == "ask")
+        self.assertEqual((row["state"], row["stop_question"]), ("stop", "Shall I fix those lines?"))
+
     def test_foreign_host_is_refused(self):
         self.assertEqual(self.get("/api/state", host="evil.example")[0], 403)
         self.assertEqual(self.get("/api/usage", host="evil.example")[0], 403)
@@ -151,6 +161,11 @@ class RunServerTest(unittest.TestCase):
         self.folder = Path(self.tmp.name) / "home"
         self.project = Path(self.tmp.name) / "proj"
         self.project.mkdir()
+        data = Path(self.tmp.name) / "data"
+        data.mkdir()
+        home = mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(data)})
+        home.start()
+        self.addCleanup(home.stop)
         cfg = dict(paths.load_config(), projects=[str(self.project)])
         fake = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
         self.httpd, self.hub = server.make_server(cfg, port=0, folder=self.folder, exe=fake)
@@ -184,6 +199,14 @@ class RunServerTest(unittest.TestCase):
     def session(self, sid):
         self.hub.poll_once()
         return next((s for s in self.hub.snapshot()["sessions"] if s["id"] == sid), None)
+
+    def test_draft_write_failure_answers_500(self):
+        """Plan 34 F5: draft.txt goes through a temp file; a failed write answers with the reason, the old draft stays."""
+        self.assertEqual(self.call("/api/draft", {"text": "hello"}), (200, {"ok": True}))
+        self.assertEqual([p.name for p in self.folder.glob("draft.txt.*")], [])
+        with mock.patch.object(server.paths, "write_text_atomic", side_effect=PermissionError(13, "in use")):
+            self.assertEqual(self.call("/api/draft", {"text": "bye"}), (500, {"error": "draft not saved: in use"}))
+        self.assertEqual((self.folder / "draft.txt").read_text(encoding="utf-8"), "hello")
 
     def test_only_listed_projects_can_run(self):
         self.assertEqual(self.call("/api/run", {"project_dir": self.tmp.name, "prompt": "x"})[0], 403)
@@ -914,8 +937,13 @@ class TaskServerTest(RunServerTest):
         self.assertNotIn("ended without a handoff", self.prompt_of(first))
         task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
         self.assertEqual(task["why"], "no HANDOFF block (after one retry)")
-        self.assertEqual(self.call("/api/task/retry", {"task": tid}), (200, {"task": tid, "state": "running"}))
+        self.assertEqual(self.call("/api/task/retry", {"task": tid, "note": " use the shorter block "}),
+                         (200, {"task": tid, "state": "running"}))
         self.assertEqual(self.hub.tasks[tid]["steps"][0]["state"], "running")
+        prompt = self.prompt_of(self.hub.tasks[tid]["steps"][0]["session"])  # plan 33: why it ended, and Fred's note
+        self.assertIn("ended without a handoff: no HANDOFF block", prompt)
+        self.assertIn("adds for this retry: use the shorter block", prompt)
+        self.assertNotIn("retry_note", self.hub.tasks[tid])
         self.assertEqual(self.call("/api/task/retry", {"task": tid})[0], 409)  # running now
 
     def test_verify_fail_inserts_fix_and_verify(self):
@@ -1512,6 +1540,34 @@ class TaskServerTest(RunServerTest):
             self.assertTrue(self.hub.count_run(rec))
         self.assertEqual(self.hub.usage_other[usage.day_of(ts)]["gpt-6.1-sol"]["cost"], 0.5)
 
+    def test_outside_codex_stop_counts_turn_tokens(self):
+        ts, sid = time.time(), "0000-codex"
+        self.hub.cfg["prices"] = dict(self.hub.cfg["prices"],
+                                      **{"gpt-6-astra": {"input": 2, "output": 10, "cache_read": 0.2}})
+        rec = {"event": "Stop", "harness": "codex", "session_id": sid, "ts": ts, "model": "gpt-6-astra",
+               "tokens": {"input": 1_000_000, "output": 100_000, "cache_read": 0}}
+        with mock.patch.object(self.hub.reader, "read_new", return_value=[rec]):
+            self.assertEqual(self.hub.poll_once(), 1)
+        row = self.hub.usage_other[usage.day_of(ts)]["gpt-6-astra"]
+        self.assertEqual((row["cost"], row["runs"], row["unknown"]), (3.0, 1, 0))
+        with mock.patch.object(self.hub.reader, "read_new", return_value=[dict(rec)]):
+            self.assertEqual(self.hub.poll_once(), 1)  # the same line replayed: counted once
+        self.assertEqual(self.hub.usage_other[usage.day_of(ts)]["gpt-6-astra"]["runs"], 1)
+        with mock.patch.object(self.hub.reader, "read_new", return_value=[dict(rec, ts=ts + 1, tokens=None)]):
+            self.hub.poll_once()
+        self.assertEqual(self.hub.usage_other[usage.day_of(ts)]["gpt-6-astra"]["unknown"], 1)  # never zero
+
+    def test_window_run_stop_not_counted(self):
+        ts, sid = time.time(), "0000-wincodex"
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
+        self.hub.runs.meta_path(sid).write_text(json.dumps({"harness": "codex", "model": "gpt-6-astra"}),
+                                                encoding="utf-8")
+        rec = {"event": "Stop", "harness": "codex", "session_id": sid, "ts": ts, "model": "gpt-6-astra",
+               "tokens": {"input": 100, "output": 10, "cache_read": 0}}
+        with mock.patch.object(self.hub.reader, "read_new", return_value=[rec]):
+            self.assertEqual(self.hub.poll_once(), 1)
+        self.assertEqual(self.hub.usage_other, {})  # a window run is counted from its run_ended line
+
     def test_a_bad_run_ended_line_never_escapes_poll_once(self):
         sid = "0000-codex"
         self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
@@ -1912,6 +1968,14 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([(s["part"], s["hard"]) for s in self.task(tid)[1]["task"]["steps"][2:4]],
                          [(1, False), (2, True)])
 
+    def test_split_plan_of_a_last_design_step_starts_every_planned_step(self):  # the audit task: design ended the chain
+        tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT VERDICT-PASS", kinds=("scout", "design"))
+        task = self.until(tid, self.at(3), "step 3 starts")  # the task was marked done before the rebuild added it
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "code", "verify"])
+        self.assertEqual(task["state"], "running")
+        task = self.until(tid, lambda t: t["state"] == "done", "the task is done")
+        self.assertEqual([s["state"] for s in task["steps"]], ["done"] * 5)
+
     def test_bad_plan_retries_then_sticks(self):
         tid = self.plan_task(words="HANDOFF-OK PLAN-BAD")
         task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
@@ -2257,7 +2321,8 @@ class TaskServerTest(RunServerTest):
         status, data = self.call("/api/tasks/delete", {"ids": [done, chat, stuck, running, done]})
         self.assertEqual(status, 200, data)
         self.assertEqual(sorted(data["deleted"]), sorted([done, chat, stuck]))
-        self.assertEqual(data["refused"], {running: "still working: wait until it stops"})
+        self.assertEqual(list(data["refused"]), [running])
+        self.assertIn(data["refused"][running], ("still working: wait until it stops", "task is running"))
         for tid in (done, chat, stuck):
             self.assertNotIn(tid, self.hub.tasks)
             self.assertFalse((self.folder / "tasks" / tid).exists())
@@ -2416,12 +2481,64 @@ FAKE_OPENCODE = [sys.executable, str(Path(__file__).resolve().parent / "fake_ope
 class HarnessServerTest(TaskServerTest):
     """Plan 5 Task 5: the probe, the harness switch, harness rungs on runs and task steps, the levers."""
 
+    def test_auto_chat_balances_tokens_but_an_explicit_model_is_kept(self):
+        self.hub.usage_ready = True
+        self.hub.usage_days = {usage.day_of(time.time()): {"models": {"sonnet": 10},
+                                                        "model_tokens": {"sonnet": 1_000_000}}}
+        body = {"project_dir": str(self.project), "prompt": "HANDOFF-OK", "model": "auto", "effort": "low"}
+        status, data = self.call("/api/run", body)
+        self.assertEqual(status, 200, data)
+        sid = data["session"]
+        self.wait_idle(sid)
+        self.assertEqual(self.hub.runs.meta(sid)["harness"], "codex")
+        self.assertIn("tokens today", self.session(sid)["route_reason"])
+        status, data = self.call("/api/run", dict(body, model="sonnet"))
+        self.assertEqual(status, 200, data)
+        self.wait_idle(data["session"])
+        self.assertEqual(self.hub.runs.meta(data["session"])["harness"], "claude")
+        self.assertIn("gpt-6-astra", self.hub.fill_marks()["models"])
+        note = {"name": "note.txt", "mime": "text/plain", "data": base64.b64encode(b"keep this file").decode()}
+        status, data = self.call("/api/run", dict(body, files=[note]))
+        self.assertEqual(status, 200, data)
+        self.wait_idle(data["session"])
+        self.assertEqual(self.hub.runs.meta(data["session"])["harness"], "claude")
+
+    def test_step_after_claude_can_rotate_to_codex_on_token_load(self):
+        self.hub.usage_ready = True
+        self.hub.usage_days = {usage.day_of(time.time()): {"models": {"sonnet": 10},
+                                                        "model_tokens": {"sonnet": 1_000_000}}}
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look", "model": "haiku"},
+                                    {"kind": "code", "goal": "fix add()"}])
+        task = self.until(tid, self.at(2), "step 2 rotates after Claude")
+        self.assertEqual(task["steps"][0]["harness"], "claude")
+        second = task["steps"][1]
+        self.assertEqual(second["harness"], "codex")
+        self.assertIn("tokens today", " ".join(second["notes"]))
+
+    def test_auto_chat_keeps_fable_explicit_and_refuses_an_empty_pool(self):
+        card = self.prep_card("THINK about the design")
+        self.hub.cfg["tiers"]["think"] = ["fable", "opus"]
+        body = {"project_dir": str(self.project), "prompt": "HANDOFF-OK", "model": "auto", "prep": card["id"]}
+        status, data = self.call("/api/run", body)
+        self.assertEqual(status, 200, data)
+        self.wait_idle(data["session"])
+        self.assertEqual(self.hub.runs.meta(data["session"])["model"], "opus")
+        self.hub.cfg["tiers"]["write"] = []
+        status, data = self.call("/api/run", {k: v for k, v in body.items() if k != "prep"})
+        self.assertEqual((status, data["error"]), (409, "no usable model in this tier"))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.folder = Path(self.tmp.name) / "home"
         self.project = Path(self.tmp.name) / "proj"
         self.project.mkdir()
         self.folder.mkdir()
+        data = Path(self.tmp.name) / "data"
+        data.mkdir()
+        for patcher in (mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(data)}),
+                        mock.patch("shutil.which", return_value=None)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         cfg = dict(paths.load_config(), projects=[str(self.project)])
         cfg["harnesses"]["codex"]["on"] = True
         cfg["models"]["codex"] = {"gpt-6.1-sol": "sonnet"}
@@ -2446,6 +2563,30 @@ class HarnessServerTest(TaskServerTest):
         lines = [json.loads(line) for path in sorted(self.folder.glob("events-*.jsonl"))
                  for line in path.read_text(encoding="utf-8").splitlines()]
         return next(r for r in lines if r.get("event") == "run_started" and r["session_id"] == sid)
+
+    def outside_codex(self, sid="cx1", **stop):
+        """A Codex chat outside the window: its hook records as the service sees them on one poll. A FAIL
+        verdict, so the levers that follow Verify are on."""
+        now = time.time()
+        recs = [{"event": "SessionStart", "harness": "codex", "session_id": sid, "ts": now,
+                 "entrypoint": "vscode", "model": "gpt-6.1-sol", "effort": "medium",
+                 "cwd": str(self.project), "project_dir": str(self.project), "project": self.project.name},
+                {"event": "UserPromptSubmit", "harness": "codex", "session_id": sid, "ts": now + 1,
+                 "prompt": "look at calc"},
+                {"event": "Stop", "harness": "codex", "session_id": sid, "ts": now + 2, "model": "gpt-6.1-sol",
+                 "entrypoint": "vscode", "verdict": "FAIL", "verdict_detail": "tests/t.py:1 - boom",
+                 "reply": "checked", "tokens": {"input": 10, "output": 2, "cache_read": 0}}]
+        recs[-1].update(stop)
+        with mock.patch.object(self.hub.reader, "read_new", return_value=recs):
+            self.hub.poll_once()
+        return sid
+
+    def handoff_skill(self):
+        """Fred's session-handoff skill under the test's own home: what a non-Claude Handoff sends as text."""
+        skill = self.hub.user_home / ".claude" / "skills" / "session-handoff"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: session-handoff\ndescription: x\n---\n\n# Handoff\n\n"
+                                        "Write the note.\n", encoding="utf-8")
 
     def test_config_lists_harnesses(self):
         data = self.call("/api/config")[1]
@@ -2484,12 +2625,48 @@ class HarnessServerTest(TaskServerTest):
         self.assertEqual((rec["harness"], rec["model"]), ("codex", "gpt-6.1-sol"))
         self.assertEqual(self.session(sid)["harness"], "codex")
         info = self.call(f"/api/levers?session={sid}")[1]
-        self.assertEqual((info["verify"], info["terminal"], info["handoff"], info["escalate"]), ("claude only",) * 4)
+        # Plan 37 3.6: every harness gets the levers; the terminal resumes the CLI's own session
+        self.assertEqual((info["verify"], info["terminal"], info["escalate"]),
+                         ("", "", "only after a FAIL verdict"))
+        self.assertIn("session-handoff skill", info["handoff"])  # Fred's skill is not installed in this tmp home
         end = time.time() + 10
         while time.time() < end and self.call(f"/api/levers?session={sid}")[1]["continue"]:
             time.sleep(0.1)
         self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["continue"], "")
-        self.assertEqual(self.call("/api/terminal", {"session": sid})[0], 409)
+        with mock.patch("subprocess.Popen") as popen:
+            self.assertEqual(self.call("/api/terminal", {"session": sid})[0], 200)
+        self.assertEqual(popen.call_args.args[0], FAKE_CODEX + ["resume", "th_fake", "-m", "gpt-6.1-sol"])
+
+    def test_levers_outside_codex_chat(self):
+        """Plan 37 3.6: an outside Codex chat gets Continue, Verify, Handoff and Escalate as forks; the
+        terminal and De-escalate stay window-only."""
+        self.hub.cfg["models"]["codex"] = {"gpt-6.1-sol": "sonnet", "gpt-6-astra": "opus"}
+        self.handoff_skill()
+        sid = self.outside_codex()
+        info = self.call(f"/api/levers?session={sid}")[1]
+        self.assertEqual((info["continue"], info["verify"], info["handoff"], info["escalate"]), ("", "", "", ""))
+        self.assertEqual((info["fork"], info["terminal"], info["deescalate"]),
+                         (True, "only for window runs", "only for window runs"))
+        self.assertEqual((info["harness"], info["route"], info["escalate_to"]),
+                         ("codex", "gpt-6.1-sol/medium", "gpt-6.1-sol/high"))  # the model as it came
+
+    def test_pull_handoff_on_codex_sends_skill_text(self):
+        """Plan 37 3.6: Codex has no /session-handoff, so a Handoff sends the skill's own text to the fork."""
+        self.handoff_skill()
+        sid = self.outside_codex()
+        status, data = self.call("/api/handoff", {"session": sid})
+        self.assertEqual(status, 200, data)
+        line = json.loads(self.hub.runs.stream_path(data["session"]).read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(line["type"], "cc_prompt")
+        self.assertIn("# Handoff", line["text"])
+        self.assertNotIn("description: x", line["text"])  # the front matter is stripped
+
+    def test_route_of_keeps_codex_model(self):
+        """Plan 37 3.6: another CLI's model is used as it came, never through a Claude alias."""
+        s = {"harness": "codex", "model": "gpt-6-astra", "effort": "high"}
+        self.assertEqual(self.hub.route_of("no-such-run", s), ("gpt-6-astra", "high"))
+        self.assertEqual(self.hub.route_of("no-such-run", dict(s, effort="auto")),
+                         ("gpt-6-astra", self.hub.cfg["default_effort"]))
 
     def test_run_refuses_off_or_unknown_rung(self):
         body = {"project_dir": str(self.project), "prompt": "x", "model": "cmd:deepseek-v4.1-flash"}
@@ -2778,6 +2955,228 @@ class NextStepServerTest(TaskServerTest):
         self.assertEqual(self.hub.levers(sid)["continue"], "Next steps start from the latest step")
         self.assertEqual(self.call("/api/continue", {"session": sid, "text": "hello"})[0], 409)
         self.assertTrue(notes.read_text(encoding="utf-8").startswith("# Turn 2\n\n"))  # the chat's notes stay
+
+    # -- plan 36 Task 2: the package, the exact route, preview and the append API -----------------------------
+
+    def preview(self, tid, kind="code", instructions="do the next thing", model="auto"):
+        return self.call("/api/task/next/preview", self.source_of(tid, kind, instructions, model))
+
+    def append(self, tid, request_id, kind="code", instructions="do the next thing", model="auto", revision=""):
+        """One POST /api/task/next with an explicit request id (and a preview's revision when given)."""
+        return self.call("/api/task/next", dict(self.source_of(tid, kind, instructions, model),
+                                                revision=revision, request_id=request_id))
+
+    def legacy_chat(self, first="just chatting"):
+        """A raw window chat (a legacy chat task): one step, turns filed as they end, no HANDOFF block."""
+        body = self.call("/api/run", {"project_dir": str(self.project), "prompt": first})[1]
+        sid, tid = body["session"], body["task"]
+        self.wait_idle(sid)
+        return sid, tid
+
+    def test_preview_packages_the_source_turn_facts_and_instructions(self):
+        tid = self.one_step_task()
+        task = self.hub.tasks[tid]
+        src = task["steps"][0]
+        status, pv = self.preview(tid, "code", "add the guard clause")
+        self.assertEqual(status, 200, pv)
+        self.assertEqual(pv["source"], {"step": 1, "session": src["session"], "kind": "scout",
+                                        "model": src["model"], "effort": src["effort"]})
+        self.assertEqual((pv["structured"], pv["fallback"]), (True, False))
+        self.assertIn(f"task {tid}, step 01, session {src['session']}", pv["text"])  # provenance
+        # the stream is cleared when the task is done: the step's own turn times stand in
+        self.assertIn(f"turn started {src['started']} and ended {src['ended']}", pv["text"])
+        self.assertIn(task["goal"], pv["text"])  # the task goal
+        self.assertIn("Instructions for this step:\nadd the guard clause", pv["text"])
+        self.assertIn("Recorded source facts:", pv["text"])  # the old step's facts, labelled
+        self.assertIn("Current project facts (captured separately):", pv["text"])
+        self.assertIn(f"Captured {pv['captured']};", pv["text"])  # the time of capture kept apart
+        self.assertIn("validated HANDOFF", pv["text"])  # the saved, checked note stands in for the cleared stream
+        self.assertIn("add() is in calc.py:2", pv["text"])  # the source block's findings ride in the package
+        self.assertTrue(pv["source_reply"].strip())  # and the source reply itself is inspectable
+        self.assertGreater(pv["words"], 0)
+        self.assertNotEqual(pv["revision"], "")
+        self.assertIn(pv["route"]["effort"], claude_cli.EFFORTS)
+
+    def test_preview_falls_back_from_the_last_reply_when_no_handoff(self):
+        sid, tid = self.legacy_chat("no handoff here")
+        status, pv = self.preview(tid, "code", "change calc.py")
+        self.assertEqual(status, 200, pv)
+        self.assertEqual((pv["structured"], pv["fallback"]), (False, True))
+        self.assertIn("Built from the last reply. Check the handover before starting.", pv["text"])
+        self.assertIn("fallback, built from the last reply", pv["text"])
+        self.assertIn("## Troubleshooting\nNot recorded.", pv["text"])  # never invented
+        self.assertIn("## Open questions\nNot recorded.", pv["text"])
+        self.assertIn("Recorded source facts:\nNot recorded.", pv["text"])
+        self.assertIn("no handoff here", pv["text"])  # the latest reply rides in Findings
+
+    def test_a_newer_plain_reply_wins_over_an_older_handoff(self):
+        sid, tid = self.legacy_chat("HANDOFF-OK first turn")
+        self.until(tid, lambda t: t["steps"][0].get("turns") == 1, "turn 1 is filed")
+        self.assertIsNotNone(tasks.parse_handoff(self.hub.final_message(sid)[0]))  # turn 1 had a valid block
+        self.assertEqual(self.call("/api/continue", {"session": sid, "text": "second plain turn"})[0], 200)
+        self.wait_idle(sid)
+        self.until(tid, lambda t: t["steps"][0].get("turns") == 2, "turn 2 is filed")
+        self.assertIsNone(tasks.parse_handoff(self.hub.final_message(sid)[0]))  # the newest reply has none
+        status, pv = self.preview(tid, "code", "carry on")
+        self.assertEqual((status, pv["structured"], pv["fallback"]), (200, False, True))
+        self.assertIn("second plain turn", pv["text"])
+        self.assertIn("Built from the last reply", pv["text"])
+        self.assertNotIn("add() is in calc.py:2", pv["text"])  # the older block is not resurrected
+
+    def test_preview_refuses_bad_instructions_kinds_and_models(self):
+        tid = self.one_step_task()
+        for bad in ("", "   ", None, 7, [1], "x" * (tasks.STEP_GOAL_MAX + 1)):
+            self.assertEqual(self.preview(tid, "code", bad)[0], 400, repr(bad))
+        self.assertEqual(self.preview(tid, "code", "x" * tasks.STEP_GOAL_MAX)[0], 200)
+        for bad in ("fix", "unknown", "", None, 7):
+            self.assertEqual(self.preview(tid, bad, "ok")[0], 400, repr(bad))
+        for bad in ("", "  ", None, 7, "x" * 201):
+            self.assertEqual(self.preview(tid, "code", "ok", bad)[0], 400, repr(bad))
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 1)  # nothing was appended
+
+    def test_preview_refuses_an_unknown_task_a_foreign_session_and_unsafe_ids(self):
+        tid = self.one_step_task()
+        base = self.source_of(tid)
+        for bad in ("deadbeef", "../../x", "..", 7, None):
+            body = {**base, "task": bad}
+            self.assertEqual(self.call("/api/task/next/preview", body)[1]["error"], "unknown task", repr(bad))
+        for over in ({"source_session": "nope"}, {"source_session": 7}, {"source_step": 99}, {"source_step": True}):
+            self.assertEqual(self.call("/api/task/next/preview", {**base, **over})[1]["error"],
+                             "Next steps start from the latest step", over)
+        self.start_next(tid, "code", "the next thing")  # a historical step is not a branch point
+        self.boundary(tid)
+        self.assertEqual(self.call("/api/task/next/preview", base)[1]["error"],
+                         "Next steps start from the latest step")
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
+
+    def test_an_exact_rung_runs_exactly_and_a_disabled_one_is_refused(self):
+        tid = self.one_step_task()
+        data, pv = self.start_next(tid, "code", "do it exactly", model="opus")
+        self.assertEqual((data["status"], pv["route"]["rung"], pv["route"]["model"]), ("running", "opus", "opus"))
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step = task["steps"][1]
+        self.assertEqual((step["model"], step["pick"], step["harness"]), ("opus", "opus", "claude"))
+        self.assertEqual(self.hub.runs.meta(step["session"])["model"], "opus")  # exactly the rung asked for
+
+        other = self.one_step_task()
+        status, data = self.preview(other, "code", "x", "codex:gpt-6-astra")
+        self.assertEqual((status, data["error"]), (409, "codex is off"))  # an error, never Auto
+        self.hub.cfg["harnesses"]["codex"]["on"] = True  # on, but the model is not in its list
+        self.hub.found["codex"] = True
+        self.hub.cfg["models"]["codex"] = {"gpt-6.1-sol": "sonnet"}
+        status, data = self.preview(other, "code", "x", "codex:gpt-6-astra")
+        self.assertEqual((status, data["error"]), (409, "model gone from models.json: codex:gpt-6-astra"))
+        self.assertEqual(len(self.hub.tasks[other]["steps"]), 1)  # no silent substitute step was made
+
+    def test_duplicate_request_id_is_stable_and_a_stale_revision_is_refused(self):
+        tid = self.one_step_task()
+        body = self.source_of(tid, "code", "add the guard")
+        status, pv = self.call("/api/task/next/preview", body)
+        self.assertEqual(status, 200, pv)
+        rid = "a" * 32
+        first = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id=rid))
+        self.assertEqual(first[0], 200, first)
+        self.assertEqual((first[1]["task"], first[1]["step"]), (tid, 2))
+        again = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id=rid))
+        self.assertEqual(again[0], 200, again)  # the same step, never a second one
+        self.assertEqual((again[1]["step"], len(self.hub.tasks[tid]["steps"])), (2, 2))
+        clash = self.call("/api/task/next", dict(body, instructions="something else",
+                                                 revision=pv["revision"], request_id=rid))
+        self.assertEqual((clash[0], clash[1]["error"]),
+                         (409, "request_id was already used with different content"))
+        race = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id="9" * 32))
+        self.assertEqual((race[0], race[1]["error"]), (409, "Next steps start from the latest step"))
+        other = self.one_step_task()  # an unchanged source, a payload that no longer matches its preview
+        obody = self.source_of(other, "code", "the first wording")
+        ostatus, opv = self.call("/api/task/next/preview", obody)
+        self.assertEqual(ostatus, 200, opv)
+        stale = self.call("/api/task/next", dict(obody, instructions="a different action",
+                                                 revision=opv["revision"], request_id="b" * 32))
+        self.assertEqual((stale[0], stale[1]["error"]),
+                         (409, "This step changed. Refresh the handover before starting."))
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
+        self.assertEqual(len(self.hub.tasks[other]["steps"]), 1)
+
+    def test_a_disk_write_failure_leaves_the_task_and_starts_nothing(self):
+        tid = self.one_step_task()
+        body = self.source_of(tid, "code", "add the guard")
+        status, pv = self.call("/api/task/next/preview", body)
+        with mock.patch.object(server.tasks, "write_step_file", side_effect=OSError("disk full")):
+            status, data = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id="c" * 32))
+        self.assertEqual(status, 500, data)
+        self.assertIn("disk full", data["error"])
+        task = self.hub.tasks[tid]
+        self.assertEqual((len(task["steps"]), task["state"]), (1, "done"))  # unchanged, nothing started
+
+    def test_a_launch_that_cannot_start_keeps_the_reserved_step_and_retry_reuses_it(self):
+        tid = self.one_step_task()
+        body = self.source_of(tid, "code", "add the guard")
+        status, pv = self.call("/api/task/next/preview", body)
+        with mock.patch.object(self.hub.runs, "start", side_effect=server.runs.RunError("cannot spawn")):
+            status, data = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id="d" * 32))
+        self.assertEqual(status, 409, data)
+        self.assertEqual((data["task"], data["step"], data["status"]), (tid, 2, "failed"))
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["state"], [s["n"] for s in task["steps"]]), ("stuck", [1, 2]))
+        self.assertEqual(task["steps"][1]["request_status"], "failed")
+        for _ in range(3):  # the stuck task starts nothing by itself
+            self.hub.poll_once()
+            self.hub.advance()
+        self.assertEqual((len(task["steps"]), task["steps"][1]["attempts"]), (2, []))
+        self.assertEqual(self.call("/api/task/retry", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(2), "the reserved step runs on Retry")
+        self.assertEqual([s["n"] for s in task["steps"]], [1, 2])  # the same step, not a new number
+        self.assertEqual(len(task["steps"][1]["attempts"]), 1)
+
+    def test_the_manual_step_runs_on_the_saved_package_not_a_fresh_brief(self):
+        tid = self.one_step_task()
+        self.start_next(tid, "code", "add the guard clause")
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step = task["steps"][1]
+        folder = self.folder / "tasks" / tid / "02-code"
+        written = folder.joinpath("received-handoff.md").read_text(encoding="utf-8")
+        self.assertIn(f"Handover from task {tid}, step 01", written)
+        self.assertIn("Instructions for this step:\nadd the guard clause", written)
+        self.assertIn("add() is in calc.py:2", written)  # the source block rides in the package
+        self.assertTrue(folder.joinpath("source-reply.md").is_file())
+        manifest = folder.joinpath("received.md").read_text(encoding="utf-8")
+        self.assertIn("saved handover from step 01", manifest)  # the reservation's manifest stands
+        self.assertNotIn("as role.md", manifest)  # start_step did not overwrite it
+        prompt = self.full_prompt(step["session"])
+        self.assertIn(written.strip(), prompt)  # preview and launch use the same saved package
+        self.assertIn(f"Handover from task {tid}, step 01", prompt)
+
+    def test_a_reserved_step_after_a_restart_is_stuck_and_never_launches_twice(self):
+        tid = self.one_step_task()
+        task = self.hub.tasks[tid]
+        step = tasks.append_step(task, "code", "add the guard", now=time.time())
+        step.update(request_id="e" * 32, request_hash="hash", request_status="starting", requested_model="auto")
+        tasks.save(self.folder, task)
+        self.hub.tasks[tid] = tasks.load(self.folder, tid)  # a restart: the reservation is all that is left
+        self.assertEqual(self.hub.reconcile_next_steps(), [(tid, "stuck")])
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["state"], task["owner"]), ("stuck", "fred"))
+        self.assertIn("Retry", task["why"])  # a recoverable stuck state
+        self.assertEqual((task["steps"][1]["state"], task["steps"][1]["request_status"]), ("planned", "failed"))
+        for _ in range(3):  # the unknown launch outcome never launches a second run
+            self.hub.poll_once()
+            self.hub.advance()
+        self.assertEqual((len(task["steps"]), task["steps"][1]["attempts"]), (2, []))
+        self.assertEqual(self.hub.reconcile_next_steps(), [])  # idempotent
+        self.assertEqual(self.call("/api/task/retry", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(2), "the reserved step runs on Retry")
+        self.assertEqual([s["n"] for s in task["steps"]], [1, 2])  # the same step number, one launch
+        self.assertEqual(len(task["steps"][1]["attempts"]), 1)
+
+    def test_a_reserved_step_that_recorded_a_session_was_launched(self):
+        tid = self.one_step_task()
+        task = self.hub.tasks[tid]
+        step = tasks.append_step(task, "code", "add the guard", now=time.time())
+        step.update(request_id="f" * 32, request_hash="hash", request_status="starting", session="live-1")
+        task.update(state="running", owner="service", current=2)
+        self.assertEqual(self.hub.reconcile_next_steps(), [(tid, "recovered")])
+        self.assertEqual(task["steps"][1]["request_status"], "running")
+        self.assertEqual((task["state"], task["owner"]), ("running", "service"))
 
 
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents

@@ -245,6 +245,10 @@ class CodexTest(unittest.TestCase):
         self.assertIs(codex.HOOKS, False)
         self.assertEqual(harness.get("codex").NAME, "codex")
 
+    def test_terminal_command(self):
+        self.assertEqual(codex.terminal_command(["codex"], "th_1", "gpt-6-astra", "medium"),
+                         ["codex", "resume", "th_1", "-m", "gpt-6-astra"])
+
 
 OC_LINES = [
     {"type": "session.created", "sessionID": "oc_fake"},
@@ -287,6 +291,10 @@ class OpenCodeTest(unittest.TestCase):
         self.assertTrue(opencode.is_result({"type": "session.idle"}))
         self.assertFalse(opencode.is_result({"type": "text"}))
 
+    def test_terminal_command(self):
+        self.assertEqual(opencode.terminal_command(["opencode"], "ses_1", "glm-5.3", "high"),
+                         ["opencode", "-s", "ses_1", "-m", "glm-5.3"])
+
     def test_chat_items(self):
         items = opencode.chat(OC_LINES + [{"type": "cc_exit", "code": 0}], "/w")
         self.assertEqual([i["role"] for i in items], ["tool", "claude", "result"])
@@ -323,6 +331,19 @@ CMD_LINES = [
 
 
 class CmdTest(unittest.TestCase):
+    def test_npm_launcher_uses_node_without_a_shell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = Path(tmp) / "cmdc.cmd"
+            entry = Path(tmp) / "node_modules" / "command-code" / "dist" / "index.mjs"
+            entry.parent.mkdir(parents=True)
+            entry.write_text("", encoding="utf-8")
+            with mock.patch.object(cmd_adapter.shutil, "which", return_value="node.exe"):
+                argv, _ = cmd_adapter.run_command([str(shim)], "m", "low", tmp, "sid", prompt='say & echo "hi"')
+                self.assertEqual(argv[:2], ["node.exe", str(entry)])
+                self.assertTrue(argv[argv.index("-p") + 1].startswith('say & echo "hi"'))
+                self.assertEqual(cmd_adapter.version_command([str(shim)]),
+                                 ["node.exe", str(entry), "--no-auto-update", "-v"])
+
     def test_command_shape(self):
         cmd, stdin = cmd_adapter.run_command(["cmdc"], "gpt-6-luna", "max", "/w", "sid", prompt="do it",
                                              max_turns=15, name="job")
@@ -363,6 +384,10 @@ class CmdTest(unittest.TestCase):
 
     def test_version_command_has_no_auto_update(self):
         self.assertEqual(cmd_adapter.version_command(["c"]), ["c", "--no-auto-update", "-v"])
+
+    def test_terminal_command(self):
+        self.assertEqual(cmd_adapter.terminal_command(["cmdc"], "c_1", "gpt-6-luna", "low"),
+                         ["cmdc", "-r", "c_1", "-m", "gpt-6-luna", "--no-auto-update"])
 
     def test_fake_end_to_end(self):
         cmd, _ = cmd_adapter.run_command(["fake"], "m", "low", "/w", "sid", prompt="hello cmd", max_turns=3)

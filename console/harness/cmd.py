@@ -1,5 +1,6 @@
 """The Command Code adapter (`cmdc`): `-p <query> --output-format json` (README 3.3, 3.4)."""
-from pathlib import PurePath
+import shutil
+from pathlib import Path, PurePath
 
 from .. import claude_cli, redact
 from . import codex, section, which
@@ -20,17 +21,26 @@ def find_exe(cfg: dict):
     return which(EXE_NAMES, section(cfg, NAME).get("exe", ""))
 
 
+def command(exe: list) -> list:
+    """Resolve the known npm entry point directly: a batch file would reparse the prompt as shell code."""
+    if exe and PurePath(str(exe[0])).suffix.lower() in (".cmd", ".bat"):
+        entry = Path(exe[0]).parent / "node_modules" / "command-code" / "dist" / "index.mjs"
+        node = shutil.which("node.exe") or shutil.which("node")
+        if not entry.is_file() or not node:
+            raise ValueError(SHIM_ERROR)
+        return [node, str(entry), *exe[1:]]
+    return list(exe)
+
+
 def version_command(exe: list) -> list:
-    return list(exe) + ["--no-auto-update", "-v"]
+    return command(exe) + ["--no-auto-update", "-v"]
 
 
 def run_command(exe: list, model: str, effort: str, cwd: str, session_id: str, *, prompt: str,
                 resume: bool = False, fork: str = "", read_only: bool = False, budget: float = 0.0,
                 max_turns: int = 0, name: str = ""):
-    """The query is in argv, so a .cmd / .bat shim is refused (ValueError; runs turns it into RunError)."""
-    if exe and PurePath(str(exe[0])).suffix.lower() in (".cmd", ".bat"):
-        raise ValueError(SHIM_ERROR)
-    cmd = list(exe) + ["-p", prompt + claude_cli.STOP_FOOTER, "--output-format", "json", "--no-auto-update",
+    """The query is one argv entry; an npm shim is resolved to Node and never run through a shell."""
+    cmd = command(exe) + ["-p", prompt + claude_cli.STOP_FOOTER, "--output-format", "json", "--no-auto-update",
                        "--skip-onboarding", "--no-skills", "-m", model, "--effort", EFFORT.get(effort, "medium"),
                        "--permission-mode", "plan" if read_only else "accept-edits"]
     if max_turns:
@@ -117,4 +127,4 @@ def stop(proc) -> str:
 
 
 def terminal_command(exe: list, session_id: str, model: str, effort: str):
-    return None
+    return list(exe) + ["-r", session_id, "-m", model, "--no-auto-update"]

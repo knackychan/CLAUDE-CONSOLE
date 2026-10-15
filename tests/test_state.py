@@ -132,6 +132,13 @@ class StateTest(unittest.TestCase):
                          (True, False, 0.25, "p1", "abc"))
         self.assertEqual(row["model"], "claude-sonnet-5-5")
 
+    def test_run_question_survives_a_late_stop_hook(self):
+        self.feed(ev("run_started", T0), ev("run_ended", T0 + 5, subtype="success",
+                                            stop_question="Shall I fix those two lines?"),
+                  ev("Stop", T0 + 6))
+        row = self.row(T0 + 7)
+        self.assertEqual((row["state"], row["stop_question"]), ("stop", "Shall I fix those two lines?"))
+
     def test_session_from_run_lines_only(self):
         self.feed(ev("run_started", T0, sid="c1", harness="codex", model="gpt-6.1-sol", effort="medium",
                      title="Add retry"),
@@ -160,6 +167,67 @@ class StateTest(unittest.TestCase):
         self.feed(ev("run_started", T0 + 2, sid="w"), ev("run_ended", T0 + 3, sid="w", cost=0.1, subtype="success"))
         row = self.row(T0 + 4, "w")
         self.assertEqual((row["harness"], row["cost"]), ("claude", 0.1))
+
+    def test_codex_hook_session_has_harness_and_source(self):
+        self.feed(ev("SessionStart", T0, harness="codex", source="startup", entrypoint="vscode",
+                     model="gpt-6-astra"),
+                  ev("UserPromptSubmit", T0 + 1, harness="codex", prompt="fix the retry"),
+                  ev("PreToolUse", T0 + 2, harness="codex", tool="Bash", what="git status"),
+                  ev("Stop", T0 + 3, harness="codex", entrypoint="vscode", model="gpt-6-astra"))
+        row = self.row(T0 + 4)
+        self.assertEqual((row["harness"], row["source"], row["model"]), ("codex", "vscode", "gpt-6-astra"))
+        self.assertEqual((row["main_steps"], row["prompts"], row["state"]), (1, 1, "replied"))
+        self.assertFalse(row["window"])
+
+    def test_cmd_stop_brings_prompt_and_title(self):
+        self.feed(ev("PreToolUse", T0, harness="cmd", tool="Bash", what="ls"),
+                  ev("Stop", T0 + 2, harness="cmd", prompt="audit the project", reply="Report Done.",
+                     model="deepseek-v4-pro", tokens={"input": 10, "output": 5, "cache_read": 2}))
+        row = self.row(T0 + 3)
+        self.assertEqual((row["prompts"], row["title"], row["state"]), (1, "audit the project", "replied"))
+        self.assertEqual(row["main_steps"], 1)
+        self.assertEqual(self.state.sessions["s1"].turn_tokens, {"input": 10, "output": 5, "cache_read": 2})
+        self.assertEqual(self.state.sessions["s1"].turns, [[T0, T0 + 2]])
+        # a second turn counts its prompt once, not per tool call
+        self.feed(ev("PreToolUse", T0 + 10, harness="cmd", tool="Bash", what="ls"),
+                  ev("PreToolUse", T0 + 11, harness="cmd", tool="Read", what="a.py"),
+                  ev("Stop", T0 + 12, harness="cmd", prompt="and now the tests"))
+        self.assertEqual(self.row(T0 + 13)["prompts"], 2)
+
+    def test_cmd_stop_without_tools_opens_and_closes_a_turn(self):
+        self.feed(ev("Stop", T0, harness="cmd", prompt="quick question"))
+        row = self.row(T0 + 1)
+        self.assertEqual((row["prompts"], row["title"], row["state"]), (1, "quick question", "replied"))
+        self.assertEqual(self.state.sessions["s1"].turns, [[T0, T0]])
+
+    def test_interrupt_needs_you(self):
+        self.feed(ev("UserPromptSubmit", T0, harness="codex", prompt="x"),
+                  ev("Interrupt", T0 + 5, harness="codex"))
+        row = self.row(T0 + 6)
+        self.assertEqual((row["state"], row["group"]), ("interrupted", "needs"))
+        self.feed(ev("UserPromptSubmit", T0 + 10, harness="codex", prompt="y"))
+        self.assertEqual(self.row(T0 + 11)["state"], "running")
+
+    def test_window_run_keeps_its_harness(self):
+        self.feed(ev("run_started", T0, sid="c1", harness="codex", model="gpt-6-astra", kind="run"),
+                  ev("UserPromptSubmit", T0 + 1, sid="c1", harness="codex", prompt="do it"),
+                  ev("PreToolUse", T0 + 2, sid="c1", harness="codex", tool="Bash", what="git status"),
+                  ev("run_ended", T0 + 3, sid="c1", subtype="success", cost=0.1))
+        rows = [r for r in self.state.snapshot(T0 + 4)["sessions"] if r["id"] == "c1"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["window"], rows[0]["harness"], rows[0]["main_steps"]), (True, "codex", 1))
+
+    def test_usage_poll_skips_other_harness_transcripts(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = str(Path(tmp.name) / "rollout.jsonl")
+        Path(path).write_text(line("m1", T0 - 60, "gpt-6-astra", input_tokens=1_000_000), encoding="utf-8")
+        self.feed(ev("SessionStart", T0 - 10, harness="codex", entrypoint="vscode", transcript_path=path),
+                  ev("UserPromptSubmit", T0 - 9, harness="codex", prompt="x", transcript_path=path),
+                  ev("Stop", T0 - 8, harness="codex", transcript_path=path))
+        self.assertEqual(self.state.transcripts(T0), [])  # not Claude's format: priced by usage.add_other
+        self.feed(ev("UserPromptSubmit", T0 - 1, sid="claude1", transcript_path=path))
+        self.assertEqual(self.state.transcripts(T0), [path])
 
     def test_task_and_step_on_the_row(self):
         self.feed(ev("run_started", T0, sid="s2", task="20261012-101500-3f2a", step=2),

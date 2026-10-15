@@ -6,7 +6,8 @@ windows (the local day, the week from Monday, the month from `month_start_day`);
 over its linear pace (the allowance times the elapsed part of the window). The share that binds is the highest.
 `balance` takes the rung of a tier whose model has the lowest share, keeps the previous step's rung while it is
 within `balance_margin` (its warm cache counting for it), and puts rungs with no allowance after the others.
-Unknown is never zero: a key with an unpriced run in its month has no share."""
+Without usable allowances, Auto prefers idle candidates with the fewest processed tokens today.
+Unknown is never zero: missing token measurements sort after known loads; unpriced runs have no USD share."""
 import time
 from datetime import datetime, timedelta
 
@@ -138,15 +139,21 @@ def _days(start: float, now: float) -> list:
 
 
 def used(days: dict, other: dict, key: str, keys: list) -> tuple:
-    """(USD, unknown runs) of `key` over the day keys: Claude transcripts (`days[d]["models"]`) plus the priced
-    runs of other harnesses (`other[d][key]`)."""
-    usd, unknown = 0.0, 0
+    """(USD, unpriced runs, processed tokens or None) over the day keys; old history without token counts is
+    unknown until available transcripts have been rescanned."""
+    usd, unknown, tokens, missing = 0.0, 0, 0, False
     for d in keys:
-        usd += float(((days.get(d) or {}).get("models") or {}).get(key) or 0)
+        day = days.get(d) or {}
+        usd += float((day.get("models") or {}).get(key) or 0)
+        counts = day.get("model_tokens") or {}
+        missing |= key in (day.get("models") or {}) and key not in counts
+        tokens += counts.get(key, 0)
         row = (other.get(d) or {}).get(key) or {}
         usd += float(row.get("cost") or 0)
         unknown += int(row.get("unknown") or 0)
-    return usd, unknown
+        tokens += sum(row.get("tokens") or [])
+        missing |= bool(row.get("tokens_unknown", row.get("runs", 0) if not any(row.get("tokens") or []) else 0))
+    return usd, unknown, None if missing else tokens
 
 
 def fill(days: dict, other: dict, key: str, allowance, now: float, month_start_day: int = 1) -> dict:
@@ -154,13 +161,13 @@ def fill(days: dict, other: dict, key: str, allowance, now: float, month_start_d
     out, best = {}, None
     allowance = allowance if isinstance(allowance, dict) else {}
     for name, (start, end) in windows(now, month_start_day).items():
-        usd, unknown = used(days, other, key, _days(start, now))
+        usd, unknown, tokens = used(days, other, key, _days(start, now))
         cap = allowance.get(f"{name}_usd")
         cap = float(cap) if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap > 0 else None
         p = pace(cap, start, end, now) if cap else None
         share = round(usd / p, 4) if p else None
         out[name] = {"used_usd": round(usd, 4), "allowance_usd": cap, "pace_usd": round(p, 4) if p else None,
-                     "share": share, "unknown_runs": unknown}
+                     "share": share, "unknown_runs": unknown, "used_tokens": tokens}
         if share is not None and (best is None or share > out[best]["share"]):
             best = name
     unknown = out["month"]["unknown_runs"]
@@ -179,6 +186,7 @@ def keys_of(cfg, days: dict = None, other: dict = None) -> list:
         keys += [model_key(r, cfg) for r, _ in tier_rungs(cfg, tier)]
     for d in (days or {}).values():
         keys += [k for k in (d.get("models") or {}) if k in claude_cli.MODELS]
+        keys += list(d.get("model_tokens") or {})
     for d in (other or {}).values():
         keys += list(d)
     return list(dict.fromkeys(k for k in keys if k))
@@ -215,11 +223,14 @@ def price(tokens, row):
 def merge_other(days: dict, other: dict) -> dict:
     """The days with the other harnesses' priced runs added to `cost` and `models`, and `unknown` {key: runs}:
     what the Usage page and the today strip show. A copy; fills read the two apart."""
-    out = {d: dict(v, models=dict(v.get("models") or {})) for d, v in days.items()}
+    out = {d: dict(v, models=dict(v.get("models") or {}), tokens=list(v.get("tokens") or [0, 0, 0, 0]))
+           for d, v in days.items()}
     for d, keys in other.items():
         day = out.setdefault(d, {"cost": 0.0, "tokens": [0, 0, 0, 0], "projects": {}, "models": {}})
         for key, row in keys.items():
             cost = float(row.get("cost") or 0)
+            counts = row.get("tokens") or [0, 0, 0]
+            day["tokens"] = [a + b for a, b in zip(day["tokens"], [counts[0], counts[1], 0, counts[2]])]
             if cost:
                 day["cost"] = round(float(day.get("cost") or 0) + cost, 4)
                 day["models"][key] = round(day["models"].get(key, 0.0) + cost, 4)
@@ -255,7 +266,9 @@ def balance(rungs: list, budget: dict, cfg: dict, *, tier: str = "", prev_rung: 
     """The rung of `rungs` ([(rung, effort)], tier order) whose model has the lowest share of pace (plus
     `peak_hours`); rungs with no share follow in order. The previous step's rung stays while its share, less
     `cache_bonus` when it ran under CACHE_TTL_S ago, is within `balance_margin` of the lowest. Returns
-    {"rung", "effort", "share", "note", "over"}; `over` when every rung has a share at or over `budget_warn_at`."""
+    {"rung", "effort", "share", "note", "over"}; `over` when every rung has a share at or over `budget_warn_at`.
+    Without a usable pace, prefer idle models and then the smallest measured token load today; keep USD share
+    None so token load never triggers a monetary hold."""
     now = time.time() if now is None else now
     margin = float(cfg.get("balance_margin", 0.1))
     bonus = float(cfg.get("cache_bonus", 0.1))
@@ -267,16 +280,27 @@ def balance(rungs: list, budget: dict, cfg: dict, *, tier: str = "", prev_rung: 
         rows.append({"i": i, "rung": rung, "effort": effort, "share": share, "eff": eff})
     if not rows:
         return {"rung": "", "effort": "auto", "share": None, "note": "", "over": False}
-    ranked = sorted(rows, key=lambda r: (r["eff"] is None, r["eff"] if r["eff"] is not None else 0, r["i"]))
+    token_mode = all(r["share"] is None for r in rows) and any(
+        "used_tokens" in (budget.get(model_key(r["rung"], cfg), {}).get("day") or {}) for r in rows)
+    if token_mode:
+        for row in rows:
+            row["tokens"] = (budget.get(model_key(row["rung"], cfg), {}).get("day") or {}).get("used_tokens")
+            row["eff"] = row["tokens"]
+            row["active"] = budget.get(model_key(row["rung"], cfg), {}).get("active", 0)
+    ranked = sorted(rows, key=lambda r: (r["eff"] is None, r.get("active", 0),
+                                         r["eff"] if r["eff"] is not None else 0, r["i"]))
     best, first = ranked[0], rows[0]
     chosen, kept = best, False
     prev = next((r for r in rows if r["rung"] == prev_rung), None)
-    if prev and prev is not best and prev["eff"] is not None and best["eff"] is not None:
+    if not token_mode and prev and prev is not best and prev["eff"] is not None and best["eff"] is not None:
         warm = bonus if prev_age is not None and prev_age < CACHE_TTL_S else 0.0
         if prev["eff"] - warm - best["eff"] <= margin:
             chosen, kept = prev, True
     over = all(r["share"] is not None and r["share"] >= warn for r in rows)
-    if len(rows) == 1:
+    if token_mode:
+        count = "unknown" if chosen["tokens"] is None else f"{chosen['tokens']:,}"
+        note = f"balance: {chosen['rung']} ({count} tokens today; by tracked token load)"
+    elif len(rows) == 1:
         note = f"balance: {chosen['rung']} only"
     elif all(r["share"] is None for r in rows):
         note = f"balance: no allowance set -> {chosen['rung']} (list order)"
@@ -288,7 +312,7 @@ def balance(rungs: list, budget: dict, cfg: dict, *, tier: str = "", prev_rung: 
         note = f"balance: {first['rung']} {_pct(first['share'])} -> {chosen['rung']} {_pct(chosen['share'])}"
     if kept:
         note += f" (previous rung kept: {best['rung']} {_pct(best['share'])} is within the margin)"
-    if chosen["eff"] is not None and chosen["eff"] != chosen["share"]:
+    if not token_mode and chosen["eff"] is not None and chosen["eff"] != chosen["share"]:
         note += f" (peak {provider(chosen['rung'])} +{round((chosen['eff'] - chosen['share']) * 100)})"
     return {"rung": chosen["rung"], "effort": chosen["effort"], "share": chosen["share"], "note": note, "over": over}
 

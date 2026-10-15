@@ -141,7 +141,7 @@ class History:
         self.offsets = {}   # path -> bytes read
         self.project = {}   # path -> the folder name of its first cwd
         self.seen = set()   # message ids counted
-        self.totals = {}    # day -> {"cost", "tokens", "projects", "models"}
+        self.totals = {}    # day -> {"cost", "tokens", "projects", "models", "model_tokens"}
 
     def scan(self, root) -> int:
         """Read what every transcript under `root` added; returns the number of new messages."""
@@ -192,13 +192,15 @@ class History:
                 new += 1
                 cost = message_cost(msg["model"], use, self.prices)
                 day = self.totals.setdefault(day_of(_when(rec.get("timestamp"))),
-                                             {"cost": 0.0, "tokens": [0, 0, 0, 0], "projects": {}, "models": {}})
+                                             {"cost": 0.0, "tokens": [0, 0, 0, 0], "projects": {}, "models": {},
+                                              "model_tokens": {}})
                 day["cost"] += cost
                 day["tokens"] = [a + b for a, b in zip(day["tokens"], message_tokens(use))]
                 proj = self.project.get(path) or Path(path).parent.name
                 day["projects"][proj] = day["projects"].get(proj, 0.0) + cost
                 fam = claude_cli.model_alias(msg["model"]) or "other"
                 day["models"][fam] = day["models"].get(fam, 0.0) + cost
+                day["model_tokens"][fam] = day["model_tokens"].get(fam, 0) + sum(message_tokens(use))
             self.offsets[path] = start + end
         return new
 
@@ -207,7 +209,8 @@ class History:
         with self.lock:
             return {d: {"cost": round(v["cost"], 4), "tokens": list(v["tokens"]),
                         "projects": {k: round(c, 4) for k, c in v["projects"].items()},
-                        "models": {k: round(c, 4) for k, c in v["models"].items()}}
+                        "models": {k: round(c, 4) for k, c in v["models"].items()},
+                        "model_tokens": dict(v["model_tokens"])}
                     for d, v in self.totals.items()}
 
 
@@ -310,7 +313,10 @@ def add_other(folder, run_id: str, day: str, key: str, tokens, cost):
         if any(run_id in ids for ids in seen.values() if isinstance(ids, list)):
             return None
         other = data.get("other") if isinstance(data.get("other"), dict) else {}
-        row = other.setdefault(day, {}).setdefault(key, {"cost": 0.0, "runs": 0, "unknown": 0, "tokens": [0, 0, 0]})
+        row = other.setdefault(day, {}).setdefault(key, {"cost": 0.0, "runs": 0, "unknown": 0, "tokens": [0, 0, 0],
+                                                       "tokens_unknown": 0})
+        if "tokens_unknown" not in row:
+            row["tokens_unknown"] = row["runs"] if not any(row["tokens"]) else 0
         row["runs"] += 1
         if cost is None:
             row["unknown"] += 1
@@ -318,6 +324,8 @@ def add_other(folder, run_id: str, day: str, key: str, tokens, cost):
             row["cost"] = round(row["cost"] + float(cost), 6)
         if isinstance(tokens, dict):
             row["tokens"] = [a + int(tokens.get(k) or 0) for a, k in zip(row["tokens"], ("input", "output", "cache_read"))]
+        else:
+            row["tokens_unknown"] += 1
         cutoff = (_date(day) - timedelta(days=SEEN_DAYS - 1)).isoformat()
         seen = {d: ids for d, ids in seen.items() if d >= cutoff and isinstance(ids, list)}
         seen.setdefault(day, []).append(run_id)
@@ -331,11 +339,15 @@ def add_other(folder, run_id: str, day: str, key: str, tokens, cost):
 
 def merge_days(kept: dict, scanned: dict) -> dict:
     """Kept and scanned days together; for a day in both the larger cost wins (a deleted transcript
-    lowers the scan, a late line raises it)."""
+    lowers the scan, a late line raises it). Equal-cost rescans may enrich the saved per-model token counts."""
     out = dict(kept)
     for day, v in scanned.items():
         if day not in out or float(v.get("cost") or 0) > float(out[day].get("cost") or 0):
             out[day] = v
+        elif float(v.get("cost") or 0) == float(out[day].get("cost") or 0) and "model_tokens" in v:
+            old = out[day].get("model_tokens") or {}
+            counts = {**old, **{k: max(n, old.get(k, 0)) for k, n in v["model_tokens"].items()}}
+            out[day] = dict(out[day], model_tokens=counts)
     return out
 
 

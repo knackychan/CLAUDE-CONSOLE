@@ -223,6 +223,11 @@ class RunsTest(unittest.TestCase):
         self.assertEqual(rec["cost"], 0.2)
         self.assertTrue(runs.result_record("s", harness.get("claude").summary([]), None, False, False)["interrupted"])
 
+    def test_result_record_keeps_a_direct_final_question(self):
+        summary = {"subtype": "success", "final": "Done.\n\nShall I fix those two lines? They're small."}
+        self.assertEqual(runs.result_record("s", summary, 0, False)["stop_question"], "Shall I fix those two lines?")
+        self.assertNotIn("stop_question", runs.result_record("s", summary, 1, True))
+
     def test_prune_old_run_files(self):
         self.mgr.runs.mkdir(parents=True)
         old = self.mgr.stream_path("old")
@@ -311,6 +316,35 @@ class HarnessRunsTest(unittest.TestCase):
         self.assertEqual(meta["limits"]["timeout_s"], 1)
         self.assertEqual(tasks.cap_reason(end["subtype"], meta["limits"]), "it hit the step timeout (1 s)")
 
+    def test_non_claude_run_env_has_console_sid(self):
+        with mock.patch.object(self.mgr, "_spawn", wraps=self.mgr._spawn) as spawn:
+            sid = self.mgr.start(str(self.project), "hi", "gpt-6.1-sol", "medium", harness="codex")
+            self.assertTrue(wait_for(lambda: self.ended(sid)))
+        self.assertEqual(spawn.call_args.args[4]["CC_CONSOLE_SID"], sid)
+        with mock.patch.object(self.mgr, "_spawn", wraps=self.mgr._spawn) as claude:
+            cid = self.mgr.start(str(self.project), "hi", "sonnet", "low")
+            self.assertTrue(wait_for(lambda: self.ended(cid)))
+        self.assertNotIn("CC_CONSOLE_SID", claude.call_args.args[4])
+
+    def test_fork_of_outside_chat_uses_row_id(self):
+        with mock.patch.object(self.mgr, "_spawn", wraps=self.mgr._spawn) as spawn:
+            sid = self.mgr.start(str(self.project), "more", "gpt-6.1-sol", "medium",
+                                 fork="row-1", harness="codex")
+            self.assertTrue(wait_for(lambda: self.ended(sid)))
+        cmd = spawn.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("fork"):cmd.index("fork") + 2], ["fork", "row-1"])
+        self.assertEqual(self.mgr.meta(sid)["harness"], "codex")
+
+    def test_run_ended_verdict_from_final_text(self):
+        summary = {"subtype": "success", "final": "Checked.\nVERDICT: FAIL\nfailing: tests/t.py:1 - boom"}
+        rec = runs.result_record("s", summary, 0, False, harness="codex")
+        self.assertEqual((rec["verdict"], rec["verdict_detail"]), ("FAIL", "tests/t.py:1 - boom"))
+        self.assertNotIn("verdict", runs.result_record("s", summary, 0, False))  # Claude's hook brings it
+        self.assertNotIn("verdict", runs.result_record("s", {"subtype": "success", "final": "all good"},
+                                                       0, False, harness="codex"))
+        self.assertNotIn("verdict", runs.result_record("s", dict(summary, subtype="error"), 1, False,
+                                                       harness="codex"))
+
     def test_stdin_closed_for_argv_adapters(self):
         script = 'import sys; sys.stdin.read(); print(\'{"type": "result"}\', flush=True)'
         stub = types.SimpleNamespace(
@@ -349,11 +383,13 @@ class HarnessRunsTest(unittest.TestCase):
         self.assertTrue(wait_for(lambda: self.ended(sid), 20))
         self.assertTrue(self.ended(sid)[0]["stopped"])
 
-    def test_open_terminal_refused_for_codex(self):
+    def test_open_terminal_resumes_a_codex_run(self):
         sid = self.codex_run()
-        with self.assertRaises(runs.RunError) as ctx:
+        with mock.patch.object(runs.subprocess, "Popen") as popen:
             self.mgr.open_terminal(sid)
-        self.assertEqual(str(ctx.exception), "claude only")
+        argv = popen.call_args.args[0]
+        self.assertEqual(argv, FAKE_CODEX + ["resume", "th_fake", "-m", "gpt-6.1-sol"])
+        self.assertEqual(popen.call_args.kwargs["cwd"], str(self.project))
 
 
 if __name__ == "__main__":

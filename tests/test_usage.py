@@ -114,11 +114,13 @@ class HistoryTest(unittest.TestCase):
         d9, d10 = days["2026-10-09"], days["2026-10-10"]
         self.assertAlmostEqual(d9["cost"], 4.002)
         self.assertEqual(d9["tokens"], [1_000_000, 100, 0, 0])
+        self.assertEqual(d9["model_tokens"], {"opus": 1_000_100})
         self.assertEqual(set(d9["projects"]), {"A"})  # the copy in the fork counts once, in the file seen first
         self.assertAlmostEqual(d10["cost"], 0.5 + 2.0)
         self.assertEqual(d10["tokens"], [1_000_000, 1_000_000, 5, 7])
         self.assertAlmostEqual(d10["projects"]["B"], 2.0)
         self.assertEqual(sorted(d10["models"]), ["haiku", "sonnet"])
+        self.assertEqual(d10["model_tokens"], {"haiku": 1_000_012, "sonnet": 1_000_000})
         self.assertEqual(self.hist.scan(self.root), 0)
         with open(fork, "a", encoding="utf-8") as fh:
             fh.write(cwd_line("m5", "2026-10-10", "D:/work/B", model="claude-sonnet-5-5", output_tokens=100_000))
@@ -152,6 +154,19 @@ class AggregateTest(unittest.TestCase):
 
 
 class DaysFileTest(unittest.TestCase):
+    def test_rescan_adds_model_tokens_at_equal_cost_without_erasing_larger_saved_totals(self):
+        kept = {"2026-10-10": {"cost": 5.0, "models": {"opus": 5.0}}}
+        scanned = {"2026-10-10": {"cost": 5.0, "models": {"opus": 5.0}, "model_tokens": {"opus": 700}}}
+        merged = usage.merge_days(kept, scanned)
+        self.assertEqual(merged["2026-10-10"]["model_tokens"], {"opus": 700})
+        self.assertNotIn("model_tokens", kept["2026-10-10"])
+        partial = {"2026-10-10": {"cost": 1.0, "model_tokens": {"opus": 100}}}
+        self.assertEqual(usage.merge_days(merged, partial), merged)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(usage.save_days(tmp, kept, "2026-10-11"))
+            self.assertTrue(usage.save_days(tmp, scanned, "2026-10-11"))
+            self.assertEqual(usage.load_days(tmp), merged)
+
     def test_closed_days_are_kept_and_the_larger_cost_wins(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
@@ -178,7 +193,8 @@ class OtherRunsTest(unittest.TestCase):
             self.assertFalse(usage.add_other(folder, "s1@1.0", "2026-10-14", "gpt-6.1-sol", self.TOK, 0.25))
             self.assertTrue(usage.add_other(folder, "s1@2.0", "2026-10-14", "gpt-6.1-sol", self.TOK, 0.5))
             row = usage.load_other(folder)["2026-10-14"]["gpt-6.1-sol"]
-            self.assertEqual(row, {"cost": 0.75, "runs": 2, "unknown": 0, "tokens": [2000, 400, 1000]})
+            self.assertEqual(row, {"cost": 0.75, "runs": 2, "unknown": 0, "tokens": [2000, 400, 1000],
+                                   "tokens_unknown": 0})
 
     def test_an_unpriced_run_is_unknown_never_zero(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -186,6 +202,7 @@ class OtherRunsTest(unittest.TestCase):
             usage.add_other(folder, "s2@2.0", "2026-10-14", "deepseek-v4.1-flash", self.TOK, None)
             row = usage.load_other(folder)["2026-10-14"]["deepseek-v4.1-flash"]
             self.assertEqual((row["runs"], row["unknown"], row["cost"], row["tokens"]), (2, 2, 0.0, [1000, 200, 500]))
+            self.assertEqual(row["tokens_unknown"], 1)
 
     def test_save_days_keeps_the_other_runs(self):
         with tempfile.TemporaryDirectory() as folder:

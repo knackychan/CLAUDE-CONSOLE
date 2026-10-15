@@ -1,10 +1,12 @@
 import base64
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from console import transcript
+from tests import fixtures
 
 
 def user(content, **extra):
@@ -141,6 +143,75 @@ class TranscriptTest(unittest.TestCase):
         transcript.HEAD_BYTES = 1000  # the first line is cut: it is skipped, the next ones are not read
         self.addCleanup(setattr, transcript, "HEAD_BYTES", old)
         self.assertEqual(transcript.first_prompt(self.path), "")
+
+
+class OtherHarnessTranscriptTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def test_codex_turns(self):
+        path = fixtures.codex_rollout(self.dir / "rollout.jsonl")
+        got = transcript.codex_turns(path)
+        self.assertEqual([(t["role"], t["text"]) for t in got],
+                         [("you", "fix the retry on line 9"), ("claude", "Looking at the retry.")])
+        self.assertIsNone(got[0]["ts"])  # this fixture carries no timestamp
+        self.assertEqual(transcript.codex_turns(str(self.dir / "none.jsonl")), [])
+        self.assertEqual(transcript.codex_turns(None), [])
+
+    def test_cmd_turns(self):
+        path = fixtures.cmd_transcript(self.dir / "c1.jsonl")
+        got = transcript.cmd_turns(path)
+        self.assertEqual([(t["role"], t["text"]) for t in got], [("you", "audit the project"),
+                                                                 ("claude", "# Report\n\nDone.")])
+        self.assertEqual(transcript.cmd_turns(str(self.dir / "none.jsonl")), [])
+
+    def _opencode_db(self, name="oc.db", rows=4, table=True) -> Path:
+        db = self.dir / name
+        con = sqlite3.connect(str(db))
+        if table:
+            con.execute("CREATE TABLE session_message (id text, session_id text, type text, seq integer,"
+                        " time_created integer, data text)")
+            records = [("user", '{"text": "start the drawer"}'),
+                       ("assistant", '{"content": [{"type": "reasoning", "text": "hmm"},'
+                                     ' {"type": "text", "text": "Looking."}]}'),
+                       ("user", '{"text": "now the tests"}'),
+                       ("assistant", '{"content": [{"type": "text", "text": "Green."}]}')][:rows]
+            for seq, (kind, data) in enumerate(records):
+                con.execute("INSERT INTO session_message VALUES (?,?,?,?,?,?)",
+                            (f"m{seq}", "ses-1", kind, seq, 1787367773728 + seq, data))
+        con.commit()
+        con.close()
+        return db
+
+    def test_opencode_turns(self):
+        db = self._opencode_db()
+        got = transcript.opencode_turns(db, "ses-1")
+        self.assertEqual([(t["role"], t["text"]) for t in got], [("you", "start the drawer"), ("claude", "Looking."),
+                                                                 ("you", "now the tests"), ("claude", "Green.")])
+        self.assertEqual(got[0]["ts"], 1787367773.728)
+        self.assertEqual(transcript.opencode_turns(self.dir / "none.db", "ses-1"), [])
+        self.assertEqual(transcript.opencode_turns(self._opencode_db("empty.db", table=False), "ses-1"), [])
+        self.assertEqual(transcript.opencode_turns(db, "ses-other"), [])
+
+    def test_opencode_db_opened_read_only(self):
+        db = self._opencode_db()
+        before = db.read_bytes()
+        transcript.opencode_turns(db, "ses-1")
+        self.assertEqual(db.read_bytes(), before)
+
+    def test_turns_of_dispatch(self):
+        claude = self.dir / "claude.jsonl"
+        claude.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}}) + "\n",
+                          encoding="utf-8")
+        self.assertEqual([t["text"] for t in transcript.turns_of("claude", claude, "s1")], ["hello"])
+        self.assertEqual([t["text"] for t in transcript.turns_of("opencode", "", "ses-1",
+                                                                 opencode_db=self._opencode_db())],
+                         ["start the drawer", "Looking.", "now the tests", "Green."])
+        self.assertEqual(transcript.first_prompt_of("claude", claude, "s1"), "hello")
+        self.assertEqual(transcript.first_prompt_of("codex", fixtures.codex_rollout(self.dir / "r.jsonl"), "s1"),
+                         "fix the retry on line 9")
 
 
 if __name__ == "__main__":

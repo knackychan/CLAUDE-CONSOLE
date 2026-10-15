@@ -91,6 +91,18 @@ class WindowsTest(unittest.TestCase):
 
 
 class FillTest(unittest.TestCase):
+    def test_model_tokens_include_cache_and_other_clis_without_assuming_missing_data_is_zero(self):
+        days = {"2026-10-14": {"models": {"opus": 5, "sonnet": 1}, "model_tokens": {"opus": 4000}}}
+        other = {"2026-10-14": {"gpt-6.1-sol": {"runs": 1, "unknown": 1, "tokens": [100, 20, 80]}}}
+        out = fills.fills(days, other, CFG, NOW)
+        self.assertEqual(out["opus"]["day"]["used_tokens"], 4000)
+        self.assertEqual(out["gpt-6.1-sol"]["day"]["used_tokens"], 200)
+        self.assertIsNone(out["gpt-6.1-sol"]["share"])  # unpriced tokens still measure workload
+        self.assertIsNone(out["sonnet"]["day"]["used_tokens"])
+        self.assertEqual(out["kimi-k3"]["day"]["used_tokens"], 0)
+        other["2026-10-14"]["gpt-6.1-sol"]["tokens_unknown"] = 1
+        self.assertIsNone(fills.fills(days, other, CFG, NOW)["gpt-6.1-sol"]["day"]["used_tokens"])
+
     DAYS = {"2026-10-14": {"models": {"opus": 5.0, "sonnet": 1.0}},
             "2026-10-13": {"models": {"opus": 10.0}},
             "2026-10-01": {"models": {"opus": 20.0}},
@@ -141,18 +153,38 @@ class FillTest(unittest.TestCase):
 
     def test_merge_other_adds_priced_runs(self):
         days = {"2026-10-14": {"cost": 5.0, "tokens": [1, 1, 1, 1], "projects": {}, "models": {"opus": 5.0}}}
-        other = {"2026-10-14": {"gpt-6.1-sol": {"cost": 1.5, "runs": 1, "unknown": 0},
+        other = {"2026-10-14": {"gpt-6.1-sol": {"cost": 1.5, "runs": 1, "unknown": 0, "tokens": [100, 20, 80]},
                                 "deepseek-v4.1-flash": {"cost": 0, "runs": 2, "unknown": 2}},
                  "2026-10-12": {"gpt-6.1-sol": {"cost": 1.0, "runs": 1, "unknown": 0}}}
         out = fills.merge_other(days, other)
         self.assertEqual(out["2026-10-14"]["cost"], 6.5)
         self.assertEqual(out["2026-10-14"]["models"], {"opus": 5.0, "gpt-6.1-sol": 1.5})
+        self.assertEqual(out["2026-10-14"]["tokens"], [101, 21, 1, 81])
+        self.assertEqual(days["2026-10-14"]["tokens"], [1, 1, 1, 1])
         self.assertEqual(out["2026-10-14"]["unknown"], {"deepseek-v4.1-flash": 2})
         self.assertEqual(out["2026-10-12"]["cost"], 1.0)
         self.assertEqual(days["2026-10-14"]["models"], {"opus": 5.0})  # a copy
 
 
 class BalanceTest(unittest.TestCase):
+    def test_token_load_rotates_without_allowances_or_prices(self):
+        budget = {k: {"share": None, "day": {"used_tokens": n}} for k, n in
+                  (("opus", 1_000_000), ("gpt-6-astra", 0), ("kimi-k3", 0))}
+        first = fills.balance(self.THINK, budget, CFG, prev_rung="opus", prev_age=30)
+        self.assertEqual(first["rung"], "codex:gpt-6-astra")
+        self.assertIn("0 tokens today", first["note"])
+        self.assertIsNone(first["share"])  # a token share must never become a monetary hold
+        budget["gpt-6-astra"]["active"] = 1
+        self.assertEqual(fills.balance(self.THINK, budget, CFG)["rung"], "opencode:opencode-go/kimi-k3")
+        budget["gpt-6-astra"]["active"] = 0
+        budget["gpt-6-astra"]["day"]["used_tokens"] = 200_000
+        second = fills.balance(self.THINK, budget, CFG, prev_rung=first["rung"], prev_age=30)
+        self.assertEqual(second["rung"], "opencode:opencode-go/kimi-k3")
+        budget["kimi-k3"]["day"]["used_tokens"] = None
+        self.assertEqual(fills.balance(self.THINK, budget, CFG)["rung"], "codex:gpt-6-astra")
+        budget["opus"]["share"] = 0.4
+        self.assertEqual(fills.balance(self.THINK, budget, CFG)["rung"], "opus")
+
     THINK = [("opus", "auto"), ("codex:gpt-6-astra", "high"), ("opencode:opencode-go/kimi-k3", "auto")]
 
     def test_balance_takes_the_lowest_share(self):

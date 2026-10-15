@@ -68,7 +68,7 @@ def check(task: dict, n: int, answer, max_steps: int) -> tuple:
     with no edit kind keeps the verify the replaced steps held, of the last edit step before n (plan 27)."""
     rest = remaining(task, n)
     items = answer.get("steps") if isinstance(answer, dict) else None
-    if not isinstance(items, list) or not items:
+    if not isinstance(items, list) or (not items and rest):  # nothing left to plan: an empty answer is right
         return [], "no steps in the answer"
     kept = []
     for item in items:

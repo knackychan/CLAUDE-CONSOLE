@@ -64,6 +64,14 @@ class ReplanTest(unittest.TestCase):
         four = {"why": "", "steps": [{"kind": "code", "goal": "g"}] * 4}
         self.assertEqual(replan.check(t, 2, four, 5)[1], "6 steps in all, over task_max_steps 5")
 
+    def test_check_accepts_an_empty_answer_when_no_step_remains(self):
+        t = make_task(("scout", "code", "verify", "replan"))
+        t["steps"][1]["state"] = t["steps"][2]["state"] = "done"
+        self.assertEqual(replan.remaining(t, 4), [])
+        self.assertEqual(replan.check(t, 4, {"why": "nothing left", "steps": []}, 8), ([], ""))
+        self.assertEqual(replan.check(t, 4, {"why": ""}, 8)[1], "no steps in the answer")
+        self.assertEqual(replan.summary(t), "replanned: no change")
+
     def test_propose_apply_and_keep(self):
         t = make_task()
         replan.insert(t, 1, 5.0, "x")

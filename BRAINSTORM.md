@@ -77,9 +77,9 @@ No cloud, no network calls of its own.
 - Every hook input carries `session_id`, `cwd`, `transcript_path`, `permission_mode`, `effort`,
   and inside a subagent `agent_id` / `agent_type` (checked in code.claude.com/docs/en/hooks).
 - Harness slot: a route is `harness · model · effort`. One adapter per harness builds the run
-  command and reads its events. Only Claude Code is built. Codex CLI (`codex exec`), OpenCode
-  (`opencode run`) and Command Code (`cmdc`) are later adapters; their flags and output formats are
-  not checked yet.
+  command and reads its events. All four are built (plan 5: Claude Code, Codex CLI, OpenCode,
+  Command Code), and plan 37 watches every CLI with the same hook (`cc_events.py --harness`), so an
+  outside chat on any of them is a session row with the same states, Steps, gauge, Chat and levers.
 
 ### Claude Code commands (checked against code.claude.com docs and `claude --help`, v2.1.288)
 

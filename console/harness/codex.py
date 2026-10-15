@@ -127,4 +127,4 @@ def stop(proc) -> str:
 
 
 def terminal_command(exe: list, session_id: str, model: str, effort: str):
-    return None
+    return list(exe) + ["resume", session_id, "-m", model]

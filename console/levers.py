@@ -4,7 +4,7 @@ place: server.Hub.levers."""
 import time
 from pathlib import Path
 
-from . import claude_cli, redact
+from . import claude_cli, harness as harness_pkg, redact
 
 VERIFY_TEXT = ("Check the work of this session. If a `verifier` agent is available (the project's "
                "`.claude/agents` or `~/.claude/agents`), run it with the Agent tool; otherwise "
@@ -25,10 +25,26 @@ FIX_FRAME = ("Before you edit: name up to three plausible causes, the evidence f
              "smallest check that tells them apart; run that check; fix only the cause it confirmed.")
 
 
-def escalate_step(model: str, effort: str):
-    """One step up (route-model: effort first, then a bigger model): effort +1 up to high, then
-    the next model at the same effort; on the top model, effort +1. None when nothing is above."""
+def escalate_step(model: str, effort: str, harness: str = "claude", cfg: dict = None):
+    """One step up (route-model: effort first, then a bigger model). Claude walks its own ladder; another
+    CLI steps its effort up to `high`, then to the first model of a higher tier in models.json. None when
+    nothing is above."""
     models, efforts = claude_cli.MODELS, claude_cli.EFFORTS
+    if harness != "claude":
+        if effort not in efforts:
+            return None
+        e = efforts.index(effort)
+        if e < efforts.index("high"):
+            return model, efforts[e + 1]
+        tiers = harness_pkg.models_of(cfg or {}, harness)
+        here = tiers.get(model)
+        if not here:
+            return None
+        rank = models.index
+        for name, tier in tiers.items():  # models.json order: the first rung a tier above
+            if rank(tier) > rank(here):
+                return name, effort
+        return None
     if model not in models or effort not in efforts:
         return None
     e, m = efforts.index(effort), models.index(model)
@@ -62,6 +78,20 @@ def handoff_ready(project_dir: str, home: Path = None) -> bool:
     """True when Claude Code can expand /session-handoff here: the project's or Fred's own skill."""
     places = [Path(project_dir) / ".claude" if project_dir else None, Path(home or Path.home()) / ".claude"]
     return any(p is not None and (p / HANDOFF_SKILL).is_file() for p in places)
+
+
+def handoff_prompt(home: Path = None) -> str:
+    """The session-handoff SKILL.md body after its front matter, sent as the prompt of a Handoff on a CLI
+    that has no slash commands ("" when the skill is not installed)."""
+    try:
+        text = (Path(home or Path.home()) / ".claude" / HANDOFF_SKILL).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end >= 0:
+            text = text[end + 4:]
+    return text.strip()
 
 
 def _day(now: float = None) -> str:

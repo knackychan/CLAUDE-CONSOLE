@@ -309,6 +309,24 @@ def _drop_opus_max_turns(folder: Path) -> None:
         pass  # load_config still reads the old key as the fallback
 
 
+def write_text_atomic(path: Path, text: str) -> None:
+    """Write <path> whole through a temp file of this write's own (pid and thread in its name), then os.replace: a
+    reader never sees half a file and two writers never share a temp file (plan 34 F5). OSError propagates, with the
+    temp file removed."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 _WINDOW_LOCK = threading.Lock()  # the page (project) and the window (form, place) both save
 
 

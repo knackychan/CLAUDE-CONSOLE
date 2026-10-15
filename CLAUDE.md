@@ -10,12 +10,14 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
   decision the plan does not make, stop and ask Fred, then update the plan.
 - Keep it small. Python 3.14 standard library + pywebview, plain HTML/CSS/JS, no build step, no
   database, no daemon. Anything on the BRAINSTORM "Non-goals" list is out of scope.
-- `cc_events.py` runs inside every Claude Code session as an async hook: it must never raise, must
-  always exit 0, must not touch the network, and logs summaries only (masked by `console/redact.py`).
+- `cc_events.py` runs inside every Claude Code, Codex, Command Code and OpenCode session as an async hook
+  (`--harness <name>`, default `claude`): it must never raise, must always exit 0, must not touch the
+  network, and logs summaries only (masked by `console/redact.py`).
 - The service binds 127.0.0.1 only and every request passes `console/guard.py`.
 - Data lives in `~/.claude/console/` (or env `CC_CONSOLE_HOME`, which the tests use). Never write
-  anywhere else (one exception, plan 28: a task's plan is mirrored into `<project>/.claude/console/plans/`), and never edit `~/.claude/settings.json` from code that Claude runs: Fred runs
-  `install_hooks.py` himself.
+  anywhere else (one exception, plan 28: a task's plan is mirrored into `<project>/.claude/console/plans/`), and never edit `~/.claude/settings.json`, `~/.codex/hooks.json`,
+  `~/.commandcode/settings.json` or the OpenCode plugin file from code that Claude runs: `install_hooks.py`
+  is the only code that writes another CLI's config, and Fred runs it himself.
 - All styling is in `web/style.css`, tokens first. The visual rework target is locked: BRAINSTORM 7.5,
   `design/rework/locked/cells-drawer.html` (tokens and cell motif: `console-cells.html`; Usage page: `usage.html`); files in
   `design/rework/explored/` are not targets.
@@ -25,7 +27,7 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
 - The plan a design step writes is saved by the service as tasks/<id>/plan.md and plan/NN-*.md, never cut; plan 24 README is its contract.
 - Handoffs (step notes, briefs, the session-handoff skill) use tasks.HEADINGS, six headings; facts (git and the last test) are code-read and never compacted; plan 23 README is the contract.
 - The Models and tuning page writes config.json only through POST /api/config/models (console/tuning.py whitelist, all or nothing); it never writes models.json.
-- The Board is a page of the one window (plan 25): WindowApi.board(on) alone widens and returns it; it reads GET /api/task, /api/chat and /api/measure and writes nothing but window.json.
+- The Board is a page of the one window (plan 25): WindowApi.board(on) alone widens and returns it; it reads GET /api/task, /api/chat and /api/measure and writes nothing but window.json, except a chat task's follow-up (Continue under its chat, the existing POST /api/continue; Fred decided 2026-10-15).
 - No emojis or em-dashes in prose. Verify CLI flags and hook fields against code.claude.com docs
   before relying on them.
 
@@ -37,5 +39,6 @@ py -m console                      :: tray icon (service inside); opens the wind
 py -m console --window             :: the window only, for a running service
 py -m console --serve              :: service only: http://127.0.0.1:47770/
 run.bat                            :: the window without a console
-py install_hooks.py [--write|--remove]   :: Fred only: add/remove the hooks in ~/.claude/settings.json
+py install_hooks.py [--harness all] [--write|--remove]   :: Fred only: add/remove the hooks in ~/.claude/settings.json,
+                                                     ~/.codex/hooks.json, ~/.commandcode/settings.json and the OpenCode plugin
 ```

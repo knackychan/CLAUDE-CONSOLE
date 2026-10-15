@@ -71,6 +71,28 @@ class LeversTest(unittest.TestCase):
             self.assertEqual(levers.read_misses(Path(tmp), "CALC"), [])  # the two files stay apart
             self.assertLessEqual(len(levers.lesson_line("P", "code", "w" * 500, now)), 240)
 
+    def test_escalate_step_other_harness(self):
+        cfg = {"models": {"codex": {"gpt-a": "sonnet", "gpt-b": "opus"}, "cmd": {"m": "haiku"}}}
+        self.assertEqual(levers.escalate_step("gpt-a", "low", "codex", cfg), ("gpt-a", "medium"))
+        self.assertEqual(levers.escalate_step("gpt-a", "medium", "codex", cfg), ("gpt-a", "high"))
+        self.assertEqual(levers.escalate_step("gpt-a", "high", "codex", cfg), ("gpt-b", "high"))
+        self.assertIsNone(levers.escalate_step("gpt-b", "high", "codex", cfg))  # nothing above opus
+        self.assertIsNone(levers.escalate_step("m", "high", "cmd", cfg))        # only haiku-tier models
+        self.assertIsNone(levers.escalate_step("gone", "high", "codex", cfg))   # not in models.json
+        self.assertIsNone(levers.escalate_step("gpt-a", "auto", "codex", cfg))
+
+    def test_handoff_prompt_strips_front_matter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            self.assertEqual(levers.handoff_prompt(home), "")
+            skill = home / ".claude" / "skills" / "session-handoff"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: session-handoff\ndescription: x\n---\n\n# Handoff\n\n"
+                                            "Write the note.\n", encoding="utf-8")
+            text = levers.handoff_prompt(home)
+            self.assertTrue(text.startswith("# Handoff"))
+            self.assertNotIn("description:", text)
+
     def test_escalate_text_frames_the_fix(self):
         text = levers.escalate_text("test_x - KeyError", "sonnet", "high")
         self.assertTrue(text.startswith("The checks failed: test_x - KeyError. You now run on sonnet/high (escalated once). "))

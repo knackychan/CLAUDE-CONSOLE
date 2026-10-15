@@ -18,8 +18,8 @@ SESSION_ENV = {
     "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_SSE_PORT", "CLAUDE_EFFORT",
     "CLAUDE_PID",
 }
-STOP_FOOTER = ("\n\nIf you must stop for a decision only Fred can make, end your final message with "
-               "one line: STOP: <question>")
+STOP_FOOTER = ("\n\nIf you ask Fred a question or need his decision (for example, 'Shall I fix this?'), "
+               "end your final message with one line: STOP: <question>")
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)

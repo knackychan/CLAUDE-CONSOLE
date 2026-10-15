@@ -170,5 +170,19 @@ class NameTest(unittest.TestCase):
         self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
 
 
+class AtomicWriteTest(unittest.TestCase):
+    def test_write_text_atomic_replaces_whole_and_cleans_up(self):
+        """Plan 34 F5: the text lands whole; a failed replace keeps the old file and leaves no temp file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sub" / "draft.txt"
+            paths.write_text_atomic(path, "one")
+            self.assertEqual(path.read_text(encoding="utf-8"), "one")
+            with mock.patch.object(paths.os, "replace", side_effect=PermissionError(13, "in use")):
+                with self.assertRaises(PermissionError):
+                    paths.write_text_atomic(path, "two")
+            self.assertEqual(path.read_text(encoding="utf-8"), "one")
+            self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["draft.txt"])
+
+
 if __name__ == "__main__":
     unittest.main()
