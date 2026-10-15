@@ -6,8 +6,9 @@ import re
 from . import claude_cli, fills, paths, tasks
 
 # key -> (group, unit, min, max), in the Tuning tab's order. Units: a whole number for steps, s, turns, kb, parts,
-# words, tokens; a number for usd and share (a share is a fraction: 0.1 = 10 points); bool; rung (a model).
+# words, tokens; a number for usd and share (a share is a fraction: 0.1 = 10 points); bool; rung (a model); text.
 TUNING = {
+    "user_name": ("you", "text", 0, paths.NAME_MAX),  # plan 31: one line of text, "" allowed
     "task_max_steps": ("steps", "steps", 1, 12),
     "task_step_budget_usd": ("steps", "usd", 0.1, 50),
     "step_timeout_s": ("steps", "s", 60, 7200),
@@ -176,6 +177,10 @@ def validate(changes, cfg: dict) -> tuple:
             group, unit, low, high = TUNING[key]
             if unit == "bool":
                 why = "" if isinstance(value, bool) else "true or false"
+            elif unit == "text":  # plan 31: whitespace collapsed, newlines and tabs included
+                why = "" if isinstance(value, str) and len(" ".join(value.split())) <= high \
+                    else f"text of at most {high} characters"
+                value = " ".join(value.split()) if not why else value
             elif unit == "rung":
                 why = _rung(value, cfg)
                 if not why and key in CLAUDE_ONLY and fills.split_rung(value)[0] != "claude":

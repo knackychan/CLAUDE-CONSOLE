@@ -1893,7 +1893,7 @@ function planAsk(t, d, cur, lv, row) {  // the four plan waits (askbox html), or
       <textarea class="in" id="t-answer" rows="3" aria-label="Answer" placeholder="Your answer joins the plan's Decisions and continues step ${two(n)}."></textarea>
       <div class="lr">${b("answer", "gapanswer", " you", "Send answer")}${b("redo", "redo", "", "Redo design", ' title="Runs the design step again with this question; the steps still planned are rebuilt, the done ones stay"')}
       ${cur && cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${n}</button>` : ""}</div>
-      <div class="say">A writer never decides for the plan: your answer is written under Decisions as "Fred, ${new Date().toISOString().slice(0, 10)}: ...".</div><div id="ta-msg" class="say"></div></div>`;
+      <div class="say">A writer never decides for the plan: your answer is written under Decisions as "${esc(youName())}, ${new Date().toISOString().slice(0, 10)}: ...".</div><div id="ta-msg" class="say"></div></div>`;
   }
   if (why === "plan ready: confirm") {
     const sel = parts.length ? `<select id="t-editpart" aria-label="Which text">${[`<option value="0">index</option>`, ...parts.map((x) => `<option value="${x.n}"${x.n === planEditPart ? " selected" : ""}>part ${x.n}: ${esc(x.title)}</option>`)].join("")}</select>` : "";
@@ -2325,6 +2325,7 @@ const mqOpen = new Set();  // the cards whose ? line is open
 const PASSES = [["prep_model", "Prep", "enhances the prompt, plans the steps"], ["brief_model", "Handoff pass", "compacts a step's handoff"],
   ["review_model", "Rules review", "read only"], ["default_model", "Run default", "the composer's Run"]];
 const TUNE = {  // key -> [label, unit word, scale from the config value to the shown one]; the service sends value, default, range
+  user_name: ["Your name", "", 1],
   task_max_steps: ["Steps per task", "", 1], task_step_budget_usd: ["Spend per step", "$", 1],
   step_timeout_s: ["Step timeout", "s", 1], design_max_turns: ["Turns on design", "", 1],
   read_max_turns: ["Turns on read kinds", "", 1], plan_max_kb: ["Plan size at most", "KB", 1],
@@ -2336,6 +2337,7 @@ const TUNE = {  // key -> [label, unit word, scale from the config value to the 
   gauge_red_tokens: ["Red from", "K", 0.001],
 };
 const MGROUP = {  // Tuning cards: [name, the one fact, the ? sentence]
+  you: ["You", "your name in the prompts", "The name the step prompts and the plan's Decisions use for you, so a question reads as waiting for you. Empty: the user."],
   steps: ["Steps", "limits per step and task", "Limits for one step and one task: how many steps, how much one step may spend, how long it may run and how many turns it may take."],
   plan: ["Plan", "the design step's plan", "The plan a design step writes: its size, how many sub-plans it may split into, and whether you confirm it and its replans."],
   handoff: ["Handoff", "between steps", "What passes between steps: the word limit of a handoff and how long the pass that compacts it may take."],
@@ -2352,6 +2354,10 @@ const KCARD = {  // Kinds and Tiers cards per tier: [name, the one fact on Kinds
 };
 const RANKS = ["haiku", "sonnet", "opus", "fable"];
 const clone = (x) => JSON.parse(JSON.stringify(x));
+const youName = () => {  // plan 31: the Decisions label, as paths.you(cfg, start=True) writes it
+  const v = cfg && cfg.tuning && cfg.tuning.user_name ? String(cfg.tuning.user_name.value || "") : "";
+  return v.split(/\s+/).filter(Boolean).join(" ").slice(0, 60) || "The user";
+};
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 async function loadModels() {
@@ -2491,6 +2497,7 @@ function tuneBad(k) {
   const t = cfg.tuning[k], v = medit.values[k];
   if (k === "allowances") { const key = Object.keys(v || {}).find(allowBad); return key ? `${key}: ${allowBad(key)}` : ""; }
   if (t.unit === "bool" || t.unit === "rung") return "";
+  if (t.unit === "text") return String(v || "").split(/\s+/).filter(Boolean).join(" ").length > t.max ? `at most ${t.max} characters` : "";
   const whole = ["steps", "s", "turns", "kb", "parts", "words", "tokens"].includes(t.unit);
   if (typeof v !== "number" || !isFinite(v) || v < t.min || v > t.max || (whole && !Number.isInteger(v)))
     return `${whole ? "a whole number " : ""}between ${shown(k, t.min)} and ${shown(k, t.max)} (default ${shown(k, t.default)})`;
@@ -2502,6 +2509,10 @@ function tuneRow(k) {
   const reset = ed ? ` · <button class="rs" data-mreset="def:${k}">reset</button>` : "";
   if (t.unit === "bool") {
     return `<div class="tf${ed ? " ed" : ""}"><span class="nm">${label}</span><span class="v"><button class="sw${v ? " on" : ""}" role="switch" aria-checked="${!!v}" data-mbool="${k}" title="${v ? "Turn off" : "Turn on"}">${v ? "on" : "off"}</button></span><span class="sub">${k} · default ${t.default ? "on" : "off"}${reset}</span></div>`;
+  }
+  if (t.unit === "text") {  // plan 31: one line of text; empty keeps "the user"
+    return `<div class="tf${ed ? " ed" : ""}${bad ? " bad" : ""}"><span class="nm">${label}</span><span class="v"><input class="txt" data-mtext="${k}" aria-label="${esc(label)}" maxlength="${t.max}" placeholder="the user" value="${esc(v || "")}"></span>
+    <span class="sub">${bad ? esc(bad) : `${k} · empty reads "the user"${reset}`}</span></div>`;
   }
   const pre = unit === "$" ? "$" : "", post = unit === "$" ? "" : unit;
   return `<div class="tf${ed ? " ed" : ""}${bad ? " bad" : ""}"><span class="nm">${label}</span><span class="v">${pre}<input inputmode="decimal" data-mnum="${k}" aria-label="${esc(label)}" value="${esc(shown(k, v))}">${post}</span>
@@ -2578,6 +2589,7 @@ $("mscroll").addEventListener("change", (e) => {
   else if (t.dataset.meff) { const [tier, i] = t.dataset.meff.split(":"); medit.tiers[tier][Number(i)].effort = t.value; }
   else if (t.dataset.madd) { if (t.value) medit.tiers[t.dataset.madd].push({ rung: t.value, effort: "auto" }); }
   else if (t.dataset.mval) medit.values[t.dataset.mval] = t.value;
+  else if (t.dataset.mtext) medit.values[t.dataset.mtext] = t.value;
   else if (t.dataset.mnum) {
     const k = t.dataset.mnum, n = Number(t.value.trim().replace(",", "."));
     medit.values[k] = t.value.trim() === "" || !isFinite(n) ? NaN : Math.round(n / TUNE[k][2] * 1e6) / 1e6;
@@ -3060,7 +3072,7 @@ function inspGap(t, s, d, row) {
   return `${stepHead(t, s, d, row, ' <span class="m mut">· from plan</span>')}
     <div class="askbox"><span class="st y">${sprite("waiting")}Plan gap <span class="lc">· step ${two(s.n)} stopped, nothing chosen</span></span>
       <div class="q">${esc(q)}</div>
-      <textarea class="in" id="b-answer" rows="2" aria-label="Answer" placeholder="Your answer joins the plan's Decisions as Fred, ${new Date().toISOString().slice(0, 10)}: ... and continues step ${two(s.n)} in its chat."></textarea>
+      <textarea class="in" id="b-answer" rows="2" aria-label="Answer" placeholder="Your answer joins the plan's Decisions as ${esc(youName())}, ${new Date().toISOString().slice(0, 10)}: ... and continues step ${two(s.n)} in its chat."></textarea>
       <div class="lr">${b("answer", " you", "Send answer").replace('data-tact="answer"', 'data-tact="gapanswer"')}${b("redo", "", "Redo design")}${b("stop", " stop", "Stop")}</div></div>
     ${tabsHtml(tabs, tab)}<div class="ipane">${pane}</div>`;
 }

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, levers, redact, routing, tasks
+from . import claude_cli, levers, paths, redact, routing, tasks
 
 PROMPT_FILE = Path(__file__).resolve().parent / "prep_prompt.md"
 TYPES = ["mechanical", "lookup", "normal", "risky", "vague"]
@@ -40,12 +40,12 @@ class PrepError(Exception):
     pass
 
 
-def build_prompt(raw: str, misses=(), days: float = 0) -> str:
-    """The Prep instructions with Fred's request and this project's routing misses filled in; `days` names
-    the window the misses were kept from (0: not named)."""
+def build_prompt(raw: str, misses=(), days: float = 0, you: str = "The user") -> str:
+    """The Prep instructions with the request and this project's routing misses filled in; `days` names the window
+    the misses were kept from (0: not named); `you` is paths.you(cfg, start=True) (plan 31)."""
     window = f"in the last {days:g} days " if days else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
-        raw=raw.strip(), misses="\n".join(misses) or "(none)", window=window)
+        raw=raw.strip(), misses="\n".join(misses) or "(none)", window=window, You=you)
 
 
 def format_prompt(fields: dict) -> str:
@@ -94,7 +94,7 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, pre
     cmd = claude_cli.prep_command(exe, cfg["prep_model"], SCHEMA)
     days = cfg.get("miss_floor_days", 0)
     misses = routing.fresh(levers.read_misses(folder, Path(project_dir).name), days)
-    prompt = build_prompt(raw, misses, days)
+    prompt = build_prompt(raw, misses, days, paths.you(cfg, start=True))
     try:
         out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"),
                              capture_output=True, timeout=cfg["prep_timeout_s"], env=claude_cli.child_env(),

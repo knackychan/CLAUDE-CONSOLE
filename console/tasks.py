@@ -977,7 +977,8 @@ def prompt_goal(task: dict, step: dict) -> str:
 
 
 def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", special: str = "",
-                plan: str = "", part: str = "", facts: str = "", lessons=()) -> str:
+                plan: str = "", part: str = "", facts: str = "", lessons=(), you: str = "the user") -> str:
+    """The prompt of one step (console/step_prompt.md); `you` is paths.you(cfg), the person a question waits for."""
     kind = step["kind"]
     special = special or (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1)
                           if kind == "verify" else _fix_text(task, step) if kind == "fix" else "")
@@ -989,4 +990,4 @@ def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", 
         title=task["title"], goal=prompt_goal(task, step), n=step["n"], m=len(task["steps"]),
         kind=kind, step_goal=step["goal"], special=special, retry=retry,
         plan=plan + "\n\n" if plan else "", lessons=taught, part=part + "\n\n" if part else "",
-        prev=received(prev_note, facts))
+        prev=received(prev_note, facts), you=you)

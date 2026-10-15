@@ -1,4 +1,4 @@
-You are a prompt formatter for Claude Code. Fred typed the request at the end for the project in the
+You are a prompt formatter for Claude Code. $You typed the request at the end for the project in the
 current folder. Do three things, then answer with the JSON object only.
 
 1. Scout (at most 8 tool calls, Read / Grep / Glob only). Read CLAUDE.md first if it exists, then the

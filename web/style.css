@@ -776,6 +776,7 @@ html:not(.native) .native-only { display: none; }
 .tf .v input:focus-visible { outline: 2px solid var(--ink); outline-offset: 0; }
 .tf.bad .v input { border-color: var(--bad); }
 .tf.bad .sub { color: var(--bad); }
+.tf .v input.txt { width: 150px; text-align: left; font: 12px var(--ui); }  /* plan 31: the name, one line of text */
 .tf.al .v input { width: 54px; }
 .tf .sw { min-width: 44px; height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 11px; background: var(--off); color: var(--mut); font: 11px var(--mono); cursor: pointer; }
 .tf .sw.on { background: color-mix(in srgb, var(--ok) 18%, var(--win)); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); color: var(--ink); }

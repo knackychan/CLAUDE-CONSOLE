@@ -21,6 +21,8 @@ class PrepTest(unittest.TestCase):
     def test_build_prompt_inserts_the_request(self):
         text = prep.build_prompt("  make $HOME {x} work  ")
         self.assertTrue(text.rstrip().endswith("Request:\nmake $HOME {x} work"))
+        self.assertIn("The user typed the request at the end", text)  # plan 31
+        self.assertIn("Fred typed the request at the end", prep.build_prompt("x", you="Fred"))
         self.assertIn("| risky |", text)
 
     def test_schema_shape(self):

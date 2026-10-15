@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from string import Template
 
-from . import redact, tasks
+from . import paths, redact, tasks
 
 MARK_START, MARK_END = "PLAN", "END PLAN"
 PART_END = "END SUBPLAN"
@@ -315,9 +315,9 @@ def write(home, task: dict, text: str, k: int = 0) -> str:
     return rel
 
 
-def with_answer(index: str, answer: str, day: str = "") -> str:
-    """The index with `- Fred, <date>: <answer>` as the last line of ## Decisions; the answer on one line, its
-    whitespace collapsed (a multi-line answer adds no heading)."""
+def with_answer(index: str, answer: str, day: str = "", who: str = "The user") -> str:
+    """The index with `- <who>, <date>: <answer>` as the last line of ## Decisions (`who` is paths.you(cfg,
+    start=True), plan 31); the answer on one line, its whitespace collapsed (a multi-line answer adds no heading)."""
     day = day or date.today().isoformat()
     answer = " ".join(str(answer or "").split())
     lines = str(index or "").splitlines()
@@ -326,7 +326,7 @@ def with_answer(index: str, answer: str, day: str = "") -> str:
         if on and line.startswith("## ") and not placed:
             while out and not out[-1].strip():
                 out.pop()
-            out += [f"- Fred, {day}: {answer}", ""]
+            out += [f"- {who}, {day}: {answer}", ""]
             placed = True
         if line.strip() == "## Decisions":
             on = True
@@ -334,13 +334,13 @@ def with_answer(index: str, answer: str, day: str = "") -> str:
     if on and not placed:
         while out and not out[-1].strip():
             out.pop()
-        out.append(f"- Fred, {day}: {answer}")
+        out.append(f"- {who}, {day}: {answer}")
     return "\n".join(out).rstrip() + "\n"
 
 
-def add_answer(home, task: dict, answer: str, day: str = "") -> str:
-    """Append Fred's answer to the Decisions of plan.md, masked by write; returns the line written."""
-    text = redact.mask(with_answer(read(home, task), answer, day))
+def add_answer(home, task: dict, answer: str, day: str = "", who: str = "The user") -> str:
+    """Append the person's answer to the Decisions of plan.md, masked by write; returns the line written."""
+    text = redact.mask(with_answer(read(home, task), answer, day, who))
     write(home, task, text)
     return text.rstrip().splitlines()[-1] if not section(text, "## Decisions") else section(text, "## Decisions").splitlines()[-1]
 
@@ -356,13 +356,13 @@ def design_text(task: dict, step: dict, cfg: dict, redo: str = "") -> str:
     edits = ", ".join(str(s["n"]) for s in later if s["kind"] in tasks.EDIT_KINDS and s["state"] != "done") or "none"
     redo_text = ""
     if redo:
-        redo_text = ("Fred asked for this plan again: " + redo + " Plan the steps that are not done; a done step keeps "
-                     "its place and its work, and its handoff is above.")
+        redo_text = (paths.you(cfg, start=True) + " asked for this plan again: " + redo + " Plan the steps that are not "
+                     "done; a done step keeps its place and its work, and its handoff is above.")
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
         turns=cfg["design_max_turns"], later="\n".join(lines), edit_steps=edits, redo=redo_text,
         max_kb=cfg["plan_max_kb"], max_parts=cfg["plan_max_parts"],
         room=max(tasks.room_after(task, step["n"], cfg["task_max_steps"]), 1),
-        write_kinds=", ".join(WRITE_KINDS))
+        write_kinds=", ".join(WRITE_KINDS), you=paths.you(cfg), You=paths.you(cfg, start=True))
 
 
 def design_input(home, task: dict, n: int) -> str:

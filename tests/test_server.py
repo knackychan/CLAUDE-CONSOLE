@@ -1560,6 +1560,18 @@ class TaskServerTest(RunServerTest):
         self.assertIn("fix it by hand", data["error"])
         self.assertEqual((self.folder / "config.json").read_text(encoding="utf-8"), "{ broken")  # never overwritten
 
+    def test_models_page_saves_the_name(self):
+        """Plan 31: the Tuning tab's user_name is saved collapsed and read by the next prompt (paths.you)."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)]}), encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {"user_name": "  Fred \n T. "}})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["tuning"]["user_name"]["value"], "Fred T.")
+        self.assertEqual(json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["user_name"], "Fred T.")
+        self.assertEqual(paths.you(self.hub.cfg), "Fred T.")
+        status, data = self.call("/api/config/models", {"changes": {"user_name": "x" * 61}})
+        self.assertEqual((status, data["errors"]), (400, {"user_name": "text of at most 60 characters"}))
+
     def test_models_page_refuses_a_huge_integer(self):
         """Plan 27 (B7): a number too big for a float is a 400 with the range, not a dropped connection."""
         status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 10 ** 400}})
@@ -1910,6 +1922,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": text})[0], 409)  # running: no edit
 
     def test_plan_gap_waits_and_the_answer_joins_decisions(self):
+        self.hub.cfg["user_name"] = "Fred"  # plan 31: the Decisions line names the configured person
         tid = self.plan_task(goals={3: "write it PLAN-GAP"})
         task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on a gap")
         self.assertEqual(task["why"], "asks: Plan gap: which file holds the ladder?")
@@ -1926,6 +1939,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": "again"})[0], 409)
 
     def test_redo_design_keeps_done_steps(self):
+        self.hub.cfg["user_name"] = "Fred"  # plan 31: the redo line names the configured person
         tid = self.plan_task(words="HANDOFF-OK PLAN-OK", kinds=("scout", "design", "code", "code"),
                              goals={4: "second PLAN-GAP"})
         task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on a gap in step 4")

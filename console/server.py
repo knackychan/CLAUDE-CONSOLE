@@ -916,7 +916,8 @@ class Hub:
         last = task["last_good"]
         lessons = tasks.lessons_for(levers.read_lessons(self.folder, task["project"], tasks.LESSONS_READ), kind)
         prompt = tasks.step_prompt(task, s, prev, retry, special=special, plan=plan_text, part=part_text,
-                                   facts=tasks.read_facts(self.folder, task, last), lessons=lessons)
+                                   facts=tasks.read_facts(self.folder, task, last), lessons=lessons,
+                                   you=paths.you(self.cfg))
         route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
         adapter = harness.get(hname)
         read_only = tasks.RULES[kind][2] == READ_ONLY_TOOLS if kind in tasks.RULES else False
@@ -1309,7 +1310,7 @@ class Hub:
             if not text.strip():
                 return 400, {"error": "empty answer"}
             task, cs, now = self.tasks[task_id], tasks.current_step(self.tasks[task_id]), time.time()
-            line = plan.add_answer(self.folder, task, text)
+            line = plan.add_answer(self.folder, task, text, who=paths.you(self.cfg, start=True))
             self._commit(task, [tasks._line(now, cs, "running", "running", f"plan gap answered by Fred: {redact.clip(text, 120)}")])
         status, body = self.pull(cs["session"], "continue", text)  # the task goes running in _ended, as any answer
         return status, dict(body, task=task_id, line=line) if status == 200 else body

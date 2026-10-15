@@ -195,15 +195,17 @@ class FilesTest(unittest.TestCase):
         self.assertGreater(meta["kb"], 0)
 
     def test_with_answer_appends_to_decisions(self):
-        text = plan.with_answer(SPLIT_INDEX, "ladder in config.json", "2026-10-14")
+        text = plan.with_answer(SPLIT_INDEX, "ladder in config.json", "2026-10-14", "Fred")
         dec = plan.section(text, "## Decisions")
         self.assertEqual(dec.splitlines()[-1], "- Fred, 2026-10-14: ladder in config.json")
+        self.assertEqual(plan.section(plan.with_answer(SPLIT_INDEX, "x", "2026-10-15"), "## Decisions").splitlines()[-1],
+                         "- The user, 2026-10-15: x")  # plan 31: no name set
         self.assertIn("## Out of scope", text)
         self.assertEqual(plan.section(text, "## Out of scope"), "- (none)")
 
     def test_add_answer_writes_the_file(self):
         self.t["plan"] = plan.save(self.home, self.t, plan.parse(split()), 2)
-        line = plan.add_answer(self.home, self.t, "config.json", "2026-10-14")
+        line = plan.add_answer(self.home, self.t, "config.json", "2026-10-14", "Fred")
         self.assertEqual(line, "- Fred, 2026-10-14: config.json")
         self.assertIn(line, plan.read(self.home, self.t))
 
@@ -225,7 +227,8 @@ class FilesTest(unittest.TestCase):
         plan.write(self.home, self.t, "## Files\n- api_key=hunter2hunter2\n", 2)
         self.assertNotIn("hunter2hunter2", plan.read_part(self.home, self.t, 2))
         plan.write(self.home, self.t, SPLIT_INDEX)
-        line = plan.add_answer(self.home, self.t, "use sk-ant-abcdefghijklmnop\n## Acceptance\n- nothing", "2026-10-14")
+        line = plan.add_answer(self.home, self.t, "use sk-ant-abcdefghijklmnop\n## Acceptance\n- nothing", "2026-10-14",
+                               "Fred")
         self.assertEqual(line, "- Fred, 2026-10-14: use *** ## Acceptance - nothing")
         text = plan.read(self.home, self.t)
         self.assertEqual(text.count("\n## Acceptance\n"), 1)  # the answer adds no heading
@@ -248,8 +251,12 @@ class PromptTest(unittest.TestCase):
     def test_design_text_on_a_redo_names_the_question_and_the_done_steps(self):
         t = make_task()
         t["steps"][2]["state"] = "done"
-        text = plan.design_text(t, tasks.step(t, 2), self.CFG, "step 4 asked: config.json or models.json?")
+        text = plan.design_text(t, tasks.step(t, 2), dict(self.CFG, user_name="Fred"),
+                                "step 4 asked: config.json or models.json?")
         self.assertIn("Fred asked for this plan again: step 4 asked", text)
+        self.assertIn("waits for Fred, so every fork", text)  # plan 31: $you
+        self.assertIn("starts with `Fred, <date>:`", text)
+        self.assertIn("stops and waits for the user", plan.design_text(t, tasks.step(t, 2), self.CFG))
         self.assertIn("- Step 3: code. step code (done, kept)", text)
         self.assertIn("(6)", text)
 

@@ -880,6 +880,16 @@ class ChainTest(unittest.TestCase):
         self.assertEqual(tasks.next_hint("Next model: opus/high"), ("opus", "high"))  # the hint still parses
         self.assertNotIn(chr(0x2014), tasks.PROMPT_FILE.read_text(encoding="utf-8"))
 
+    def test_prompts_name_the_configured_person(self):
+        """Plan 31: no prompt file names Fred; the step prompt's question rule names `you` (paths.you)."""
+        for path in sorted(tasks.PROMPT_FILE.parent.glob("*.md")):
+            self.assertNotIn("Fred", path.read_text(encoding="utf-8"), path.name)
+        task = make(("scout", "code"))
+        self.assertIn("- a question the next step or the user must settle", tasks.step_prompt(task, tasks.step(task, 1), ""))
+        text = tasks.step_prompt(task, tasks.step(task, 1), "", you="Fred")
+        self.assertIn("- a question the next step or Fred must settle", text)
+        self.assertNotIn("$", text)
+
     def test_goal_is_cut_to_600_after_the_first_step(self):
         task = make(("scout", "code"))
         task["goal"] = "g" * 2000
