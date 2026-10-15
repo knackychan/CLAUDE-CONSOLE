@@ -12,32 +12,41 @@ import json
 import os
 import re
 import shutil
+import statistics
 import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, levers, redact, routing
+from . import claude_cli, fills, levers, redact, routing
+from .fills import RANK_TIER, TIER_RANK, TIERS  # plan 18: the job tiers (the contract names them here)
 
 RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify and fix are computed.
     "scout": ("haiku", "low", "Read,Grep,Glob"),
     "search": ("haiku", "low", "Read,Grep,Glob,WebFetch,WebSearch"),
-    "draft": ("haiku", "low", ""),
-    "proofread": ("haiku", "low", ""),
-    "edit": ("haiku", "low", ""),
-    "code": ("sonnet", "medium", ""),
-    "document": ("sonnet", "medium", ""),
+    "draft": ("haiku", "low", "Read,Edit,Write,Grep,Glob"),  # plan 23 (D3): an explicit list on every kind
+    "proofread": ("haiku", "low", "Read,Edit,Write,Grep,Glob"),
+    "edit": ("haiku", "low", "Read,Edit,Write,Grep,Glob"),
+    "code": ("sonnet", "medium", "Bash,Read,Edit,Write,Grep,Glob"),
+    "document": ("sonnet", "medium", "Read,Edit,Write,Grep,Glob"),
     "explain": ("sonnet", "medium", "Read,Grep,Glob"),
-    "debug": ("sonnet", "high", ""),
+    "debug": ("sonnet", "high", "Bash,Read,Edit,Write,Grep,Glob"),
     "test": ("haiku", "low", "Bash,Read,Grep,Glob"),
     "design": ("opus", "high", "Read,Grep,Glob,WebFetch,WebSearch"),
+    "replan": ("haiku", "low", ""),
     "verify": ("", "", "Bash,Read,Grep,Glob"),
-    "fix": ("", "", ""),
+    "fix": ("", "", "Bash,Read,Edit,Write,Grep,Glob"),
 }
 KINDS = tuple(RULES)
 PREP_KINDS = tuple(k for k in KINDS if k not in ("verify", "fix"))  # what Prep may propose
 EDIT_KINDS = frozenset({"edit", "code", "debug", "document", "draft"})  # a verify follows the last of them
 DISALLOW = ("Agent",)
-HEADINGS = ("## Findings", "## Files touched", "## Open questions", "## Next")
+HEADINGS = ("## Goal", "## Findings", "## Files touched", "## Troubleshooting", "## Open questions", "## Next")
+OLD_HEADINGS = ("## Findings", "## Files touched", "## Open questions", "## Next")  # a note from before plan 23
+READ_CAPPED = ("scout", "search")  # kinds whose run gets --max-turns read_max_turns (plan 23)
+PROMPT_GOAL_MAX = 600  # the goal in a step prompt after step 1: every handoff carries its Goal heading (plan 23)
+LESSONS_IN_PROMPT = 5  # the newest lessons of the step's own kind that ride in its prompt (plan 23)
+LESSONS_READ = 1000  # the project's lessons.md lines lessons_for picks the step's kind from (plan 27: filter, then cut)
+FIRST_STEP = "This is the first step: there is no handoff note yet."
 MARK_START, MARK_END = "HANDOFF", "END HANDOFF"
 NOTE_MAX = 20 * 1024
 GOAL_MAX = 6000
@@ -68,14 +77,31 @@ def verify_route(checked: tuple) -> tuple:
     return model, effort
 
 
+def kind_tier(kind: str) -> str:
+    """A kind's job tier: its rule's rank read as a tier (design think; code, document, explain, debug write; the
+    rest read); "" for verify and fix, which the rule computes."""
+    return RANK_TIER.get(RULES.get(kind, ("",))[0], "")
+
+
 def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(), prev: str = "",
-               budget=None, warn_at: float = 0.8, effort: str = "auto") -> dict:
-    """The route of one step: rule, pick, demand, floor, hint, cap, budget, fixed effort (README 3.5), in
-    that order, each one appending a note. A pick keeps its model against the floor and the hint (they may
-    still raise the effort); only the budget may move it. `hold` non-empty means the task waits for Fred."""
-    models, efforts = claude_cli.MODELS, claude_cli.EFFORTS
+               budget=None, warn_at: float = 0.8, effort: str = "auto", cfg=None, prev_rung: str = "",
+               prev_age=None, hard: bool = False, refuse=None, now: float = None, pin=None) -> dict:
+    """The route of one step: rule, pick, demand, floor, hint, cap, balance, fixed effort (README 3.5 of plan 17,
+    step 7 rewritten by plan 18), in that order, each one appending a note. A pick keeps its model against the floor
+    and the hint (they may still raise the effort) and is never balanced. `budget` is Hub.budget() (fills per model
+    key); `cfg` gives the tiers, the balance keys and models.json; `refuse(rung)` a reason a rung cannot run now.
+    Returns {"model": the rank of the rung, "rung", "effort", "notes", "hold"}; without `cfg` the rung is the rank
+    alias (plan 17's behaviour). `hold` non-empty means the task waits for Fred. `pin` is config `kinds[kind]`
+    (plan 26): a pinned rung acts as a pick when the step has none, a pinned effort as the task's fixed effort
+    when the task has none; verify and fix are never pinned."""
+    efforts = claude_cli.EFFORTS
+    pin = pin if isinstance(pin, dict) and kind not in ("verify", "fix") else {}
+    pin_rung = pin.get("rung") if cfg is not None and pin.get("rung") not in (None, "", "auto") else ""
+    pinned = effort == "auto" and pin.get("effort") in efforts
+    if pinned:
+        effort = pin["effort"]
     fixed = effort != "auto"
-    notes, hold = [], ""
+    notes, hold, rung = [], "", ""
     if kind == "verify":
         model, level = verify_route(checked)
     elif kind == "fix":
@@ -84,10 +110,27 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
     else:
         model, level = RULES[kind][:2]
     notes.append(f"rule {kind}: {model}/{level}")
-    picked = claude_cli.model_alias(pick)
+    from_pin = False
+    if pin_rung and not pick:  # plan 26: the kind's pinned rung, unless it cannot run now (then auto)
+        why = (refuse(pin_rung) if refuse else "") or ("" if fills.rank_of(pin_rung, cfg) else "unknown model")
+        if why:
+            notes.append(f"pin {kind}: {pin_rung} refused: {why} -> auto")
+        else:
+            pick, from_pin = pin_rung, True
+            notes.append(f"pin {kind}: {pin_rung}")
+    picked = (fills.rank_of(pick, cfg) if cfg is not None else claude_cli.model_alias(pick)) if pick else ""
+    if pick and not picked and cfg is not None:  # review plan-18 nit: a pick no list knows balances, with a note
+        notes.append(f"pick: {pick}")
+        notes.append(f"pick refused: {(refuse(pick) if refuse else '') or 'unknown model'} -> balance")
     if picked:
         model = picked
-        notes.append(f"pick: {picked}")
+        if not from_pin:  # a pin wrote its own note above
+            notes.append(f"pick: {pick if cfg is not None else picked}")
+        why = refuse(pick) if refuse and cfg is not None and not from_pin else ""
+        if why:
+            notes.append(f"pick refused: {why} -> balance")
+        else:
+            rung = pick if cfg is not None else ""
     if (demand or {}).get("reasoning") == "high" and kind in ("code", "debug") \
             and efforts.index(level) < efforts.index("high"):
         level = "high"
@@ -110,28 +153,43 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
             notes.append(f"hint: {hint[0]}/{hint[1]} -> one step up")
     chosen = (model, level)
     if model == "fable" and picked != "fable" and not (checked and checked[0] == "fable"):
-        model = "opus"  # code never picks fable; a fix or verify of a step Fred put on fable may keep it
+        model = "opus"  # code never routes a rank to fable; a hard-only fable rung of the think tier may (balance)
     if not fixed and model == "opus" and efforts.index(level) > efforts.index(_TOP[1]):
         level = _TOP[1]
     if (model, level) != chosen:
         notes.append(f"cap: {model}/{level}")
-    share = (budget or {}).get(model, 0)
-    if share >= warn_at and model != "haiku":
-        if kind == "verify":
-            hold = f"{model} over its pace"
-            notes.append(f"budget: {model} {round(share * 100)} % -> hold")
+    share = None
+    if cfg is not None and not rung:  # 7. balance (plan 18): the emptiest model of the tier, from the first step
+        check = kind in ("verify", "fix")
+        rungs = fills.pool(cfg, model, check=check, hard=hard and not check, refuse=refuse)
+        tier = RANK_TIER.get(model, "")
+        if rungs:
+            pickd = fills.balance(rungs, budget or {}, cfg, tier=tier, prev_rung="" if check else prev_rung,
+                                  prev_age=prev_age, now=now)
+            rung, share = pickd["rung"], pickd["share"]
+            notes.append(pickd["note"])
+            if pickd["effort"] != "auto" and not fixed:
+                level = pickd["effort"]
+                notes.append(f"rung effort: {level}")
         else:
-            was = model
-            model, level = models[models.index(model) - 1], efforts[min(efforts.index(level) + 1, len(efforts) - 1)]
-            notes.append(f"budget: {was} {round(share * 100)} % -> {model}/{level}")
+            rung = model
+            notes.append(f"balance: no usable {tier} rung -> {model}")
+        model = fills.rank_of(rung, cfg) or model
+    if not rung:
+        rung = model
+    if cfg is not None and share is None:  # review B10: a pick, a pin or an empty pool reads its rung's own fill
+        share = ((budget or {}).get(fills.model_key(rung, cfg)) or {}).get("share")
+    if kind == "verify" and cfg is not None and share is not None and share >= warn_at:
+        hold = f"{fills.model_key(rung, cfg)} over its pace"
+        notes.append(f"over pace: {rung} {round(share * 100)} % -> hold")
     if fixed:
         level = effort
-        notes.append(f"fixed effort: {effort}")
-        cap = EFFORT_CAP[model]
-        if efforts.index(level) > efforts.index(cap):
-            level = cap
-            notes.append(f"cap {model}: {cap}")
-    return {"model": model, "effort": level, "notes": notes, "hold": hold}
+        notes.append(f"pin effort: {effort}" if pinned else f"fixed effort: {effort}")
+    cap = EFFORT_CAP.get(model, efforts[-1])
+    if efforts.index(level) > efforts.index(cap):
+        level = cap
+        notes.append(f"cap {model}: {cap}")
+    return {"model": model, "rung": rung, "effort": level, "notes": notes, "hold": hold}
 
 
 # -- the handoff block ------------------------------------------------------------------------------------
@@ -177,19 +235,29 @@ def note_state(task: dict, s: dict, live: str = "") -> str:
     return "ready" if step(task, s["n"] + 1)["state"] == "planned" else "sent"
 
 
-def check_handoff(block: str) -> str:
-    """"" when the four headings stand on their own lines in order and Findings has text; else the reason."""
+def check_handoff(block: str, old_ok: bool = False) -> str:
+    """"" when the six headings stand on their own lines in order and Goal and Findings have text; else the reason.
+    `old_ok`: a four-heading note from before plan 23 (an old task folder) passes too; only read paths pass it."""
     lines = str(block or "").splitlines()
+    if old_ok and not any(line.strip() in ("## Goal", "## Troubleshooting") for line in lines):
+        return _check_headings(lines, OLD_HEADINGS)
+    return _check_headings(lines, HEADINGS)
+
+
+def _check_headings(lines: list, headings: tuple) -> str:
     at = []
-    for heading in HEADINGS:
+    for heading in headings:
         found = [i for i, line in enumerate(lines) if line.strip() == heading]
         if not found:
             return f"missing: {heading}"
         at.append(found[0])
     if at != sorted(at):
         return "headings out of order"
-    if not any(line.strip() for line in lines[at[0] + 1:at[1]]):
-        return "Findings is empty"
+    for heading in ("## Goal", "## Findings"):
+        if heading in headings:
+            i = headings.index(heading)
+            if not any(line.strip() for line in lines[at[i] + 1:at[i + 1]]):
+                return f"{heading[3:]} is empty"
     return ""
 
 
@@ -242,6 +310,11 @@ def note_file(task: dict, step: dict) -> str:
 def handoff_file(task: dict, step: dict) -> str:
     """The session-handoff skill's note of the step Fred handed off."""
     return f"steps/{step['n']:02d}-handoff.md"
+
+
+def facts_file(task: dict, step: dict) -> str:
+    """The facts the service read when the step ended (git and its last test command): never compacted."""
+    return f"steps/{step['n']:02d}-{step['kind']}.facts.md"
 
 
 def brief_file(task: dict, step: dict) -> str:
@@ -299,6 +372,14 @@ def plan_steps(proposed, max_steps: int) -> list:
         for i, s in enumerate(steps):
             s["n"] = i + 1
     return steps
+
+
+def room_after(task: dict, n: int, max_steps: int) -> int:
+    """How many steps may still follow step `n` (plan 27): task_max_steps minus n minus the done steps a redo kept
+    after n. A verify or fix is never counted (the service re-places it), here and in what the callers count:
+    plan.check (a split), replan.check (a replan answer) and Hub._ended (a `Replan:` line)."""
+    kept = sum(1 for s in task["steps"] if s["n"] > n and s["state"] == "done" and s["kind"] not in ("verify", "fix"))
+    return max_steps - n - kept
 
 
 def new_task(project_dir: str, project: str, title: str, goal: str, steps: list, type_: str, demand,
@@ -419,6 +500,8 @@ def cap_reason(subtype: str, limits) -> str:
         return f"it hit the turn cap ({limits.get('max_turns') or '?'} turns)"
     if subtype == "error_max_budget_usd":
         return f"it hit the step budget ({float(limits.get('budget') or 0):.2f} USD)"
+    if subtype == "error_step_timeout":
+        return f"it hit the step timeout ({limits.get('timeout_s') or '?'} s)"
     return ""
 
 
@@ -524,11 +607,42 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0):
             _finish(task, s, "handed" if lever == "handoff" else "done", now, lines, why)
         _task_to(task, "handed" if lever == "handoff" else "done", why, now, s, lines)
         task["owner"] = "fred"
+    elif lever == "keep":  # Keep old plan: the replan proposal is dropped
+        from . import replan
+        if not (state == "waiting" and task["why"].startswith("replanned:")):
+            return False, "no plan change waits", []
+        lines += replan.keep(task, now)
+        _task_to(task, "running", "", now, s, lines)
+    elif lever == "redo":  # Redo design: the design step plans again with the question; done steps stay done
+        design = next((x for x in task["steps"] if x["kind"] == "design"), None)
+        waits = state == "waiting" and (task["why"].startswith("asks: Plan gap:") or task["why"].startswith("plan "))
+        if design is None or not (waits or (state == "stuck" and s and s["kind"] == "design")):
+            return False, "nothing to redo", []
+        question = task["why"][len("asks: Plan gap: "):] if task["why"].startswith("asks: Plan gap:") else task["why"]
+        if s and s["state"] == "running":
+            _finish(task, s, "failed", now, lines, "stopped for a redo")
+        for x in task["steps"]:
+            if x["n"] >= design["n"] and x["state"] != "done" or x is design:
+                if x["state"] != "planned":
+                    lines.append(_line(now, x, x["state"], "planned", "redo by Fred"))
+                x["state"], x["session"], x["ended"] = "planned", "", None
+        design["retries"] = 0
+        task["redo"], task["current"] = question, design["n"]
+        _task_to(task, "running", "", now, design, lines)
+        lines.append(_line(now, design, "planned", "planned", f"design redone by Fred: {question}"))
+        task["owner"] = "service"
     elif lever == "confirm":
+        from . import replan
         if held(task):
             task["hold_ok"] = next_n
         elif state == "waiting" and task["why"] == "confirm Fable":
             task["fable_ok"] = True
+        elif state == "waiting" and task["why"].startswith("replanned:"):
+            lines += replan.apply(task, now)
+        elif state == "waiting" and task["why"] == "plan ready: confirm":
+            lines.append(_line(now, s, "done", "done", "plan confirmed by Fred"))
+        elif state == "waiting" and task["why"].startswith("plan ") and " KB, over " in task["why"]:
+            lines.append(_line(now, s, "done", "done", "plan accepted by Fred"))
         else:
             return False, "nothing to confirm", []
         _task_to(task, "running", "", now, s, lines)
@@ -633,6 +747,22 @@ def write_brief(home, task: dict, step: dict, text: str) -> str:
     return rel
 
 
+def write_facts(home, task: dict, step: dict, text: str) -> str:
+    """The facts text of `step` (facts.text), masked; returns the relative name."""
+    rel = facts_file(task, step)
+    path = folder(home, task["id"]) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(redact.mask(text), encoding="utf-8")
+    return rel
+
+
+def read_facts(home, task: dict, n: int) -> str:
+    try:
+        return (folder(home, task["id"]) / facts_file(task, step(task, n))).read_text(encoding="utf-8")
+    except (KeyError, OSError):
+        return ""
+
+
 def prune(home, days: float, now: float = None) -> list:
     """Remove the task folders of `done`, `stopped`, `stuck` and `handed` tasks whose task.json is older than `days`."""
     cutoff = (time.time() if now is None else now) - days * 86400
@@ -662,7 +792,8 @@ def clear(home, task: dict, keep_last: bool = True) -> list:
     if keep_last:
         last = step(task, task["last_good"]) if task["last_good"] else None
         keep = note_file(task, last) if last else ""
-        kept = {keep, brief_file(task, last) if last else "", task.get("handoff_note") or ""}
+        kept = {keep, brief_file(task, last) if last else "", facts_file(task, last) if last else "",
+                task.get("handoff_note") or ""}
         for path in sorted((root / "steps").glob("*.md")):
             if f"steps/{path.name}" not in kept:
                 path.unlink(missing_ok=True)
@@ -673,6 +804,132 @@ def clear(home, task: dict, keep_last: bool = True) -> list:
         shutil.rmtree(root, ignore_errors=True)
     task["cleared"] = True
     return sessions
+
+
+# -- the Board (plan 25): open questions, the chain log, the measure table ------------------------------------
+
+QUESTIONS_HEAD = "## Open questions"
+NO_ITEM = ("(none)", "none", "n/a", "-", "")
+MEASURE_MAX = 50  # tasks at most in one measure table
+
+
+def section_items(text: str, heading: str) -> list:
+    """The `- ` items under `heading` in a note or a brief, without the dash, in order; "(none)" items dropped."""
+    out, inside = [], False
+    for line in str(text or "").splitlines():
+        if line.startswith("## "):
+            inside = line.strip() == heading
+            continue
+        item = line.strip()
+        if inside and item.startswith(("- ", "* ")):
+            item = item[2:].strip()
+            if item.lower().rstrip(".") not in NO_ITEM:
+                out.append(item)
+    return out
+
+
+def question_key(text: str) -> str:
+    """Two spellings of one question compare equal: whitespace, case and a trailing `?` or `.` do not count."""
+    return " ".join(str(text).split()).lower().rstrip(" ?.")
+
+
+def open_questions(task: dict, briefs: dict) -> list:
+    """[{q, opened, closed}] from the Open questions of each step's brief, in step order (D2 a): a question opens at
+    the first brief that carries it and closes at the first later brief that no longer does; closed 0 = still open.
+    `briefs` maps step numbers (int or the str of an int, as GET /api/task keys them) to the brief text."""
+    texts = {int(k): v for k, v in (briefs or {}).items() if str(k).isdigit() and v}
+    found, order = {}, []
+    for s in task.get("steps") or []:
+        n = s["n"]
+        if n not in texts:
+            continue
+        here = {question_key(q): q for q in section_items(texts[n], QUESTIONS_HEAD)}
+        for key, q in here.items():
+            if key not in found:
+                found[key] = {"q": q, "opened": n, "closed": 0}
+                order.append(key)
+        for key in order:
+            if key not in here and not found[key]["closed"]:
+                found[key]["closed"] = n
+    return [found[k] for k in order]
+
+
+def read_chain(home, task: dict, limit: int = 200) -> list:
+    """The last `limit` lines of the task's chain.jsonl as dicts, oldest first; a broken line is skipped."""
+    try:
+        lines = (folder(home, task["id"]) / "chain.jsonl").read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError):
+        return []
+    out = []
+    for line in lines[-limit:]:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
+def _words(text) -> int:
+    return len(str(text or "").split())
+
+
+def note_words(text: str) -> int:
+    """A note file's words without its `# Step NN: ...` head line."""
+    lines = str(text or "").splitlines()
+    return _words("\n".join(lines[1:] if lines and lines[0].startswith("# Step ") else lines))
+
+
+def _median(values):
+    return round(statistics.median(values)) if values else None
+
+
+def same_dir(a, b) -> bool:
+    norm = lambda p: os.path.normcase(os.path.normpath(str(p)))
+    return bool(a) and bool(b) and norm(a) == norm(b)
+
+
+def _count(value):
+    """A stored count (brief_meta words, ctx_tokens), or None for anything that is not a whole number."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def measure(home, project: str, n: int = 10) -> dict:
+    """The Board's measure table (brainstorm 5.1 item 6): medians per step kind over the project's last `n` tasks,
+    newest by `created`. received: the words a step got (the previous step's handoff after the brief pass,
+    brief_meta.sent_w, else the brief file's words); context: the step's ctx_tokens; handoff: the words it wrote
+    (brief_meta.raw_w, else the note file's words). Done steps only; a zero or unknown value is left out.
+    hot: the kind with the most context per received word (D3 a), "" when no kind has both."""
+    n = max(1, min(int(n), MEASURE_MAX))
+    mine = sorted((t for t in load_all(home).values() if same_dir(t.get("project_dir"), project)),
+                  key=lambda t: t.get("created") or 0, reverse=True)[:n]
+    got, ctx, wrote, steps = {}, {}, {}, {}
+    for t in mine:
+        by_n = {s["n"]: s for s in t["steps"]}
+        for s in t["steps"]:
+            if s["state"] != "done":
+                continue
+            kind = s["kind"]
+            steps[kind] = steps.get(kind, 0) + 1
+            raw = _count((s.get("brief_meta") or {}).get("raw_w"))
+            raw = raw if raw is not None else note_words(read_note(home, t, s["n"]))
+            if raw:
+                wrote.setdefault(kind, []).append(raw)
+            prev = by_n.get(s["n"] - 1)
+            if prev is not None:
+                sent = _count((prev.get("brief_meta") or {}).get("sent_w"))
+                sent = sent if sent is not None else _words(read_brief(home, t, prev["n"]))
+                if sent:
+                    got.setdefault(kind, []).append(sent)
+            tokens = _count(s.get("ctx_tokens"))
+            if tokens:
+                ctx.setdefault(kind, []).append(tokens)
+    rows = [{"kind": k, "steps": steps[k], "received": _median(got.get(k)), "context": _median(ctx.get(k)),
+             "handoff": _median(wrote.get(k))} for k in KINDS if k in steps]
+    both = [r for r in rows if r["received"] and r["context"]]
+    hot = max(both, key=lambda r: r["context"] / r["received"])["kind"] if both else ""
+    return {"project": project, "tasks": len(mine), "kinds": rows, "hot": hot}
 
 
 # -- prompts ----------------------------------------------------------------------------------------------
@@ -687,13 +944,49 @@ def _fix_text(task: dict, s: dict) -> str:
     return levers.escalate_text(before["verdict_detail"] if before else "", *route)
 
 
-def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "") -> str:
+_LESSON_LINE = re.compile(r"^- (\d{4}-\d\d-\d\d) - .*? - ([a-z]+): (.+)$")
+
+
+def lessons_for(lines, kind: str, limit: int = LESSONS_IN_PROMPT) -> list:
+    """The lessons a step of `kind` reads: lessons.md lines (levers.read_lessons, one project) whose kind is the
+    step's own, newest last, at most `limit`, as `<day>: <sentence>`. A chat's lesson (`chat`) reaches no step."""
+    out = []
+    for line in lines or ():
+        m = _LESSON_LINE.match(str(line).strip())
+        if m and m.group(2) == kind:
+            out.append(f"{m.group(1)}: {m.group(3)}")
+    return out[-limit:] if limit > 0 else []
+
+
+def received(prev_note: str, facts: str = "") -> str:
+    """What the earlier steps left a step: the previous brief, then the facts the service read (never compacted)."""
+    if not prev_note:
+        return FIRST_STEP
+    if not facts:
+        return prev_note
+    return f"{prev_note}\n\nFacts the service read when that step ended (git and its last test run, not compacted):\n{facts}"
+
+
+def prompt_goal(task: dict, step: dict) -> str:
+    """The goal as a step prompt carries it: whole (up to GOAL_MAX) for step 1, which has no handoff yet; cut to
+    PROMPT_GOAL_MAX characters for every later step, whose handoff restates it under ## Goal."""
+    goal = str(task.get("goal", ""))[:GOAL_MAX]
+    if step["n"] == 1 or len(goal) <= PROMPT_GOAL_MAX:
+        return goal
+    return goal[:PROMPT_GOAL_MAX - 1].rstrip() + "\u2026"
+
+
+def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", special: str = "",
+                plan: str = "", part: str = "", facts: str = "", lessons=()) -> str:
     kind = step["kind"]
-    special = (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1) if kind == "verify"
-               else _fix_text(task, step) if kind == "fix" else "")
+    special = special or (Template(VERIFY_STEP).safe_substitute(checked=step["checked"] or step["n"] - 1)
+                          if kind == "verify" else _fix_text(task, step) if kind == "fix" else "")
     retry = (f"Your earlier attempt at this step ended without a handoff: {retry_reason}. "
-             "Start again from the note above.") if retry_reason else ""
+             "Start again from the handoff below.") if retry_reason else ""
+    taught = (f"Lessons from earlier {kind} steps in this project (use one only where it applies):\n"
+              + "\n".join(f"- {line}" for line in lessons) + "\n\n") if lessons else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(
-        title=task["title"], goal=str(task.get("goal", ""))[:GOAL_MAX], n=step["n"], m=len(task["steps"]),
+        title=task["title"], goal=prompt_goal(task, step), n=step["n"], m=len(task["steps"]),
         kind=kind, step_goal=step["goal"], special=special, retry=retry,
-        prev=prev_note or "This is the first step: there is no handoff note yet.")
+        plan=plan + "\n\n" if plan else "", lessons=taught, part=part + "\n\n" if part else "",
+        prev=received(prev_note, facts))

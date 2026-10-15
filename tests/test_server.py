@@ -1,16 +1,19 @@
 import base64
+import copy
 import http.client
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from urllib.parse import quote
 from pathlib import Path
 from unittest import mock
 
-from console import attach, brief, claude_cli, events, guard, levers, paths, server, tasks
+from console import attach, brief, claude_cli, events, guard, levers, paths, server, tasks, usage
 
 
 class GuardTest(unittest.TestCase):
@@ -538,6 +541,91 @@ class RunServerTest(unittest.TestCase):
         self.assertEqual(self.hub.levers("c4")["escalate"], "")  # a click may, the service does not
         self.assertEqual([lever for s, lever in self.hub.auto_steps() if s == "c4"], [])
 
+    # -- plan 23: auto handoff at red ---------------------------------------------------------------------------
+    def skill_here(self):
+        skill = self.project / ".claude" / "skills" / "session-handoff"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+
+    def red(self, sid, tokens=312000):
+        events.append(self.folder, {"event": "Stop", "ts": time.time(), "session_id": sid,  # what the hook logs
+                                    "context_tokens": tokens})
+        self.hub.poll_once()
+
+    def test_setting_route_writes_handoff_auto_only(self):
+        self.assertEqual(self.call("/api/setting", {"key": "handoff_auto", "value": True}),
+                         (200, {"key": "handoff_auto", "value": True}))
+        self.assertIs(self.hub.cfg["handoff_auto"], True)
+        saved = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))
+        self.assertIs(saved["handoff_auto"], True)
+        self.assertIs(self.call("/api/config")[1]["handoff_auto"], True)
+        self.assertEqual(self.call("/api/setting", {"key": "brief_on", "value": False}),
+                         (400, {"error": "not a setting: brief_on"}))
+        self.assertEqual(self.call("/api/setting", {"key": "handoff_auto", "value": "yes"})[0], 400)
+        self.assertIs(self.hub.cfg["brief_on"], True)
+
+    def test_auto_handoff_hands_a_red_window_run_off(self):
+        self.skill_here()
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.red(sid)
+        self.assertEqual(self.hub.auto_steps(), [])  # handoff_auto is off by default
+        self.hub.cfg["handoff_auto"] = True
+        self.assertEqual(self.hub.auto_steps(), [(sid, "handoff")])
+        self.assertEqual(self.hub.runs.meta(sid)["model"], "sonnet")  # in place: a window run resumes
+        self.wait_idle(sid)
+        row = self.session(sid)
+        self.assertEqual((row["state"], row["group"], row["kind"], row["auto_handoff"]),
+                         ("done", "needs", "handoff", 312000))
+        self.assertEqual(self.hub.auto_steps(), [])  # once per session
+        self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["next"], "")  # Start next chat
+        self.assertEqual(self.call("/api/done", {"session": sid})[0], 200)
+        row = self.session(sid)
+        self.assertEqual((row["group"], row["auto_handoff"]), ("done", 0))
+
+    def test_auto_handoff_forks_a_red_vscode_chat_and_skips_route_steps(self):
+        self.skill_here()
+        self.hub.cfg["handoff_auto"] = True
+        self.hub.auto_since = 0
+        self.idle_chat("c6", hours=0, tokens=1000)
+        self.assertEqual(self.hub.auto_steps(), [])  # not red
+        self.idle_chat("c7", hours=0, tokens=312000)
+        self.assertEqual(self.hub.auto_steps(), [("c7", "handoff")])
+        fork = self.session("c7")["forks"][0]
+        self.wait_idle(fork)
+        row, copy_row = self.session("c7"), self.session(fork)
+        self.assertEqual((row["state"], row["group"], row["auto_handoff"], row["handoff_by"]),
+                         ("done", "needs", 312000, fork))  # the VS Code chat itself is never resumed
+        self.assertEqual((copy_row["kind"], copy_row["auto_handoff"]), ("handoff", 0))  # one card: the chat's
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.hub.cfg["handoff_auto"] = False
+        self.red(sid)
+        self.verdict(sid, "FAIL", "test_add - 3 != 4")
+        self.hub.cfg["handoff_auto"] = True
+        self.assertEqual(self.hub.auto_steps(), [(sid, "handoff")])  # red: the handoff, not an Escalate
+        self.wait_idle(sid)
+
+    def test_refused_auto_handoff_still_escalates_and_is_tried_once_per_turn(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "fix add",  # no session-handoff skill
+                                     "model": "sonnet", "effort": "medium"})[1]["session"]
+        self.wait_idle(sid)
+        self.red(sid)
+        self.verdict(sid, "FAIL", "test_add - 3 != 4")
+        self.hub.cfg["handoff_auto"] = True
+        self.assertNotEqual(self.hub.pull(sid, "handoff")[0], 200)  # refused: the pull answers 409
+        calls = []
+        real = self.hub.pull
+        self.hub.pull = lambda s, lever, **kw: calls.append(lever) or real(s, lever, **kw)
+        self.assertEqual(self.hub.auto_steps(), [(sid, "escalate")])  # the FAIL verdict still takes its step
+        self.wait_idle(sid)
+        self.hub.auto_steps()
+        self.hub.auto_steps()
+        self.assertEqual(calls.count("handoff"), 2)  # once for the FAIL turn, once for the escalated turn, not every pass
+        self.assertNotIn(sid, self.hub.auto_handed)  # never handed off
+
     def test_handoff_marks_the_session_done(self):
         skill = self.project / ".claude" / "skills" / "session-handoff"
         skill.mkdir(parents=True)
@@ -723,6 +811,7 @@ class TaskServerTest(RunServerTest):
         self.assertEqual((row["task"], row["step"], row["kind"]), (tid, 1, "task"))
         limits = self.hub.runs.meta(step["session"])["limits"]
         self.assertEqual((limits["disallow"], limits["tools"], limits["budget"]), (["Agent"], "Read,Grep,Glob", 3))
+        self.assertEqual((limits["strict_mcp"], limits["max_turns"]), (True, 15))  # plan 23: no MCP, read_max_turns
         self.assertEqual(self.hub.snapshot()["preps"], [])  # the card became the task
         # a second task in the same project starts beside the first (plan 20: parallel tasks per project)
         other = tasks.new_task(str(self.project), "proj", "Other", "goal", tasks.plan_steps(
@@ -841,9 +930,107 @@ class TaskServerTest(RunServerTest):
         self.settled(tid)
         self.assertEqual(len(levers.read_lessons(self.folder, "proj")), 1)  # no Lesson line: nothing added
 
-    def over(self, tier):
-        """A budget() with every rung of the tier over its pace."""
-        return lambda: {rung: 0.9 for rung in self.hub.cfg["ladder"][tier]}
+    def git(self, *args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=self.project, check=True,
+                       capture_output=True)
+
+    def test_facts_are_read_when_a_step_ends(self):
+        try:
+            self.git("init", "-q")
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("no git")
+        (self.project / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "base")
+        base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.project, capture_output=True, text=True).stdout.strip()
+        tid = self.make_task(words="HANDOFF-OK TESTS-OK")
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step1 = task["steps"][0]
+        self.assertEqual(step1["git_base"]["commit"], base)
+        self.assertEqual((step1["end_commit"], step1["facts"]["files"], step1["facts"]["tests"]), (base, 0, "23 OK"))
+        text = tasks.read_facts(self.folder, task, 1)
+        self.assertIn("no file changed", text)
+        self.assertIn("Ran 23 tests", text)
+        self.assertIn("Ran 23 tests", self.prompt_of(task["steps"][1]["session"]))  # step 2 reads the facts
+        # the step's own lines: written after its start, counted against git_base
+        (self.project / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        (self.project / "new.py").write_text("x = 1\n", encoding="utf-8")
+        with self.hub.tlock:
+            self.hub._facts(task, step1, step1["session"])
+        self.assertEqual((step1["facts"]["files"], step1["facts"]["plus"], step1["facts"]["minus"]), (2, 2, 1))
+        self.assertIn("calc.py", tasks.read_facts(self.folder, task, 1))
+        self.assertEqual(self.task(tid)[1]["task"]["steps"][0]["facts"], step1["facts"])
+
+    def test_task_route_sends_no_git_base(self):  # plan 27 (K6): the snapshots stay in the service
+        tid = self.make_task()
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("git_base", task["steps"][0])
+        sent = self.task(tid)[1]["task"]
+        self.assertEqual([s for s in sent["steps"] if "git_base" in s or "touched" in s], [])
+        self.assertEqual(sent["steps"][0]["session"], task["steps"][0]["session"])  # the rest of the step is sent
+        self.assertIn("git_base", self.hub.tasks[tid]["steps"][0])  # a copy was trimmed, not the hub's task
+
+    def test_brief_check_reads_every_path_a_step_touched(self):  # plan 27 (23 nit): not the facts text's 30 lines
+        try:
+            self.git("init", "-q")
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("no git")
+        self.git("commit", "-q", "--allow-empty", "-m", "base")
+        tid = self.make_task()
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step1 = task["steps"][0]
+        for k in range(35):
+            (self.project / f"f{k:02d}.py").write_text("x = 1\n", encoding="utf-8")
+        with self.hub.tlock:
+            self.hub._facts(task, step1, step1["session"])
+        self.assertIn(" ... and 5 more", tasks.read_facts(self.folder, task, 1))  # the text stays short
+        seen = []
+        self.hub._brief_job = lambda t, s, nxt, prev, raw, touched=(): seen.append(sorted(touched))
+        with self.hub.tlock:
+            self.hub.start_brief(task, 1)
+        end = time.time() + 5
+        while not seen and time.time() < end:
+            time.sleep(0.05)
+        self.assertEqual(seen, [[f"f{k:02d}.py" for k in range(35)]])
+
+    def test_brief_meta_and_the_carried_troubleshooting(self):
+        tid = self.make_task(words="HANDOFF-OK TROUBLE", steps=[{"kind": "scout", "goal": "look"},
+                                                               {"kind": "explain", "goal": "say"}])
+        task = self.settled(tid)
+        meta = task["steps"][0]["brief_meta"]
+        self.assertEqual(sorted(meta), ["by", "checks", "cost", "cut", "fallback", "raw_w", "sent_w", "turns"])
+        self.assertGreater(meta["raw_w"], 0)
+        self.assertEqual(meta["fallback"], "")
+        brief2 = tasks.read_brief(self.folder, task, 2)
+        self.assertIn("py -3.12 fails here: use py -3.14", brief2)  # carried whole through both briefs
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual(row["steps"][0]["brief_meta"], meta)
+        self.assertNotIn("git_base", row["steps"][0])
+
+    def test_lessons_reach_steps_of_their_kind(self):
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "scout", "read calc.py before tests"))
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "code", "run the suite twice"))
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "chat", "a chat lesson"))
+        tid = self.make_task(steps=self.TWO)
+        task = self.until(tid, self.at(2), "step 2 starts")
+        first = self.prompt_of(task["steps"][0]["session"])
+        self.assertIn("read calc.py before tests", first)
+        self.assertNotIn("run the suite twice", first)
+        self.assertNotIn("a chat lesson", first)
+        self.settled(tid)
+
+    def test_a_kinds_lesson_outlives_many_of_other_kinds(self):  # plan 27 (23 nit): the kind filter comes first
+        levers.add_lesson(self.folder, levers.lesson_line("proj", "scout", "read calc.py before tests"))
+        for k in range(levers.LESSONS_SHOWN + 5):  # newer lessons of another kind, more than the Review page shows
+            levers.add_lesson(self.folder, levers.lesson_line("proj", "code", f"code lesson {k}"))
+        tid = self.make_task(steps=self.TWO)
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("read calc.py before tests", self.prompt_of(task["steps"][0]["session"]))
+        self.settled(tid)
+
+    def over(self, key):
+        """A budget() (plan 18) with one model key at 90 % of its pace, binding on the day."""
+        return lambda: {key: {"share": 0.9, "binding": "day", "day": {"unknown_runs": 0}}}
 
     def test_stop_question_waits_for_fred(self):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "look STOP-ASK"}, self.TWO[1]])
@@ -865,7 +1052,7 @@ class TaskServerTest(RunServerTest):
     def test_turn_cap_is_named_in_the_retry(self):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "MAXTURNS look"}])
         task = self.until(tid, lambda t: t["state"] == "stuck", "stuck after the retry")
-        self.assertEqual(task["why"], "it hit the turn cap (? turns) (after one retry)")
+        self.assertEqual(task["why"], "it hit the turn cap (15 turns) (after one retry)")  # a scout is read-capped
 
     def test_retry_sums_the_cost_of_both_attempts(self):
         tid = self.make_task(words="", steps=[{"kind": "scout", "goal": "look"}])  # no HANDOFF: retry, then stuck
@@ -991,10 +1178,10 @@ class TaskServerTest(RunServerTest):
 
     def test_budget_hold_waits_for_fred(self):
         self.hub.budget = self.over("opus")
-        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it"}])  # a design step drops one model
+        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it PLAN-OK"}])  # over pace no longer moves a step
         step = self.hub.tasks[tid]["steps"][0]
-        self.assertEqual((step["model"], step["effort"]), ("sonnet", "xhigh"))
-        self.assertIn("budget: opus 90 % -> sonnet/xhigh", self.session(step["session"])["route_reason"])
+        self.assertEqual((step["model"], step["tier"], step["effort"]), ("opus", "opus", "high"))
+        self.assertIn("balance: every think rung over pace -> opus 90 %", self.session(step["session"])["route_reason"])
         self.settled(tid)
         tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])  # its verify would run on opus: it holds
         task = self.until(tid, lambda t: t["state"] == "waiting", "the verify holds")
@@ -1111,7 +1298,7 @@ class TaskServerTest(RunServerTest):
             self.assertFalse(self.hub.runs.meta_path(sid).exists())
         folder = self.folder / "tasks" / tid
         self.assertEqual(sorted(p.name for p in (folder / "steps").iterdir()),
-                         ["02-explain.brief.md", "02-explain.md"])  # the last note and its brief
+                         ["02-explain.brief.md", "02-explain.facts.md", "02-explain.md"])  # the last note, its brief and facts
         saved = tasks.load(self.folder, tid)
         self.assertTrue(saved["cleared"])
         self.assertEqual((saved["state"], saved["steps"][0]["handoff"], saved["steps"][1]["handoff"]),
@@ -1176,7 +1363,7 @@ class TaskServerTest(RunServerTest):
         # the brief request holds the next step's goal, so HUGE goes in step 2's
         tid = self.make_task(steps=[self.TWO[0], {"kind": "explain", "goal": "say it HUGE"}])
         task = self.until(tid, self.at(2), "step 2 starts")
-        self.assertIn("brief fallback: over 400 words", [c["why"] for c in self.chain(tid)])
+        self.assertIn("brief fallback: over 500 words", [c["why"] for c in self.chain(tid)])
         text = (self.folder / "tasks" / tid / "steps" / "01-scout.brief.md").read_text(encoding="utf-8")
         self.assertIn("add() is in calc.py:2", text)
         self.assertEqual(task["steps"][1]["state"], "running")
@@ -1199,7 +1386,8 @@ class TaskServerTest(RunServerTest):
         self.assertEqual([(s["n"], s["kind"], s["state"]) for s in row["steps"]],
                          [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
         self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
-                                                          "verdict", "retries", "cost", "note", "attempts"]))
+                                                          "verdict", "retries", "cost", "note", "attempts", "part", "hard",
+                                                          "end_commit", "brief_meta", "facts"]))
         self.assertIn(row["steps"][0]["note"], ("writing", "unchecked"))
         self.until(tid, self.at(2), "step 2 starts")
         steps = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)["steps"]
@@ -1212,20 +1400,241 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(data["levers"]["start"], "a step is running")
         self.assertIn("## Findings\nadd() is in calc.py:2", data["note"])
         self.assertIn("test_add covers it", data["brief"])
+        self.assertEqual((list(data["notes"]), list(data["briefs"]), list(data["facts"])), (["1"], ["1"], ["1"]))
+        self.assertEqual(data["notes"]["1"], data["note"])  # plan 23: every step's texts, keyed by its number
         self.assertEqual(self.task("../x")[0], 404)
         self.assertEqual(self.task("20260101-000000-ffff")[0], 404)
 
-    def test_rung_under_budget_pressure(self):
-        self.hub.budget = lambda: {"opus": 0.9}  # the alias is over, the older rungs are not
-        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it"}])
+    def test_balance_spreads_a_tier(self):
+        """Plan 18: a write tier of two Claude rungs; the emptiest model runs, its verify one rank above it."""
+        self.hub.cfg["tiers"] = dict(self.hub.cfg["tiers"], write=[{"rung": "sonnet", "effort": "auto"},
+                                                                   {"rung": "claude-haiku-4-5", "effort": "auto"}])
+        self.hub.budget = lambda: {"sonnet": {"share": 0.9, "binding": "week"}, "haiku": {"share": 0.2, "binding": "day"}}
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
         step = self.hub.tasks[tid]["steps"][0]
-        self.assertEqual((step["tier"], step["model"], step["effort"]), ("opus", "claude-opus-4-8", "high"))
-        self.assertEqual(self.hub.runs.meta(step["session"])["model"], "claude-opus-4-8")
-        self.settled(tid)
-        self.hub.budget = self.over("opus")  # every rung over: the tier drop of step_route
-        tid = self.make_task(steps=[{"kind": "design", "goal": "plan it again"}])
+        self.assertEqual((step["model"], step["tier"]), ("claude-haiku-4-5", "haiku"))
+        self.assertEqual(self.hub.runs.meta(step["session"])["model"], "claude-haiku-4-5")
+        self.assertIn("balance: sonnet 90 % -> claude-haiku-4-5 20 %", step["notes"])
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the verify holds")
+        self.assertEqual(task["why"], "sonnet over its pace")  # haiku's code is checked on sonnet, over its pace
+
+    def test_a_hard_design_step_on_fable_waits_for_the_confirm(self):
+        """Plan 18: fable is hard only in think; when the balance picks it, the Fable confirm still holds the step."""
+        self.hub.budget = lambda: {"opus": {"share": 0.9, "binding": "day"}, "fable": {"share": 0.1, "binding": "day"}}
+        tid = self.make_task(text="THINK plan it", steps=[{"kind": "design", "goal": "plan it"}])  # reasoning high
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the fable step waits")
+        self.assertEqual((task["why"], task["steps"][0]["state"]), ("confirm Fable", "planned"))
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(1), "the design step starts")
+        self.assertEqual((task["steps"][0]["model"], task["steps"][0]["tier"]), ("fable", "fable"))
+
+    def test_budget_reads_the_usage_days(self):
+        today = usage.day_of(time.time())
+        self.assertEqual(self.hub.budget(), {})  # usage not read yet: the tiers' order routes
+        self.hub.cfg["allowances"] = {"opus": {"day_usd": 10, "week_usd": 50, "month_usd": 150}}
+        with self.hub.lock:
+            self.hub.usage_days = {today: {"cost": 5.0, "tokens": [0, 0, 0, 0], "projects": {}, "models": {"opus": 5.0}}}
+            self.hub.usage_ready = True
+        fill = self.hub.budget()["opus"]
+        self.assertEqual((fill["day"]["used_usd"], fill["day"]["allowance_usd"]), (5.0, 10.0))
+        self.assertIn(fill["binding"], ("day", "week", "month"))
+        self.assertEqual(fill["via"], ["claude"])
+        self.assertIsNone(self.hub.budget()["sonnet"]["share"])  # no allowance
+        data = self.call("/api/usage")[1]
+        self.assertEqual((data["fills"]["opus"]["day"]["used_usd"], data["fail_hours"], data["warn_at"]), (5.0, {}, 0.8))
+        cfg = self.call("/api/config")[1]
+        self.assertEqual(cfg["kinds_tier"]["design"], "think")
+        self.assertEqual(cfg["kinds_tier"]["scout"], "read")
+        think = {r["rung"]: r for r in cfg["tiers"]["think"]}
+        self.assertEqual((think["opus"]["why"], think["opus"]["key"], think["fable"]["hard"]), ("", "opus", True))
+        self.assertNotEqual(think["codex:gpt-6-astra"]["why"], "")  # codex is not usable here
+
+    def test_runs_of_another_harness_count_once(self):
+        sid, ts = "0000-codex", time.time()
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
+        self.hub.runs.meta_path(sid).write_text(json.dumps({"harness": "codex", "model": "gpt-6.1-sol"}), encoding="utf-8")
+        self.hub.cfg["prices"] = dict(self.hub.cfg["prices"], **{"gpt-6.1-sol": {"input": 2, "output": 10, "cache_read": 0.2}})
+        rec = {"event": "run_ended", "session_id": sid, "ts": ts,
+               "tokens": {"input": 1_000_000, "output": 100_000, "cache_read": 0}}
+        self.assertTrue(self.hub.count_run(rec))
+        self.assertFalse(self.hub.count_run(rec))  # a restart replays the line: counted once
+        row = self.hub.usage_other[usage.day_of(ts)]["gpt-6.1-sol"]
+        self.assertEqual((row["cost"], row["runs"], row["unknown"]), (3.0, 1, 0))
+        self.assertTrue(self.hub.count_run(dict(rec, ts=ts + 1, tokens=None)))  # no usage: unknown, never zero
+        self.assertEqual(self.hub.usage_other[usage.day_of(ts)]["gpt-6.1-sol"]["unknown"], 1)
+        self.hub.runs.meta_path("0000-claude").write_text(json.dumps({"model": "sonnet"}), encoding="utf-8")
+        self.assertFalse(self.hub.count_run(dict(rec, session_id="0000-claude")))  # the transcripts price Claude
+        today = self.hub.snapshot()["spend"]
+        self.assertEqual(today["fills"]["over"], [])
+
+    def test_count_run_keeps_what_add_other_wrote(self):
+        sid, ts = "0000-codex", time.time()
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
+        self.hub.runs.meta_path(sid).write_text(json.dumps({"harness": "codex", "model": "gpt-6.1-sol"}), encoding="utf-8")
+        rec = {"event": "run_ended", "session_id": sid, "ts": ts, "cost": 0.5}
+        with mock.patch.object(usage, "load_other", side_effect=AssertionError("read after FILE_LOCK")):
+            self.assertTrue(self.hub.count_run(rec))
+        self.assertEqual(self.hub.usage_other[usage.day_of(ts)]["gpt-6.1-sol"]["cost"], 0.5)
+
+    def test_a_bad_run_ended_line_never_escapes_poll_once(self):
+        sid = "0000-codex"
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)
+        self.hub.runs.meta_path(sid).write_text(json.dumps({"harness": "codex", "model": "gpt-6.1-sol"}), encoding="utf-8")
+        rec = {"event": "run_ended", "session_id": sid, "ts": time.time(), "tokens": {"input": "lots"}}
+        with mock.patch.object(self.hub.reader, "read_new", return_value=[rec]):
+            self.assertEqual(self.hub.poll_once(), 1)
+        log = (self.folder / "console.log").read_text(encoding="utf-8")
+        self.assertIn("count_run 0000-codex: ValueError", log)
+
+    def test_models_page_saves_to_config_json(self):
+        """Plan 26: POST /api/config/models writes the checked keys, keeps every other key, and the hub uses them."""
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["kind_pins"], cfg["tuning"]["task_max_steps"]["value"]), ({}, 6))
+        self.assertEqual(cfg["tuning"]["balance_margin"], {"value": 0.1, "default": 0.1, "min": 0, "max": 0.5,
+                                                           "unit": "share", "group": "balancing"})
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)], "port": 47770,
+                                                             "tiers": {"write": ["sonnet"]}}), encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {
+            "task_max_steps": 8, "balance_margin": 0.15, "tiers": {"read": ["haiku", "claude-haiku-4-5"]},
+            "kinds": {"test": {"rung": "auto", "effort": "medium"}}, "allowances": {"opus": {"day_usd": 12}}}})
+        self.assertEqual(status, 200, data)
+        self.assertEqual((data["tuning"]["task_max_steps"]["value"], data["kind_pins"]),
+                         (8, {"test": {"rung": "auto", "effort": "medium"}}))
+        written = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual((written["projects"], written["port"], written["task_max_steps"]), ([str(self.project)], 47770, 8))
+        self.assertEqual(written["tiers"], {"write": ["sonnet"], "read": [{"rung": "haiku", "effort": "auto"},
+                                                                         {"rung": "claude-haiku-4-5", "effort": "auto"}]})
+        self.assertEqual((self.hub.cfg["task_max_steps"], self.hub.cfg["balance_margin"]), (8, 0.15))
+        self.assertEqual([r["rung"] for r in data["tiers"]["read"]], ["haiku", "claude-haiku-4-5"])
+        self.assertEqual(len(self.hub.cfg["tiers"]["think"]), len(paths.DEFAULTS["tiers"]["think"]))  # untouched tier
+        self.assertEqual(self.hub.cfg["allowances"], {"opus": {"day_usd": 12}})
+
+    def test_a_one_tier_save_keeps_the_other_tiers_as_written(self):
+        """Plan 27 B6: the page posts only the tiers that changed; the service merges per tier, so a tier that names
+        a model gone from models.json stays in config.json as written and never blocks a Save of another tier."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        think = [{"rung": "opus", "effort": "auto"}, {"rung": "codex:gpt-gone", "effort": "high"}]
+        read = [{"rung": "haiku", "effort": "auto"}]
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)], "tiers": {
+            "think": think, "write": [{"rung": "sonnet", "effort": "auto"}], "read": read}}), encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {"tiers": {"write": ["sonnet", "opus"]}}})
+        self.assertEqual(status, 200, data)
+        written = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["tiers"]
+        self.assertEqual((written["think"], written["read"]), (think, read))
+        self.assertEqual([r["rung"] for r in written["write"]], ["sonnet", "opus"])
+        self.assertEqual(self.call("/api/config/models", {"changes": {"tiers": {"read": ["haiku", "sonnet"]}}})[0], 200)
+        written = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))["tiers"]
+        self.assertEqual(written["think"], think)
+        status, data = self.call("/api/config/models", {"changes": {"tiers": {"think": think}}})
+        self.assertEqual((status, data["errors"]), (400, {"tiers": "think 2: unknown model: codex:gpt-gone"}))
+
+    def test_models_page_reload_shows_a_hand_edit(self):
+        """Plan 26 README 3.1: a hand edit of config.json shows on the page after Reload (GET /api/config)."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        path = self.folder / "config.json"
+        path.write_text(json.dumps({"projects": [str(self.project)], "port": 47770}), encoding="utf-8")
+        self.call("/api/config")
+        path.write_text(json.dumps({"projects": [str(self.project)], "port": 1, "brief_max_words": 450}),
+                        encoding="utf-8")
+        os.utime(path, (time.time() + 5, time.time() + 5))
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["tuning"]["brief_max_words"]["value"], self.hub.cfg["brief_max_words"]), (450, 450))
+        self.assertNotEqual(self.hub.cfg["port"], 1)  # only the page's keys are reread
+
+    def test_models_page_refuses_with_reasons(self):
+        before = self.hub.cfg["task_max_steps"]
+        status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 99, "port": 1}})
+        self.assertEqual(status, 400)
+        self.assertEqual(data["errors"], {"task_max_steps": "between 1 and 12", "port": "not a setting this page changes"})
+        self.assertIn("task_max_steps: between 1 and 12", data["error"])
+        self.assertEqual(self.hub.cfg["task_max_steps"], before)
+        self.assertFalse((self.folder / "config.json").exists() and
+                         "task_max_steps" in json.loads((self.folder / "config.json").read_text(encoding="utf-8")))
+        self.assertEqual(self.call("/api/config/models", {"changes": []})[0], 400)
+        self.assertEqual(self.call("/api/config/models", {"other": 1})[0], 400)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text("{ broken", encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 7}})
+        self.assertEqual(status, 409)
+        self.assertIn("fix it by hand", data["error"])
+        self.assertEqual((self.folder / "config.json").read_text(encoding="utf-8"), "{ broken")  # never overwritten
+
+    def test_models_page_refuses_a_huge_integer(self):
+        """Plan 27 (B7): a number too big for a float is a 400 with the range, not a dropped connection."""
+        status, data = self.call("/api/config/models", {"changes": {"task_max_steps": 10 ** 400}})
+        self.assertEqual((status, data["errors"]), (400, {"task_max_steps": "between 1 and 12"}))
+
+    def test_models_page_reload_resets_a_deleted_key_and_drops_a_refused_value(self):
+        """Plan 27 (K2): a page key removed from config.json by hand goes back to its default on Reload; a value
+        tuning.validate refuses is not taken (the live value stays) and console.log says so."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        path = self.folder / "config.json"
+        path.write_text(json.dumps({"projects": [str(self.project)], "brief_max_words": 450, "task_max_steps": 8,
+                                    "kinds": {"code": {"rung": "haiku", "effort": "low"}}}), encoding="utf-8")
+        os.utime(path, (time.time() + 5, time.time() + 5))
+        self.call("/api/config")
+        self.assertEqual((self.hub.cfg["brief_max_words"], self.hub.cfg["task_max_steps"]), (450, 8))
+        path.write_text(json.dumps({"projects": [str(self.project)], "task_max_steps": 99, "plan_hold": "yes"}),
+                        encoding="utf-8")
+        os.utime(path, (time.time() + 10, time.time() + 10))
+        cfg = self.call("/api/config")[1]
+        self.assertEqual(self.hub.cfg["brief_max_words"], paths.DEFAULTS["brief_max_words"])  # deleted: the default
+        self.assertEqual((cfg["kind_pins"], self.hub.cfg["kinds"]), ({}, {}))
+        self.assertEqual((self.hub.cfg["task_max_steps"], self.hub.cfg["plan_hold"]), (8, False))  # refused: kept
+        log = (self.folder / "console.log").read_text(encoding="utf-8")
+        self.assertIn("config.json task_max_steps refused: between 1 and 12", log)
+        self.assertIn("config.json plan_hold refused: true or false", log)
+
+    def test_a_config_write_that_fails_is_a_500(self):
+        """Plan 27 (K1): os.replace can raise PermissionError on Windows (a reader holds the file); every config POST
+        answers 500 with the reason and the live config keeps its value."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)]}), encoding="utf-8")
+        fresh = Path(self.tmp.name) / "fresh"
+        fresh.mkdir()
+        before = (self.hub.cfg["task_max_steps"], self.hub.cfg["handoff_auto"], self.hub.cfg["harnesses"]["codex"]["on"],
+                  list(self.hub.cfg["projects"]))
+        with mock.patch("console.paths.os.replace", side_effect=PermissionError(13, "Access is denied")):
+            for route, body in (("/api/config/models", {"changes": {"task_max_steps": 7}}),
+                                ("/api/setting", {"key": "handoff_auto", "value": True}),
+                                ("/api/harness", {"name": "codex", "on": not before[2]}),
+                                ("/api/open_folder", {"project_dir": str(fresh)})):
+                self.assertEqual(self.call(route, body), (500, {"error": "cannot write config.json: Access is denied"}),
+                                 route)
+        self.assertEqual((self.hub.cfg["task_max_steps"], self.hub.cfg["handoff_auto"],
+                          self.hub.cfg["harnesses"]["codex"]["on"], list(self.hub.cfg["projects"])), before)
+        self.assertEqual(json.loads((self.folder / "config.json").read_text(encoding="utf-8")),
+                         {"projects": [str(self.project)]})
+
+    def test_a_pinned_kind_routes_its_steps(self):
+        status, data = self.call("/api/config/models", {"changes": {"kinds": {"code": {"rung": "claude-haiku-4-5",
+                                                                                         "effort": "low"}}}})
+        self.assertEqual(status, 200, data)
+        tid = self.make_task(steps=[{"kind": "code", "goal": "write it"}])
         step = self.hub.tasks[tid]["steps"][0]
-        self.assertEqual((step["tier"], step["model"], step["effort"]), ("sonnet", "sonnet", "xhigh"))
+        self.assertEqual((step["model"], step["tier"], step["effort"]), ("claude-haiku-4-5", "haiku", "low"))
+        self.assertIn("pin code: claude-haiku-4-5", step["notes"])
+        self.assertIn("pin effort: low", step["notes"])
+
+    def test_get_task_carries_plan_parts_and_step_part(self):
+        """The window contract (plan 24 Task 4): GET /api/task has the plan text, the parts by number and the
+        step's part and hard; the snapshot row (task_row) has the plan meta and each step's part and hard."""
+        self.hub.cfg["plan_hold"] = True
+        tid = self.make_task(words="HANDOFF-OK PLAN-SPLIT",
+                             steps=[{"kind": "scout", "goal": "look"}, {"kind": "design", "goal": "plan it"},
+                                    {"kind": "code", "goal": "write"}, {"kind": "verify", "goal": "check"}])
+        self.until(tid, lambda t: t["state"] == "waiting" and t["why"] == "plan ready: confirm", "the plan waits")
+        data = self.task(tid)[1]
+        self.assertIn("## Sub-plans", data["plan"])
+        self.assertEqual(sorted(data["parts"]), ["1", "2"])
+        self.assertIn("calc.py", data["parts"]["1"])
+        meta = data["task"]["plan"]
+        self.assertEqual([p["n"] for p in meta["parts"]], [1, 2])
+        self.assertEqual([s.get("part", 0) for s in data["task"]["steps"] if s["kind"] == "code"], [1, 2])
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual(row["plan"]["from"], meta["from"])
+        self.assertEqual([(s["part"], s["hard"]) for s in row["steps"] if s["kind"] == "code"], [(1, False), (2, True)])
 
     def test_a_rung_can_be_run_by_hand(self):
         run = {"project_dir": str(self.project), "prompt": "fix add", "effort": "low"}
@@ -1246,12 +1655,23 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(sorted(data["storage"]), ["events", "other", "preps", "runs", "tasks", "total"])
         self.assertEqual(data["storage_warn_mb"], 500)
 
+    def test_draft_keeps_board_tab_and_folds(self):
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["board_tab"], cfg["folds"]), ("chat", {}))
+        self.assertEqual(self.call("/api/draft", {"text": "", "board_tab": "hand", "folds": {"b.facts": True}})[0], 200)
+        cfg = self.call("/api/config")[1]
+        self.assertEqual((cfg["board_tab"], cfg["folds"]), ("hand", {"b.facts": True}))
+        for bad in ({"board_tab": "notes"}, {"folds": {"B.X": True}}, {"folds": {"b.x": "yes"}}, {"folds": [1]},
+                    {"folds": {f"k{i}": True for i in range(65)}}):
+            self.assertEqual(self.call("/api/draft", dict(bad, text=""))[0], 400, bad)
+
     def test_draft_keeps_the_effort(self):
         self.assertEqual(self.call("/api/config")[1]["effort"], "auto")
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "max"}), (200, {"ok": True}))
         config = self.call("/api/config")[1]
         self.assertEqual((config["effort"], config["kinds"]), ("max", list(tasks.PREP_KINDS)))
         self.assertEqual(config["edit_kinds"], sorted(tasks.EDIT_KINDS))
+        self.assertIs(config["handoff_auto"], False)
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "turbo"})[0], 400)
         self.assertEqual(self.call("/api/draft", {"text": "", "effort": "auto"})[0], 200)
         self.assertEqual(self.call("/api/config")[1]["effort"], "auto")
@@ -1375,10 +1795,568 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(planned["state"], "planned")  # it cannot start here
         self.assertEqual(self.call("/api/task/clear", {"task": planned["id"]})[0], 200)  # README 3.7: not running
 
+    # -- plan 24 Task 3: the plan, its waits, the replan step -------------------------------------------------
+
+    def plan_task(self, words="HANDOFF-OK PLAN-OK", kinds=("scout", "design", "code", "test"), goals=None):
+        goals = goals or {}
+        steps = [{"kind": k, "goal": goals.get(i + 1, f"do {k}")} for i, k in enumerate(kinds)]
+        status, data = self.post_task(self.prep_card(), words=words, steps=steps)
+        self.assertEqual(status, 200, data)
+        return data["task"]
+
+    def full_prompt(self, sid):  # the chat view cuts a long prompt; the run keeps it whole
+        for line in self.hub.runs.stream_path(sid).read_text(encoding="utf-8").splitlines():
+            if '"cc_prompt"' in line:
+                return json.loads(line)["text"]
+        self.fail("no cc_prompt line")
+
+    def whys(self, tid):
+        return [c["why"] for c in self.chain(tid)]
+
+    def test_design_step_saves_the_plan_and_the_next_step_reads_it(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(3), "step 3 starts")
+        folder = self.folder / "tasks" / tid
+        self.assertIn("## Goal", (folder / "plan.md").read_text(encoding="utf-8"))
+        self.assertEqual(task["plan"]["from"], 2)
+        self.assertGreater(task["plan"]["words"], 0)
+        self.assertTrue(any(w.startswith("plan saved: ") for w in self.whys(tid)))
+        prompt = self.full_prompt(task["steps"][2]["session"])
+        self.assertIn("The plan (follow it, do not change it):", prompt)
+        self.assertIn("Your part of the plan:\n### Step 3: code", prompt)
+        self.assertRegex(task["steps"][2]["notes"][-1], r"^read: brief 02 · plan [\d.]+ KB · step 3 section$")
+        row = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)
+        self.assertEqual(row["plan"]["from"], 2)
+        self.assertEqual(self.task(tid)[1]["plan"], (folder / "plan.md").read_text(encoding="utf-8"))
+
+    def test_design_step_reads_the_raw_notes_whole(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(2), "the design step starts")
+        prompt = self.full_prompt(task["steps"][1]["session"])
+        self.assertIn("add() is in calc.py:2", prompt)
+        self.assertIn("You are the design step", prompt)
+        self.assertEqual(task["steps"][1]["notes"][-1], "read: notes 01-01")
+
+    def test_design_step_has_the_design_turn_cap(self):
+        tid = self.plan_task()
+        task = self.until(tid, self.at(2), "the design step starts")
+        self.assertEqual(self.hub.runs.meta(task["steps"][1]["session"])["limits"]["max_turns"],
+                         self.hub.cfg["design_max_turns"])
+        self.hub.tasks[tid]["steps"][1]["pick"] = "sonnet"  # on any rung
+        self.hub.tasks[tid]["steps"][1]["state"] = "planned"
+        self.hub.tasks[tid]["steps"][1]["session"] = ""
+        self.hub.tasks[tid]["current"] = 1
+        self.hub.tasks[tid]["steps"][0]["state"] = "done"
+        self.hub.start_step(self.hub.tasks[tid], 2)
+        self.assertEqual(self.hub.runs.meta(self.hub.tasks[tid]["steps"][1]["session"])["limits"]["max_turns"],
+                         self.hub.cfg["design_max_turns"])
+
+    def test_split_plan_rebuilds_the_write_steps(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT")
+        task = self.until(tid, self.at(4), "step 4 starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "code", "verify", "test"])
+        self.assertEqual(task["steps"][4]["checked"], 4)
+        folder = self.folder / "tasks" / tid
+        self.assertTrue((folder / "plan" / "01-calc-module.md").is_file())
+        self.assertTrue((folder / "plan" / "02-report-module.md").is_file())
+        self.assertIn("design split into 2 sub-plans: 2 code steps (Prep had 1)", self.whys(tid))
+        self.assertIn("Your part of the plan:\n# Part 2: Report module", self.full_prompt(task["steps"][3]["session"]))
+        self.assertEqual([(s["part"], s["hard"]) for s in self.task(tid)[1]["task"]["steps"][2:4]],
+                         [(1, False), (2, True)])
+
+    def test_bad_plan_retries_then_sticks(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-BAD")
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        self.assertEqual(task["steps"][1]["retries"], 1)
+        self.assertEqual(task["why"], "plan: missing: ## Acceptance (after one retry)")
+        self.assertNotIn("plan", task)
+
+    def test_plan_over_the_size_waits(self):
+        self.hub.cfg["plan_max_kb"] = 0.3
+        tid = self.plan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting" and not t.get("briefing"), "the task waits on the size")
+        self.assertTrue(task["why"].startswith("plan ") and " KB, over 0.3" in task["why"], task["why"])
+        self.assertEqual(self.task(tid)[1]["levers"]["redo"], "")
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        self.until(tid, self.at(3), "step 3 starts")
+        self.assertIn("plan accepted by Fred", self.whys(tid))
+        other = self.plan_task()  # a second task: Redo design plans again
+        task = self.until(other, lambda t: t["state"] == "waiting" and not t.get("briefing"), "the second task waits")
+        why = task["why"]
+        self.assertEqual(self.call("/api/task/redo", {"task": other})[0], 200)
+        task = self.hub.tasks[other]
+        self.assertEqual(task["redo"], why)
+        self.assertEqual(task["steps"][1]["retries"], 0)
+        self.hub.cfg["plan_max_kb"] = 100
+        task = self.until(other, self.at(3), "step 3 starts after the redo")
+        self.assertNotIn("redo", task)
+
+    def test_plan_hold_waits_for_confirm(self):
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task holds")
+        self.assertEqual(task["why"], "plan ready: confirm")
+        text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        edited = text.replace("## Out of scope", "- Fred, 2026-10-14: use ints\n\n## Out of scope", 1)
+        status, data = self.call("/api/task/plan", {"task": tid, "text": edited})
+        self.assertEqual(status, 200, data)
+        self.assertIn("Fred, 2026-10-14: use ints", (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8"))
+        status, data = self.call("/api/task/plan", {"task": tid, "text": text.replace("## Goal", "## Aim")})
+        self.assertEqual((status, data["error"]), (409, "plan: missing: ## Goal"))
+        self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": "x", "part": -1})[0], 400)
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(3), "step 3 starts")
+        self.assertIn("plan confirmed by Fred", self.whys(tid))
+        self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": text})[0], 409)  # running: no edit
+
+    def test_plan_gap_waits_and_the_answer_joins_decisions(self):
+        tid = self.plan_task(goals={3: "write it PLAN-GAP"})
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on a gap")
+        self.assertEqual(task["why"], "asks: Plan gap: which file holds the ladder?")
+        self.assertEqual(self.task(tid)[1]["levers"]["answer"], "")
+        self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": " "})[0], 400)
+        status, data = self.call("/api/task/answer", {"task": tid, "text": "config.json"})
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["session"])
+        plan_text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        decisions = plan_text.split("## Decisions")[1].split("## Out of scope")[0].strip()
+        self.assertTrue(decisions.endswith(f"- Fred, {__import__('datetime').date.today().isoformat()}: config.json"))
+        self.assertIn("plan gap answered by Fred: config.json", self.whys(tid))
+        self.until(tid, lambda t: t["state"] == "running", "the task runs again")
+        self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": "again"})[0], 409)
+
+    def test_redo_design_keeps_done_steps(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-OK", kinds=("scout", "design", "code", "code"),
+                             goals={4: "second PLAN-GAP"})
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on a gap in step 4")
+        self.assertEqual([s["state"] for s in task["steps"][:4]], ["done", "done", "done", "running"])
+        question = task["why"][len("asks: Plan gap: "):]
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+        task = self.hub.tasks[tid]
+        self.assertEqual([s["state"] in ("planned", "running") for s in task["steps"][:4]], [False, True, False, True])
+        self.assertEqual((task["current"], task["redo"]), (2, question))
+        task = self.until(tid, self.at(2), "the design step runs again")
+        prompt = self.full_prompt(task["steps"][1]["session"])
+        self.assertIn("Fred asked for this plan again", prompt)
+        self.assertIn("(done, kept)", prompt)
+        task = self.until(tid, self.at(4), "step 4 runs again")
+        self.assertEqual(task["steps"][2]["state"], "done")
+
+    def replan_task(self, goal_words="REPLAN-ADD"):
+        status, data = self.post_task(self.prep_card(), words=f"HANDOFF-OK {goal_words}", steps=[
+            {"kind": "scout", "goal": "look REPLAN-ASK"}, {"kind": "design", "goal": "plan it"},
+            {"kind": "code", "goal": "write it"}, {"kind": "test", "goal": "run it"}])
+        self.assertEqual(status, 200, status)
+        return data["task"]
+
+    def test_replan_line_inserts_a_replan_step_and_waits(self):
+        self.hub.cfg["task_max_steps"] = 8
+        tid = self.replan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the replan")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "replan", "design", "code", "verify", "test"])
+        step = task["steps"][1]
+        self.assertEqual((step["state"], step["session"], step["model"]), ("done", "", self.hub.cfg["brief_model"]))
+        self.assertTrue((self.folder / "tasks" / tid / "steps" / "02-replan.md").is_file())
+        self.assertEqual(task["why"], "replanned: 1 steps added")
+        self.assertEqual(task["replan"]["after"][0]["kind"], "search")
+        self.assertEqual(self.task(tid)[1]["levers"]["keep"], "")
+        self.assertIn("replan inserted after 01: a search step is needed first", self.whys(tid))
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+        self.assertIn("plan changed: 5 steps follow 02", self.whys(tid))
+        task = self.hub.tasks[tid]
+        self.assertEqual([s["kind"] for s in task["steps"]],
+                         ["scout", "replan", "search", "design", "code", "verify", "test"])
+        self.assertNotIn("replan", task)
+        other = self.replan_task()  # a second task: Keep old plan
+        self.until(other, lambda t: t["state"] == "waiting", "the second task waits")
+        self.assertEqual(self.call("/api/task/keep", {"task": other})[0], 200)
+        self.assertIn("old plan kept by Fred", self.whys(other))
+        self.assertEqual([s["kind"] for s in self.hub.tasks[other]["steps"]],
+                         ["scout", "replan", "design", "code", "verify", "test"])
+        self.assertEqual(self.call("/api/task/keep", {"task": other})[0], 409)
+
+    def test_replan_auto_applies_without_confirm(self):
+        self.hub.cfg.update(replan_auto=True, task_max_steps=8)
+        tid = self.replan_task()
+        self.until(tid, self.at(3), "the search step starts")
+        whys = self.whys(tid)
+        after = whys[whys.index("replanned: 1 steps added"):]
+        self.assertTrue(any(w.startswith("plan changed:") for w in after), whys)
+        self.assertNotEqual(self.hub.tasks[tid]["why"], "replanned: 1 steps added")
+
+    def test_replan_refused_when_no_room(self):
+        self.hub.cfg["task_max_steps"] = 4  # scout, design, code, test (the verify is not counted): no room for a 5th
+        tid = self.replan_task()
+        self.until(tid, self.at(2), "step 2 starts")
+        self.assertTrue(any(w.startswith("replan refused: no room") for w in self.whys(tid)))
+
+    def test_clear_keeps_the_plan_files(self):
+        tid = self.plan_task(kinds=("scout", "design", "code"), words="HANDOFF-OK PLAN-SPLIT VERDICT-PASS")
+        self.until(tid, lambda t: t["state"] == "done" or t["state"] == "stuck", "the task ends", seconds=60)
+        self.assertEqual(self.hub.tasks[tid]["state"], "done", self.hub.tasks[tid]["why"])
+        task = self.until(tid, lambda t: not t.get("briefing"), "the last brief is written")
+        self.hub._clear_done(task, task["steps"][-1])
+        folder = self.folder / "tasks" / tid
+        self.assertTrue((folder / "plan.md").is_file())
+        self.assertTrue(any((folder / "plan").glob("*.md")))
+        self.assertTrue((folder / "task.json").is_file())
+
+    # -- plan 27 Task 2: plan and replan edges --------------------------------------------------------------
+
+    def test_design_step_replan_line_is_refused(self):
+        tid = self.plan_task(goals={2: "plan it REPLAN-ASK"})
+        task = self.until(tid, self.at(3), "step 3 starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "verify", "test"])
+        self.assertIn("replan refused: design step (a search step is needed first)", self.whys(tid))
+        self.assertIn("Your part of the plan:\n### Step 3: code", self.full_prompt(task["steps"][2]["session"]))
+        self.assertIn("the service refuses a `Replan:` line from this step", self.full_prompt(task["steps"][1]["session"]))
+
+    def test_plan_gap_answer_needs_a_plan(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look"}, {"kind": "code", "goal": "write PLAN-GAP"}])
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the question")
+        self.assertEqual(task["why"], "asks: Plan gap: which file holds the ladder?")
+        self.assertNotIn("plan", task)
+        self.assertEqual(self.task(tid)[1]["levers"]["answer"], "no plan gap waits")
+        self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": "config.json"}),
+                         (409, {"error": "no plan gap waits"}))
+        self.assertFalse((self.folder / "tasks" / tid / "plan.md").exists())
+
+    def test_redo_to_a_single_plan_drops_the_parts(self):
+        tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT", kinds=("scout", "design", "code"))
+        self.until(tid, self.at(3), "part 1 runs")
+        self.hub.tasks[tid]["goal"] += " PLAN-GAP"  # part 2 stops on a gap; part 1 has its prompt already
+        task = self.until(tid, lambda t: t["state"] == "waiting", "part 2 waits on a gap")
+        self.assertEqual([(s["kind"], s["state"], s.get("part")) for s in task["steps"][2:4]],
+                         [("code", "done", 1), ("code", "running", 2)])
+        task["goal"] = task["goal"].replace(" PLAN-GAP", "").replace("PLAN-SPLIT", "PLAN-OK")
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+        task = self.until(tid, self.at(4), "step 4 runs on the single plan")
+        self.assertEqual(task["plan"]["parts"], [])
+        self.assertNotIn("part", task["steps"][3])
+        self.assertNotIn("hard", task["steps"][3])
+        self.assertEqual(task["steps"][3]["goal"], "Report module")
+        self.assertEqual(task["steps"][2]["part"], 1)  # a done step keeps what it ran with
+        self.assertFalse((self.folder / "tasks" / tid / "plan").exists())
+        self.assertIn("Your part of the plan:\n### Step 4: code", self.full_prompt(task["steps"][3]["session"]))
+
+    def test_redo_room_counts_the_done_steps(self):
+        self.hub.cfg["task_max_steps"] = 4
+        tid = self.plan_task(kinds=("scout", "design", "code", "code"), goals={4: "second PLAN-GAP"})
+        task = self.until(tid, lambda t: t["state"] == "waiting", "step 4 waits on a gap")
+        task["goal"] = task["goal"].replace("PLAN-OK", "PLAN-SPLIT")
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the split does not fit")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "code", "verify"])
+        self.assertEqual(task["why"], "plan: 2 steps after the design step, over task_max_steps (after one retry)")
+
+    def test_replan_pass_needs_the_project_allowed(self):
+        tid = self.replan_task()
+        self.hub.cfg["projects"] = []  # Fred took the project off the list while the scout ran
+        task = self.until(tid, lambda t: t["state"] != "running", "the task leaves running")
+        self.assertEqual((task["state"], task["why"]),
+                         ("stuck", "runs are off in this project: pick it on the home view and allow runs"))
+        self.assertEqual((task["steps"][1]["kind"], task["steps"][1]["state"]), ("replan", "planned"))
+        self.assertIn("brief fallback: runs are off in this project: pick it on the home view and allow runs",
+                      self.whys(tid))
+
+    def test_replan_pass_restarted_after_a_restart_needs_the_project_allowed(self):
+        self.hub.cfg["task_max_steps"] = 8
+        tid = self.replan_task()
+        self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the replan")
+        with self.hub.tlock:  # the state a service restart finds: the pass was running, no thread holds the task
+            task = self.hub.tasks[tid]
+            task.update(state="running", owner="service", why="")
+            task["steps"][1].update(state="running", session="")
+            self.hub.briefing.discard(tid)
+            self.hub.cfg["projects"] = []  # and Fred took the project off the list meanwhile
+            with mock.patch.object(self.hub, "start_replan") as start:
+                self.assertEqual(self.hub._advance_one(task), "stuck")
+            start.assert_not_called()
+        self.assertEqual((task["state"], task["why"]),
+                         ("stuck", "runs are off in this project: pick it on the home view and allow runs"))
+
+    def test_redo_waits_while_the_brief_writes(self):
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task()
+        self.until(tid, lambda t: t["state"] == "waiting" and not t.get("briefing"), "the task holds, briefed")
+        self.hub.briefing.add(tid)  # the design step's brief thread is still writing
+        self.assertEqual(self.task(tid)[1]["levers"]["redo"], "brief still writing")
+        self.assertEqual(self.call("/api/task/redo", {"task": tid}), (409, {"error": "brief still writing"}))
+        self.hub.briefing.discard(tid)
+        self.assertEqual(self.call("/api/task/redo", {"task": tid})[0], 200)
+
+    def test_plan_edit_refused_on_a_stopped_task(self):
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task()
+        self.until(tid, lambda t: t["state"] == "waiting", "the task holds")
+        text = (self.folder / "tasks" / tid / "plan.md").read_text(encoding="utf-8")
+        self.assertEqual(self.call("/api/task/stop", {"task": tid})[0], 200)
+        self.assertEqual(self.call("/api/task/plan", {"task": tid, "text": text}),
+                         (409, {"error": "the plan can be edited while the task waits on it or is paused"}))
+
+    def test_replan_step_tier_follows_brief_model(self):
+        self.hub.cfg.update(brief_model="sonnet", task_max_steps=8)
+        tid = self.replan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the replan")
+        self.assertEqual((task["steps"][1]["model"], task["steps"][1]["tier"]), ("sonnet", "sonnet"))
+
+    # -- plan 25: the Board ---------------------------------------------------------------------------------
+    def test_task_carries_questions_chain_and_ctx(self):
+        tid = self.make_task()
+        task = self.until(tid, self.at(2), "step 2 starts")
+        self.assertIn("ctx_tokens", task["steps"][0])  # stored when step 1 ended (None: the fake reports none)
+        tasks.write_brief(self.folder, task, task["steps"][0], "## Findings\n- x\n## Open questions\n- Week or 7 days?\n## Next\ngo")
+        data = self.task(tid)[1]
+        self.assertEqual(data["questions"], [{"q": "Week or 7 days?", "opened": 1, "closed": 0}])
+        moves = [(c["step"], c["from"], c["to"]) for c in data["chain"]]
+        self.assertIn((1, "running", "done"), moves)
+        self.assertEqual(data["chain"], self.chain(tid)[-200:])
+
+    def test_measure_route(self):
+        self.assertEqual(self.call("/api/measure")[0], 400)
+        self.assertEqual(self.call("/api/measure?project=x&n=ten")[0], 400)
+        tid = self.make_task()
+        self.until(tid, self.at(2), "step 2 starts")
+        status, data = self.call(f"/api/measure?project={quote(str(self.project))}&n=10")
+        self.assertEqual(status, 200)
+        self.assertEqual((data["tasks"], [r["kind"] for r in data["kinds"]]), (1, ["scout"]))
+        self.assertEqual(self.call(f"/api/measure?project={quote(str(self.project))}&n=0")[1]["tasks"], 1)  # n >= 1
+
+    def test_measure_refuses_a_digit_that_is_not_ascii(self):
+        """Plan 27 B8: `²` passes str.isdigit but not int(); the answer is the promised 400, not a dropped connection."""
+        for n in ("%C2%B2", "%D9%A3", "12345"):
+            self.assertEqual(self.call(f"/api/measure?project=x&n={n}"), (400, {"error": "bad measure query"}), n)
+
 
 for _name in dir(RunServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parent
     if _name.startswith("test_"):
         setattr(TaskServerTest, _name, None)
+
+
+
+FAKE_CODEX = [sys.executable, str(Path(__file__).resolve().parent / "fake_codex.py")]
+FAKE_CMD = [sys.executable, str(Path(__file__).resolve().parent / "fake_cmd.py")]
+FAKE_OPENCODE = [sys.executable, str(Path(__file__).resolve().parent / "fake_opencode.py")]
+
+
+class HarnessServerTest(TaskServerTest):
+    """Plan 5 Task 5: the probe, the harness switch, harness rungs on runs and task steps, the levers."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = Path(self.tmp.name) / "home"
+        self.project = Path(self.tmp.name) / "proj"
+        self.project.mkdir()
+        self.folder.mkdir()
+        cfg = dict(paths.load_config(), projects=[str(self.project)])
+        cfg["harnesses"]["codex"]["on"] = True
+        cfg["models"]["codex"] = {"gpt-6.1-sol": "sonnet"}
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)]}), encoding="utf-8")
+        fake = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
+        self.httpd, self.hub = server.make_server(cfg, port=0, folder=self.folder, exe=fake,
+                                                  exes={"codex": FAKE_CODEX})
+        self.hub.user_home = Path(self.tmp.name)
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.hub.probing.join(10)
+
+    def turn_on(self, name, fake, models):
+        """A harness on, found through its fake, with its models: what the switch and the probe do."""
+        self.hub.cfg["harnesses"][name]["on"] = True
+        self.hub.cfg["models"][name] = models
+        self.hub.exes[name] = fake
+        self.hub.probe([name])
+
+    def started(self, sid):
+        """The run_started line of a run, from the event log."""
+        lines = [json.loads(line) for path in sorted(self.folder.glob("events-*.jsonl"))
+                 for line in path.read_text(encoding="utf-8").splitlines()]
+        return next(r for r in lines if r.get("event") == "run_started" and r["session_id"] == sid)
+
+    def test_config_lists_harnesses(self):
+        data = self.call("/api/config")[1]
+        self.assertEqual(list(data["harnesses"]), ["claude", "codex", "opencode", "cmd"])
+        codex = data["harnesses"]["codex"]
+        self.assertEqual((codex["on"], codex["found"]), (True, True))
+        self.assertTrue(codex["version"].startswith("codex-cli"))
+        self.assertEqual(codex["models"], {"gpt-6.1-sol": "sonnet"})
+        self.assertFalse(data["harnesses"]["opencode"]["on"])
+        self.assertEqual((data["claude"], data["harnesses"]["claude"]["found"]), (True, True))
+        self.assertEqual(set(data["models_file"]), {"path", "count", "error"})
+
+    def test_harness_switch(self):
+        status, data = self.call("/api/harness", {"name": "opencode", "on": True})
+        self.assertEqual(status, 200)
+        self.assertEqual((data["harnesses"]["opencode"]["on"], data["harnesses"]["opencode"]["found"]), (True, False))
+        written = json.loads((self.folder / "config.json").read_text(encoding="utf-8"))
+        self.assertTrue(written["harnesses"]["opencode"]["on"])
+        self.assertEqual(written["projects"], [str(self.project)])
+        status, data = self.call("/api/harness", {"name": "claude", "on": False})
+        self.assertEqual((status, data["error"]), (400, "Prep and the brief pass run on Claude"))
+        self.assertEqual(self.call("/api/harness", {"name": "nope", "on": True})[0], 400)
+        self.assertEqual(self.call("/api/harness", {"name": "codex", "on": "yes"})[0], 400)
+        (self.folder / "config.json").write_text("{broken", encoding="utf-8")
+        status, data = self.call("/api/harness", {"name": "codex", "on": False})
+        self.assertEqual(status, 500)
+        self.assertIn("fix it by hand", data["error"])
+
+    def test_run_on_a_codex_rung(self):
+        status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "look at calc",
+                                              "model": "codex:gpt-6.1-sol", "effort": "low"})
+        self.assertEqual(status, 200, data)
+        sid = data["session"]
+        self.wait_idle(sid)
+        rec = self.started(sid)
+        self.assertEqual((rec["harness"], rec["model"]), ("codex", "gpt-6.1-sol"))
+        self.assertEqual(self.session(sid)["harness"], "codex")
+        info = self.call(f"/api/levers?session={sid}")[1]
+        self.assertEqual((info["verify"], info["terminal"], info["handoff"], info["escalate"]), ("claude only",) * 4)
+        end = time.time() + 10
+        while time.time() < end and self.call(f"/api/levers?session={sid}")[1]["continue"]:
+            time.sleep(0.1)
+        self.assertEqual(self.call(f"/api/levers?session={sid}")[1]["continue"], "")
+        self.assertEqual(self.call("/api/terminal", {"session": sid})[0], 409)
+
+    def test_run_refuses_off_or_unknown_rung(self):
+        body = {"project_dir": str(self.project), "prompt": "x", "model": "cmd:deepseek-v4.1-flash"}
+        status, data = self.call("/api/run", body)
+        self.assertEqual((status, data["error"]), (409, "cmd is off"))
+        status, data = self.call("/api/run", dict(body, model="codex:nope"))
+        self.assertEqual((status, data["error"]), (409, "model gone from models.json: codex:nope"))
+        self.hub.found["codex"] = False
+        self.assertEqual(self.call("/api/run", dict(body, model="codex:gpt-6.1-sol"))[0], 409)
+
+    def test_task_step_pick_on_codex(self):
+        steps = [{"kind": "scout", "goal": "find add()", "model": "codex:gpt-6.1-sol"},
+                 {"kind": "code", "goal": "fix add()"}]
+        tid = self.make_task(steps=steps)
+        task = self.until(tid, self.at(2), "step 2 starts on Claude")
+        first, second = task["steps"][0], task["steps"][1]
+        self.assertEqual((first["harness"], first["model"], first["tier"]), ("codex", "codex:gpt-6.1-sol", "sonnet"))
+        self.assertIn("harness: codex", first["notes"])
+        self.assertEqual(self.started(first["session"])["harness"], "codex")
+        meta = self.hub.runs.meta(first["session"])
+        self.assertEqual((meta["harness"], meta["read_only"], meta["model"]), ("codex", True, "gpt-6.1-sol"))
+        self.assertEqual(first["state"], "done")
+        self.assertEqual((second["harness"], second["model"]), ("claude", "sonnet"))
+        self.assertEqual(self.hub.runs.meta(second["session"])["harness"], "claude")
+
+    def test_chat_and_final_message_for_codex(self):
+        sid = self.call("/api/run", {"project_dir": str(self.project), "prompt": "say hi HANDOFF-OK",
+                                     "model": "codex:gpt-6.1-sol", "effort": "low"})[1]["session"]
+        self.wait_idle(sid)
+        end = time.time() + 10
+        while time.time() < end and not self.hub.runs.meta(sid)["ended"]:
+            time.sleep(0.1)
+        items = self.call(f"/api/chat?session={sid}")[1]["items"]
+        self.assertEqual(items[0]["role"], "you")
+        self.assertIn("claude", [i["role"] for i in items])
+        text, subtype = self.hub.final_message(sid)
+        self.assertIn("say hi", text)
+        self.assertIn("HANDOFF", text)
+        self.assertEqual(subtype, "success")
+        self.assertEqual(self.hub.last_reply(sid), next(i["text"] for i in reversed(items) if i["role"] == "claude"))
+
+    def test_cheap_rung_refused_on_a_design_step(self):
+        self.turn_on("cmd", FAKE_CMD, {"deepseek-v4.1-flash": "haiku"})
+        self.turn_on("opencode", FAKE_OPENCODE, {"kimi-k3": "opus"})
+        card = self.prep_card()
+
+        def post(kind, model):
+            return self.post_task(card, steps=[{"kind": kind, "goal": "g", "model": model}])
+        status, data = post("design", "cmd:deepseek-v4.1-flash")
+        self.assertEqual(status, 400)
+        self.assertIn("is not a think model", data["error"])
+        self.assertIn("step 1", data["error"])
+        status, data = post("verify", "opencode:kimi-k3")
+        self.assertEqual(status, 400)
+        self.assertIn("not on verify or fix steps", data["error"])
+        self.assertEqual(self.hub.rung_ok("opencode:kimi-k3", "design"), "")
+        self.assertEqual(self.hub.rung_ok("cmd:deepseek-v4.1-flash", "scout"), "")
+        self.assertEqual(self.hub.rung_ok("cmd:deepseek-v4.1-flash", "code"), "")
+        self.assertEqual(self.hub.rung_ok("cmd:deepseek-v4.1-flash"), "")
+        self.assertEqual(self.hub.rung_ok("cmd:deepseek-v4.1-flash", "design").split(": ")[0], "cmd")
+        self.assertEqual(post("scout", "cmd:deepseek-v4.1-flash")[0], 200)
+
+    def test_cheap_rung_accepted_on_code(self):
+        self.turn_on("cmd", FAKE_CMD, {"deepseek-v4.1-flash": "haiku"})
+        status, data = self.post_task(self.prep_card(), steps=[
+            {"kind": "code", "goal": "g", "model": "cmd:deepseek-v4.1-flash"}])
+        self.assertEqual(status, 200, data)
+
+    def test_step_pick_falls_back_when_harness_off(self):
+        steps = [{"kind": "scout", "goal": "look"}, {"kind": "scout", "goal": "again",
+                                                      "model": "codex:gpt-6.1-sol"}]
+        tid = self.make_task(steps=steps)
+        self.assertEqual(self.hub.tasks[tid]["steps"][1]["pick"], "codex:gpt-6.1-sol")
+        self.assertEqual(self.call("/api/harness", {"name": "codex", "on": False})[0], 200)
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step = task["steps"][1]
+        self.assertEqual((step["harness"], step["model"], step["tier"]), ("claude", "sonnet", "sonnet"))
+        self.assertIn("pick refused: codex is off -> balance", step["notes"])
+        self.assertEqual(self.hub.runs.meta(step["session"])["harness"], "claude")
+
+    def use_models_json(self, models):
+        """models.json under a data folder the test owns (the Hub reads paths.home()), written with a new mtime."""
+        patcher = mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(self.folder)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        path = self.folder / "models.json"
+        path.write_text(json.dumps(models), encoding="utf-8")
+        old = self.hub.models_mtime or 0
+        os.utime(path, ns=(old + 10**9, old + 10**9))
+
+    def test_rung_gone_from_models_json(self):
+        self.hub.cfg["models"]["codex"] = {"gpt-6-sol": "sonnet"}
+        self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol"), "model gone from models.json: codex:gpt-6.1-sol")
+        self.assertEqual(self.hub.rung_ok("codex:gpt-6-sol"), "")
+        self.hub.cfg["harnesses"]["codex"]["on"] = False
+        self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol"), "codex is off")
+
+    def test_models_json_is_reread_before_the_route(self):
+        steps = [{"kind": "scout", "goal": "look"}, {"kind": "scout", "goal": "again", "model": "codex:gpt-6.1-sol"}]
+        tid = self.make_task(steps=steps)
+        self.until(tid, self.at(1), "step 1 starts")
+        self.use_models_json(dict(copy.deepcopy(paths.MODELS_DEFAULT), codex={"gpt-6-sol": "sonnet"}))
+        task = self.until(tid, self.at(2), "step 2 starts")
+        step = task["steps"][1]
+        self.assertEqual(step["harness"], "claude")
+        self.assertIn("pick refused: model gone from models.json: codex:gpt-6.1-sol -> balance", step["notes"])
+
+    def test_reload_models_logs_what_it_drops(self):
+        models = copy.deepcopy(paths.MODELS_DEFAULT)
+        models["claude"]["claude-x"] = "gpt"
+        models["opencode"] = {"opencode-go/kimi-k3": "opus", "opencode-go/sonnet-ish": "sonnet"}
+        self.use_models_json(models)
+        self.hub.reload_models()
+        log = (self.folder / "console.log").read_text(encoding="utf-8")
+        self.assertIn("models.json: claude claude-x dropped: unknown tier gpt", log)
+        self.assertIn("models.json: opencode opencode-go/sonnet-ish dropped: opencode holds no sonnet model", log)
+        self.assertNotIn("kimi-k3", log)
+        self.assertNotIn("gpt", self.hub.cfg["ladder"])
+
+    def test_step_timeout_reaches_the_retry_reason(self):
+        self.hub.cfg["step_timeout_s"] = 1
+        steps = [{"kind": "scout", "goal": "SLOW look", "model": "codex:gpt-6.1-sol"}]
+        tid = self.make_task(steps=steps)
+        task = self.until(tid, lambda t: "step timeout" in t["why"], "the timeout is the reason", seconds=40)
+        self.assertIn("it hit the step timeout (1 s)", task["why"])
+
+    def test_probe_never_raises(self):
+        self.hub.exes.pop("codex")
+        self.hub.cfg["harnesses"]["codex"]["exe"] = str(Path(self.tmp.name) / "no-such-codex")
+        harnesses = self.hub.probe(["codex"])
+        self.assertEqual((harnesses["codex"]["found"], harnesses["codex"]["version"]), (False, ""))
+        self.hub.exes["codex"] = [str(Path(self.tmp.name) / "no-such-codex")]
+        harnesses = self.hub.probe()
+        self.assertEqual((harnesses["codex"]["found"], harnesses["codex"]["version"]), (False, ""))
+        self.assertTrue(harnesses["claude"]["found"])
+        self.assertEqual(self.call("/api/config")[0], 200)  # the service keeps serving
+
+
+for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
+    if _name.startswith("test_") and _name not in HarnessServerTest.__dict__:
+        setattr(HarnessServerTest, _name, None)
 
 
 if __name__ == "__main__":

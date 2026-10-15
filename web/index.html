@@ -19,11 +19,13 @@
         <span class="grip drag-region" title="Drag to move">&#8942;&#8942;</span>
         <button id="scope" class="scope" data-pick aria-haspopup="listbox" aria-expanded="false" title="Project (Ctrl+P)"><span id="scopenm" class="nm">All projects</span><span class="car">&#9662;</span></button>
         <button id="needsbtn" class="needs" data-go="needs" title="Show what needs you, in every project" hidden></button>
+        <button id="boardbtn" class="wide-btn" data-go="board" title="Open the Board: the window widens to 900 px" hidden>&#8660; Board</button>
         <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
         <span data-winbtns></span>
       </div>
       <div id="listscroll" class="scroll">
         <button id="today" class="today" aria-expanded="false" title="Show today's breakdown"></button>
+        <button id="overpace" class="overpace" aria-expanded="false" hidden title="The today breakdown: where the spend went and which models are over their pace"></button>
         <div id="todaymore" class="todaymore" hidden></div>
         <div id="list"></div>
       </div>
@@ -74,6 +76,17 @@
       <div id="tbar" class="levers"></div>
     </section>
 
+    <section data-page="board" hidden>
+      <div class="top">
+        <button class="rb" data-go="back" title="Back (Esc)" aria-label="Back">&#8592;</button>
+        <span id="bcrumb" class="crumb m">Board</span>
+        <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
+        <span data-winbtns></span>
+      </div>
+      <div class="board"><div id="bchain" class="bchain"></div><div id="bwrap" class="bwrap"></div></div>
+      <div id="bfoot" class="bfoot"></div>
+    </section>
+
     <section data-page="usage" hidden>
       <div class="top">
         <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">&#8592;</button>
@@ -82,6 +95,18 @@
         <span data-winbtns></span>
       </div>
       <div id="uscroll" class="scroll"></div>
+    </section>
+
+    <section data-page="models" hidden>
+      <div class="top">
+        <button class="rb" data-go="list" title="Back to the list (Esc)" aria-label="Back">&#8592;</button>
+        <span class="crumb m">Models and tuning</span>
+        <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
+        <span data-winbtns></span>
+      </div>
+      <div id="mtabs" class="tabs" role="tablist"></div>
+      <div id="mscroll" class="scroll mp"></div>
+      <div id="mbar" class="levers"></div>
     </section>
 
     <div id="utip" class="utip" hidden></div>

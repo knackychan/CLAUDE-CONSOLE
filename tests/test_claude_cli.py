@@ -47,6 +47,13 @@ class CommandTest(unittest.TestCase):
         two = claude_cli.run_command(["claude.exe"], "haiku", "low", "abc", disallow=("Agent", "Edit"))
         self.assertEqual(two[two.index("--disallowedTools") + 1], "Agent,Edit")
 
+    def test_step_command_loads_no_mcp_server(self):
+        cmd = claude_cli.run_command(["claude.exe"], "haiku", "low", "abc", tools="Read,Grep,Glob", strict_mcp=True)
+        self.assertIn("--strict-mcp-config", cmd)
+        self.assertNotIn("--mcp-config", cmd)  # strict with no config: no server at all
+        self.assertLess(cmd.index("--tools"), cmd.index("--strict-mcp-config"))
+        self.assertNotIn("--strict-mcp-config", claude_cli.run_command(["claude.exe"], "haiku", "low", "abc"))
+
     def test_tier_of_and_known_model(self):
         self.assertEqual([claude_cli.tier_of(m) for m in ("claude-opus-4-6", "opus", "gpt")], ["opus", "opus", ""])
         cfg = copy.deepcopy(paths.DEFAULTS)

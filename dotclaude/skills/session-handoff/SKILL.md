@@ -31,16 +31,33 @@ Turns the useful part of a long chat into a few one-line records, so a fresh cha
 
      The project is the git root folder's name; the kind is `chat`.
 5. Remove or correct any older line this chat proved wrong (notes spread mistakes too).
-6. Print a starter prompt for the next chat, at most 5 lines: the project, the files to read first, the next step, the check that proves it is done.
-7. Tell the user the exit:
-   - default: `/clear <short-name>` (the name labels this chat in `/resume`), then paste the starter prompt;
+6. Tell the user the exit, in one line:
+   - default: `/clear <short-name>` (the name labels this chat in `/resume`), then paste the handoff block below;
    - only if the task must continue in this chat: `/compact focus on <the open step and the decisions above>`.
+7. End the message with the handoff block, the same six headings a Claude Console task step writes, so the next chat (or the console's Start next chat) reads it whole. Nothing comes after `END HANDOFF`. Keep it under 300 words; a heading with nothing to say gets `- (none)`:
+
+```
+HANDOFF
+## Goal
+<the task goal in one line, then what the next chat does of it in one line>
+## Findings
+- <what this chat established that the next one needs, one line each>
+## Files touched
+- <path>: <what changed, one line>
+## Troubleshooting
+- <a trap the next chat would hit again: the symptom, then what works>
+## Open questions
+- <only questions the next chat cannot answer from the files>
+## Next
+<the next step and the check that proves it is done; name a file to read first>
+END HANDOFF
+```
 
 ## Done looks like
 
 - Every decision from step 2 appears in exactly one place (PLAN.md History, a memory file, or a proposed CLAUDE.md line shown to the user).
 - `git diff` shows only one-line additions or corrections to History / memory files, no code changes.
-- The starter prompt names a file to read and a check to run.
+- The message ends with the HANDOFF block; its Next names a file to read and a check to run.
 - A lesson, when there was one, is one line in `~/.claude/console/lessons.md` and nowhere else.
 
 ## Never

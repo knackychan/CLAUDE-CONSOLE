@@ -27,6 +27,15 @@ class BriefTest(unittest.TestCase):
         self.assertEqual(brief.build("next"), brief.NEXT_INTRO)
         self.assertTrue(brief.build("next", last="x" * 5000).endswith("x…"))
 
+    def test_next_brief_of_a_skill_note_is_its_handoff_block(self):
+        block = ("HANDOFF\n## Goal\nShip plan 23.\n## Findings\n- the brief pass works\n## Files touched\n- (none)\n"
+                 "## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\nWrite the window task.\nEND HANDOFF")
+        note = "Done. Next session: /session-handoff resume\n\n" + block
+        text = brief.build("next", last=note)
+        self.assertIn("## Troubleshooting", text)
+        self.assertNotIn("Done. Next session", text)  # the block alone
+        self.assertIn("free text", brief.build("next", last="free text"))  # a note with no block keeps its lines
+
     def test_verify_brief_starts_with_the_verify_text(self):
         text = brief.build("verify", goal="g", files=["a.py"], plan=True)
         self.assertTrue(text.startswith(levers.VERIFY_TEXT))

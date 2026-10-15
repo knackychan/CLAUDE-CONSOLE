@@ -125,6 +125,32 @@ class WindowApiTest(unittest.TestCase):
         self.api.drag_move()
         self.assertEqual(len(self.win.calls), 2)
 
+    def test_board_opens_at_its_size_and_returns(self):
+        self.assertEqual(window.clamp_board(10, 10), (window.BOARD_MIN_W, window.OPEN_MIN_H))
+        self.assertEqual(window.clamp_board("x", 1), (window.BOARD_W, window.BOARD_H))
+        self.api.form("open")
+        self.api.resize(360, 900, True)  # the compact size Fred set
+        self.assertEqual(self.api.board(True), [900, 680])  # the first time: 900 x 680
+        self.assertEqual(self.win.calls[-1], ("resize", 900, 680))
+        self.api.fit(900)  # a text-size check while the Board is open keeps the Board's size
+        self.assertEqual(self.api.resize(820, 640, True), [820, 640])  # the grip on the Board
+        self.assertEqual(self.api.resize(500, 640, False), [window.BOARD_MIN_W, 640])  # never under 700
+        self.assertEqual(paths.load_window(self.folder)["size"], [360, 900])  # the compact size is untouched
+        self.assertEqual(self.api.board(False), [360, 900])
+        self.assertEqual(self.win.calls[-1], ("resize", 360, 900))
+        self.assertEqual(self.api.board(True), [820, 640])  # the Board's size is kept in window.json
+        self.assertEqual(paths.load_window(self.folder)["board"], [820, 640])
+
+    def test_board_needs_the_open_window(self):
+        self.api.form("pill")
+        self.assertIsNone(self.api.board(True))
+        self.api.form("open")
+        self.api.board(True)
+        self.api.form("pill")  # folding leaves the Board: unfolding opens the compact size
+        self.assertEqual(self.api.form("open"), "open")
+        self.assertEqual(self.win.calls[-1], ("resize", window.OPEN_W, window.OPEN_H))
+        self.assertEqual(window.WindowApi(self.folder)._board, False)  # never kept across starts
+
     def test_hwnd_is_only_this_process_window(self):
         # the test process has no window: an Explorer tab proxy or the real window of the same name
         # (another process) must not be picked, so always-on-top never reaches them

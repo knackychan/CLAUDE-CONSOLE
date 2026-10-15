@@ -62,10 +62,11 @@ def brief_command(exe: list, model: str, schema: dict) -> list:
 
 def run_command(exe: list, model: str, effort: str, session_id: str, resume: bool = False,
                 name: str = "", fork: str = "", disallow: tuple = (), tools: str = None,
-                budget: float = 0.0, max_turns: int = 0) -> list:
+                budget: float = 0.0, max_turns: int = 0, strict_mcp: bool = False) -> list:
     """D5: auto mode, nobody answers prompts (a denial ends up in the result). Prompts go in on stdin.
     `fork`: start `session_id` as a copy of that chat (its context, a new id; the original is not touched).
-    Step limits (plan 17): `disallow` tool names, `tools` (the --tools list), a spend cap, a turn cap."""
+    Step limits (plan 17): `disallow` tool names, `tools` (the --tools list), a spend cap, a turn cap; plan 23:
+    `strict_mcp` loads no MCP server (--strict-mcp-config with no --mcp-config, as Prep runs)."""
     cmd = exe + ["-p", "--model", model, "--effort", effort, "--permission-mode", "auto",
                  "--permission-prompts", "none", "--input-format", "stream-json",
                  "--output-format", "stream-json", "--verbose"]
@@ -73,6 +74,8 @@ def run_command(exe: list, model: str, effort: str, session_id: str, resume: boo
         cmd += ["--disallowedTools", ",".join(disallow)]
     if tools is not None:
         cmd += ["--tools", tools]
+    if strict_mcp:
+        cmd += ["--strict-mcp-config"]
     if budget and budget > 0:
         cmd += ["--max-budget-usd", f"{budget:.2f}"]
     if max_turns and max_turns > 0:
@@ -88,20 +91,63 @@ def run_command(exe: list, model: str, effort: str, session_id: str, resume: boo
     return cmd
 
 
+HARNESS_NAMES = ("claude", "codex", "opencode", "cmd")  # equal to harness.NAMES (a test asserts it)
+
+
+def split_rung(rung: str) -> tuple:
+    """"codex:gpt-6.1-sol" -> ("codex", "gpt-6.1-sol"); anything else is a Claude rung."""
+    rung = str(rung or "")
+    name, sep, rest = rung.partition(":")
+    if sep and name in HARNESS_NAMES:
+        return name, rest
+    return "claude", rung
+
+
 def model_alias(model: str) -> str:
-    """claude-sonnet-5-5 -> sonnet (the names routes use); "" when unknown."""
+    """claude-sonnet-5-5 -> sonnet (the names routes use); "" when unknown or a rung of another harness."""
+    name, model = split_rung(model)
+    if name != "claude":
+        return ""
     low = str(model or "").lower()
     return next((m for m in MODELS if m in low), "")
 
 
-def tier_of(model: str) -> str:
-    """The tier alias of an alias or a ladder rung (claude-opus-4-6 -> opus); "" when none."""
-    return model_alias(model)
+def _rung_models(cfg: dict, name: str) -> dict:
+    """model -> tier of one non-Claude harness: models.json (cfg["models"]), else the section's own list."""
+    models = (cfg.get("models") or {}).get(name)
+    if not isinstance(models, dict):
+        section = (cfg.get("harnesses") or {}).get(name)
+        models = section.get("models") if isinstance(section, dict) else None
+    return models if isinstance(models, dict) else {}
+
+
+def tier_of(model: str, cfg: dict = None) -> str:
+    """The tier alias of an alias or a ladder rung (claude-opus-4-6 -> opus); for a `harness:model` rung the
+    tier config gives it (needs `cfg`); "" when none."""
+    name, bare = split_rung(model)
+    if name == "claude":
+        return model_alias(bare)
+    tier = _rung_models(cfg or {}, name).get(bare)
+    return tier if tier in MODELS else ""
 
 
 def known_model(cfg: dict, model: str) -> bool:
-    """A tier alias or a rung of the configured ladder."""
-    return model in MODELS or any(model in rungs for rungs in (cfg.get("ladder") or {}).values())
+    """A tier alias or a rung of the configured ladder; a `harness:model` rung whose harness is on, whose
+    model is listed and whose tier the adapter may hold."""
+    name, bare = split_rung(model)
+    if name == "claude":
+        return bare in MODELS or any(bare in rungs for rungs in (cfg.get("ladder") or {}).values())
+    section = (cfg.get("harnesses") or {}).get(name)
+    if not isinstance(section, dict) or section.get("on") is not True:
+        return False
+    tier = tier_of(model, cfg)
+    if not tier:
+        return False
+    from . import harness  # late: harness imports this module
+    try:
+        return tier in harness.get(name).TIERS
+    except KeyError:
+        return False
 
 
 def terminal_command(exe: list, session_id: str, model: str = "", effort: str = "") -> list:
@@ -225,6 +271,38 @@ def git_changed(cwd: str, commit: str):
             return None
         names.update(line for line in out.stdout.splitlines() if line.strip())
     return len(names)
+
+
+UNTRACKED_READ_MAX = 256 * 1024  # an untracked file larger than this counts 0 lines (plan 23 facts, plan 27 K4)
+UNTRACKED_MAX = 100  # untracked files a snapshot reads; later ones are left out (plan 27 K4: an unignored venv)
+
+
+def git_snapshot(cwd: str, commit: str):
+    """The tree against `commit` for the facts (plan 23): {path: [plus, minus]} from `git diff --numstat <commit>`,
+    plus each untracked file as [its lines, 0]; None when git cannot tell (not a repo, no commit). Read only: no git
+    object, index or file is written."""
+    from . import facts  # here, not at the top: facts is pure and imports redact only
+    if not commit:
+        return None
+    outs = []
+    for cmd in (["git", "-c", "core.quotePath=false", "diff", "--numstat", commit],  # plan 27 K5: paths as written
+                ["git", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard"]):
+        try:
+            out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+                                 encoding="utf-8", errors="replace")
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if out.returncode != 0:
+            return None
+        outs.append(out.stdout)
+    untracked = {}
+    for name in outs[1].splitlines()[:UNTRACKED_MAX]:
+        path = Path(cwd) / name
+        try:
+            untracked[name] = path.read_bytes().count(b"\n") if path.stat().st_size <= UNTRACKED_READ_MAX else 0
+        except OSError:
+            untracked[name] = 0
+    return facts.snapshot(outs[0], untracked)
 
 
 def git_status(cwd: str) -> list:

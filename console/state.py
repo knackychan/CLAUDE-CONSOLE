@@ -93,6 +93,8 @@ class Session:
     interrupted: bool = False
     stopped: bool = False
     cost: float = 0.0
+    cost_unknown: bool = False  # a run ended with no cost key (a harness that does not report one)
+    harness: str = "claude"
     route_reason: str = ""
     prep: str = ""
     prep_model: str = ""       # the Prep that wrote the prompt: its model, cost and turns (Route block)
@@ -113,6 +115,7 @@ class Session:
     handoff_by: str = ""       # the session whose last message is the handoff note (itself or its Handoff copy)
     forked_from: str = ""
     handoff_of: str = ""       # a fresh Handoff chat (after a PASS): the session it hands off
+    auto_handoff: int = 0      # plan 23: the service handed it off by itself at this many context tokens
     forks: list = field(default_factory=list)
     turns: list = field(default_factory=list)  # [start, end or None] per turn; the last start is turn_ts
     rules: dict = field(default_factory=dict)  # file -> {scope, lines, bytes}: CLAUDE.md / rules loaded
@@ -260,6 +263,7 @@ class State:
             s.compactions += 1
         elif event == "marked_done":  # Fred's Mark done; the chat's next prompt brings it back
             s.in_turn, s.ended, s.doing = False, True, ""
+            s.auto_handoff = 0  # plan 23: the HANDED OFF card leaves Needs you
             self._turn_close(s, ts)
         elif event == "SessionEnd":
             s.in_turn = False
@@ -267,6 +271,7 @@ class State:
             s.ended = not s.window  # a window run's process ends after every turn; it can resume
         elif event == "run_started":
             s.window, s.run_live, s.source = True, True, "window"
+            s.harness = rec.get("harness") or "claude"
             s.in_turn, s.ended = True, False
             self._turn_open(s, ts)
             s.interrupted = s.stopped = s.handed_off = False
@@ -279,6 +284,10 @@ class State:
             s.handoff = s.kind == "handoff"
             if rec.get("handoff_of"):
                 s.handoff_of = rec["handoff_of"]
+            s.auto_handoff = 0
+            if rec.get("auto_handoff"):  # plan 23: Hub.auto_steps started it; the card is the chat it hands off
+                origin = self.sessions.get(rec.get("forked_from") or rec.get("handoff_of") or "")
+                (origin if origin and origin is not s else s).auto_handoff = int(rec["auto_handoff"])
             if rec.get("task"):
                 s.task, s.step = rec["task"], int(rec.get("step") or 0)
             if rec.get("escalated"):
@@ -313,8 +322,16 @@ class State:
             self._turn_close(s, ts)
             s.cost += float(rec.get("cost") or 0)
             s.run_costs.append([ts, float(rec.get("cost") or 0)])
+            if "cost" not in rec and s.harness != "claude":
+                s.cost_unknown = True
+            tokens = rec.get("tokens")
+            if isinstance(tokens, dict) and isinstance(tokens.get("context"), (int, float)):
+                s.ctx_tokens = int(tokens["context"])
             s.stopped = bool(rec.get("stopped"))
             s.interrupted = bool(rec.get("interrupted"))
+            subtype = rec.get("subtype")
+            if s.harness != "claude" and subtype and subtype != "success" and not (s.stopped or s.interrupted):
+                s.failed = {"error": subtype, "details": ""}  # no hook reports a failure for another CLI
             if rec.get("subtype") == "success" and not (s.stopped or s.interrupted):
                 s.replied_ts = ts
             if s.handoff and rec.get("subtype") == "success":
@@ -478,10 +495,13 @@ class State:
                 group = "replied"
             else:
                 group = "working"
+            if s.auto_handoff and s.handed_off and not s.ended:  # plan 23: HANDED OFF waits for Start next chat
+                group = "needs"
             symbol, text, state_tone = STATES[state]
             follow_ups = max(0, s.prompts - 1)
             files = self.files(s)
             exact = s.window and not s.run_live  # a live window run has no result line yet: estimate
+            unpriced = s.cost_unknown and s.cost == 0
             rows.append({
                 "id": s.id, "project": s.project, "project_dir": s.project_dir,
                 "title": s.title or ("Empty chat, nothing sent" if state == "empty" else f"(prompt not seen) {s.id[:8]}"), "source": s.source or "?",
@@ -494,7 +514,8 @@ class State:
                 "denials": s.denials,
                 "two_writers": s.id in writer_ids,
                 "window": s.window, "run_live": s.run_live, "stopped": s.stopped,
-                "cost": round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,
+                "harness": s.harness,
+                "cost": None if unpriced else round(s.cost, 4), "route_reason": s.route_reason, "prep": s.prep,
                 "start_commit": s.start_commit, "cwd": s.cwd,
                 "started_ts": s.started_ts, "last_ts": s.last_ts,
                 "turn_ts": s.turns[-1][0] if s.turns else s.started_ts,
@@ -503,7 +524,7 @@ class State:
                 "prep_model": s.prep_model, "prep_cost": s.prep_cost, "prep_turns": s.prep_turns,
                 "models": shares(fams(files)),
                 "task": s.task, "step": s.step,
-                "kind": s.kind, "handoff": s.handoff, "handoff_by": s.handoff_by if s.handed_off else "", "forked_from": s.forked_from, "forks": list(s.forks),
+                "kind": s.kind, "handoff": s.handoff, "handoff_by": s.handoff_by if s.handed_off else "", "auto_handoff": s.auto_handoff, "forked_from": s.forked_from, "forks": list(s.forks),
                 "follow_ups": follow_ups,
                 "handoff_hint": state not in DONE and (
                     tone == "red" or follow_ups >= self.cfg["handoff_after_followups"]),
@@ -512,7 +533,7 @@ class State:
                 "rules_warn": self.rules_warn(s.rules),
                 "reads": s.reads,
                 "delegate_hint": state not in DONE and s.reads >= self.cfg["delegate_after_reads"],
-                "spent": round(s.cost if exact else cost(files), 4) if exact or files else None,
+                "spent": None if unpriced else round(s.cost if exact else cost(files), 4) if exact or files else None,
                 "spent_exact": exact,
                 "burn": round(cost(files, now - BURN_S) / (BURN_S / 60), 4),
                 "activity": self.activity(s, now),

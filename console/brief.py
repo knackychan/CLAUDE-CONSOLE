@@ -1,6 +1,6 @@
 """A new-task brief built from the facts of a session, with no model call: what a fresh chat needs to
 take over a session whose context is too large to re-read (the cold-cache guard offers it)."""
-from . import levers, redact
+from . import levers, redact, tasks
 
 GOAL_MAX = 1200
 LAST_MAX = 1200
@@ -22,8 +22,9 @@ def build(kind: str, goal: str = "", last: str = "", files: list = (), verdict: 
     """`kind` is "task" (hand the work over), "verify" (VERIFY_TEXT plus the facts), "handoff" (the facts on one
     line, the arguments of /session-handoff in a fresh chat) or "next" (the handoff note `last` of a chat that
     ran /session-handoff)."""
-    if kind == "next":  # the note keeps its lines: the starter prompt is a few of them
-        note = last.strip()
+    if kind == "next":  # the note keeps its lines; a skill note that ends with the HANDOFF block gives the block alone
+        block = tasks.parse_handoff(last)
+        note = (block if block is not None and not tasks.check_handoff(block, old_ok=True) else str(last or "")).strip()
         note = note if len(note) <= NOTE_MAX else note[: NOTE_MAX - 1] + "…"
         return "\n".join([NEXT_INTRO] + (["", "Handoff note:", note] if note else []))
     out = [levers.VERIFY_TEXT + " " + VERIFY_INTRO if kind == "verify" else
