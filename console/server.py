@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import (attach, brief, claude_cli, compact, events, facts, fills, guard, harness, kinds, levers, paths, plan, prep, redact, replan,
+from . import (attach, brief, claude_cli, compact, events, facts, fills, guard, harness, kinds, levers, limits, paths, plan, prep, redact, replan,
                review, routing, runs, tasks, transcript, tuning, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
@@ -55,6 +55,7 @@ class Hub:
         self.cfg = cfg
         self.folder = Path(folder)
         self.state = State(cfg)
+        self.limits = limits.read(folder)
         self.reader = events.LogReader(folder)
         self.runs = runs.RunManager(cfg, folder, exe)  # runs.exes is filled by the probe
         self.exes = dict(exes or {})  # {harness: command prefix} given by the caller (the tests' fakes)
@@ -240,6 +241,9 @@ class Hub:
 
     def rung_ok(self, rung, kind: str = "") -> str:
         """"" when `rung` may run a step of `kind` ("" = a plain Run), else the reason (README 3.6)."""
+        hit = self.limited(rung) if isinstance(rung, str) else ""
+        if hit:
+            return hit
         name, bare = claude_cli.split_rung(rung)
         if name != "claude":
             if not harness.is_on(self.cfg, name):
@@ -257,6 +261,13 @@ class Hub:
                     "haiku", "sonnet"):
                 return f"{name}: {bare} is not a think model"
         return ""
+
+    def limited(self, rung: str) -> str:
+        now = time.time()
+        self.limits = {key: hit for key, hit in self.limits.items() if float(hit.get("until") or 0) > now}
+        provider = limits.provider(rung)
+        hit = self.limits.get(provider)
+        return f"{provider}: {hit['why']}, until {limits.clock(hit['until'])}" if hit else ""
 
     def poll_once(self) -> int:
         with self.lock:  # request threads call this too, right after they add a line
@@ -837,10 +848,13 @@ class Hub:
         """(the last assistant text, the last result's subtype) of a window run's current turn, whole: runs.chat
         cuts a text at 4000 characters, and a step's HANDOFF block stands at the end of its final message. Read
         through the run's adapter; a timed-out run reports error_step_timeout (the retry reason reads it)."""
-        meta = self.runs.meta(sid) or {}
-        _, lines = runs.read_lines(self.runs.stream_path(sid), meta.get("offset", 0))  # this turn only
-        summary = harness.get(meta.get("harness") or "claude").summary(lines)
+        meta, _, summary = self._turn_summary(sid)
         return summary["final"], "error_step_timeout" if meta.get("timed_out") else summary["subtype"]
+
+    def _turn_summary(self, sid: str) -> tuple:
+        meta = self.runs.meta(sid) or {}
+        _, lines = runs.read_lines(self.runs.stream_path(sid), meta.get("offset", 0))
+        return meta, lines, harness.get(meta.get("harness") or "claude").summary(lines)
 
     def _next_step(self, task: dict):
         """The step that would start now: the first of a planned task, the current step when it was reset to
@@ -1408,8 +1422,15 @@ class Hub:
     def start_step(self, task: dict, n: int) -> None:
         """Route step `n` and start its run; a hold waits for Fred, a run that cannot start makes the task stuck."""
         s, now, lines = tasks.step(task, n), time.time(), []
+        s.pop("limit", None)
         self.reload_models()  # review B12: a models.json edit reaches this step's route, not the next one
+        manual = s.get("manual_route")
+        refused = self.limited(manual["rung"]) if manual else ""
+        if refused:
+            s.pop("manual_route", None)
         route = s.get("manual_route") or self._route_for(task, s)
+        if refused:
+            route["notes"].append(f"manual route refused: {refused} -> auto")
         if route.get("rung") and self.rung_ok(route["rung"], s["kind"]):
             tasks._task_to(task, "stuck", self.rung_ok(route["rung"], s["kind"]), now, s, lines)
             return self._commit(task, lines)
@@ -1623,8 +1644,20 @@ class Hub:
         if task["state"] == "waiting" and "asked" in cs and cs["asked"] == meta.get("started"):
             return ""  # no answer yet: the turn that asked is still the last one
         cs["ctx_tokens"] = s["ctx_tokens"]  # plan 25: the context the step reached (None: unknown, plan 5 3.6)
-        text, subtype = self.final_message(sid)
-        question = s["stop_question"] or tasks.reply_question(text)
+        meta, _, summary = self._turn_summary(sid)
+        text = summary["final"]
+        subtype = "error_step_timeout" if meta.get("timed_out") else summary["subtype"]
+        hit = summary.get("limit")
+        if hit:
+            provider = limits.provider(cs["model"])
+            self.limits[provider] = {"until": limits.until(hit, now, self.cfg["limit_cooldown_s"]),
+                                     "why": hit["why"]}
+            try:
+                limits.save(self.folder, self.limits)
+            except OSError:
+                pass
+            cs["limit"] = provider
+        question = "" if hit else s["stop_question"] or tasks.reply_question(text)
         if question:
             cs["asked"] = meta.get("started")
             action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
@@ -1657,7 +1690,7 @@ class Hub:
             verdict, detail = s["verdict"], s["verdict_detail"]
         action, lines = tasks.on_step_ended(task, ok=ok, block_error=block_error, verdict=verdict,
                                             verdict_detail=detail if verdict else "", question="", now=now,
-                                            cap=tasks.cap_reason(subtype, meta.get("limits")))
+                                            cap=self.limited(cs["model"]) or tasks.cap_reason(subtype, meta.get("limits")))
         self.sync_costs(task)
         if found is not None and action in (("manual",) if manual else ("next", "fix", "done")):
             if task.pop("redo", None) is not None:  # plan 27: the old plan's parts go before the new plan is saved

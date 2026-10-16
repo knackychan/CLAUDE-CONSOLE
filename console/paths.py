@@ -79,6 +79,7 @@ DEFAULTS = {
         "cmd": {"on": False, "exe": ""},
     },
     "step_timeout_s": 1800,  # ends a run of an adapter with no turn or spend cap
+    "limit_cooldown_s": 3600,
     "effort_variant": {},  # OpenCode: {model: {effort: variant}}
     "storage_warn_mb": 500,
     "task_clear_on_done": True,

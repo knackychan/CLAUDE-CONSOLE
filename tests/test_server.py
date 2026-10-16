@@ -2543,6 +2543,39 @@ class HarnessServerTest(TaskServerTest):
         self.assertEqual(second["harness"], "codex")
         self.assertIn("tokens today", " ".join(second["notes"]))
 
+    def test_quota_attempt_names_limit_and_retries_on_claude(self):
+        self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"})
+        self.hub.cfg["harnesses"]["codex"]["on"] = False
+        self.assertEqual(self.hub.cfg["limit_cooldown_s"], 3600)
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "QUOTA HANDOFF-OK",
+                                     "model": "opencode:opencode-go/kimi-k3"}])
+        task = self.until(tid, lambda t: t["state"] == "done", "the quota retry completes")
+        step = task["steps"][0]
+        self.assertTrue(step["attempts"][0]["why"].startswith(
+            "opencode:opencode-go: Go usage limit exceeded (5 hour), until "))
+        self.assertEqual(step["harness"], "claude")
+        saved = json.loads((self.folder / "limits.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["opencode:opencode-go"]["why"], "Go usage limit exceeded (5 hour)")
+
+    def test_limit_refuses_every_model_of_the_provider(self):
+        self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"})
+        self.hub.limits["opencode:opencode-go"] = {"until": time.time() + 60, "why": "5 hour limit"}
+        self.assertIn("opencode:opencode-go: 5 hour limit, until ", self.hub.rung_ok("opencode:opencode-go/kimi-k3"))
+        self.assertIn("opencode:opencode-go: 5 hour limit, until ", self.hub.rung_ok("opencode:opencode-go/glm-5.3"))
+
+    def test_expired_limit_allows_provider_again(self):
+        self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/kimi-k3": "opus"})
+        self.hub.limits["opencode:opencode-go"] = {"until": time.time() - 1, "why": "old limit"}
+        self.assertEqual(self.hub.rung_ok("opencode:opencode-go/kimi-k3"), "")
+        self.assertNotIn("opencode:opencode-go", self.hub.limits)
+
+    def test_config_tiers_explain_limited_provider(self):
+        self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/kimi-k3": "opus"})
+        self.hub.limits["opencode:opencode-go"] = {"until": time.time() + 60, "why": "5 hour limit"}
+        tiers = self.call("/api/config")[1]["tiers"]
+        row = next(r for r in tiers["think"] if r["rung"] == "opencode:opencode-go/kimi-k3")
+        self.assertIn("5 hour limit", row["why"])
+
     def test_auto_chat_keeps_fable_explicit_and_refuses_an_empty_pool(self):
         card = self.prep_card("THINK about the design")
         self.hub.cfg["tiers"]["think"] = ["fable", "opus"]
