@@ -292,7 +292,7 @@ textarea.in.m { font: 12px/1.45 var(--mono); }
 .pset { margin-top: 6px; padding: 8px 8px 2px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--raise) 45%, var(--win)); display: grid; gap: 8px; }
 .pop .pset .fold { gap: 0; background: var(--win); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .pop .pset .fold .fh { align-items: center; min-height: 34px; padding: 0 10px 0 12px; gap: 10px; }
-.pop .pset .fold .fh .lbl { font: 600 12.5px var(--ui); letter-spacing: 0; text-transform: none; color: var(--ink); }
+.pop .pset .fold .fh .fl { font: 600 12.5px var(--ui); letter-spacing: 0; text-transform: none; color: var(--ink); }
 .pop .pset .fold .fh .fi { flex: 1; text-align: right; }
 .pop .pset .fold .fh:hover { background: var(--raise); }
 .pop .pset .fold .fh[aria-expanded="true"] { border-bottom: 1px solid var(--line); }
@@ -509,8 +509,14 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .fh { display: flex; gap: 8px; align-items: center; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent;
   color: var(--mut); font: 11px var(--mono); cursor: pointer; text-align: left; min-height: 24px; }
 .fh .lbl { flex: none; }
+/* plan 38 U11: a fold head is a control and looks like one: ink label in the UI face, caret first, a hover fill;
+   static labels keep .lbl (muted mono caps, no caret), so the two never read alike */
+.fold > .fh { padding: 0 8px; margin: 0 -8px; width: calc(100% + 16px); border-radius: 6px; color: var(--mut); }
+.fold > .fh:hover { background: var(--raise); }
+.pop .pset .fold > .fh, .mp .pcard .fold > .fh, .fold.hf > .fh, .fold.facts > .fh { margin: 0; width: 100%; }
+.fh .fl { flex: none; font: 500 12.5px var(--ui); color: var(--ink); }
 .fh .fi { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fh .car { font-size: 9px; flex: none; }
+.fh .car { font-size: 10px; flex: none; width: 10px; color: var(--ink); transition: transform 120ms ease-out; }
 .fold.hf { gap: 0; padding: 3px 10px; border-radius: 6px; background: var(--raise); }
 .fold.hf .fb { padding: 4px 0 4px; }
 .hsec { display: grid; gap: 2px; padding: 6px 10px 7px; border-radius: 6px; background: var(--raise); }
@@ -532,7 +538,8 @@ pre.text { margin: 0; padding: 8px 10px; max-height: 42vh; overflow: auto; borde
 .fh .fi.r, .fh .fi .r { color: var(--bad); } .fh .fi.y, .fh .fi .y { color: var(--you); }
 .fh .fi b { color: var(--ink); font-weight: 400; }
 .fh:hover { color: var(--ink); }
-.fh[data-fold][aria-expanded="true"] .car { display: inline-block; transform: rotate(180deg); }
+.fh[data-fold][aria-expanded="true"] .car { display: inline-block; transform: rotate(90deg); }
+.turn.prompt .fh[aria-expanded="true"] .car { transform: rotate(180deg); }  /* the Prompt chip keeps its ▾ */
 .hb { display: grid; gap: 8px; }
 .hsec p { white-space: pre-wrap; }
 .hsec li.cut { color: var(--mut); }

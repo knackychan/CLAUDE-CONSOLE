@@ -518,7 +518,7 @@ class State:
                 group = "needs"
             elif state in DONE:
                 group = "done"
-            elif state == "replied":
+            elif state in ("replied", "idle"):  # plan 38 D1 b: an idle session's turn is over, the next is Fred's
                 group = "replied"
             else:
                 group = "working"

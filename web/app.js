@@ -1631,7 +1631,7 @@ function stepBody(text) {  // a ### Step N section or a sub-plan: Files, Actions
 // -- plan 23: the Handoff fold, its facts, the chip's block parser ---------------------------------
 function fold(label, info, body, o = {}) {  // a head button and a body; o.cls, o.tone ("r" | "y"), o.open, o.title; the open state outlives a redraw
   const open = o.force ? true : o.key ? foldOpen(o.key, o.open) : foldLabel.has(label) ? foldLabel.get(label) : !!o.open;
-  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold${o.key ? ` data-fkey="${esc(o.key)}"` : ""} aria-expanded="${open}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="lbl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span><span class="car">▾</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
+  return `<div class="fold${o.cls ? " " + o.cls : ""}"><button class="fh" data-fold${o.key ? ` data-fkey="${esc(o.key)}"` : ""} aria-expanded="${open}"${o.title ? ` title="${esc(o.title)}"` : ""}><span class="car" aria-hidden="true">▸</span><span class="fl">${label}</span><span class="fi${o.tone ? " " + o.tone : ""}">${info}</span></button><div class="fb"${open ? "" : " hidden"}>${body}</div></div>`;
 }
 const HEADS = { "## Goal": "goal", "## Findings": "findings", "## Files touched": "files", "## Troubleshooting": "trouble",
                 "## Open questions": "questions", "## Next": "next" };  // tasks.HEADINGS
@@ -2982,7 +2982,7 @@ function busyBox(tid) { return `<div id="b-msg" class="say" data-tid="${esc(tid)
 function stepButtons(t, s, d, row) {  // the step's levers: they sit in the dock bar under the pane
   const shown = stepShown(t, s, row), lv = d.levers || {};
   const failedTry = shown === "failed" && (s.attempts || []).length > 1 ? (s.attempts.find((a) => a.why) || s.attempts[0]) : null;
-  return (s.session ? '<button class="btn sm' + (shown === "replied" ? " go" : "") + '" data-open="' + esc(s.session) + '" title="The session page, with its levers' + (shown === "replied" ? ": Continue is there" : "") + '">Open chat</button>' : "")
+  return nextActions(t, s, d) + (s.session ? '<button class="btn sm" data-open="' + esc(s.session) + '" title="The session page, with its levers' + (shown === "replied" ? ": Continue is there" : "") + '">Open chat</button>' : "")
     + (s.state === "running" && lv.stop === "" ? `<button class="btn sm stop" data-tact="stop" data-tid="${esc(t.id)}" title="Interrupts the run; the task stops">Stop</button>` : "")
     + (failedTry ? `<button class="btn sm" data-open="${esc(failedTry.session)}">Open try 1</button>` : "")
     + (t.chat && s.state === "running" && t.state === "running" && chatReplied(s) ? `<button class="btn sm" data-tact="chatdone" data-tid="${esc(t.id)}" title="Ends this chat task; a later follow-up reopens it">Mark done</button>` : "")
@@ -3049,7 +3049,7 @@ async function openStepFile(b) {
 }
 function handPane(t, s, d) {
   const note = (d.notes || {})[String(s.n)] || "", meta = s.brief_meta || {}, nx = t.steps.find((x) => x.n === s.n + 1);
-  if (s.state === "running") return '<p class="note m">Writing. Shows here when the run ends.</p>';
+  if (s.state === "running" && !(t.chat && chatReplied(s))) return '<p class="note m">Writing. Shows here when the run ends.</p>';  // plan 38 U2: a replied chat's turn is over
   if (s.state === "planned") return '<p class="note m">Not started.</p>';
   if (!note) return '<p class="note m">No handoff: the step ended without a HANDOFF block.</p>';
   const raw = meta.raw_w != null ? meta.raw_w : wc(note), got = meta.sent_w;
@@ -3156,13 +3156,15 @@ function nextFormHtml(t, s, row, d) {
       : `<div class="lr"><button class="btn go" data-tact="nextstart" data-tid="${esc(t.id)}" disabled>Start step</button>
       <button class="btn" data-tact="nextcancel" data-tid="${esc(t.id)}">Cancel</button></div>`}</div>`;
 }
-function nextActions(t, d) {
+function nextActions(t, s, d) {  // plan 38 U3: in stepButtons, so every inspector tab carries them; the primary is the next action
+  const cur = t.current == null ? s.n : t.current, open = nextOpen && nextOpen.key === nextKey(t, s);
+  if (!s.session || s.n !== cur || open || (s.state === "running" && !chatReplied(s))) return "";
   const lv = d.levers || {}, tid = esc(t.id);
   const add = lv.add_next === ""
-    ? `<button class="btn" data-tact="nextopen" data-tid="${tid}" title="A fresh session in this task, in the same folder, with the handover">Add next step</button>`
-    : `<button class="btn" disabled title="${esc(lv.add_next || "Add next step is not available yet")}">Add next step</button>`;
-  const fin = lv.done === "" ? `<button class="btn" data-tact="done" data-tid="${tid}">Finish task</button>` : "";
-  return `<div class="lr">${add}${fin}</div>`;
+    ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" title="A fresh session in this task, in the same folder, with the handover">Add next step</button>`
+    : `<button class="btn sm" disabled title="${esc(lv.add_next || "Add next step is not available yet")}">Add next step</button>`;
+  const fin = lv.done === "" ? `<button class="btn sm" data-tact="done" data-tid="${tid}">Finish task</button>` : "";
+  return add + fin;
 }
 function nextSecondary(t, d) {
   const lv = d.levers || {}, tid = esc(t.id);
@@ -3191,7 +3193,7 @@ function stepFooter(t, s, d, row) {
   const box = canChat ? `<div class="askbox cont">${question ? `<div class="q">${esc(question)}</div>` : ""}
     <textarea class="in" id="b-tcont" data-sid="${esc(s.session)}" rows="2" aria-label="${question ? "Answer" : "Follow-up"}" placeholder="${question ? `Your answer continues step ${two(s.n)} in its chat.` : `Follow-up for this chat. It continues step ${two(s.n)} in its own session.`}">${esc(fuDraft[s.session] || "")}</textarea>
     <div class="lr"><button class="btn ${question ? "you" : "go"}" data-tact="${question ? "answer" : "cont"}" data-tid="${esc(t.id)}">${question ? "Send answer" : "Continue"}</button></div></div>` : "";
-  return box + nextActions(t, d) + nextSecondary(t, d);
+  return box + nextSecondary(t, d);  // plan 38 U3: Add next step and Finish task sit in the dock bar on every tab
 }
 async function openNextForm(tid, kind) {
   const bd = boardData && boardData.id === tid ? boardData.data : null;
@@ -3201,6 +3203,7 @@ async function openNextForm(tid, kind) {
   const box = $("b-tcont");
   if (box) fuDraft[s.session] = box.value;
   nextOpen = { tid, key };
+  itab = "chat";  // plan 38 U3: the form lives on the Chat tab; the button now sits on every tab
   nextDraftFor(t, bd, s);
   if (kind) { nextDraft[key].kind = kind; setInstr(nextDraft[key], nextInstr(t, bd, s, kind, null)); }
   nextView = null;
@@ -3375,21 +3378,20 @@ function inspTask(t, d, row) {
   if (row.paused_after) wait += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
   const qs = d.questions || [], open = qs.filter((q) => !q.closed), closed = qs.filter((q) => q.closed);
   const qrow = (q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.opened)}${q.closed ? " · closed " + two(q.closed) : ""}</span></div>`;
-  const doneWhen = (String(t.goal || "").match(/Done when:\s*([^\n]*)/) || [, ""])[1] || String(t.goal || "").split("\n")[0].slice(0, 80);
   const log = d.chain || [], last = log[log.length - 1];
   const move = (c) => `${c.step ? two(c.step) : "task"} ${esc(c.from)} -> ${esc(c.to)}`;
   const n = row.count;
   const off = ["stop", "retry", "clear"].filter((k) => lv[k]).map((k) => `${k === "clear" ? "Delete" : k[0].toUpperCase() + k.slice(1)} off: ${esc(lv[k])}`).join(" · ");
   const levers = `<div class="v-levers">${lv.done === "" ? `<button class="btn" data-tact="done" data-tid="${tid}">Mark done</button>` : ""}${lv.clear === "" ? `<button class="btn stop" data-tact="clear" data-tid="${tid}" title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays">Delete</button>` : ""}
-    <span class="m">${off || (lv.clear === "" ? "Delete asks once more" : "")}</span></div>`;
+    </div>`;  // plan 38 U11: why Stop / Retry / Delete are off lives in the task head's title, not a line
   return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
-    <div class="meta">${labHtml(t.id)}<span title="the folder name the chip copies">${tid}</span><button class="olink" data-tact="folder" data-tid="${tid}" title="${esc(taskDir(t.id))}">Open folder</button></div>
+    <div class="meta"${off ? ` title="${off}"` : ""}>${labHtml(t.id)}<button class="olink" data-tact="folder" data-tid="${tid}" title="${esc(taskDir(t.id))}">Open folder</button></div>
     <div class="meta"><span>${esc(t.project)}</span><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span>${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}</div></div>${busyBox(t.id)}
     ${now}${wait}
-    ${fold("prompt.md", `Done when: ${esc(doneWhen)}`, `<pre class="text">${esc(t.goal)}</pre>`, { key: "promptmd" })}
-    <div class="blk"><span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("") || '<p class="note m">none</p>'}</div>
-      ${closed.length ? fold("", `${closed.length} closed`, `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf", key: "qclosed" }) : ""}</div>
-    ${log.length ? fold("Chain log", `${log.length} moves · last ${hhmm(last.ts)} ${move(last)}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}
+    ${fold("prompt.md", "", `<pre class="text">${esc(t.goal)}</pre>`, { key: "promptmd" })}
+    ${open.length || closed.length ? `<div class="blk">${open.length ? `<span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("")}</div>` : ""}
+      ${closed.length ? fold(`${closed.length} closed question${closed.length === 1 ? "" : "s"}`, "", `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf", key: "qclosed" }) : ""}</div>` : ""}
+    ${log.length ? fold("Chain log", `${log.length}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}
     ${levers}`;
 }
 function inspPrep(t, d, row) {  // step 00 of a task that ran: the card Prep left (task.prep, plan 29) and its 00-prep/ files

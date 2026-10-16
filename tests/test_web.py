@@ -131,6 +131,14 @@ class ModelUsageTest(unittest.TestCase):
 
 
 @unittest.skipUnless(NODE, "Node is not installed")
+class FoldTest(unittest.TestCase):  # plan 38 U11: a fold head reads as a control, never as a static .lbl caption
+    def test_fold_head_has_a_caret_first_and_its_own_label(self):
+        html = render('fold("prompt.md", "", "<pre>goal</pre>")')
+        self.assertIn('<button class="fh" data-fold aria-expanded="false"><span class="car" aria-hidden="true">▸</span>'
+                      '<span class="fl">prompt.md</span>', html)
+        self.assertNotIn('class="lbl"', html)
+
+
 class NextStepUITest(unittest.TestCase):
     """Plan 36 Task 3: the Add next step footer and inline form (web/app.js)."""
 
@@ -206,11 +214,11 @@ class NextStepUITest(unittest.TestCase):
         self.assertIn("off", render(self._setup() + "routeLine({busy: false, error: 'off'})"))
 
     def test_add_next_step_disabled_carries_a_reason(self):
-        html = render(self._setup() + "nextActions({id: 't'}, {levers: {add_next: 'still working', done: 'x'}})")
+        html = render(self._setup() + "nextActions({id: 't', current: 1}, {n: 1, session: 's', state: 'done'}, {levers: {add_next: 'still working', done: 'x'}})")
         self.assertIn("Add next step", html)
         self.assertIn("still working", html)
         self.assertNotIn("Finish task", html)
-        enabled = render(self._setup() + "nextActions({id: 't'}, {levers: {add_next: '', done: ''}})")
+        enabled = render(self._setup() + "nextActions({id: 't', current: 1}, {n: 1, session: 's', state: 'done'}, {levers: {add_next: '', done: ''}})")
         self.assertIn('data-tact="nextopen"', enabled)
         self.assertIn("Finish task", enabled)
 
@@ -229,8 +237,14 @@ class NextStepUITest(unittest.TestCase):
                       "{levers: {add_next: '', done: '', handoff: '', next: ''}}, null)")
         self.assertIn("Continue", html)
         self.assertIn('data-tact="cont"', html)
-        self.assertIn("Add next step", html)
-        self.assertIn("Finish task", html)
+        self.assertNotIn("Add next step", html)  # plan 38 U3: in the dock bar, on every tab
+        dock = render(self._setup(snap=snap) +
+                      "stepButtons({id: 't', chat: true, state: 'running', current: 1, "
+                      "steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
+                      "{n: 1, session: 's', state: 'running', kind: 'chat'}, "
+                      "{levers: {add_next: '', done: '', handoff: '', next: ''}}, null)")
+        self.assertIn('class="btn sm go" data-tact="nextopen"', dock)
+        self.assertIn("Finish task", dock)
         self.assertIn("Hand off", html)
         self.assertIn("Start new task", html)
 

@@ -29,6 +29,23 @@ class GuardTest(unittest.TestCase):
         self.assertFalse(guard.post_ok({}))
 
 
+class ChatTaskGroupTest(unittest.TestCase):  # plan 38 U1 (D1 b): a chat task follows its session's group
+    def row(self, session_state, session_group, task_state="running"):
+        t = tasks.new_task("/p", "proj", "fix add()", "goal", tasks.plan_steps([{"kind": "code", "goal": "g"}], 6),
+                           "normal", {}, "", "auto", 1000.0)
+        t.update(state=task_state, current=1, chat=True)
+        t["steps"][0].update(state="running", session="s1", model="sonnet", effort="high")
+        r = {"state": session_state, "group": session_group, "stop_question": "", "handoff_hint": False,
+             "ctx_tone": "", "follow_ups": 0}
+        return server.task_row(t, sessions={"s1": r})
+
+    def test_idle_chat_sits_in_replied(self):
+        self.assertEqual(self.row("idle", "replied")["group"], "replied")
+
+    def test_working_chat_stays_working(self):
+        self.assertEqual(self.row("running", "working")["group"], "working")
+
+
 class ServerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

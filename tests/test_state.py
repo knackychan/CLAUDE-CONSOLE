@@ -45,7 +45,7 @@ class StateTest(unittest.TestCase):
         self.assertEqual((self.row(T0 + 2000)["state"], self.row(T0 + 2000)["group"]), ("lost", "done"))
         self.feed(ev("Stop", T0 + 20))
         self.assertEqual((self.row(T0 + 30)["state"], self.row(T0 + 30)["group"]), ("replied", "replied"))
-        self.assertEqual((self.row(T0 + 700)["state"], self.row(T0 + 700)["group"]), ("idle", "working"))
+        self.assertEqual((self.row(T0 + 700)["state"], self.row(T0 + 700)["group"]), ("idle", "replied"))  # plan 38 D1 b
         self.assertEqual(self.row(T0 + 2000)["state"], "stale")
         self.assertEqual(self.row(T0 + 2000)["group"], "done")
         self.assertEqual(self.row(T0 + 30)["title"], "fix the updater retry")
