@@ -1,7 +1,7 @@
 # Task actions on the task page and on any step: brainstorm
 
-Status: **decided** 2026-10-16 (Fred took option 2 and the recommended placement; section 5 lists what is
-still open). Becomes [plan 39](../../plans/39-task-actions.md) (to write). Design only: no code changed here.
+Status: **decided** 2026-10-16 (Fred took option 2 and the recommended placement, then (a) on D1 to D6 the same
+day: nothing is open). Becomes [plan 39](../../plans/39-task-actions.md) (to write). Design only: no code changed here.
 
 Context: [CLAUDE.md](../../CLAUDE.md), [BRAINSTORM.md](../../BRAINSTORM.md) (non-goals, 7.5),
 [plan 36](../../plans/36-next-step/README.md) and its [design guideline](2026-10-15-next-step.md),
@@ -150,7 +150,7 @@ session and a saved note or final reply may be the source of a new step. The cha
 - One primary per surface: on the task page Add next step is the filled button when allowed, else Finish task
   when allowed; on a step page the same; on a replied chat Continue stays the filled button in the follow-up box.
 
-## 5. Open decisions
+## 5. Decisions (Fred, 2026-10-16: (a) on all six)
 
 - **D1** Continue from the task page: (a) a Continue button that jumps to the latest step's Chat tab and
   focuses the follow-up box (one click, no second textarea); (b) the follow-up textarea on the task page itself,
@@ -174,7 +174,7 @@ session and a saved note or final reply may be the source of a new step. The cha
   only when the current facts differ from the source's recorded facts. Recommended (a): simpler, and the line is
   true either way.
 
-## 6. Plan 39 sketch (zero-decision once section 5 is answered)
+## 6. Plan 39 sketch (zero-decision: section 5 is answered, (a) throughout)
 
 One guided plan, five tasks, one commit each, tests first where a test can see the change.
 
