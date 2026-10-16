@@ -1,5 +1,5 @@
 """The Codex CLI adapter: `codex exec --json -` with the prompt on stdin (README 3.3, 3.4)."""
-from .. import claude_cli, redact
+from .. import claude_cli, limits, redact
 from . import section, which
 
 NAME = "codex"
@@ -54,9 +54,13 @@ def _item_text(item: dict) -> str:
 
 
 def summary(lines: list) -> dict:
-    final, subtype, tokens, sid = "", "", None, ""
+    final, subtype, tokens, sid, hit = "", "", None, "", None
     for d in lines:
         kind = d.get("type")
+        error = d.get("error")
+        message = d.get("message") or (error.get("message") if isinstance(error, dict) else "")
+        if kind in ("error", "turn.failed") and isinstance(message, str) and limits.TEXT.search(message):
+            hit = {"why": message[:160], "until": None, "window_s": limits.window_s(message)}
         if kind == "thread.started" and isinstance(d.get("thread_id"), str):
             sid = d["thread_id"]
         elif kind == "item.completed":
@@ -75,7 +79,7 @@ def summary(lines: list) -> dict:
         elif kind == "turn.started":
             subtype = ""
     return {"final": final, "subtype": subtype, "cost": None, "tokens": tokens, "session_id": sid,
-            "denials": [], "exit_cap": False}
+            "denials": [], "exit_cap": False, "limit": hit}
 
 
 def _tool_text(item: dict) -> str:

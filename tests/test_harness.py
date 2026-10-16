@@ -216,6 +216,11 @@ class CodexTest(unittest.TestCase):
         self.assertIsNone(codex.summary(failed)["tokens"])
         self.assertEqual(codex.summary([])["subtype"], "")
 
+    def test_summary_detects_usage_limit_text(self):
+        hit = codex.summary([{"type": "error", "message": "You've hit your usage limit"}])["limit"]
+        self.assertEqual(hit, {"why": "You've hit your usage limit", "until": None, "window_s": None})
+        self.assertIsNone(codex.summary([{"type": "error", "message": "network unavailable"}])["limit"])
+
     def test_chat_items(self):
         items = codex.chat(CODEX_LINES, "/w")
         self.assertEqual([i["role"] for i in items], ["tool", "claude", "result"])
@@ -290,6 +295,31 @@ class OpenCodeTest(unittest.TestCase):
                          {"input": 5, "output": 2, "cache_read": 3, "context": None})
         self.assertTrue(opencode.is_result({"type": "session.idle"}))
         self.assertFalse(opencode.is_result({"type": "text"}))
+
+    def test_summary_detects_go_quota_error(self):
+        hit = opencode.summary([{"type": "error", "error": {"type": "provider.quota",
+            "message": "Go usage limit exceeded", "status": 429,
+            "response": {"body": '{"metadata":{"limitName":"5 hour"}}'}}}])["limit"]
+        self.assertEqual(hit, {"why": "Go usage limit exceeded (5 hour)", "until": None, "window_s": 18000})
+
+    def test_fake_quota_error(self):
+        pf = Path(tempfile.mkdtemp()) / "p.md"
+        self.addCleanup(shutil.rmtree, pf.parent, True)
+        pf.write_text("QUOTA", encoding="utf-8")
+        cmd, _ = opencode.run_command(["fake"], "m", "low", "/w", "sid", prompt="x", prompt_file=str(pf))
+        r = subprocess.run(fake("fake_opencode.py") + cmd[1:], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 1)
+        hit = opencode.summary(parse(r.stdout) + [{"type": "cc_exit", "code": 1}])["limit"]
+        self.assertEqual((hit["why"], hit["window_s"]), ("Go usage limit exceeded (5 hour)", 18000))
+
+    def test_claude_rate_limit_rejected_only(self):
+        resets = 1792170000
+        rejected = {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected",
+                    "resetsAt": resets, "rateLimitType": "five_hour"}}
+        self.assertEqual(claude_adapter.summary([rejected])["limit"],
+                         {"why": "five hour limit", "until": resets, "window_s": None})
+        rejected["rate_limit_info"]["status"] = "allowed"
+        self.assertIsNone(claude_adapter.summary([rejected])["limit"])
 
     def test_terminal_command(self):
         self.assertEqual(opencode.terminal_command(["opencode"], "ses_1", "glm-5.3", "high"),

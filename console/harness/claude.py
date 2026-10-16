@@ -1,7 +1,7 @@
 """The Claude Code adapter: claude_cli and the stream-json shapes behind the adapter contract (no new behaviour)."""
 import uuid
 
-from .. import claude_cli, redact, transcript
+from .. import claude_cli, limits, redact, transcript
 from . import section
 
 NAME = "claude"
@@ -39,7 +39,7 @@ def is_result(line: dict) -> bool:
 
 
 def summary(lines: list) -> dict:
-    final, result = "", None
+    final, result, hit = "", None, None
     for d in lines:
         if d.get("type") == "assistant" and not d.get("parent_tool_use_id"):
             for block in (d.get("message") or {}).get("content") or []:
@@ -47,6 +47,14 @@ def summary(lines: list) -> dict:
                     final = block["text"]
         elif d.get("type") == "result":
             result = d
+            text = str(d.get("result") or "")
+            if d.get("is_error") and limits.TEXT.search(text):
+                hit = {"why": text[:160], "until": None, "window_s": limits.window_s(text)}
+        elif d.get("type") == "rate_limit_event":
+            info = d.get("rate_limit_info") or {}
+            if info.get("status") == "rejected":
+                name = str(info.get("rateLimitType") or "usage").replace("_", " ")
+                hit = {"why": f"{name} limit", "until": info.get("resetsAt"), "window_s": None}
     result = result or {}
     denials = []
     for d in (result.get("permission_denials") or [])[:3]:
@@ -55,7 +63,7 @@ def summary(lines: list) -> dict:
     subtype = result.get("subtype", "")
     return {"final": final, "subtype": subtype, "cost": result.get("total_cost_usd"), "tokens": None,
             "session_id": result.get("session_id", ""), "denials": denials,
-            "exit_cap": subtype in ("error_max_turns", "error_max_budget_usd")}
+            "exit_cap": subtype in ("error_max_turns", "error_max_budget_usd"), "limit": hit}
 
 
 def chat(lines: list, cwd: str) -> list:

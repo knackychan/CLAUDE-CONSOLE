@@ -43,6 +43,10 @@ def main(argv):
     if "SLOW" in prompt:
         time.sleep(3)
     out({"type": "text", "part": {"text": reply(prompt)}})
+    if "QUOTA" in prompt:
+        out({"type": "error", "error": {"type": "provider.quota", "message": "Go usage limit exceeded",
+             "status": 429, "response": {"body": '{"metadata":{"limitName":"5 hour"}}'}}})
+        return 1
     if "FAIL" in prompt:
         return 1
     out({"type": "session.idle"})

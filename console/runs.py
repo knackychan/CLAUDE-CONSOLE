@@ -67,6 +67,8 @@ def result_record(session_id: str, summary: dict, exit_code, stopped: bool, time
         rec["tokens"] = summary["tokens"]
     if summary.get("denials"):
         rec["denials"] = summary["denials"]
+    if summary.get("limit"):
+        rec["limit"] = summary["limit"]
     if subtype == "success" and not stopped:
         question = tasks.reply_question(summary.get("final"))
         if question:

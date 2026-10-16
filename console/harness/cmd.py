@@ -97,7 +97,7 @@ def summary(lines: list) -> dict:
     code = _exit_code(lines)
     subtype = "success" if code == 0 else "error_max_turns" if code == 8 else "error"
     return {"final": final or assistant, "subtype": subtype, "cost": None, "tokens": tokens,
-            "session_id": _session_id(lines), "denials": [], "exit_cap": code == 8}
+            "session_id": _session_id(lines), "denials": [], "exit_cap": code == 8, "limit": None}
 
 
 def chat(lines: list, cwd: str) -> list:

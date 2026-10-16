@@ -1,7 +1,7 @@
 """The OpenCode adapter: `opencode run --standalone --format json` with the prompt in a file (README 3.3, 3.4)."""
 import json
 
-from .. import claude_cli, redact
+from .. import claude_cli, limits, redact
 from . import section, which
 
 NAME = "opencode"
@@ -83,16 +83,29 @@ def _tokens(lines: list):
 
 
 def summary(lines: list) -> dict:
-    final, sid = "", ""
+    final, sid, hit = "", "", None
     for d in lines:
         text = _text_of(d)
         if text.strip():
             final = text
         if not sid:
             sid = next((d[k] for k in ("sessionID", "session_id") if isinstance(d.get(k), str)), "")
+        error = d.get("error")
+        if d.get("type") == "error" and isinstance(error, dict) and (
+                "quota" in str(error.get("type", "")).lower() or error.get("status") == 429):
+            why = str(error.get("message") or "usage limit")
+            response = error.get("response")
+            body = response.get("body") if isinstance(response, dict) else None
+            try:
+                name = json.loads(body).get("metadata", {}).get("limitName") if isinstance(body, str) else None
+            except (ValueError, AttributeError):
+                name = None
+            if isinstance(name, str) and name:
+                why += f" ({name})"
+            hit = {"why": why, "until": None, "window_s": limits.window_s(name or "")}
     code = _exit_code(lines)
     return {"final": final, "subtype": "success" if code == 0 else "error", "cost": None,
-            "tokens": _tokens(lines), "session_id": sid, "denials": [], "exit_cap": False}
+            "tokens": _tokens(lines), "session_id": sid, "denials": [], "exit_cap": False, "limit": hit}
 
 
 def chat(lines: list, cwd: str) -> list:
