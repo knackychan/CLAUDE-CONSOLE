@@ -187,6 +187,30 @@ CODEX_LINES = [
 
 
 class CodexTest(unittest.TestCase):
+    def test_store_shell_filtered_only_for_codex_startup(self):
+        path = r'C:\tools;C:\Users\me\Microsoft\WindowsApps;C:\Windows\System32'
+        with mock.patch.object(codex, "os", name="os") as env_os, \
+                mock.patch.object(codex.Path, "is_file", return_value=True):
+            env_os.name, env_os.pathsep, env_os.environ = "nt", ";", {"PATH": path}
+            self.assertEqual(codex.env(False), {"PATH": r'C:\tools;C:\Windows\System32'})
+            cmd, _ = codex.run_command(["x"], "m", "low", "/w", "sid", prompt="hi")
+            self.assertIn("shell_environment_policy.set.PATH=" + json.dumps(path), cmd)
+            env_os.name = "posix"
+            self.assertEqual(codex.env(False), {})
+
+    def test_shell_start_failure_is_not_success(self):
+        failed = {"type": "item.completed", "item": {"type": "command_execution", "exit_code": -1,
+                  "aggregated_output": "Failed to create unified exec process: CreateProcessAsUserW failed: 5"}}
+        done = {"type": "turn.completed"}
+        self.assertEqual(codex.summary([failed, done])["subtype"], "error_shell_start")
+        self.assertEqual(codex.chat([failed, done], "/w")[-1]["text"], "error · 1 turns")
+        recovered = {"type": "item.completed", "item": {"type": "command_execution", "exit_code": 0}}
+        self.assertEqual(codex.summary([failed, recovered, done])["subtype"], "success")
+        self.assertEqual(codex.summary([failed, done, {"type": "turn.started"}, done])["subtype"], "success")
+        ordinary = {"type": "item.completed", "item": {"type": "command_execution", "exit_code": 1,
+                    "aggregated_output": "test assertion failed"}}
+        self.assertEqual(codex.summary([ordinary, done])["subtype"], "success")
+
     def test_command_shape(self):
         cmd, stdin = codex.run_command(["x"], "gpt-6.1-sol", "xhigh", "D:/p", "sid", prompt="hi")
         self.assertEqual(cmd[:2], ["x", "exec"])

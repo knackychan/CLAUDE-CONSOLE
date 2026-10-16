@@ -75,6 +75,7 @@ let live = false;
 let form = "open";       // open | pill
 let page = "board";      // board | session | usage | models (plan 30: the Board is the one view)
 let openId = null;
+let sessionView = "chat"; // task head, prep record, or the chat step
 let backTo = null;       // {page: "board"} or {page: "session", id}: where the session page's back arrow returns
 const foldLabel = new Map(); // plan 23: fold label -> open, kept across redraws (Handoff, its headings, Facts, Window runs); closed on openTask
 let settingBusy = false; // POST /api/setting in flight (the Window runs switch)
@@ -443,7 +444,7 @@ function renderOnTop() {
 function showPage(name) {
   page = name;
   closePicker();
-  document.querySelectorAll("[data-page]").forEach((p) => { p.hidden = p.dataset.page !== name; });
+  document.querySelectorAll("[data-page]").forEach((p) => { p.hidden = p.dataset.page !== name && !(name === "session" && p.dataset.page === "board"); });
   leversSig = "";
   procShown = "";
   if (name === "session") $("sscroll").scrollTop = 0;
@@ -455,10 +456,11 @@ function showPage(name) {
   render();
 }
 
-async function openSession(id, list = "chat") {
+async function openSession(id, list = "chat", view = "chat") {
   if (form === "pill") await setForm("open");
   if (id !== openId) att.answer = att.fu = [];  // files were for the other session's boxes
   openId = id;
+  sessionView = view;
   tab = list;
   tlMin = -1;
   const s = current();
@@ -499,8 +501,7 @@ function render() {
   }
   if (form === "pill") { renderFolded(false); return; }
   snap.sessions.filter((s) => PEEK.has(s.state)).forEach((s) => seen.add(peekId(s)));  // seen while open
-  if (page === "session") renderSession();
-  else if (page === "board") renderBoard();
+  if (page === "session" || page === "board") renderBoard();
 }
 
 // -- the spend cells ----------------------------------------------------------------------
@@ -558,6 +559,26 @@ function cardHtml(s) {
     <span class="age m" title="since the last event">${ago(snap.now - s.last_ts)}</span></div>
     <div class="l2 m"><span class="who">${esc(s.project)}${s.two_writers ? " · 2 writers" : ""}<span class="route"> · ${esc(routeText(s))}</span></span>
     <span class="cost">${spentText(s)}</span>${ctxMini(s)}</div>${third}</div>`;
+}
+
+function sessionTree(s) {
+  const picked = page === "session" && openId === s.id, open = picked || s.group !== "done";
+  const tn = tone(s), sid = esc(s.id);
+  const attrs = (view) => `data-open="${sid}" data-sview="${view}" tabindex="0" role="button"`;
+  const selected = (view) => picked && sessionView === view ? " picked" : "";
+  return `<div class="v-tk${picked ? " act" : ""}"><div class="v-th${selected("task")}" ${attrs("task")}>
+    <div class="l1"><span class="st ${tn}">${sessionMark(s, s.symbol, tn)}${esc(label(s))}</span><span class="t">${esc(s.title)}</span></div>
+    <div class="l2"><span class="why">${esc(s.project)} · 1 chat step</span><span class="cost">${spentText(s)}</span></div></div>
+    ${open ? `<div class="v-subs"><div class="v-sr zero${selected("prep")}" ${attrs("prep")}>
+      ${sprite(s.prep ? "done" : "stopped")}<span class="n">00</span><span class="k"><b>prep</b><span class="m">${s.prep ? esc(s.prep_model || "recorded") : "not recorded"}</span></span><span></span><span class="c">${s.prep ? money(s.prep_cost) : ""}</span></div>
+      <div class="v-sr${selected("chat")}" ${attrs("chat")}>${sessionMark(s, s.symbol, tn)}<span class="n">01</span><span class="k"><b>chat</b><span class="m">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span></span>${ctxMini(s)}<span class="c">${spentText(s)}</span></div></div>` : ""}</div>`;
+}
+function sessionHead(s) {
+  const prepOn = sessionView === "prep", overview = sessionView === "task", tn = prepOn ? (s.prep ? "g" : "q") : tone(s);
+  const mark = prepOn ? sprite(s.prep ? "done" : "stopped") : sessionMark(s, s.symbol, tn);
+  const word = prepOn ? (s.prep ? "Done" : "Not recorded") : label(s);
+  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${mark}${esc(word)}</span><h2>${overview ? esc(s.title) : prepOn ? "00 prep" : "01 chat"}</h2></div>
+    <div class="meta"><span>${esc(s.project)}</span>${prepOn ? (s.prep ? `<span>${esc(s.prep_model || "model not recorded")}</span><span>cost <b>${money(s.prep_cost)}</b></span>` : "") : `<span>${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span><span>cost <b>${spentText(s)}</b></span>`}</div></div>`;
 }
 
 function quietHtml(s, showProject) {
@@ -1283,15 +1304,14 @@ function renderSession() {
     setHtml($("levers"), "");
     return;
   }
-  const t = tone(s);
-  const when = BUSY.has(s.state) ? "turn " + ago(snap.now - s.turn_ts) : (s.state === "stop" ? "waiting " : "") + ago(snap.now - s.last_ts);
-  const src = s.source === "?" ? "" : s.source + " / ";
-  setHtml($("sbody"), `<div class="head"><span class="st ${t}">${sessionMark(s, s.symbol, t)}${esc(label(s))} <span class="lc">· ${when}</span></span><h2>${esc(s.title)}</h2>${taskLink(s)}
-    <div class="where"><span class="m" title="${esc(s.route_reason || "")}">${esc(s.project)} / ${esc(src)}${esc(s.route)}</span>
-    ${s.model ? `<span class="mdl" title="${esc(s.model)}">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span>` : ""}
-    ${s.project_dir ? `<button class="btn sm" data-here="${esc(s.project_dir)}">New task here</button>` : ""}</div></div>
-    ${noteLine(s)}${askBlock(s)}${renderBrief(s)}`);
-  renderProc(s).catch(() => {});
+  const prepOn = sessionView === "prep", overview = sessionView === "task";
+  $("proc").hidden = prepOn || overview;
+  setHtml($("sbody"), sessionHead(s) + (prepOn
+    ? `<div class="ipane"><p class="note m">${s.prep ? `Prep ${esc(s.prep)} · ${esc(s.prep_model || "model not recorded")} · ${s.prep_turns || 0} turns · cost ${money(s.prep_cost)}` : "No Console Prep was recorded for this chat. It started outside the Console task flow."}</p></div>`
+    : overview ? `<div class="ipane"><p class="note">${esc(s.title)}</p><p class="note m">1 chat step · ${esc(s.project)} · ${esc(s.source)}</p></div>`
+    : `${noteLine(s)}${askBlock(s)}`));
+  if (!prepOn && !overview) renderProc(s).catch(() => {});
+  else ++procSeq;
   renderLevers(s).catch(() => {});
 }
 
@@ -1431,7 +1451,7 @@ async function renderProc(s) {
       <div class="hd at"><span class="lbl">${hhmm(at(sel))} · ${inMin.length} step${inMin.length === 1 ? "" : "s"}</span><span class="m">← → other minutes</span></div>
       ${inMin.length ? `<div class="log">${inMin.map((x) => logRow(x, "", stepTag(s)(x))).join("")}</div>` : '<p class="none">No step in this minute.</p>'}</div>`;
   } else {
-    body = chatPane(chat, s.id, s.source, { prompt: !!taskTag(s), step: stepOf(s.id) });
+    body = chatPane(chat, s.id, s.source, { prompt: true, step: stepOf(s.id), compact: true, board: true });
   }
   const html = `<div class="tabs" role="tablist" aria-label="Process">${TABS.map(([id, nm]) =>
     `<button role="tab" id="tab-${id}" data-tab="${id}" aria-selected="${wanted === id}" aria-controls="pane" tabindex="${wanted === id ? 0 : -1}">${nm}${id === "agents" ? ` <span class="n">${rows.length}</span>` : ""}</button>`).join("")}</div>
@@ -2565,7 +2585,7 @@ function dayGroup(k, rows, sessions) {  // one Done day: open (its rows) or fold
     : `<button class="act" data-sel="${k}" title="Pick finished tasks of this day to delete their folders">Select</button>`) : "";
   const head = `<div class="v-sec${open ? "" : " fd"}${hit}" id="day-${k}"><button class="dh" data-dayfold="${k}" aria-expanded="${open}"><span class="lbl">${dayLabel(k)} · ${n}</span>${open ? "" : '<span class="car">&#9662;</span>'}</button>${act}</div>`;
   if (!open) return head;
-  return head + rows.map((t) => taskHtml(t, { select: sel })).join("") + sessions.map((s) => quietHtml(s, !scope)).join("");
+  return head + rows.map((t) => taskHtml(t, { select: sel })).join("") + sessions.map(sessionTree).join("");
 }
 function doneDays(tasks, sessions) {  // {day: [tasks], ...} and the sessions by the day of their last event, newest day first
   const out = new Map();
@@ -2576,10 +2596,10 @@ function doneDays(tasks, sessions) {  // {day: [tasks], ...} and the sessions by
 function chainHtml() {
   const c = chainGroups(), job = (j) => (j.kind === "review" ? reviewHtml(j) : prepTaskHtml(j));
   const item = (x) => (x.steps ? taskHtml(x) : job(x));  // a Prep job has no steps and, unlike a review, no kind
-  let html = secHtml("y", "Needs you", c.needs.length + c.needsS.length, "", "needsec") + c.needs.map(item).join("") + c.needsS.map(cardHtml).join("")
-    + secHtml("", "Replied", c.replied.length + c.repliedS.length) + c.replied.map(item).join("") + c.repliedS.map((s) => quietHtml(s, !scope)).join("")
-    + secHtml("", "Working", c.work.length + c.workS.length) + c.work.map(item).join("") + c.workS.map(cardHtml).join("")
-    + secHtml("", "Idle", c.idleS.length) + c.idleS.map((s) => quietHtml(s, !scope)).join("");
+  let html = secHtml("y", "Needs you", c.needs.length + c.needsS.length, "", "needsec") + c.needs.map(item).join("") + c.needsS.map(sessionTree).join("")
+    + secHtml("", "Replied", c.replied.length + c.repliedS.length) + c.replied.map(item).join("") + c.repliedS.map(sessionTree).join("")
+    + secHtml("", "Working", c.work.length + c.workS.length) + c.work.map(item).join("") + c.workS.map(sessionTree).join("")
+    + secHtml("", "Idle", c.idleS.length) + c.idleS.map(sessionTree).join("");
   for (const [k, rows, sessions] of doneDays(c.done, c.doneS)) html += dayGroup(k, rows, sessions);
   const older = snap.older || 0;
   if (older) {
@@ -2608,7 +2628,7 @@ function emptyBoard() {
 // a task: its head row, then its steps on a tree line (00 prep in violet; a fix and its re-verify one level further)
 function taskOpen(t) {  // Q4 (a): a finished task and a chat fold to their head; the picked one opens
   if (t.id === boardTask) return true;
-  return !t.chat && taskGroup(t) !== "done";
+  return taskGroup(t) !== "done";
 }
 function labHtml(id) {
   const cp = copiedId === id;
@@ -2632,7 +2652,7 @@ function taskHtml(t, o = {}) {
   const picked = t.id === boardTask && boardPick === "t";
   const cls = ["v-tk", tn === "y" || tn === "r" ? tn : "", t.id === boardTask || t.state === "running" ? "act" : "", done ? "done" : ""].filter(Boolean).join(" ");
   const chk = o.select ? `<input type="checkbox" class="chk" data-check="${esc(t.id)}" aria-label="${esc("Select " + t.title)}"${selected.has(t.id) ? " checked" : ""}>` : "";
-  const [why, wt] = headWhy(t), pick = t.chat && t.steps.length ? "s" + t.steps[0].n : "t";  // a chat opens on its one step, as a step does
+  const [why, wt] = headWhy(t), pick = "t";
   const head = `<div class="v-th${picked ? " picked" : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-bpick="${pick}" data-btask="${esc(t.id)}" tabindex="0" role="button" title="${esc(t.project)} · effort ${esc(t.effort)}">
     <div class="l1">${chk}<span class="st ${tn}">${taskMark({ ...t, state: shown })}${done ? "" : word}</span><span class="t">${esc(t.title)}</span>${done ? "" : `<span class="age">${ago(snap.now - t.updated)}</span>`}</div>
     <div class="l2">${labHtml(t.id)}<span class="why${wt ? " " + wt : ""}" title="${esc(why)}">${esc(why)}</span><span class="cost">${money(t.cost)}</span>${open ? "" : '<span class="v-more">&#9656;</span>'}</div></div>`;
@@ -2719,11 +2739,11 @@ async function renderBoard() {
   $("needsbtn").textContent = `${nb} ${nb === 1 ? "needs" : "need"} you`;
   $("scopenm").textContent = scope ? projectName(scope) : "All projects";
   await olderFetch();
-  if (page !== "board") return;
+  if (page !== "board" && page !== "session") return;
   const job = boardTask && preps().find((j) => j.id === boardTask);
   if (boardTask && !job && !boardRow(boardTask)) { boardTask = ""; boardPick = ""; }  // gone: deleted, or run (a Prep id becomes the task's)
   setHtml($("bchain"), chainHtml());
-  $("vboard").classList.toggle("open", !!boardPick);
+  $("vboard").classList.toggle("open", page === "session" || !!boardPick);
   setHtml($("bfoot"), `<span><span class="kbd">↑</span><span class="kbd">↓</span> move</span><span><span class="kbd">Enter</span> chat</span><span><span class="kbd">C</span> copy label</span><span><span class="kbd">Esc</span> back</span><span class="sp"></span>
     <button class="q" title="A step's context in cells of 20K; a handoff shows on the step that received it when it was cut, carries the plan or went as written" aria-label="Legend">?</button>`);
   renderCompose();
@@ -2731,6 +2751,14 @@ async function renderBoard() {
   await renderInspector(job);
 }
 async function renderInspector(job) {
+  const sessionOn = page === "session";
+  document.querySelector('[data-page="session"]').hidden = !sessionOn;
+  if (sessionOn) {
+    $("iprep").hidden = $("bwrap").hidden = true;
+    $("bbackwhat").textContent = current()?.title || "Chat";
+    renderSession();
+    return;
+  }
   const prepOn = boardPick === "p" && job && job.card;
   $("iprep").hidden = !prepOn;
   $("bwrap").hidden = !!prepOn;
@@ -2909,7 +2937,7 @@ function openTask(id) {  // a task from the session page or a card: picked on th
   boardData = boardChat = null;
   showPage("board");
 }
-function boardItems() { return [...document.querySelectorAll("#bchain [data-bpick], #bchain .card[data-open]")].filter((el) => el.tabIndex >= 0); }
+function boardItems() { return [...document.querySelectorAll("#bchain [data-bpick], #bchain [data-open]")].filter((el) => el.tabIndex >= 0); }
 function boardKey(e) {
   if (e.key === "Escape") {
     e.preventDefault();
@@ -3491,7 +3519,7 @@ async function go(name, button) {
   if (name === "list") { backTo = null; showPage("board"); }
   if (name === "back") goBack();
   if (name === "board") showPage("board");
-  if (name === "bback") { boardPick = ""; boardTask = ""; prepShown = ""; renderBoard(); }
+  if (name === "bback") { if (page === "session") { goBack(); return; } boardPick = ""; boardTask = ""; prepShown = ""; renderBoard(); }
   if (name === "new") { if (form === "pill") await setForm("open"); showPage("board"); $("c-prompt").focus(); }
   if (name === "needs") {
     if (scope) pick("");
@@ -3579,7 +3607,8 @@ document.addEventListener("click", async (e) => {
     if (t.dataset.btask !== boardTask) { boardTask = t.dataset.btask || ""; boardData = boardChat = null; }
     boardPick = t.dataset.bpick;
     if (boardPick !== "x" && selecting && boardPick !== "t") setSelecting("");
-    renderBoard();
+    if (page === "session") showPage("board");
+    else renderBoard();
   } else if (t.dataset.itab) { itab = t.dataset.itab; saveDraft(); renderBoard(); }
   else if (t.dataset.eff) setEffort(t.dataset.eff);
   else if (t.dataset.task) openTask(t.dataset.task);
@@ -3590,7 +3619,7 @@ document.addEventListener("click", async (e) => {
   else if (t.dataset.prep) prepJob(t.dataset.prep, t.dataset.pdo);
   else if (t.dataset.go) go(t.dataset.go, t);
   else if (t.dataset.do) unblock(t);
-  else if (t.dataset.open) openSession(t.dataset.open);
+  else if (t.dataset.open) openSession(t.dataset.open, "chat", t.dataset.sview || "chat");
   else if (t.dataset.tab) { tab = t.dataset.tab; const s = current(); if (s) renderProc(s).catch(() => {}); }
   else if (t.dataset.min !== undefined) { tlMin = tlBase() + Number(t.dataset.min); const s = current(); if (s) renderProc(s).catch(() => {}); }
   else if (t.dataset.act) act(t.dataset.act, t);
@@ -3682,13 +3711,13 @@ document.addEventListener("keydown", (e) => {
   if (id === "fu" && e.key === "Enter") return act("continue", document.querySelector('[data-act="continue"]'));
   if (id === "pk" && e.key === "Enter") return unblock(document.querySelector('[data-do="send"][data-where="peek"]'));
   if (id.startsWith("ca-") && e.key === "Enter") return unblock(e.target.closest("[data-stay]").querySelector('[data-do="send"]'));
-  if (e.key === "Enter" && e.target.matches(".card[data-open],.card[data-prep],.card[data-task]")) { e.target.click(); return; }
+  if (e.key === "Enter" && e.target.matches("[data-open],.card[data-prep],.card[data-task]")) { e.target.click(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); go("new"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
   const onCtl = e.key !== "Escape" && e.target.matches('[data-page="board"] button, [data-page="board"] select');  // plan 27: Enter presses it, the arrows scroll
   if (e.key === "Escape" && nextOpen) { e.preventDefault(); cancelNextForm(); return; }  // plan 36: Escape closes only the inline form
-  if (page === "board" && form === "open" && BOARD_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && $("pop").hidden && !inField && !onCtl && !e.target.closest(".tabs")) return boardKey(e);
+  if ((page === "board" || page === "session" && e.target.closest("#bchain")) && form === "open" && BOARD_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && $("pop").hidden && !inField && !onCtl && !e.target.closest(".tabs")) return boardKey(e);
   if (e.key === "Escape") {
     if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();

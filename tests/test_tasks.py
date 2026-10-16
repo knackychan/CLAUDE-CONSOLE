@@ -452,6 +452,16 @@ class ChainTest(unittest.TestCase):
                          "it hit the step timeout (1800 s)")
         self.assertEqual(tasks.cap_reason("error_step_timeout", None), "it hit the step timeout (? s)")
 
+    def test_shell_start_failure_does_not_advance(self):
+        task = make(("test", "code"))
+        run(task, 1)
+        why = tasks.cap_reason("error_shell_start", None)
+        self.assertIn("could not start the workspace shell", why)
+        action, _ = end(task, ok=False, cap=why)
+        self.assertEqual((action, task["current"], task["last_good"]), ("retry", 1, 0))
+        action, _ = end(task, ok=False, cap=why)
+        self.assertEqual((action, task["state"]), ("stuck", "stuck"))
+
     def test_cap_reason_names_the_cap(self):
         self.assertEqual(tasks.cap_reason("error_max_turns", {"max_turns": 12}), "it hit the turn cap (12 turns)")
         self.assertEqual(tasks.cap_reason("error_max_budget_usd", {"budget": 3}), "it hit the step budget (3.00 USD)")

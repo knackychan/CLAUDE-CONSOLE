@@ -1011,3 +1011,12 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
   .bfoot { display: none; }
 }
 @container (max-width: 372px) { .v-pg { display: none; } }
+
+/* Session chats share the Board inspector, keeping the task list beside them. */
+.v-right > [data-page="session"] { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+
+.v-right .sess .body { padding: 0; gap: 0; }
+.v-right .sess .ihead { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.v-right .sess .ipane { padding: 16px; }
+.v-right .sess .proc { margin-top: 0; min-height: 0; }
+.v-right .sess .pane { padding: 14px 16px; }

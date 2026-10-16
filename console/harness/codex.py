@@ -1,4 +1,8 @@
 """The Codex CLI adapter: `codex exec --json -` with the prompt on stdin (README 3.3, 3.4)."""
+import json
+import os
+from pathlib import Path
+
 from .. import claude_cli, limits, redact
 from . import section, which
 
@@ -29,6 +33,9 @@ def run_command(exe: list, model: str, effort: str, cwd: str, session_id: str, *
     cmd = list(exe) + ["exec", "--json", "-C", cwd, "--skip-git-repo-check", "-m", model,
                        "-c", f'model_reasoning_effort="{EFFORT.get(effort, "medium")}"',
                        "-s", "read-only" if read_only else "workspace-write"]
+    if env(read_only):
+        # Keep Store app aliases available to commands after Codex selects a runnable shell.
+        cmd += ["-c", "shell_environment_policy.set.PATH=" + json.dumps(os.environ.get("PATH", ""))]
     if fork:
         cmd += ["fork", fork]
     elif resume:
@@ -38,6 +45,15 @@ def run_command(exe: list, model: str, effort: str, cwd: str, session_id: str, *
 
 
 def env(read_only: bool) -> dict:
+    if os.name == "nt":
+        path = os.environ.get("PATH", "")
+        # Store PowerShell aliases cannot start with Codex's restricted Windows token.
+        kept = [p for p in path.split(os.pathsep) if not (
+            "windowsapps" in p.lower().replace("\\", "/").split("/")
+            and (Path(p) / "pwsh.exe").is_file())]
+        filtered = os.pathsep.join(kept)
+        if filtered != path:
+            return {"PATH": filtered}
     return {}
 
 
@@ -55,6 +71,7 @@ def _item_text(item: dict) -> str:
 
 def summary(lines: list) -> dict:
     final, subtype, tokens, sid, hit = "", "", None, "", None
+    shell_failed = False
     for d in lines:
         kind = d.get("type")
         error = d.get("error")
@@ -65,6 +82,12 @@ def summary(lines: list) -> dict:
             sid = d["thread_id"]
         elif kind == "item.completed":
             item = d.get("item") or {}
+            if item.get("type") == "command_execution":
+                output = item.get("aggregated_output") or ""
+                if "CreateProcessAsUserW failed:" in output or "Failed to create unified exec process:" in output:
+                    shell_failed = True
+                elif item.get("exit_code") == 0:
+                    shell_failed = False
             if item.get("type") == "agent_message":
                 final = _item_text(item)
         elif kind == "turn.completed":
@@ -78,6 +101,9 @@ def summary(lines: list) -> dict:
             subtype = "error"
         elif kind == "turn.started":
             subtype = ""
+            shell_failed = False
+    if subtype == "success" and shell_failed:
+        subtype = "error_shell_start"
     return {"final": final, "subtype": subtype, "cost": None, "tokens": tokens, "session_id": sid,
             "denials": [], "exit_cap": False, "limit": hit}
 
@@ -101,8 +127,12 @@ def _tool_text(item: dict) -> str:
 
 def chat(lines: list, cwd: str) -> list:
     items, turns = [], 0
+    turn_lines = []
     for d in lines:
         kind = d.get("type")
+        if kind == "turn.started":
+            turn_lines = []
+        turn_lines.append(d)
         if "raw" in d:
             items.append({"role": "note", "text": redact.clip(d["raw"], 300)})
         elif kind == "cc_prompt":
@@ -118,7 +148,8 @@ def chat(lines: list, cwd: str) -> list:
             items.append({"role": "note", "text": redact.clip(str(d.get("message", "error")), 300)})
         elif kind == "turn.completed":
             turns += 1
-            items.append({"role": "result", "text": f"success · {turns} turns"})
+            status = "error" if summary(turn_lines)["subtype"] == "error_shell_start" else "success"
+            items.append({"role": "result", "text": f"{status} · {turns} turns"})
         elif kind == "turn.failed":
             turns += 1
             items.append({"role": "result", "text": f"error · {turns} turns"})

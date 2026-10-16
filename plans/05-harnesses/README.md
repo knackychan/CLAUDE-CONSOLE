@@ -52,6 +52,12 @@ window task as anchored edits, never a whole-file copy, and stage only this plan
 
 ## 3. The contract (what every task must keep)
 
+2026-10-16 Windows Codex repair: exclude PATH entries containing Store `pwsh.exe` during CLI startup so
+shell discovery selects unpackaged PowerShell; restore the original PATH for model commands through
+`shell_environment_policy.set.PATH`. Keep the existing sandbox mode. A command startup failure that has
+no later successful shell command in the turn yields `error_shell_start`, using the task's existing retry
+then stuck behavior instead of advancing. Regression coverage: `test_harness.py`, `test_tasks.py`.
+
 ### 3.1 Names
 
 - A **harness name** is one of `claude`, `codex`, `opencode`, `cmd`. `harness.NAMES` is that tuple, in that order.

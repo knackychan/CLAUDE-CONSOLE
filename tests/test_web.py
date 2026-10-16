@@ -80,6 +80,48 @@ class ChatCopyTest(unittest.TestCase):
                                           "copied": "line one\n<two>" if success else None,
                                           "removed": mode != "native", "done": success})
 
+    def test_open_session_keeps_board_visible_and_uses_right_pane(self):
+        result = render("""(async () => {
+          const pages = ['board', 'session', 'usage', 'models'].map(page => ({dataset: {page}, hidden: true}));
+          document = {querySelectorAll: () => pages, getElementById: () => ({})};
+          closePicker = () => {}; render = () => {};
+          snap = {sessions: [{id: 's', title: 'Working chat'}]};
+          form = 'open';
+          await openSession('s');
+          const visible = pages.filter(p => !p.hidden).map(p => p.dataset.page);
+          let rendered = false;
+          renderSession = () => {rendered = true;};
+          document.querySelector = () => pages[1];
+          await renderInspector(null);
+          showPage('board');
+          return {visible, rendered, after: pages.filter(p => !p.hidden).map(p => p.dataset.page)};
+        })()""")
+        self.assertEqual(result, {"visible": ["board", "session"], "rendered": True, "after": ["board"]})
+        html = APP.with_name("index.html").read_text(encoding="utf-8")
+        right = html.index('<div class="v-right">')
+        session = html.index('<section data-page="session"')
+        inspector = html.index('<div id="bwrap"')
+        self.assertLess(right, session)
+        self.assertLess(session, inspector)
+
+    def test_standalone_chat_has_task_prep_and_chat_rows(self):
+        setup = """snap = {now: 100}; page = 'session'; openId = 's'; sessionView = 'chat';
+          s = {id: 's', title: 'Fix the run', state: 'replied', group: 'replied',
+               symbol: 'R', project: 'Console', model: 'sonnet', harness: 'claude',
+               effort: 'medium', cost: 1, ctx_tokens: 0, prep: ''}; """
+        html = render(setup + "sessionTree(s)")
+        for view in ('task', 'prep', 'chat'):
+            self.assertIn('data-sview="' + view + '"', html)
+        self.assertIn('not recorded', html)
+        self.assertIn('class="v-sr picked"', html)
+        self.assertIn('<b>chat</b>', html)
+        recorded = render(setup + "s.prep = 'p'; s.prep_model = 'haiku'; s.prep_cost = 0.01; sessionTree(s)")
+        self.assertNotIn('not recorded', recorded)
+        self.assertIn('haiku', recorded)
+
+    def test_chat_task_expands_like_other_running_tasks(self):
+        self.assertTrue(render("boardTask = ''; taskOpen({id: 't', chat: true, state: 'running', group: 'working'})"))
+
     def test_board_chat_shows_the_answer_prompt_for_a_question(self):
         setup = "snap = {sessions: [{id: 's', state: 'stop', run_live: false, stop_question: 'Shall I fix it?'}], tasks: []}; boardChat = {sid: 's', chat: {items: [], source: 'window'}};"
         html = render(setup + "chatTab({id: 't', chat: true, state: 'running'}, {n: 1, session: 's', state: 'running'}, {})")

@@ -41,25 +41,23 @@
         </div>
         <div class="v-right">
           <div class="v-back"><button data-go="bback" title="Back to the chain (Esc)">&#8249; Board</button><span id="bbackwhat"></span></div>
+          <section data-page="session" hidden>
+            <div class="top" hidden>
+              <button class="rb" data-go="back" title="Back (Esc)" aria-label="Back">&#8592;</button>
+              <span id="pos" class="crumb m"></span>
+              <button id="prev" class="rb" data-step="-1" title="Previous session (Up)" aria-label="Previous session">&#8249;</button>
+              <button id="next" class="rb" data-step="1" title="Next session (Down)" aria-label="Next session">&#8250;</button>
+              <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
+            </div>
+            <div id="sscroll" class="scroll sess"><div id="sbody" class="body"></div><div id="proc" class="proc"></div></div>
+            <div id="levers" class="levers"></div>
+          </section>
           <div id="bwrap" class="bwrap"></div>
           <div id="iprep" class="v-iprep" hidden><div id="pscroll" class="scroll stack"></div><div id="pbar" class="levers"></div></div>
         </div>
       </div>
       <div id="bfoot" class="bfoot"></div>
       <input id="filepick" type="file" multiple hidden>
-    </section>
-
-    <section data-page="session" hidden>
-      <div class="top">
-        <button class="rb" data-go="back" title="Back (Esc)" aria-label="Back">&#8592;</button>
-        <span id="pos" class="crumb m"></span>
-        <button id="prev" class="rb" data-step="-1" title="Previous session (Up)" aria-label="Previous session">&#8249;</button>
-        <button id="next" class="rb" data-step="1" title="Next session (Down)" aria-label="Next session">&#8250;</button>
-        <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
-        <span data-winbtns></span>
-      </div>
-      <div id="sscroll" class="scroll sess"><div id="sbody" class="body"></div><div id="proc" class="proc"></div></div>
-      <div id="levers" class="levers"></div>
     </section>
 
     <section data-page="usage" hidden>

@@ -619,6 +619,8 @@ def _insert_fix(task: dict, s: dict, now: float, detail: str) -> None:
 def cap_reason(subtype: str, limits) -> str:
     """Why a step's run stopped at one of its caps (the result subtypes of the Agent SDK), else ""."""
     limits = limits or {}
+    if subtype == "error_shell_start":
+        return "Codex could not start the workspace shell; check its Windows sandbox and PowerShell installation"
     if subtype == "error_max_turns":
         return f"it hit the turn cap ({limits.get('max_turns') or '?'} turns)"
     if subtype == "error_max_budget_usd":
