@@ -2658,7 +2658,7 @@ function miniCtx(s) {  // 8 cells of 20K and the figure; a harness with no conte
   return `<span class="mini" title="context reached ${kTokens(tok)} (a cell is 20K)"><span class="cells">${cellsHtml(cls)}</span><b class="${ctxFigTone(tok)}">${kTokens(tok)}</b></span>`;
 }
 function receivedNote(t, s) {  // the handoff s received, shown only when it has something to say: cut, the plan, as written
-  const prev = t.steps.find((x) => x.n === s.n - 1), meta = (prev && prev.brief_meta) || {};
+  const prev = t.steps.find((x) => x.n === (s.source_step || s.n - 1)), meta = (prev && prev.brief_meta) || {};  // plan 39: by source
   if (!prev || s.state === "planned") return "";
   if (prev.kind === "design" && t.plan && t.plan.from === prev.n) return "received + plan";
   if (meta.fallback) return "received as written";
@@ -2673,7 +2673,8 @@ function chainStepHtml(t, s, picked) {
   const cost = pl ? "" : costUnknown(s) ? '<span class="c u" title="the harness reported no usage">?</span>' : `<span class="c">${money(s.cost)}</span>`;
   const s2 = [s.verdict ? `<span class="${s.verdict === "FAIL" ? "r" : "g"}">${s.verdict}</span>` : "", receivedNote(t, s), scoutHint(t, s, null),
     shown === "waiting" ? `<span class="y">${esc(t.asks || t.why)}</span>` : "", cur ? '<span class="w">writing</span>' : "",
-    s.part ? '<span title="a write step the design step made">from plan</span>' : ""].filter(Boolean).join(" · ");
+    s.part ? '<span title="a write step the design step made">from plan</span>' : "",
+    s.source_step && s.source_step !== s.n - 1 ? `<span title="a branch: this step started from step ${two(s.source_step)}'s handover">from ${two(s.source_step)}</span>` : ""].filter(Boolean).join(" · ");
   return `<div class="${cls}" data-bpick="s${s.n}" data-btask="${esc(t.id)}" tabindex="0" role="button">${sprite(spr)}<span class="n">${two(s.n)}</span>
     <span class="k"><b>${esc(s.kind)}</b>${rung ? `<span class="m">${esc(rung)}</span>` : ""}</span>${pl ? "<span></span>" : miniCtx(s)}${cost || '<span class="c"></span>'}${s2 ? `<span class="s2">${s2}</span>` : ""}</div>`;
 }
@@ -3011,9 +3012,10 @@ function recvPane(t, s, d) {  // what the step received: Prep's handoff for step
   const pf = d.prep_files || {};
   if (s.n === 1) return pf.handoff ? `<div class="blk"><div class="hd"><span class="lbl">From 00 prep</span><span class="m">${wc(pf.handoff)} w · Findings cut to 600 characters</span></div>
     ${headingBlock(handoffSections(pf.handoff), [], ["goal", "findings", "questions", "next"])}</div>` : '<p class="note m">No handoff: step 1 gets the task goal and Prep\'s context pack.</p>';
-  const prev = t.steps.find((x) => x.n === s.n - 1), brief = (d.briefs || {})[String(s.n - 1)] || "", meta = (prev && prev.brief_meta) || {};
-  const note = (d.notes || {})[String(s.n - 1)] || "", cut = (meta.cut || []).map(normItem);
-  if (!brief && !note) return `<p class="note m">The brief of step ${two(s.n - 1)} is not on disk (cleared, or the step never ran).</p>`;
+  const from = s.source_step || s.n - 1;  // plan 39: a branch received its source's note, not the step before it
+  const prev = t.steps.find((x) => x.n === from), brief = (d.briefs || {})[String(from)] || "", meta = (prev && prev.brief_meta) || {};
+  const note = (d.notes || {})[String(from)] || "", cut = (meta.cut || []).map(normItem);
+  if (!brief && !note) return `<p class="note m">The brief of step ${two(from)} is not on disk (cleared, or the step never ran).</p>`;
   const w = meta.sent_w != null ? meta.sent_w : wc(brief || note);
   const plan = prev && prev.kind === "design" && t.plan && t.plan.from === prev.n
     ? `<p class="note m">and plan.md, ${Number(t.plan.words || 0).toLocaleString("en")} w, never cut (the Plan tab)</p>` : "";
@@ -3025,7 +3027,7 @@ function recvPane(t, s, d) {  // what the step received: Prep's handoff for step
     open = open.concat(["files", "trouble"].filter((k) => h[k].some((x) => cut.includes(x))));
   }
   const how = meta.by === "as is" ? "as is, under the cap" : meta.fallback ? "as written" : cut.length ? `compacted, cut ${(meta.raw_w || 0) - (meta.sent_w || 0)} w` : "compacted";
-  return `<div class="blk"><div class="hd"><span class="lbl">From ${two(s.n - 1)}</span><span class="m">${w} w · ${how}</span></div>${plan}
+  return `<div class="blk"><div class="hd"><span class="lbl">From ${two(from)}</span><span class="m">${w} w · ${how}</span></div>${plan}
     ${headingBlock(h, cut, open, true)}</div>${checksFold(meta)}`;
 }
 function checksFold(meta) {  // what the code checked on the brief pass's answer (plan 23): closed unless one failed

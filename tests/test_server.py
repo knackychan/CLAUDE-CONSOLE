@@ -1468,7 +1468,8 @@ class TaskServerTest(RunServerTest):
                          [(1, "scout", "running"), (2, "code", "planned"), (3, "verify", "planned")])
         self.assertEqual(sorted(row["steps"][0]), sorted(["n", "kind", "state", "model", "effort", "session",
                                                           "verdict", "retries", "cost", "note", "attempts", "part", "hard",
-                                                          "end_commit", "brief_meta", "facts", "checked", "harness", "ctx_tokens"]))
+                                                          "end_commit", "brief_meta", "facts", "checked", "harness", "ctx_tokens",
+                                                          "source_step"]))  # plan 39: lineage
         self.assertIn(row["steps"][0]["note"], ("writing", "unchecked"))
         self.until(tid, self.at(2), "step 2 starts")
         steps = next(t for t in self.hub.snapshot()["tasks"] if t["id"] == tid)["steps"]
@@ -2294,6 +2295,16 @@ class TaskServerTest(RunServerTest):
         tasks.save(self.folder, t)
         self.hub.tasks[t["id"]] = t
         return t["id"]
+
+    def test_task_row_carries_the_source_step_of_a_branch(self):
+        """Plan 39 Task 4: the list's rows carry source_step, 0 when the step has none."""
+        t = tasks.new_task("/p", "proj", "fix add()", "goal", tasks.plan_steps([{"kind": "scout", "goal": "g"}], 6),
+                           "normal", {}, "", "auto", 1000.0)  # a read-only step: plan_steps adds no verify after it
+        t["steps"][0].update(state="done", session="s1")
+        t.update(current=1, progression="manual")
+        new = tasks.append_step(t, "verify", "check 01", now=1001.0)
+        self.assertEqual([s["source_step"] for s in server.task_row(t)["steps"]], [0, 1])
+        self.assertEqual(new["source_step"], 1)
 
     def test_task_row_carries_label_prep_and_fix_links(self):
         self.brief_pass_always()

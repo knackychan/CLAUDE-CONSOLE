@@ -2088,6 +2088,7 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
                        "checked": s.get("checked") or 0, "harness": s.get("harness") or "",  # plan 30: fix inserts, rungs
                        "ctx_tokens": s.get("ctx_tokens"),  # plan 30: the context cells of every row
                        "end_commit": s.get("end_commit", ""), "brief_meta": s.get("brief_meta"),
+                       "source_step": s.get("source_step") or 0,  # plan 39: lineage, one integer
                        "facts": s.get("facts"),  # plan 23
                        "note": tasks.note_state(t, s, live(s["session"]) if s["state"] == "running" else ""),
                        "attempts": [{"session": a["session"], "cost": a["cost"], "why": a["why"]}

@@ -316,6 +316,16 @@ class NextStepUITest(unittest.TestCase):
                      "nextOpen = {tid: 't', key: 't|2|other'}; const [, gone] = nextSource(bd); return [t && t.id, s && s.n, gone]; })()")
         self.assertEqual(out, ["t", 2, None])
 
+    def test_chain_row_tags_a_branch_with_its_source(self):
+        """Plan 39 Task 4: `from 02` on the row's second line when source_step is set and is not n - 1; no indentation."""
+        t = ("{id: 't', current: 4, steps: [{n: 1, kind: 'scout', state: 'done', source_step: 0}, {n: 2, kind: 'code', state: 'done', source_step: 1}, "
+             "{n: 3, kind: 'verify', state: 'done', source_step: 2}, {n: 4, kind: 'code', state: 'done', source_step: 2}]}")
+        html = render(self._setup() + f"stepRows({t})")
+        self.assertEqual(html.count("from 02"), 1)
+        self.assertIn('<span class="n">04</span>', html)
+        self.assertNotIn('class="v-subs"', html)  # a branch is a tag, never a nested list
+        self.assertEqual(render(self._setup() + f"receivedNote({t}, {{n: 4, state: 'done', source_step: 2}})"), "")
+
     def test_live_turn_explains_next_step_is_unavailable(self):
         snap = {"sessions": [{"id": "s", "state": "running", "run_live": True}],
                 "tasks": [], "versions": {}, "projects": []}
