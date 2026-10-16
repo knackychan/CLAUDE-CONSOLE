@@ -1575,9 +1575,10 @@ function stepTries(s) {  // the earlier attempts of a step, each a link to its c
 
 function handedBox(d, t, cur, shown) {  // Fred handed the task off: the skill's note, then Start next task (Mark done ends it)
   const [word, tn] = TASK_WORD[shown] || TASK_WORD.handed, dir = taskDir(t.id);
+  const retry = !d.handoff && d.levers && d.levers.retry === "";  // plan 40: the step's run failed and no note came: Retry on another model
   const body = d.handoff
     ? `<pre class="text">${esc(d.handoff)}</pre>${dir ? `<div class="m tpath">${esc(dir + "\\" + t.handoff_note.replace(/\//g, "\\"))}</div>` : ""}`
-    : `<p class="note m mut">${shown === "handing" ? `The chat of step ${cur.n} is writing its handoff note.` : "No handoff note: the handoff run did not finish."}</p>`;
+    : `<p class="note m mut">${shown === "handing" ? `The chat of step ${cur.n} is writing its handoff note.` : retry ? "No handoff note: the step's run failed. Retry it on another model." : "No handoff note: the handoff run did not finish."}</p>${retry ? retryForm(t, cur, esc(t.id)) : ""}`;
   return `<div class="askbox${tn === "y" ? "" : " ho"}"><span class="st ${tn}">${taskMark({ ...t, state: shown })}${word} <span class="lc">· step ${cur.n}</span></span>
     ${body}<div class="lr">${d.handoff ? '<button class="btn you" data-tact="next" title="A new task seeded with the handoff note">Start next task</button>' : ""}
     ${cur.session ? `<button class="btn" data-open="${esc(cur.session)}">Open step ${cur.n}</button>` : ""}</div></div>`;
@@ -3410,7 +3411,8 @@ function inspTask(t, d, row) {
   const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn sm${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
   const gap = /^(asks: )?Plan gap:/.test(row.asks || row.why || ""), replan = (t.why || "").startsWith("replanned:");
   const retryBox = t.state === "stuck" && !!t.why && lv.retry === "";  // plan 33: a stuck task's Retry sits under its reason, with a note
-  const buttons = b("stop", " stop", "Stop") + b("pause", "", "Pause") + b("resume", " go", "Resume") + (retryBox ? "" : b("retry", " go", "Retry"));
+  const handedRetry = t.state === "handed" && !d.handoff && lv.retry === "";  // plan 40: handedBox carries its Retry form
+  const buttons = b("stop", " stop", "Stop") + b("pause", "", "Pause") + b("resume", " go", "Resume") + (retryBox || handedRetry ? "" : b("retry", " go", "Retry"));
   const nxt = cur && t.steps.find((x) => x.n === cur.n + 1);
   const now = cur && cur.state === "running" && !(t.chat && chatReplied(cur))
     ? `<div class="now"><span class="cells"><i class="f live"></i></span><span>Now <b>${stepNo(cur)} ${esc(cur.kind)}</b> · ${rungTime(cur)}</span><span class="m">${nxt ? `next ${stepNo(nxt)} ${esc(nxt.kind)}` : "last step"}</span></div>` : "";

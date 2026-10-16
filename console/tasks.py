@@ -745,7 +745,8 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
         task["owner"], task["updated"] = "service", now
         lines.append(_line(now, s, "task:" + state, "task:" + state, "resumed by Fred"))
     elif lever == "retry":
-        if state not in ("stuck", "stopped"):
+        unhanded = state == "handed" and not task.get("handoff_note") and bool(s) and s["state"] == "failed"
+        if state not in ("stuck", "stopped") and not unhanded:  # plan 40: a handed task whose step failed, no note
             return False, "not stuck or stopped", []
         if s and s["state"] != "done":  # a finished step is not run twice: the next one is already planned
             on = ""
@@ -758,7 +759,7 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
             s["state"] = "planned"
             if note:  # plan 33: the retry's prompt carries Fred's words, and the reason a stuck step ended
                 task["retry_note"] = note
-            if state == "stuck" and (attempts(s) or [{}])[-1].get("why"):
+            if state in ("stuck", "handed") and (attempts(s) or [{}])[-1].get("why"):
                 task["retry_why"] = attempts(s)[-1]["why"]
         _task_to(task, "running" if s else "planned", "", now, s, lines)
         task["owner"] = "service"

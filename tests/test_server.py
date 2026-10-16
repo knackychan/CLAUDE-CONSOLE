@@ -977,6 +977,35 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(task["steps"][0]["model"], "sonnet")
         self.assertIn("retry by Fred on sonnet", [c["why"] for c in self.chain(tid)])
 
+    def test_hand_off_is_off_after_a_usage_limit(self):
+        """Plan 40 Task 5: a step whose last attempt hit a limit cannot answer a Hand off; other stuck steps keep it."""
+        tid = self.make_task(words="")
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        sid = task["steps"][0]["session"]
+        self.wait_idle(sid)
+        self.assertNotEqual(self.hub.levers(sid)["handoff"], "the run hit a usage limit: Retry on another model")
+        task["steps"][0]["limit"] = "claude"
+        self.assertEqual(self.hub.levers(sid)["handoff"], "the run hit a usage limit: Retry on another model")
+
+    def test_handed_task_without_a_note_and_a_failed_step_may_retry(self):
+        tid = self.make_task(words="")
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        old = task["steps"][0]["session"]
+        self.wait_idle(old)
+        with self.hub.tlock:
+            ok, why, lines = tasks.fred(task, "handoff", time.time())
+            self.hub._commit(task, lines)
+        self.assertEqual((ok, task["state"], task["steps"][0]["state"]), (True, "handed", "failed"))
+        self.assertEqual(self.hub.task_levers(tid)["retry"], "")
+        task["handoff_note"] = "steps/01-scout/handoff.md"
+        self.assertEqual(self.hub.task_levers(tid)["retry"], "task is handed")
+        self.assertEqual(self.call("/api/task/retry", {"task": tid})[0], 409)
+        del task["handoff_note"]
+        self.assertEqual(self.call("/api/task/retry", {"task": tid, "model": "sonnet"}),
+                         (200, {"task": tid, "state": "running"}))
+        task = self.until(tid, lambda t: t["steps"][0]["session"] != old, "step 1 runs again")
+        self.assertEqual((task["owner"], task["steps"][0]["model"]), ("service", "sonnet"))
+
     def test_verify_fail_inserts_fix_and_verify(self):
         tid = self.make_task()
         verify = self.hub.tasks[tid]["steps"][2]

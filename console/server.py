@@ -673,6 +673,8 @@ class Hub:
             for lever in ("continue", "verify", "handoff", "escalate", "deescalate"):
                 if not (lever in ("continue", "handoff") and asked):  # answer the step's question, or hand off
                     out[lever] = base or "a task step: use the task's levers"
+        if task and cs and cs["session"] == session_id and cs.get("limit"):  # plan 40: the session cannot answer
+            out["handoff"] = base or "the run hit a usage limit: Retry on another model"
         return out
 
     def pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = (), auto: int = 0) -> tuple:
@@ -975,8 +977,9 @@ class Hub:
             if task.get("progression") == "manual" and owner == "fred" and cs and cs["state"] == "done" \
                     and state == "waiting":
                 resume = "choose a next step or finish the task"
+            unhanded = bool(state == "handed" and not task.get("handoff_note") and cs and cs["state"] == "failed")
             retry = base or ("still working: wait until it stops" if live else
-                             "" if state in ("stuck", "stopped") else f"task is {state}")
+                             "" if state in ("stuck", "stopped") or unhanded else f"task is {state}")  # plan 40: 99bd
             why = task["why"]
             gap = state == "waiting" and why.startswith("asks: Plan gap:")
             answer = base or ("" if gap and task.get("plan") else "no plan gap waits")  # plan 27: a plan-less task asks plainly

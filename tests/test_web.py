@@ -278,6 +278,19 @@ class NextStepUITest(unittest.TestCase):
             self.assertIn(text, html)
         self.assertNotIn("kimi-k3", html)
 
+    def test_handed_box_offers_retry_when_the_service_allows_it(self):
+        """Plan 40 Task 5: a handed task with no note and a failed step shows the retry form and the failed-run line."""
+        cfg = {"models": ["opus"], "ladder": {"opus": ["opus"]}, "tiers": {"think": [], "write": [], "read": []}}
+        call = (f"cfg = {json.dumps(cfg)}; handedBox({{levers: {{retry: ''}}, handoff: ''}}, {{id: 't', state: 'handed'}}, "
+                "{n: 1, kind: 'scout', session: 's'}, 'handed')")
+        html = render(call)
+        self.assertIn("No handoff note: the step's run failed. Retry it on another model.", html)
+        for text in ('id="b-retrynote"', 'id="b-retrymodel"', 'data-tact="retry"'):
+            self.assertIn(text, html)
+        off = render(call.replace("retry: ''", "retry: 'task is handed'"))
+        self.assertIn("No handoff note: the handoff run did not finish.", off)
+        self.assertNotIn("b-retrymodel", off)
+
     def test_hand_off_and_start_new_task_read_the_step_levers(self):
         """Plan 39 Task 2 (plan 36 Task 3 slip): the Board's levers are task_levers, which never carry handoff or next."""
         html = render(self._setup() + "nextSecondary({id: 't'}, {levers: {handoff: '', next: ''}, step_levers: {handoff: 'x', next: 'y'}})")
