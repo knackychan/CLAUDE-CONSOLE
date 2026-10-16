@@ -2830,14 +2830,15 @@ for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, 
 class NextStepServerTest(TaskServerTest):
     """Plan 36 Task 1: manual progression through the service: one task, one step at a time, Fred picks the next."""
 
-    def source_of(self, tid, kind="code", instructions="do the next thing", model="auto"):
-        src = tasks.current_step(self.hub.tasks[tid])
+    def source_of(self, tid, kind="code", instructions="do the next thing", model="auto", at=0):
+        task = self.hub.tasks[tid]
+        src = tasks.step(task, at) if at else tasks.current_step(task)  # plan 39: any done step may be the source
         return {"task": tid, "source_step": src["n"], "source_session": src["session"],
                 "kind": kind, "instructions": instructions, "model": model}
 
-    def start_next(self, tid, kind="code", instructions="do the next thing", model="auto", expect=200):
+    def start_next(self, tid, kind="code", instructions="do the next thing", model="auto", expect=200, at=0):
         """The service operation: preview, then commit one successor. Returns (body, preview)."""
-        body = self.source_of(tid, kind, instructions, model)
+        body = self.source_of(tid, kind, instructions, model, at)
         status, preview = self.call("/api/task/next/preview", body)
         self.assertEqual(status, 200, preview)
         self.seq = getattr(self, "seq", 0) + 1
@@ -3059,12 +3060,12 @@ class NextStepServerTest(TaskServerTest):
             self.assertEqual(self.call("/api/task/next/preview", body)[1]["error"], "unknown task", repr(bad))
         for over in ({"source_session": "nope"}, {"source_session": 7}, {"source_step": 99}, {"source_step": True}):
             self.assertEqual(self.call("/api/task/next/preview", {**base, **over})[1]["error"],
-                             "Next steps start from the latest step", over)
-        self.start_next(tid, "code", "the next thing")  # a historical step is not a branch point
+                             "unknown source step", over)
+        self.start_next(tid, "code", "the next thing")  # plan 39: a historical done step is a source
         self.boundary(tid)
-        self.assertEqual(self.call("/api/task/next/preview", base)[1]["error"],
-                         "Next steps start from the latest step")
-        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
+        status, pv = self.call("/api/task/next/preview", base)
+        self.assertEqual((status, pv["source"]["step"]), (200, 1), pv)
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)  # a preview reserves nothing
 
     def test_an_exact_rung_runs_exactly_and_a_disabled_one_is_refused(self):
         tid = self.one_step_task()
@@ -3087,7 +3088,7 @@ class NextStepServerTest(TaskServerTest):
 
     def test_duplicate_request_id_is_stable_and_a_stale_revision_is_refused(self):
         tid = self.one_step_task()
-        body = self.source_of(tid, "code", "add the guard")
+        body = self.source_of(tid, "code", "add the guard SLOW")
         status, pv = self.call("/api/task/next/preview", body)
         self.assertEqual(status, 200, pv)
         rid = "a" * 32
@@ -3102,7 +3103,7 @@ class NextStepServerTest(TaskServerTest):
         self.assertEqual((clash[0], clash[1]["error"]),
                          (409, "request_id was already used with different content"))
         race = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id="9" * 32))
-        self.assertEqual((race[0], race[1]["error"]), (409, "Next steps start from the latest step"))
+        self.assertEqual((race[0], race[1]["error"]), (409, "a later step has not finished"))
         other = self.one_step_task()  # an unchanged source, a payload that no longer matches its preview
         obody = self.source_of(other, "code", "the first wording")
         ostatus, opv = self.call("/api/task/next/preview", obody)
@@ -3194,6 +3195,78 @@ class NextStepServerTest(TaskServerTest):
         self.assertEqual(self.hub.reconcile_next_steps(), [(tid, "recovered")])
         self.assertEqual(task["steps"][1]["request_status"], "running")
         self.assertEqual((task["state"], task["owner"]), ("running", "service"))
+
+    # -- plan 39 Task 1: any done step as a source ------------------------------------------------------------
+
+    def three_steps(self):
+        """01 scout, 02 code, 03 verify, all done at the manual boundary (the fake's verify passes)."""
+        tid = self.one_step_task()
+        self.start_next(tid, "code", "add the missing case HANDOFF-OK")
+        self.boundary(tid, 2)
+        self.start_next(tid, "verify", "check it VERDICT-PASS")
+        self.boundary(tid, 3)
+        return tid
+
+    def test_sources_name_every_done_step_and_the_reason_for_the_rest(self):
+        tid = self.three_steps()
+        task = self.task(tid)[1]
+        self.assertEqual(task["sources"], {"01": "", "02": "", "03": ""})
+        self.assertEqual(task["levers"]["add_next"], "")  # the task-level answer stays the latest step's
+        self.start_next(tid, "code", "the next thing SLOW")
+        self.until(tid, self.at(4), "step 4 runs")
+        task = self.task(tid)[1]
+        self.assertEqual(task["sources"]["04"], "Available when this turn finishes")
+        self.assertEqual(task["sources"]["02"], "a later step has not finished")  # D5 a: nothing branches while a step runs
+        self.assertEqual(self.call("/api/task/stop", {"task": tid})[0], 200)
+        self.until(tid, lambda t: t["state"] == "stopped", "stopped")
+        self.wait_idle(self.hub.tasks[tid]["steps"][3]["session"])  # the interrupted run has ended
+        task = self.task(tid)[1]
+        self.assertEqual(task["sources"]["02"], "a later step has not finished")  # 04 failed: Retry or Finish first
+        self.assertEqual(task["sources"]["04"], "use the existing recovery action for this step")
+
+    def test_a_branch_from_an_older_step_takes_the_next_number_and_its_own_handover(self):
+        tid = self.three_steps()
+        status, pv = self.call("/api/task/next/preview", self.source_of(tid, "verify", "check 02 again VERDICT-PASS", at=2))
+        self.assertEqual(status, 200, pv)
+        self.assertEqual(pv["source"]["step"], 2)
+        self.assertIn(f"task {tid}, step 02", pv["text"])
+        data, _ = self.start_next(tid, "verify", "check 02 again VERDICT-PASS", at=2)
+        self.assertEqual(data["step"], 4)
+        task = self.until(tid, self.at(4), "step 4 starts")
+        new = task["steps"][3]
+        self.assertEqual((new["source_step"], new["checked"], task["current"]), (2, 2, 4))
+        self.assertEqual([s["state"] for s in task["steps"][:3]], ["done", "done", "done"])  # 03 stays
+        folder = self.folder / "tasks" / tid / "04-verify"
+        self.assertIn(f"Handover from task {tid}, step 02", folder.joinpath("received-handoff.md").read_text(encoding="utf-8"))
+        self.assertIn("saved handover from step 02", folder.joinpath("received.md").read_text(encoding="utf-8"))
+        chain = self.task(tid)[1]["chain"]
+        self.assertTrue(any(c["step"] == 4 and c["why"].endswith("from step 02") for c in chain), chain)
+        self.assertIn("handover from step 02", task["steps"][3]["notes"][-1])  # start_step read the step's own package
+        self.boundary(tid, 4)
+        self.assertEqual(self.hub.tasks[tid]["last_good"], 4)
+
+    def test_a_branch_closes_the_latest_replied_chat_and_logs_it(self):
+        tid = self.one_step_task()
+        self.start_next(tid, "chat", "what should we do next?")
+        task = self.until(tid, self.at(2), "the chat step starts")
+        self.wait_idle(task["steps"][1]["session"])
+        self.assertEqual(self.task(tid)[1]["sources"]["01"], "")  # D3 a: a replied chat does not block the branch
+        data, _ = self.start_next(tid, "code", "take the other road", at=1)
+        self.assertEqual(data["step"], 3)
+        task = self.until(tid, self.at(3), "step 3 starts")
+        self.assertEqual(task["steps"][1]["state"], "done")
+        chain = self.task(tid)[1]["chain"]
+        self.assertTrue(any(c["step"] == 2 and c["to"] == "done" and c["why"] == "closed by step 03" for c in chain), chain)
+
+    def test_a_duplicate_branch_request_returns_the_same_step(self):
+        tid = self.three_steps()
+        body = self.source_of(tid, "code", "from two", at=2)
+        status, pv = self.call("/api/task/next/preview", body)
+        self.assertEqual(status, 200, pv)
+        first = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id="c" * 32))
+        again = self.call("/api/task/next", dict(body, revision=pv["revision"], request_id="c" * 32))
+        self.assertEqual((first[0], again[0], first[1]["step"], again[1]["step"]), (200, 200, 4, 4))
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 4)
 
 
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents

@@ -1000,15 +1000,23 @@ class Hub:
             self.changed.notify_all()
 
     def _next_source(self, task_id, source_n, source_sid):
+        """The step a next step may start from, or why not. Plan 39 (D2 a): any done step with a session and a saved
+        note or final reply is a source, a FAIL verify included; the latest step keeps its plan 36 fallback (built
+        from the last reply). The task conditions are plan 36's, unchanged (D5 a): a running automatic chain, a stuck
+        or a stopped task refuse and keep Retry / Resume / Stop. A replied latest chat is closed by the branch (D3 a)."""
         task = self.tasks.get(task_id) if isinstance(task_id, str) and tasks.safe_id(task_id) else None
         if task is None:
             return None, "unknown task"
-        source = tasks.current_step(task)
-        if (not isinstance(source_n, int) or isinstance(source_n, bool) or not isinstance(source_sid, str)
-                or source is None or source["n"] != source_n or source["session"] != source_sid
-                or source["n"] != len(task["steps"])
-                or any(s["n"] > source["n"] for s in task["steps"])):
-            return None, "Next steps start from the latest step"
+        source = (next((s for s in task["steps"] if s["n"] == source_n), None)
+                  if isinstance(source_n, int) and not isinstance(source_n, bool) else None)
+        if source is None or not isinstance(source_sid, str) or not source_sid or source["session"] != source_sid:
+            return None, "unknown source step"
+        latest = task["steps"][-1]
+        if source is not latest and source["state"] != "done":
+            return None, "only a done step is a source"
+        if any(x["state"] != "done" and not (x["kind"] == tasks.CHAT and x["state"] == "running")
+               for x in task["steps"] if x["n"] > source["n"]):
+            return None, "a later step has not finished"
         if task.get("progression") not in (None, "manual"):
             return None, "task uses automatic progression"
         if task.get("briefing") or task["id"] in self.briefing:
@@ -1024,15 +1032,22 @@ class Hub:
             saved = tasks.read_note(self.folder, task, source["n"])
             if saved:
                 reply += "\n\nHANDOFF\n" + saved.split("\n\n", 1)[-1] + "\nEND HANDOFF"
+        if source is not latest and not reply.strip():
+            return None, "no saved note or final reply"
         if (row and row["stop_question"]) or tasks.reply_question(reply):
             return None, "answer the pending question first"
         if not meta.get("ended") and source["state"] != "done":
             return None, "Available when this turn finishes"
-        chat_turn = source["kind"] == tasks.CHAT and source["state"] == "running"
-        boundary = (task.get("progression") == "manual" and source["state"] == "done" and task["owner"] == "fred"
+        chat_turn = latest["kind"] == tasks.CHAT and latest["state"] == "running"
+        if source is not latest and chat_turn:  # D3 a: the branch closes the latest chat once its turn is over
+            last_row = self.session(latest["session"]) if latest["session"] else None
+            if (latest["session"] and self.runs.is_live(latest["session"])) or (
+                    last_row is not None and (last_row["run_live"] or last_row["stop_question"])):
+                return None, "Available when the latest turn finishes"
+        boundary = (task.get("progression") == "manual" and latest["state"] == "done" and task["owner"] == "fred"
                     and task["state"] == "waiting" and (task["why"] == "choose next step" or
                     task["why"].startswith("VERDICT: FAIL")))
-        reopened = task["state"] == "done" and source["state"] == "done"
+        reopened = task["state"] == "done" and latest["state"] == "done"
         legacy_chat = bool(task.get("chat") and chat_turn and task["state"] in ("running", "done"))
         manual_chat = bool(task.get("progression") == "manual" and chat_turn and task["state"] == "running")
         if not (boundary or reopened or legacy_chat or manual_chat):
@@ -1045,6 +1060,13 @@ class Hub:
                                        source.get("session", "") if source else "")
         return {"available": not why, "reason": why, "source_step": source["n"] if source else 0,
                 "source_session": source.get("session", "") if source else ""}
+
+    def next_sources(self, task) -> dict:
+        """Plan 39: GET /api/task `sources`, step number (two digits) -> "" when the step may be the source of a next
+        step, else the reason. _next_source once per step, so the Board shows a button only where the service would
+        accept the request and reproduces no rule of its own (plan 36 3.4)."""
+        return {f"{s['n']:02d}": self._next_source(task.get("id"), s["n"], s.get("session", ""))[1]
+                for s in task["steps"]}
 
     def reconcile_next_steps(self) -> list:
         """Plan 36 (3.4): a manual step reserved before its launch whose outcome a crash left unknown, recovered at
@@ -1150,9 +1172,9 @@ class Hub:
                            if r == requested and e in claude_cli.EFFORTS), self.cfg["default_effort"])
             return {"rung": requested, "model": fills.rank_of(requested, self.cfg), "effort": effort,
                     "notes": [f"pick: {requested}"], "hold": ""}, ""
-        step = tasks._blank(source["n"] + 1, kind, "", requested if requested != "auto" else "",
+        step = tasks._blank(len(task["steps"]) + 1, kind, "", requested if requested != "auto" else "",
                             checked=source["n"] if kind == "verify" else 0)
-        route = self._route_for(task, step)
+        route = self._route_for(dict(task, last_good=source["n"]), step)  # plan 39: the previous note and rung are the source's
         if requested != "auto" and route["rung"] != requested:
             return None, self.rung_ok(requested, kind) or "selected model cannot run this step"
         if kind == "verify" and requested == "auto":
@@ -1235,9 +1257,11 @@ class Hub:
             if current[0] != 200 or current[1]["revision"] != request["revision"]:
                 return 409, {"error": "This step changed. Refresh the handover before starting."}
             route = current[1]["route"]
-            updated = copy.deepcopy(task)
+            updated, now = copy.deepcopy(task), time.time()
+            closing = [x for x in updated["steps"] if x["kind"] == tasks.CHAT and x["state"] == "running"]  # D3 a
             step = tasks.append_step(updated, payload["kind"], payload["instructions"],
-                                     payload["model"] if payload["model"] != "auto" else "", time.time())
+                                     payload["model"] if payload["model"] != "auto" else "", now,
+                                     source=tasks.step(updated, source["n"]))
             step.update(request_id=request_id, request_hash=signature, request_status="starting",
                         manual_route=route, requested_model=payload["model"])
             step["attempts"] = []
@@ -1248,8 +1272,10 @@ class Hub:
                 tasks.write_step_file(self.folder, updated, step, "source-reply.md", current[1]["source_reply"])
                 tasks.write_step_file(self.folder, updated, step, "received.md",
                                       tasks.received_manifest(updated, step, source))
-                self._commit(updated, [tasks._line(time.time(), step, "reserved", "planned",
-                                                   f"manual request {request_id}")])
+                lines = [tasks._line(now, x, "running", "done", f"closed by step {step['n']:02d}") for x in closing]
+                lines.append(tasks._line(now, step, "reserved", "planned",
+                                         f"manual request {request_id} from step {source['n']:02d}"))
+                self._commit(updated, lines)
             except OSError as exc:  # the task is unchanged and nothing launches (plan 36 Task 2)
                 return 500, {"error": f"the step was not saved: {exc}"}
             self.tasks[updated["id"]] = updated
@@ -2564,6 +2590,7 @@ class Handler(BaseHTTPRequestHandler):
                                  for s in task["steps"]])
         return self._json({"task": sent, "levers": self.hub.task_levers(task_id),
                            "next_step": self.hub.next_availability(task),
+                           "sources": self.hub.next_sources(task),
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),

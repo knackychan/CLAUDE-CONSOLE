@@ -1458,8 +1458,9 @@ class NextStepTest(unittest.TestCase):
         late["progression"] = "manual"
         run(late, 1)
         end(late)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as refused:
             tasks.append_step(late, "code", "again", now=NOW)
+        self.assertEqual(str(refused.exception), "a later step has not finished")  # plan 39: 02 is planned, not done
         fresh = make(("scout",))  # nor is a task that never ran
         with self.assertRaises(ValueError):
             tasks.append_step(fresh, "code", "start", now=NOW)
@@ -1480,6 +1481,56 @@ class NextStepTest(unittest.TestCase):
         self.assertNotIn("chat", task)  # the whole-task flag goes: the current step's kind decides
         self.assertEqual((task["progression"], new["source_session"], task["current"]), ("manual", "w1", 1))
         self.assertEqual((task["state"], task["owner"]), ("running", "service"))
+
+    def test_append_step_from_an_older_done_step_takes_the_next_number(self):
+        """Plan 39 Task 1 (D2 a): any done step with a session is a source; the new step is numbered after the last,
+        is checked against its source when a verify, and current / last_good point at the source until it starts."""
+        task = self.manual()  # step 01 scout, done, manual
+        tasks.append_step(task, "code", "write it", now=NOW)
+        run(task, 2)
+        self.assertEqual(end(task)[0], "manual")
+        tasks.append_step(task, "verify", "check it", now=NOW)
+        run(task, 3, "opus", "high")
+        self.assertEqual(end(task, verdict="FAIL", verdict_detail="3 != 4")[0], "manual")
+        new = tasks.append_step(task, "verify", "check it again", now=NOW + 300, source=tasks.step(task, 2))
+        self.assertEqual([s["n"] for s in task["steps"]], [1, 2, 3, 4])
+        self.assertEqual((new["n"], new["checked"], new["source_step"], new["source_session"]), (4, 2, 2, "s2"))
+        self.assertEqual((task["current"], task["last_good"], task["state"], task["owner"]), (2, 2, "running", "service"))
+        self.assertEqual(task["steps"][2]["state"], "done")  # step 03 stays as it was
+        run(task, 4, "opus", "high")  # 04 must finish first (D5 a): a planned later step refuses a branch
+        self.assertEqual(end(task, verdict="PASS")[0], "manual")
+        failed = tasks.append_step(task, "code", "fix what 03 found", now=NOW + 400, source=tasks.step(task, 3))
+        self.assertEqual((failed["n"], failed["source_step"], failed["checked"]), (5, 3, 0))  # a FAIL verify is a source
+
+    def test_append_step_refuses_an_older_step_that_is_not_done_or_has_unfinished_followers(self):
+        """Plan 39 Task 1 (D5 a): a planned or running later step refuses the branch; so does a source that is not done."""
+        task = self.manual()
+        tasks.append_step(task, "code", "write it", now=NOW)
+        run(task, 2)  # step 02 runs: 01 is done but a later step has not finished
+        with self.assertRaises(ValueError) as refused:
+            tasks.append_step(task, "code", "again", now=NOW, source=tasks.step(task, 1))
+        self.assertEqual(str(refused.exception), "a later step has not finished")
+        with self.assertRaises(ValueError) as refused:  # the running code step itself is no source
+            tasks.append_step(task, "code", "again", now=NOW, source=tasks.step(task, 2))
+        self.assertEqual(str(refused.exception), "only a done step is a source")
+        with self.assertRaises(ValueError):  # a step that is not this task's
+            tasks.append_step(task, "code", "again", now=NOW, source=dict(tasks.step(task, 1)))
+        self.assertEqual(len(task["steps"]), 2)
+
+    def test_a_branch_closes_the_latest_replied_chat(self):
+        """Plan 39 Task 1 (D3 a): branching from an older step while the latest step is a chat still in running
+        closes that chat done, as the latest-step append does for its own source chat."""
+        task = make(("scout",))
+        task["progression"] = "manual"
+        run(task, 1)
+        end(task)
+        chat = tasks.chat_step(2, "what next", "w2", "sonnet", "medium", NOW + 10)
+        chat.update(source_step=1, source_session="s1")
+        task["steps"].append(chat)
+        task.update(current=2, last_good=1, state="running", owner="service")
+        new = tasks.append_step(task, "code", "do it from 01", now=NOW + 20, source=tasks.step(task, 1))
+        self.assertEqual((new["n"], new["source_step"]), (3, 1))
+        self.assertEqual((chat["state"], chat["ended"]), ("done", NOW + 20))
 
     def test_manual_verify_fail_waits_without_inserting_a_fix(self):
         task = self.manual()  # step 01 scout, done, manual

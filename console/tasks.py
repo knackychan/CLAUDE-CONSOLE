@@ -512,16 +512,23 @@ def checked_route(task: dict, s: dict, cfg=None):
     return (tier, done["effort"]) if tier and done["effort"] else None
 
 
-def append_step(task: dict, kind: str, goal: str, pick: str = "", now: float = None) -> dict:
-    """Reserve one manual successor after the current final step; launch and source readiness belong to Hub."""
-    source = current_step(task)
-    if kind not in NEXT_KINDS or source is None or source["n"] != len(task["steps"]):
+def append_step(task: dict, kind: str, goal: str, pick: str = "", now: float = None, source: dict = None) -> dict:
+    """Reserve one manual successor of `source` (None: the current step). Plan 39: any done step of the task with a
+    session is a source; the new number is the next free one, never the source's plus one; `current` and `last_good`
+    point at the source until start_step moves `current`. Launch and source readiness belong to Hub."""
+    source = current_step(task) if source is None else source
+    if kind not in NEXT_KINDS or source is None or not any(x is source for x in task["steps"]) or not source["session"]:
         raise ValueError("no appendable source step")
+    if source["state"] != "done" and not (source["kind"] == CHAT and source["state"] == "running"):
+        raise ValueError("only a done step is a source")
+    if any(x["state"] != "done" and not (x["kind"] == CHAT and x["state"] == "running")
+           for x in task["steps"] if x["n"] > source["n"]):
+        raise ValueError("a later step has not finished")
     if not isinstance(goal, str) or not goal.strip() or len(goal) > STEP_GOAL_MAX:
         raise ValueError("step instructions must be 1 to 1000 characters")
     if task.get("progression") not in (None, "manual"):
         raise ValueError("task does not use manual progression")
-    n = source["n"] + 1
+    n = len(task["steps"]) + 1
     new = _blank(n, kind, goal.strip(), pick, checked=source["n"] if kind == "verify" else 0)
     new.update(source_step=source["n"], source_session=source["session"])
     task["steps"].append(new)
@@ -531,8 +538,9 @@ def append_step(task: dict, kind: str, goal: str, pick: str = "", now: float = N
     task["last_good"] = source["n"]
     task["owner"], task["state"], task["why"] = "service", "running", ""
     task["updated"] = time.time() if now is None else now
-    if source["kind"] == CHAT and source["state"] == "running":
-        source.update(state="done", ended=task["updated"])
+    for x in task["steps"]:  # D3 a: a replied chat still in running (the source, or the latest step) is closed by the branch
+        if x is not new and x["kind"] == CHAT and x["state"] == "running":
+            x.update(state="done", ended=task["updated"])
     return new
 
 
