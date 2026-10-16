@@ -191,14 +191,16 @@ branching a running or stuck automatic chain (D5 b), editing the handover packag
 
 ## 7. Acceptance
 
-- [ ] From the task page, one click opens Add next step or Verify on the latest step; Finish task and Hand off
-      work there without picking a step.
-- [ ] An older done step's dock offers Add step from here and Verify this step; the form says "From 02" and the
+- [x] From the task page, one click opens Add next step or Verify on the latest step; Finish task and Hand off
+      work there without picking a step. (Headless 2026-10-16: Hand off rendered and wired; its real run is in
+      Fred's live check.)
+- [x] An older done step's dock offers Add step from here and Verify this step; the form says "From 02" and the
       shared-tree line; Start appends the next number with `source_step` 02 and selects its Chat tab.
-- [ ] The chain row of the branch reads `from 02`; its Received tab names step 02; step 03 stays visible and
+- [x] The chain row of the branch reads `from 02`; its Received tab names step 02; step 03 stays visible and
       inspectable.
-- [ ] A step the service refuses as a source shows no filled button and gives the reason in the title; the Board
+- [x] A step the service refuses as a source shows no filled button and gives the reason in the title; the Board
       reproduces no rule of its own.
-- [ ] Hand off and Start new task render on the Board where `step_levers` allow them.
-- [ ] Hub.levers unchanged: no older session is continued, verified or handed off in place.
-- [ ] No hover chrome, no menu, no new keys; 900 / 400 / 340 px, dark and light, reduced motion, 130 % pass.
+- [x] Hand off and Start new task render on the Board where `step_levers` allow them.
+- [x] Hub.levers unchanged: no older session is continued, verified or handed off in place.
+- [x] No hover chrome, no menu, no new keys; 900 / 400 / 340 px, dark and light, reduced motion, 130 % pass.
+      (Headless 2026-10-16, plan 39 History; Fred's live check on Windows open.)

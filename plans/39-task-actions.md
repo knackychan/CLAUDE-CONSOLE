@@ -10,7 +10,7 @@
 > Anchor by the quoted lines, never by line numbers. Every edit below is an anchored edit of the function named with it;
 > no file is replaced whole.
 
-Status: written 2026-10-16, no code changed. Decisions D1-D6 answered (a) by Fred on 2026-10-16 (section 3). Every task
+Status: code done 2026-10-16 (Tasks 1-5, 751 tests OK on Linux; Fred's live check on Windows open). Written 2026-10-16. Decisions D1-D6 answered (a) by Fred on 2026-10-16 (section 3). Every task
 writes its tests first where a test can see the change (tasks, server, the Board's pure render functions) and checks the
 Board headless with `tests/fake_claude.py` as plan 36 Task 4 did. Five tasks, one commit each:
 `plan 39 task N: <what> (<n> tests OK)`.
@@ -860,3 +860,40 @@ lineage integer (no letters, no sub-tasks, no graph, no worktree); buttons live 
   the plan changes was read with its callers (section 1). No code changed. Two slips found while reading and folded into
   the tasks: `nextSecondary` reads `task_levers` (F11, Task 2) and `nextSeed` reads the note of the step before the
   source (F18, Task 3); one gap: `recvPane` labels a manual step's Received tab by `n - 1` (F19, Task 4).
+- 2026-10-16 - Tasks 1-4 placed as anchored edits, tests first, one commit each (`3365fda`, `cfff5b5`, `80a78a9`,
+  `5fecc4a`); every anchor matched. Linux: 741 -> 755 tests, only the four baseline failures (test_tray import,
+  test_redact Windows paths, test_usage local day, test_window screen); `node --check web/app.js` OK. Departures, all
+  in tests, none in the plan's code:
+  - Task 1, `test_append_step_from_an_older_done_step_takes_the_next_number`: the plan's last append (from 03) ran while
+    04 was still planned, which its own D5 rule refuses ("a later step has not finished"). The test now runs 04 and
+    ends it with a PASS first; the claim it makes (a FAIL verify is a source, numbered 05) is unchanged.
+  - Task 2, `test_task_page_dock_shows_each_action_only_where_the_service_allows_it`: the second render closed with
+    `}}})` in a plain string; it is `}})`.
+  - Task 4, `test_task_row_carries_the_source_step_of_a_branch`: `plan_steps` adds a planned verify after a code step,
+    which refuses the append; the fixture is a scout step. `test_task_snapshot_and_get` (not named in the plan) pins
+    the list row's step keys and gains `source_step`.
+- 2026-10-16 - Task 5: bounded headless pass (Playwright, Chromium, `tests/fake_claude.py`, a scratch
+  `CC_CONSOLE_HOME`, the service in-process with its hub loop; the script stayed in the scratch folder). 900 px dark
+  and light, 400 and 340 px dark and light, each also at 130 % text scaling (device scale 1.3, the viewport divided
+  by 1.3 as WebView2 zooms), reduced motion throughout: 181 of 181 checks. Proved: the task page bar of a replied chat
+  and of a three-step task at its boundary shows exactly the buttons whose lever is ""; Continue focuses `b-tcont`;
+  Add next step and Verify on the task page open the form on the latest step's Chat tab (Verify reads "Check step
+  02"); with the session-handoff skill copied into the scratch home, Hand off shows in the bar and in the chat footer;
+  Finish task (two clicks) ends the task; one `b-msg`. On step 02 of the three-step task: Add step from here
+  (filled) and Verify this step, the footer reads Go to step 03 only, the form reads From 02 code and "Starts from
+  step 02's handover on the project as it is now; step 03 ran since.", Cancel returns focus to the step's Add step
+  from here, Escape closes the form, Verify this step seeds "Check step 02 against its goal" with a resolved route.
+  A real Start appended 04 with `source_step` 2, selected it on its Chat tab, left 01-03 done, tagged row 04
+  `from 02` (row 03 untagged, inspectable), headed 04's Received tab From 02 with 02's note, and wrote
+  `manual request .. from step 02` in chain.jsonl. While a later step runs, step 02's bar shows a disabled Add step
+  from here titled "a later step has not finished" and the task page a disabled Add next step with its reason. No
+  horizontal overflow anywhere, no page errors. No code fix was needed. Two expectations in this plan were read
+  differently: the bars of Task 2's Check listed Delete (and Hand off) where the service refuses them (`clear` is
+  "task is running" for a replied chat and "task is waiting" at a boundary), so the pass compares each bar with the
+  served levers instead of a fixed list; and Task 3's Check expected a disabled button on a running latest step, but
+  the plan's `nextActions` returns nothing for a live turn and the footer gives the reason ("Add next step is
+  available when this turn finishes"), as plan 38 placed it. One console 404 per page load is the browser's favicon
+  request (`web/index.html` declares no icon), not this plan.
+- Fred's live check on Windows (100 % and 130 %: the task page dock on a real replied chat, Add step from here on an
+  older step of a real task and the branch's handover, Verify this step, Hand off's real run, the light theme bar)
+  stays open.

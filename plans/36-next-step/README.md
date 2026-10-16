@@ -61,7 +61,7 @@ Use anchored edits; do not reset, overwrite, or stage unrelated work.
   answer, active handover preparation, or unstarted successor. A completed task may be reopened
   by an explicit append. A manual boundary paused with `why: "choose next step"` is also
   eligible. Other paused, stopped, failed/stuck, and handed tasks must first use their existing
-  recovery/resume/next-task actions. Historical steps are inspectable, not branch points.
+  recovery/resume/next-task actions. Since plan 39 any done step with a session and a saved note or final reply is a source too (D2 a); the branch is a fresh session numbered after the last step, never a resume of the old one.
 - A replied legacy chat is eligible even though its task/step state still says `running`.
   Derive readiness from the actual run and filed turn, not just the task state string.
 - Introduce optional `progression: "manual"` on tasks when this feature first appends a step.
@@ -316,7 +316,7 @@ Mark each stage shipped independently; keep any missing bridge/harness support e
 - [ ] Compatibility, focused tests, full suite and fake end-to-end evidence recorded.
 - [ ] Stage A and Stage B status reflect actual shipped behavior.
 
-Excluded: branching/DAG UI, arbitrary old-step forks, global workflow builder, auto-running
+Excluded: branching/DAG UI, sibling numbering and sub-tasks (plan 39 makes older done steps sources, as a tag on a numbered list), global workflow builder, auto-running
 suggestions, automatic fixes in manual mode, new model SDK/provider integration, generic MCP
 enablement, replacing the Console design, worktrees, background task queues across projects,
 and rewriting historical plans. New test infrastructure is unnecessary where current fakes suffice.
