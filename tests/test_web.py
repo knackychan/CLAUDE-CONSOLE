@@ -234,7 +234,7 @@ class NextStepUITest(unittest.TestCase):
                       "stepFooter({id: 't', chat: true, state: 'running', current: 1, "
                       "steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
                       "{n: 1, session: 's', state: 'running', kind: 'chat'}, "
-                      "{levers: {add_next: '', done: '', handoff: '', next: ''}}, null)")
+                      "{levers: {add_next: '', done: ''}, step_levers: {handoff: '', next: ''}}, null)")
         self.assertIn("Continue", html)
         self.assertIn('data-tact="cont"', html)
         self.assertNotIn("Add next step", html)  # plan 38 U3: in the dock bar, on every tab
@@ -245,6 +245,33 @@ class NextStepUITest(unittest.TestCase):
                       "{levers: {add_next: '', done: '', handoff: '', next: ''}}, null)")
         self.assertIn('class="btn sm go" data-tact="nextopen"', dock)
         self.assertIn("Finish task", dock)
+        self.assertIn("Hand off", html)
+        self.assertIn("Start new task", html)
+
+    def test_task_page_dock_shows_each_action_only_where_the_service_allows_it(self):
+        """Plan 39 Task 2: the task page's dock bar reads task_levers for Add next step, Finish task and Delete, and
+        step_levers for Continue and Hand off; Add next step is the filled button, else Finish task."""
+        snap = {"sessions": [{"id": "s2", "state": "idle", "run_live": False}], "tasks": [], "versions": {}, "projects": []}
+        t = "{id: 't', current: 2, steps: [{n: 1, session: 's1', state: 'done', kind: 'scout'}, {n: 2, session: 's2', state: 'running', kind: 'chat'}]}"
+        html = render(self._setup(snap=snap) + f"taskButtons({t}, {{levers: {{add_next: '', done: '', clear: ''}}, "
+                      "step_levers: {continue: '', handoff: ''}, next_step: {source_step: 2}})")
+        for text in ('class="btn sm go" data-tact="nextopen" data-tid="t" data-n="2"', 'data-tact="nextverify" data-tid="t" data-n="2"',
+                     'data-tact="gochat" data-tid="t" data-n="2"', 'data-tact="done"', 'data-tact="handoff"', 'data-tact="clear"'):
+            self.assertIn(text, html)
+        self.assertLess(html.index("Add next step"), html.index("Finish task"))
+        self.assertLess(html.index("Finish task"), html.index("Delete"))
+        off = render(self._setup(snap=snap) + f"taskButtons({t}, {{levers: {{add_next: 'task is stuck', done: '', clear: 'task is stuck'}}, "
+                     "step_levers: {continue: 'still working', handoff: 'still working'}})")
+        self.assertIn('disabled title="task is stuck">Add next step', off)
+        self.assertIn('class="btn sm go" data-tact="done"', off)  # the primary falls to Finish task
+        for text in ("Verify", "Continue", "Hand off", "Delete"):
+            self.assertNotIn(text, off)
+
+    def test_hand_off_and_start_new_task_read_the_step_levers(self):
+        """Plan 39 Task 2 (plan 36 Task 3 slip): the Board's levers are task_levers, which never carry handoff or next."""
+        html = render(self._setup() + "nextSecondary({id: 't'}, {levers: {handoff: '', next: ''}, step_levers: {handoff: 'x', next: 'y'}})")
+        self.assertEqual(html, "")
+        html = render(self._setup() + "nextSecondary({id: 't'}, {levers: {}, step_levers: {handoff: '', next: ''}})")
         self.assertIn("Hand off", html)
         self.assertIn("Start new task", html)
 

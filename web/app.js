@@ -1739,7 +1739,9 @@ async function taskAct(name, button) {
   if (name === "saveplan") return savePlan(button);
   if (name === "gapanswer") return gapAnswer(button);
   if (name === "folder") return openTaskFolder(id, button);
-  if (name === "nextopen") return openNextForm(id);
+  if (name === "nextopen") return openNextForm(id, undefined, Number(button.dataset.n) || 0);
+  if (name === "nextverify") return openNextForm(id, "verify", Number(button.dataset.n) || 0);
+  if (name === "gochat") return goChat(id, Number(button.dataset.n) || 0);
   if (name === "nextcancel") { cancelNextForm(); return; }
   if (name === "nextstart") return startNextStep(button);
   if (!id) return;
@@ -1823,6 +1825,14 @@ async function openTaskFolder(id, button) {  // plan 30: the service opens tasks
   try { await api("/api/task/folder", { task: id }); }
   catch (e) { const msg = actMsg(); if (msg) msg.innerHTML = `<span class="r">${esc(e.message)}</span>`; }
   button.disabled = false;
+}
+async function goChat(tid, n) {  // plan 39 D1 a: Continue on the task page lands in the latest chat's follow-up box
+  if (!n) return;
+  boardPick = "s" + n;
+  itab = "chat";
+  await renderBoard();
+  const f = $("b-tcont");
+  if (f) f.focus({ preventScroll: true });
 }
 
 async function stepAct(name, button) {  // the current step's question or hand-off, from the inspector: a session lever
@@ -3167,7 +3177,7 @@ function nextActions(t, s, d) {  // plan 38 U3: in stepButtons, so every inspect
   return add + fin;
 }
 function nextSecondary(t, d) {
-  const lv = d.levers || {}, tid = esc(t.id);
+  const lv = d.step_levers || {}, tid = esc(t.id);  // plan 39: Hand off and Start new task are session levers, never task_levers
   const ho = lv.handoff === "" ? `<button class="btn sm" data-tact="handoff" data-tid="${tid}" title="Prepare a handoff for a separate task.">Hand off</button>` : "";
   const nx = lv.next === "" ? `<button class="btn sm" data-tact="next" data-tid="${tid}" title="A new task seeded with the handoff note">Start new task</button>` : "";
   return ho || nx ? `<div class="lr sub">${ho}${nx}</div>` : "";
@@ -3350,6 +3360,23 @@ function inspGap(t, s, d, row) {
       <div class="lr">${b("answer", " you", "Send answer").replace('data-tact="answer"', 'data-tact="gapanswer"')}${b("redo", "", "Redo design")}${b("stop", " stop", "Stop")}</div></div>
     <div class="ipane">${pane}</div>`, stepButtons(t, s, d, row), t.id);
 }
+function latestStep(t) {  // plan 39: the step with the highest number (the only one Continue and Hand off can reach)
+  return (t.steps || []).reduce((a, x) => (x.n > (a ? a.n : 0) ? x : a), null);
+}
+function taskButtons(t, d) {  // plan 39 Task 2: the task page's dock bar; each button only where the service allows it
+  const lv = d.levers || {}, sl = d.step_levers || {}, ns = d.next_step || {}, tid = esc(t.id), last = latestStep(t);
+  const n = ns.source_step || (last ? last.n : 0);
+  const add = lv.add_next === ""
+    ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${n}" title="A fresh session in this task, in the same folder, with step ${two(n)}'s handover">Add next step</button>`
+      + `<button class="btn sm" data-tact="nextverify" data-tid="${tid}" data-n="${n}" title="Add next step with Verify selected: a fresh session checks step ${two(n)}">Verify</button>`
+    : `<button class="btn sm" disabled title="${esc(lv.add_next || "Add next step is not available yet")}">Add next step</button>`;
+  const cont = sl.continue === "" && last && last.session && last.kind === "chat"  // D1 a: one click lands in the latest chat's follow-up box
+    ? `<button class="btn sm" data-tact="gochat" data-tid="${tid}" data-n="${last.n}" title="The latest chat's follow-up box: more conversation with this agent">Continue</button>` : "";
+  const fin = lv.done === "" ? `<button class="btn sm${lv.add_next === "" ? "" : " go"}" data-tact="done" data-tid="${tid}" title="Ends this task; its history stays">Finish task</button>` : "";
+  const ho = sl.handoff === "" ? `<button class="btn sm" data-tact="handoff" data-tid="${tid}" title="Prepare a handoff for a separate task.">Hand off</button>` : "";
+  const del = lv.clear === "" ? `<button class="btn sm stop" data-tact="clear" data-tid="${tid}" title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays">Delete</button>` : "";
+  return add + cont + fin + ho + del;
+}
 function inspTask(t, d, row) {
   const shown = taskShown(row), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, lv = d.levers || {}, tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
   const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn sm${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
@@ -3382,17 +3409,15 @@ function inspTask(t, d, row) {
   const move = (c) => `${c.step ? two(c.step) : "task"} ${esc(c.from)} -> ${esc(c.to)}`;
   const n = row.count;
   const off = ["stop", "retry", "clear"].filter((k) => lv[k]).map((k) => `${k === "clear" ? "Delete" : k[0].toUpperCase() + k.slice(1)} off: ${esc(lv[k])}`).join(" · ");
-  const levers = `<div class="v-levers">${lv.done === "" ? `<button class="btn" data-tact="done" data-tid="${tid}">Mark done</button>` : ""}${lv.clear === "" ? `<button class="btn stop" data-tact="clear" data-tid="${tid}" title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays">Delete</button>` : ""}
-    </div>`;  // plan 38 U11: why Stop / Retry / Delete are off lives in the task head's title, not a line
-  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
+  const head = `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
     <div class="meta"${off ? ` title="${off}"` : ""}>${labHtml(t.id)}<button class="olink" data-tact="folder" data-tid="${tid}" title="${esc(taskDir(t.id))}">Open folder</button></div>
-    <div class="meta"><span>${esc(t.project)}</span><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span>${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}</div></div>${busyBox(t.id)}
-    ${now}${wait}
+    <div class="meta"><span>${esc(t.project)}</span><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span>${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}</div></div>`;
+  const body = `${now}${wait}
     ${fold("prompt.md", "", `<pre class="text">${esc(t.goal)}</pre>`, { key: "promptmd" })}
     ${open.length || closed.length ? `<div class="blk">${open.length ? `<span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("")}</div>` : ""}
       ${closed.length ? fold(`${closed.length} closed question${closed.length === 1 ? "" : "s"}`, "", `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf", key: "qclosed" }) : ""}</div>` : ""}
-    ${log.length ? fold("Chain log", `${log.length}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}
-    ${levers}`;
+    ${log.length ? fold("Chain log", `${log.length}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}`;
+  return dock(head, `<div class="ipane">${body}</div>`, taskButtons(t, d), t.id);  // plan 39: the task page docks like a step page
 }
 function inspPrep(t, d, row) {  // step 00 of a task that ran: the card Prep left (task.prep, plan 29) and its 00-prep/ files
   const p = t.prep && typeof t.prep === "object" ? t.prep : null, pf = d.prep_files || {};
