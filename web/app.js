@@ -3095,18 +3095,17 @@ function planPane(t, d, s) {
 }
 // -- plan 36 Task 3: Add next step (the same task, a fresh session, the handover) --------------------------
 const NEXT_WORK = [["code", "Code"], ["verify", "Verify"], ["scout", "Investigate"], ["design", "Plan"], ["chat", "Chat"]];
-const VERIFY_DEFAULT = "Check the previous step against its goal, tests and unresolved risks. Do not edit files: " +
-  "report VERDICT: PASS or FAIL and what you found.";
+const verifyDefault = (n) => `Check step ${two(n)} against its goal, its tests and its unresolved risks. Do not edit files: ` +
+  "report VERDICT: PASS or FAIL and what you found.";  // plan 39 D4 a: the default names the step it checks
 const nextKey = (t, s) => `${t.id}|${s.n}|${s.session || ""}`;
-function nextSeed(t, d, s) {  // the previous step's usable Next section, else ""
-  const prev = t.steps.find((x) => x.n === s.n - 1) || s;
-  const text = (d.notes || {})[String(prev.n)] || (d.briefs || {})[String(prev.n)] || "";
+function nextSeed(t, d, s) {  // the source step's usable Next section, else ""
+  const text = (d.notes || {})[String(s.n)] || (d.briefs || {})[String(s.n)] || "";  // plan 39: the source's own Next, not the step before it
   const h = handoffSections(text);
   return h.next && !/^\(?(none|n\/a|not recorded)\)?\.?$/i.test(h.next) ? h.next : "";
 }
 function nextInstr(t, d, s, kind, seed) {
   if (seed != null && seed !== "") return seed;
-  return kind === "verify" ? VERIFY_DEFAULT : nextSeed(t, d, s);
+  return kind === "verify" ? verifyDefault(s.n) : nextSeed(t, d, s);
 }
 function nextDraftFor(t, d, s) {
   const key = nextKey(t, s);
@@ -3115,13 +3114,23 @@ function nextDraftFor(t, d, s) {
 }
 function nextReseed(kind) {  // a Work switch reseeds the instructions for the new kind (a Verify gets its concrete default)
   const bd = boardData && nextOpen && boardData.id === nextOpen.tid ? boardData.data : null;
-  const t = bd && bd.task, s = t && t.steps.find((x) => x.n === t.current);
+  const [t, s] = nextSource(bd);
   return t && s ? nextInstr(t, bd, s, kind, null) : "";
 }
 function setInstr(draft, text) {  // a reseed shows in the open field too: setHtml keeps a field's typed value over the redraw
   draft.instr = text;
   const f = $("b-ninstr");
   if (f) f.value = text;
+}
+function nextSource(bd) {  // plan 39: the form's source, from nextOpen's key (task + step + session), never t.current
+  const t = bd && bd.task, s = t && nextOpen && t.steps.find((x) => nextKey(t, x) === nextOpen.key);
+  return s ? [t, s] : [null, null];
+}
+function sinceLine(t, s) {  // plan 39 D6 a: the shared tree, said once, whenever the source is not the latest step
+  const later = (t.steps || []).filter((x) => x.n > s.n).map((x) => two(x.n));
+  if (!later.length) return "";
+  const list = later.length === 1 ? `step ${later[0]}` : `steps ${later.slice(0, -1).join(", ")} and ${later[later.length - 1]}`;
+  return `<div class="nfrom"><span class="m">Starts from step ${two(s.n)}'s handover on the project as it is now; ${list} ran since.</span></div>`;
 }
 function nextModelOptions(draft, view) {  // Auto first, then the exact rungs the preview resolved; a disabled one carries its reason
   const rows = [["auto", "Auto", ""]].concat(((view && view.models) || [])
@@ -3151,7 +3160,8 @@ function nextFormHtml(t, s, row, d) {
     ? `<span class="chip m" title="the exact rung this step starts on">${esc(view.route.rung)}/${esc(view.route.effort)}</span>` : "";
   return `<div class="askbox cont nform" role="group" aria-label="Add next step">
     <div class="nfrom"><span class="lbl">Next step</span><span class="m">From ${two(s.n)} ${esc(s.kind)}</span>` +
-    `<span class="m">Same project: ${esc(projectName(t.project_dir))}</span></div>
+    `<span class="m">Same project: ${esc(projectName(t.project_dir))}</span></div>` +
+    `${sinceLine(t, s)}
     <div class="nrow"><label class="nl" for="b-nwork">Work</label><select id="b-nwork" class="in">${work}</select>
       <label class="nl" for="b-nmodel">Model</label><select id="b-nmodel" class="in"${busy ? " disabled" : ""}>${nextModelOptions(draft, view)}</select></div>
     <div class="nroute">${started ? `<span class="m">Starting step ${two(started)}…</span>` : routeLine(view)}${routed}</div>
@@ -3166,12 +3176,20 @@ function nextFormHtml(t, s, row, d) {
       : `<div class="lr"><button class="btn go" data-tact="nextstart" data-tid="${esc(t.id)}" disabled>Start step</button>
       <button class="btn" data-tact="nextcancel" data-tid="${esc(t.id)}">Cancel</button></div>`}</div>`;
 }
-function nextActions(t, s, d) {  // plan 38 U3: in stepButtons, so every inspector tab carries them; the primary is the next action
-  const cur = t.current == null ? s.n : t.current, open = nextOpen && nextOpen.key === nextKey(t, s);
-  if (!s.session || s.n !== cur || open || (s.state === "running" && !chatReplied(s))) return "";
+function nextActions(t, s, d) {  // plan 38 U3: in stepButtons, on every tab; plan 39: an older done step offers a branch
+  const open = nextOpen && nextOpen.key === nextKey(t, s), last = latestStep(t), latest = !last || s.n === last.n;
+  if (!s.session || open || (s.state === "running" && !chatReplied(s))) return "";
   const lv = d.levers || {}, tid = esc(t.id);
+  if (!latest) {  // the service's answer per step (GET /api/task sources); the Board reproduces no rule of its own
+    const why = (d.sources || {})[two(s.n)];
+    if (why == null) return "";
+    return why === ""
+      ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${s.n}" title="A fresh session in this task from step ${two(s.n)}'s handover, on the project as it is now">Add step from here</button>`
+        + `<button class="btn sm" data-tact="nextverify" data-tid="${tid}" data-n="${s.n}" title="A fresh session checks step ${two(s.n)} against its goal, its tests and its risks">Verify this step</button>`
+      : `<button class="btn sm" disabled title="${esc(why)}">Add step from here</button>`;
+  }
   const add = lv.add_next === ""
-    ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" title="A fresh session in this task, in the same folder, with the handover">Add next step</button>`
+    ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${s.n}" title="A fresh session in this task, in the same folder, with the handover">Add next step</button>`
     : `<button class="btn sm" disabled title="${esc(lv.add_next || "Add next step is not available yet")}">Add next step</button>`;
   const fin = lv.done === "" ? `<button class="btn sm" data-tact="done" data-tid="${tid}">Finish task</button>` : "";
   return add + fin;
@@ -3182,22 +3200,19 @@ function nextSecondary(t, d) {
   const nx = lv.next === "" ? `<button class="btn sm" data-tact="next" data-tid="${tid}" title="A new task seeded with the handoff note">Start new task</button>` : "";
   return ho || nx ? `<div class="lr sub">${ho}${nx}</div>` : "";
 }
-function histFoot(t, s, d) {
-  const latest = t.steps.reduce((a, x) => (x.n > (a ? a.n : 0) ? x : a), null);
+function histFoot(t, s, d) {  // plan 39: an older step's footer keeps only the way to the latest step; its actions are in the dock
+  const latest = latestStep(t);
   if (!latest || latest.n === s.n) return "";
-  const ns = d.next_step || {};
-  const why = ns.available === false && ns.reason ? ns.reason : "Next steps start from the latest step";
-  return `<div class="askbox cont hfoot"><span class="m">${esc(why)}</span>
-    <div class="lr"><button class="btn sm" data-bpick="s${latest.n}" data-btask="${esc(t.id)}">Go to step ${two(latest.n)}</button></div></div>`;
+  return `<div class="askbox cont hfoot"><div class="lr"><button class="btn sm" data-bpick="s${latest.n}" data-btask="${esc(t.id)}">Go to step ${two(latest.n)}</button></div></div>`;
 }
 function stepFooter(t, s, d, row) {
   d = d || {};
   const steps = Array.isArray(t.steps) ? t.steps : [s];
+  const key = nextKey(t, s), open = nextOpen && nextOpen.key === key, lv = d.levers || {}, question = row && row.stop_question;
+  if (open) return nextFormHtml(t, s, row, d);  // plan 39: on the source's own Chat tab, the latest step or an older one
   const current = t.current == null ? s.n : t.current;
   if (!s.session || s.n !== current) return steps.length > 1 ? histFoot(t, s, d) : "";
-  const key = nextKey(t, s), open = nextOpen && nextOpen.key === key, lv = d.levers || {}, question = row && row.stop_question;
   const live = s.state === "running" && !chatReplied(s);
-  if (open) return nextFormHtml(t, s, row, d);
   if (live) return `<div class="askbox cont"><span class="st n">${sprite("running")}Working <span class="lc">· Add next step is available when this turn finishes</span></span></div>`;
   const canChat = t.chat && s.state === "running" || s.kind === "chat";
   const box = canChat ? `<div class="askbox cont">${question ? `<div class="q">${esc(question)}</div>` : ""}
@@ -3205,15 +3220,17 @@ function stepFooter(t, s, d, row) {
     <div class="lr"><button class="btn ${question ? "you" : "go"}" data-tact="${question ? "answer" : "cont"}" data-tid="${esc(t.id)}">${question ? "Send answer" : "Continue"}</button></div></div>` : "";
   return box + nextSecondary(t, d);  // plan 38 U3: Add next step and Finish task sit in the dock bar on every tab
 }
-async function openNextForm(tid, kind) {
+async function openNextForm(tid, kind, n) {  // plan 39: from step n (0: the service's latest source), on that step's Chat tab
   const bd = boardData && boardData.id === tid ? boardData.data : null;
-  const t = bd && bd.task, s = t && t.steps.find((x) => x.n === t.current);
+  const t = bd && bd.task, ns = (bd && bd.next_step) || {};
+  const s = t && t.steps.find((x) => x.n === (n || ns.source_step || t.current));
   if (!s || !s.session) return;
   const key = nextKey(t, s);
   const box = $("b-tcont");
-  if (box) fuDraft[s.session] = box.value;
+  if (box) fuDraft[box.dataset.sid || ""] = box.value;
   nextOpen = { tid, key };
-  itab = "chat";  // plan 38 U3: the form lives on the Chat tab; the button now sits on every tab
+  boardPick = "s" + s.n;  // from the task page or an older step: the form opens on the source's own Chat tab
+  itab = "chat";
   nextDraftFor(t, bd, s);
   if (kind) { nextDraft[key].kind = kind; setInstr(nextDraft[key], nextInstr(t, bd, s, kind, null)); }
   nextView = null;
@@ -3221,19 +3238,19 @@ async function openNextForm(tid, kind) {
   renderBoard();
   await nextPreview();
 }
-async function verifyNext(tid) {  // a task step's Verify: the Board's Add next step with Verify selected, never the same-session lever
+async function verifyNext(tid, n) {  // a task step's Verify: the Board's Add next step with Verify selected, never the same-session lever
   showPage("board");
   boardTask = tid;
   const row = boardRow(tid);
-  boardPick = "s" + (row && row.current ? row.current : 1);
+  boardPick = "s" + (n || (row && row.current ? row.current : 1));
   boardData = boardChat = null;
   await renderBoard();
-  await openNextForm(tid, "verify");
+  await openNextForm(tid, "verify", n);
 }
 async function nextPreview() {
   if (!nextOpen) return;
   const tid = nextOpen.tid, bd = boardData && boardData.id === tid ? boardData.data : null;
-  const t = bd && bd.task, s = t && t.steps.find((x) => x.n === t.current);
+  const [t, s] = nextSource(bd);
   if (!s) return;
   const key = nextOpen.key, draft = nextDraftFor(t, bd, s);
   nextView = { key, busy: true, models: [] };
@@ -3260,7 +3277,7 @@ function cancelNextForm() {
 async function startNextStep(button) {
   if (!nextOpen) return;
   const tid = nextOpen.tid, bd = boardData && boardData.id === tid ? boardData.data : null;
-  const t = bd && bd.task, s = t && t.steps.find((x) => x.n === t.current);
+  const [t, s] = nextSource(bd);
   if (!t || !s) return;
   const draft = nextDraftFor(t, bd, s), instr = String(draft.instr || "").trim();
   if (!instr) { nextView = { key: nextOpen.key, busy: false, models: [], error: "Describe what this step should do (1 to 1000 characters)" }; renderBoard(); const f = $("b-ninstr"); if (f) f.focus(); return; }

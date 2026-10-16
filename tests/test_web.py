@@ -165,12 +165,12 @@ class NextStepUITest(unittest.TestCase):
 
     def test_instructions_seed_from_the_previous_next_section(self):
         notes = json.dumps({"1": "HANDOFF\n## Next\nwrite the tests first\nEND HANDOFF"})
-        out = render(f"nextSeed({{steps: [{{n: 1}}]}}, {{notes: {notes}}}, {{n: 2}})")
+        out = render(f"nextSeed({{steps: [{{n: 1}}]}}, {{notes: {notes}}}, {{n: 1}})")
         self.assertEqual(out, "write the tests first")
 
     def test_a_none_next_section_seeds_blank(self):
         notes = json.dumps({"1": "HANDOFF\n## Next\n(none)\nEND HANDOFF"})
-        self.assertEqual(render(f"nextSeed({{steps: [{{n: 1}}]}}, {{notes: {notes}}}, {{n: 2}})"), "")
+        self.assertEqual(render(f"nextSeed({{steps: [{{n: 1}}]}}, {{notes: {notes}}}, {{n: 1}})"), "")
 
     def test_draft_is_keyed_and_seeded_once(self):
         out = render(self._setup() + "(() => { const d = nextDraftFor({id: 't', steps: [{n: 1, session: 's'}]}, {}, "
@@ -224,7 +224,6 @@ class NextStepUITest(unittest.TestCase):
 
     def test_historical_step_points_to_the_latest(self):
         html = render(self._setup() + "histFoot({id: 't', steps: [{n: 1}, {n: 2, session: 's2'}]}, {n: 1}, {})")
-        self.assertIn("Next steps start from the latest step", html)
         self.assertIn("Go to step 02", html)
 
     def test_replied_chat_footer_offers_continue_and_next_step(self):
@@ -275,6 +274,48 @@ class NextStepUITest(unittest.TestCase):
         self.assertIn("Hand off", html)
         self.assertIn("Start new task", html)
 
+    def test_older_done_step_offers_a_branch_where_the_service_allows_it(self):
+        """Plan 39 Task 3: the dock of an older step reads sources[NN]; the Board reproduces no rule of its own."""
+        t = "{id: 't', current: 3, steps: [{n: 1, session: 's1', state: 'done'}, {n: 2, session: 's2', state: 'done'}, {n: 3, session: 's3', state: 'done'}]}"
+        ok = render(self._setup() + f"nextActions({t}, {{n: 2, session: 's2', state: 'done'}}, {{levers: {{add_next: '', done: ''}}, sources: {{'01': '', '02': '', '03': ''}}}})")
+        self.assertIn('class="btn sm go" data-tact="nextopen" data-tid="t" data-n="2"', ok)
+        self.assertIn("Add step from here", ok)
+        self.assertIn('data-tact="nextverify" data-tid="t" data-n="2"', ok)
+        self.assertIn("Verify this step", ok)
+        self.assertNotIn("Finish task", ok)  # the task's own actions stay on the task page and the latest step
+        off = render(self._setup() + f"nextActions({t}, {{n: 2, session: 's2', state: 'done'}}, {{levers: {{add_next: ''}}, sources: {{'02': 'no saved note or final reply'}}}})")
+        self.assertIn('disabled title="no saved note or final reply">Add step from here', off)
+        self.assertNotIn("Verify this step", off)
+        self.assertEqual(render(self._setup() + f"nextActions({t}, {{n: 2, session: 's2', state: 'done'}}, {{levers: {{}}}})"), "")
+        latest = render(self._setup() + f"nextActions({t}, {{n: 3, session: 's3', state: 'done'}}, {{levers: {{add_next: '', done: ''}}, sources: {{'03': ''}}}})")
+        self.assertIn("Add next step", latest)
+        self.assertIn("Finish task", latest)
+        foot = render(self._setup() + f"histFoot({t}, {{n: 2}}, {{}})")
+        self.assertIn("Go to step 03", foot)
+        self.assertNotIn("Next steps start", foot)
+
+    def test_form_from_an_older_step_names_it_and_the_steps_that_ran_since(self):
+        """Plan 39 Task 3 (D4 a, D6 a): the source line, the shared-tree line and the Verify default name the source."""
+        view = {"key": "t|2|s2", "busy": False, "revision": "r", "text": "HANDOFF\n## Goal\ngoal\nEND HANDOFF",
+                "route": {"rung": "opus", "model": "opus", "effort": "high", "notes": []}, "models": []}
+        t = ("{id: 't', project_dir: 'C:/repo/APP', current: 4, steps: [{n: 1, session: 's1', kind: 'scout'}, {n: 2, session: 's2', kind: 'code'}, "
+             "{n: 3, session: 's3', kind: 'verify'}, {n: 4, session: 's4', kind: 'chat'}]}")
+        html = render(self._setup(view=view) + f"nextOpen = {{tid: 't', key: 't|2|s2'}}; nextFormHtml({t}, {{n: 2, session: 's2', kind: 'code'}}, null, {{}})")
+        self.assertIn("From 02 code", html)
+        self.assertIn("Starts from step 02's handover on the project as it is now; steps 03 and 04 ran since.", html)
+        one = render(self._setup(view=view) + f"sinceLine({t}, {{n: 3}})")
+        self.assertIn("step 04 ran since", one)
+        self.assertEqual(render(self._setup() + f"sinceLine({t}, {{n: 4}})"), "")
+        self.assertTrue(render("verifyDefault(2)").startswith("Check step 02 against its goal, its tests and its unresolved risks"))
+        self.assertIn("Do not edit files", render("nextInstr({steps: []}, {}, {n: 2}, 'verify', null)"))
+
+    def test_the_form_is_bound_to_the_source_in_next_open_not_to_current(self):
+        """Plan 39 Task 3: openNextForm, nextPreview, startNextStep and nextReseed resolve the source from nextOpen's key."""
+        out = render(self._setup() + "(() => { const bd = {task: {id: 't', current: 3, steps: [{n: 2, session: 's2', kind: 'code'}, {n: 3, session: 's3', kind: 'verify'}]}}; "
+                     "nextOpen = {tid: 't', key: 't|2|s2'}; const [t, s] = nextSource(bd); "
+                     "nextOpen = {tid: 't', key: 't|2|other'}; const [, gone] = nextSource(bd); return [t && t.id, s && s.n, gone]; })()")
+        self.assertEqual(out, ["t", 2, None])
+
     def test_live_turn_explains_next_step_is_unavailable(self):
         snap = {"sessions": [{"id": "s", "state": "running", "run_live": True}],
                 "tasks": [], "versions": {}, "projects": []}
@@ -300,7 +341,7 @@ class NextStepUITest(unittest.TestCase):
         """Plan 36 Task 4 (headless pass): setHtml keeps a field's typed value over a redraw, so a Work switch
         writes the reseeded instructions into the open field as well as the draft."""
         out = render("(() => { const f = {value: 'Go on'}; document = {getElementById: (id) => id === 'b-ninstr' ? f : null}; "
-                     "const d = {instr: 'Go on'}; setInstr(d, VERIFY_DEFAULT); return [d.instr === VERIFY_DEFAULT, f.value === VERIFY_DEFAULT]; })()")
+                     "const d = {instr: 'Go on'}; setInstr(d, verifyDefault(1)); return [d.instr === verifyDefault(1), f.value === verifyDefault(1)]; })()")
         self.assertEqual(out, [True, True])
 
 
