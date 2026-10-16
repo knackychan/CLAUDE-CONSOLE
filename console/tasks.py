@@ -1228,12 +1228,35 @@ def prompt_goal(task: dict, step: dict) -> str:
     return goal[:PROMPT_GOAL_MAX - 1].rstrip() + "\u2026"
 
 
+ATTEMPT_MAX = 12000  # plan 40: the tail of a failed attempt's chat that notes.<k>.md keeps and the retry prompt carries
+
+
+def attempt_text(items: list, you: str = "the user") -> str:
+    """Plan 40: a failed attempt's chat from an adapter's chat() items: Claude's texts and `you`'s answers, no tool
+    rows, the step prompt (the first `you` item) left out; the last ATTEMPT_MAX characters, cut at a line start."""
+    parts, seen_prompt = [], False
+    for item in items:
+        if item.get("role") == "you":
+            if seen_prompt and item.get("text"):
+                parts.append(f"**{you}:** {item['text']}")
+            seen_prompt = True
+        elif item.get("role") == "claude" and item.get("text"):
+            parts.append(f"**Claude:** {item['text']}")
+    text = "\n\n".join(parts)
+    if len(text) <= ATTEMPT_MAX:
+        return text
+    tail = text[-ATTEMPT_MAX:]
+    if text[-ATTEMPT_MAX - 1] != "\n" and "\n" in tail:
+        tail = tail[tail.index("\n") + 1:]
+    return "[earlier part cut]\n\n" + tail.lstrip("\n")
+
+
 def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", role: str = None,
                 plan: str = "", part: str = "", facts: str = "", lessons=(), you: str = "the user",
-                note: str = "") -> str:
+                note: str = "", tried: str = "") -> str:
     """The prompt of one step (console/step_prompt.md); `you` is paths.you(cfg), the person a question waits for.
     `role` is the step's kind file as role_text rendered it (plan 28); None renders the repo's seed copy.
-    `note` is what `you` typed with Retry (plan 33)."""
+    `note` is what `you` typed with Retry (plan 33); `tried` the earlier attempt's chat (plan 40)."""
     kind = step["kind"]
     if role is None:
         role = role_text(task, step, kinds.seed_text(kind), you=you)
@@ -1241,6 +1264,11 @@ def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", 
              "Start again from the handoff below.") if retry_reason else ""
     if note:
         retry += ("\n" if retry else "") + f"{you} adds for this retry: {note}"
+    if tried:  # inline: an OpenCode run may be denied reads outside the project
+        fence = "`" * max(3, max(len(run) for run in re.findall(r"`+", tried) or [0]) + 1)
+        retry += ("\n" if retry else "") + (
+            "Your earlier attempt wrote this before it stopped (its chat, newest last). Keep what still holds, and "
+            f"check the working tree for edits it already made before you redo them:\n{fence}\n{tried}\n{fence}")
     taught = (f"Lessons from earlier {kind} steps in this project (use one only where it applies):\n"
               + "\n".join(f"- {line}" for line in lessons) + "\n\n") if lessons else ""
     return Template(PROMPT_FILE.read_text(encoding="utf-8")).safe_substitute(

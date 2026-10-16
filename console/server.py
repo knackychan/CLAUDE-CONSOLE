@@ -1495,8 +1495,16 @@ class Hub:
             if package:
                 prev, facts_text = package, ""
                 read = [f"handover from step {s['source_step']:02d}"]
+        tried, k = "", len(tasks.attempts(s))
+        if retry and k:  # plan 40: the failed attempt's chat (notes.<k>.md) goes into the prompt inline
+            tried = tasks.read_step_file(self.folder, task, s, f"notes.{min(k, 99)}.md")
+            tried = tried.split("\n\n", 1)[1] if tried.startswith("# Step ") and "\n\n" in tried else tried
+            tried = tried.strip()
+            if tried:
+                read.append(f"attempt {k}")
+                got.append(f"notes.{min(k, 99)}.md (the earlier attempt's chat)")
         prompt = tasks.step_prompt(task, s, prev, retry, role=role, plan=plan_text, part=part_text,
-                                   facts=facts_text, lessons=lessons, you=you, note=note)
+                                   facts=facts_text, lessons=lessons, you=you, note=note, tried=tried)
         route = dict(route, notes=route["notes"] + ["read: " + " · ".join(read)])  # plan 24 D3 a: the chain says what it got
         goal_cut = n != 1 and len(str(task.get("goal", ""))) > tasks.PROMPT_GOAL_MAX
         goal_file = f"{prep.DIR}/prompt.md" if prep.read(self.folder, task, "prompt.md") else "prompt.md"  # plan 29
@@ -1712,7 +1720,7 @@ class Hub:
                 tasks._task_to(task, "waiting", "plan ready: confirm", now, cs, lines)
                 action = "wait"
         ended = action in ("next", "fix", "done", "manual") or (found is not None and action == "wait")
-        self._step_files(task, cs, text, ended, verdict, detail)
+        self._step_files(task, cs, text, ended, verdict, detail, sid)
         if ended and block:
             tasks.write_note(self.folder, task, cs, block)
         if ended:
@@ -1746,17 +1754,20 @@ class Hub:
             self._go_on(task)
         return action
 
-    def _step_files(self, task: dict, cs: dict, text: str, ended: bool, verdict: str, detail: str) -> None:
+    def _step_files(self, task: dict, cs: dict, text: str, ended: bool, verdict: str, detail: str,
+                    sid: str = "") -> None:
         """Plan 28: what the service files from a step's final message besides handoff.md. An accepted attempt leaves
-        notes.md (the message before its PLAN and HANDOFF blocks); one that ends in a retry or stuck leaves its whole
-        message as notes.<k>.md (k: its attempt); a verify with a verdict leaves verdict.md (the VERDICT line and the
-        Findings it checked). A disk error leaves what it could write; the chain goes on."""
+        notes.md (the message before its PLAN and HANDOFF blocks); one that ends in a retry or stuck leaves the
+        attempt's chat as notes.<k>.md (k: its attempt; plan 40: every turn of the session, else the final message);
+        a verify with a verdict leaves verdict.md (the VERDICT line and the Findings it checked). A disk error leaves
+        what it could write; the chain goes on."""
         try:
             if ended:
                 tasks.write_step_file(self.folder, task, cs, "notes.md", tasks.notes_of(text), head=True)
             else:
                 k = len(tasks.attempts(cs)) or 1
-                tasks.write_step_file(self.folder, task, cs, f"notes.{min(k, 99)}.md", text, head=True)
+                chat = tasks.attempt_text(self.runs.chat_of(sid, limit=10 ** 6), paths.you(self.cfg)) if sid else ""
+                tasks.write_step_file(self.folder, task, cs, f"notes.{min(k, 99)}.md", chat or text, head=True)
             if cs["kind"] == "verify" and verdict:
                 block = tasks.parse_handoff(text) or ""
                 tasks.write_step_file(self.folder, task, cs, "verdict.md",

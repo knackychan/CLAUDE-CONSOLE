@@ -1002,6 +1002,36 @@ class ChainTest(unittest.TestCase):
         self.assertIn("Step 2 of 3: code. goal of code\n\nROLE TEXT\n", role)
         self.assertIn("You are the code step", bare)  # None: the repo's seed of kinds/code.md
 
+    def test_attempt_text_keeps_the_chat_without_the_prompt_or_tools(self):
+        """Plan 40 Task 4: the failed attempt's chat, both sides labelled, the step prompt and tool rows left out."""
+        items = [{"role": "you", "text": "THE STEP PROMPT"}, {"role": "tool", "text": "read calc.py"},
+                 {"role": "claude", "text": "I read the module."}, {"role": "result", "text": "success"},
+                 {"role": "you", "text": "use the other file"}, {"role": "note", "text": "stopped"},
+                 {"role": "claude", "text": "Done with the edit."}]
+        text = tasks.attempt_text(items, you="Fred")
+        self.assertEqual(text, "**Claude:** I read the module.\n\n**Fred:** use the other file\n\n**Claude:** Done with the edit.")
+        self.assertNotIn("STEP PROMPT", text)
+        self.assertEqual(tasks.attempt_text([]), "")
+        self.assertEqual(tasks.attempt_text([{"role": "you", "text": "only the prompt"}]), "")
+        long = [{"role": "you", "text": "p"}] + [{"role": "claude", "text": f"line {i} " + "x" * 90} for i in range(300)]
+        cut = tasks.attempt_text(long)
+        self.assertTrue(cut.startswith("[earlier part cut]\n\n**Claude:** line "))
+        self.assertLessEqual(len(cut), tasks.ATTEMPT_MAX + 40)
+        self.assertTrue(cut.endswith("x" * 90))  # the tail stays
+
+    def test_step_prompt_carries_the_attempt_chat_in_the_retry_paragraph(self):
+        task = make(("scout", "code"))
+        run(task, 1)
+        step = tasks.step(task, 1)
+        plain = tasks.step_prompt(task, step, "", "the run hit a limit")
+        self.assertNotIn("earlier attempt wrote this", plain)
+        text = tasks.step_prompt(task, step, "", "the run hit a limit", tried="**Claude:** half done\n```py\nx = 1\n```")
+        self.assertIn("Your earlier attempt wrote this before it stopped (its chat, newest last). Keep what still holds, "
+                      "and check the working tree for edits it already made before you redo them:\n````\n"
+                      "**Claude:** half done", text)
+        self.assertLess(text.index("earlier attempt wrote this"), text.index("What the earlier steps left you:"))
+        self.assertIn("ended without a handoff: the run hit a limit", text)
+
     def test_step_prompt_text(self):
         task = make(("scout", "code"))
         run(task, 1)

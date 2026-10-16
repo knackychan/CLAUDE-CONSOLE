@@ -2571,6 +2571,26 @@ class HarnessServerTest(TaskServerTest):
         saved = json.loads((self.folder / "limits.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["opencode:opencode-go"]["why"], "Go usage limit exceeded (5 hour)")
 
+    def test_retry_prompt_carries_the_failed_attempts_chat(self):
+        self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"})
+        self.hub.cfg["harnesses"]["codex"]["on"] = False
+        prompts, start = [], self.hub.runs.start
+        self.hub.runs.start = lambda cwd, prompt, *args, **kwargs: (prompts.append(prompt), start(cwd, prompt, *args, **kwargs))[1]
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "QUOTA HANDOFF-OK",
+                                     "model": "opencode:opencode-go/kimi-k3"}])
+        task = self.until(tid, lambda t: t["state"] == "done", "the quota retry completes")
+        step = task["steps"][0]
+        notes = (self.folder / "tasks" / tid / tasks.step_file(step, "notes.1.md")).read_text(encoding="utf-8")
+        self.assertIn("**Claude:** ", notes)
+        self.assertIn("QUOTA HANDOFF-OK", notes)  # the fake echoes the prompt: the attempt's chat, not only a final line
+        self.assertGreater(len(notes), 400)
+        self.assertEqual(len(prompts), 2)
+        self.assertNotIn("Your earlier attempt wrote this", prompts[0])
+        self.assertIn("Your earlier attempt wrote this before it stopped", prompts[1])
+        self.assertIn("**Claude:** ", prompts[1])
+        received = (self.folder / "tasks" / tid / tasks.step_file(step, "received.md")).read_text(encoding="utf-8")
+        self.assertIn("notes.1.md (the earlier attempt's chat)", received)
+
     def test_limit_refuses_every_model_of_the_provider(self):
         self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/kimi-k3": "opus", "opencode-go/glm-5.3": "opus"})
         self.hub.limits["opencode:opencode-go"] = {"until": time.time() + 60, "why": "5 hour limit"}
