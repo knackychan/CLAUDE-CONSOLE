@@ -254,6 +254,18 @@ class HandoffTest(unittest.TestCase):
             self.assertEqual(tasks.lesson_of(none), "", none)
         self.assertEqual(tasks.lesson_of("a lesson: not a line start"), "")
 
+    def test_blocked_of(self):
+        """Plan 38: only an explicit `Status: blocked` line blocks; an open question or a worked-round error does not."""
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked: codex-code-mode-host.exe is missing"),
+                         "codex-code-mode-host.exe is missing")
+        self.assertEqual(tasks.blocked_of(GOOD + "\n**Status:** Blocked - no test runner"), "no test runner")
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked"), "the step could not do its work")
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked: key sk-abcdefghijklmnop"), "key ***")
+        luna = GOOD.replace("- (none)\n## Next", "- Restore the host so the tests can run?\n## Next")
+        for fine in ("", GOOD, luna, GOOD + "\nStatus: done", GOOD + "\nStatus: blockedness unknown",
+                     GOOD.replace("- (none)", "- the first rg call failed; Grep worked"), "the status: blocked here"):
+            self.assertEqual(tasks.blocked_of(fine), "", fine)
+
     def test_verdict_and_question_of_a_reply(self):
         # the Stop hook is async and may land after run_ended: the chain reads them in the reply too
         reply = f"HANDOFF\n{GOOD}\nEND HANDOFF\n**VERDICT: FAIL** test_add - 3 != 4"
@@ -992,6 +1004,8 @@ class ChainTest(unittest.TestCase):
         self.assertTrue(code.rstrip().endswith("END HANDOFF"))
         self.assertIn("`Lesson: <one sentence>`", code)
         self.assertIn("most steps have none", code)
+        self.assertIn("`Status: blocked: <why>`", code)  # plan 38
+        self.assertIn("an open question is not blocked", code)
         self.assertIn("do not run /session-handoff", code)
         self.assertNotIn("STOP:", code)
         self.assertNotIn("$", code)
@@ -1010,7 +1024,7 @@ class ChainTest(unittest.TestCase):
         self.assertIn("Fred adds for this retry: try again", tasks.step_prompt(task, tasks.step(task, 2), "note", note="try again", you="Fred"))
         self.assertNotIn("adds for this retry", retry)
         long = dict(task, goal="g" * 9000)
-        self.assertLess(len(tasks.step_prompt(long, tasks.step(long, 1), "")), 9000)
+        self.assertLess(len(tasks.step_prompt(long, tasks.step(long, 1), "")), 9100)  # plan 38: the Status line
 
     def test_step_prompt_is_harness_neutral(self):
         task = make(("scout", "code"))

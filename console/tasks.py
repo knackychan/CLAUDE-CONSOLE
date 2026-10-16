@@ -308,6 +308,18 @@ def reply_question(text: str) -> str:
     return redact.clip(redact.mask(match.group()), 200) if match else ""
 
 
+_BLOCKED = re.compile(r"^[\s`*>\-]*Status:\**\s*blocked\b[\s:\-`*]*(.*?)[\s`*]*$", re.M | re.I)
+
+
+def blocked_of(block: str) -> str:
+    """Plan 38: why the step says it could not do its work, from the last `Status: blocked: <why>` line of its
+    handoff block; "" when there is none (no Status line, or `Status: done`: the step did its work)."""
+    found = _BLOCKED.findall(str(block or ""))
+    if not found:
+        return ""
+    return redact.clip(redact.mask(found[-1].strip()), 200) or "the step could not do its work"
+
+
 _LESSON = re.compile(r"^[\s`*>\-]*Lesson:\**\s*(.+?)[\s`*]*$", re.M)
 
 

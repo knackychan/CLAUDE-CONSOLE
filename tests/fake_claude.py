@@ -14,6 +14,7 @@ Run (--input-format stream-json): per user message prints init / assistant / res
   "HANDOFF-OK" in the message: the assistant text ends with a valid HANDOFF block.
   "HINT-OPUS" with it: the block's Next ends with `Next model: opus/high` (a hint for the step after).
   "LESSON" with it: the block's Next carries a `Lesson:` line (plan 22).
+  "STEP-BLOCKED" with it: the block's Next carries `Status: blocked: the test runner is missing` (plan 38).
   "VERDICT-PASS" / "VERDICT-FAIL" in the message: it ends with a `VERDICT: PASS` / `VERDICT: FAIL x` line;
   VERDICT-FAIL also waits 1 s before the result line (a test appends the verdict event meanwhile).
   "STOP-ASK" in the message: the assistant text ends with `STOP: which file?`.
@@ -171,6 +172,8 @@ def reply(text):
             block = block.replace("\nGo on\n", "\nGo on\nNext model: opus/high\n")
         if "LESSON" in text:  # the step's Lesson line, inside the block's Next
             block = block.replace("\nGo on\n", "\nGo on\nLesson: fake claude teaches one thing\n")
+        if "STEP-BLOCKED" in text:  # the step says it could not do its work (plan 38)
+            block = block.replace("\nGo on\n", "\nGo on\nStatus: blocked: the test runner is missing\n")
         if "TROUBLE" in text:  # a dead end the brief must carry whole (plan 23)
             block = block.replace("## Troubleshooting\n- (none)", "## Troubleshooting\n- py -3.12 fails here: use py -3.14")
         body += "\n\n" + block

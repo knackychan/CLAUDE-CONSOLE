@@ -1610,6 +1610,13 @@ class Hub:
         block_error = ("" if manual else tasks.missing_block(text)) if block is None else tasks.check_handoff(block)
         # a denial in auto mode is not a failure: the model works around it and its handoff says what is left
         ok = not (s["interrupted"] or s["stopped"] or s["failed"]) and subtype == "success"
+        blocked = tasks.blocked_of(block) if block and ok else ""
+        if blocked:  # plan 38: a finished turn is not finished work; the step waits for Fred, nothing advances
+            cs["asked"] = meta.get("started")
+            action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
+                                                question="Blocked: " + blocked, now=now)
+            self._commit(task, lines)
+            return action
         found = None
         if cs["kind"] == "design" and ok and (manual or not block_error):  # plan 24: PLAN is still checked in manual mode
             found = plan.parse(text)

@@ -41,13 +41,15 @@ scout step and the writing in a later one. Kinds and their models:
 | edit | a 1-2 file edit with a clear spec, a rename, a copy | haiku | low |
 | code | a feature or fix with a clear spec, and its tests | sonnet | medium |
 | document | an important document: a plan, a spec, user-facing docs | sonnet | medium |
-| explain | an in-depth explanation across many files | sonnet | medium |
+| explain | an in-depth explanation, audit or review across many files: findings only, no plan | sonnet | medium |
 | debug | a failing test or a bug with no known cause | sonnet | high |
 | test | run the checks and report, no edits | haiku | low |
-| design | architecture, a novel problem, a critical decision, deep research | opus | high |
+| design | architecture, a novel problem, a critical decision: the implementation PLAN the write steps follow | opus | high |
 | replan | after a scout or a design: re-plan the steps that follow, from what it found | haiku | low |
 
 Do not add a verify step: the Console adds one after the last step that edits.
+A read-only audit or review that ends in findings is explain (scout for a quick one), never design: a design step
+must write an implementation plan. Rate its reasoning high when the audit needs the strongest model.
 
 Fields: goal (one sentence), where (files and functions, short), keep (what must not break),
 done_when (a check that can be run), last_decisions (from PLAN.md History, one line each, or ""),

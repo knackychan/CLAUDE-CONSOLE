@@ -107,7 +107,7 @@ let cold = null;        // {idle_s, tokens, cost} when a lever would re-read the
 let coldTimer = null;
 let freshHandoff = false;  // Hand off after a PASS starts a new chat from a brief: it re-reads nothing
 let boardTask = "";      // the picked task ("" none: the Board picks the newest in scope)
-let boardPick = "";      // "" nothing (the Measure table), "t" the task head, "s<n>" a step, "c<n>" the connector after step n
+let boardPick = "";      // "" nothing (the Measure table), "t" the task head, "s<n>" a step, "c<n>" the connector after step n, "o<id>" a chat with no task
 let itab = "chat";       // the step inspector's tab (window.json board_tab)
 let boardData = null;    // {id, sig, data}: GET /api/task of boardTask
 let boardChat = null;    // {sid, at, chat}: GET /api/chat of the picked step's session
@@ -552,7 +552,7 @@ function cardHtml(s) {
   }
   if (cardMsg[s.id]) third += `<div class="say" data-stay><span class="r">${esc(cardMsg[s.id])}</span></div>`;
   const hand = s.handoff_hint ? ` <span class="st ${s.ctx_tone === "red" ? "r" : "q"}">· HAND OFF</span>` : "";
-  return `<div class="card${t === "y" || t === "r" ? " " + t : ""}${enterClass("s" + s.id, s.group === "needs")}" data-open="${esc(s.id)}" tabindex="0" role="button"
+  return `<div class="card${t === "y" || t === "r" ? " " + t : ""}${enterClass("s" + s.id, s.group === "needs")}${boardPick === "o" + s.id ? " picked" : ""}" data-open="${esc(s.id)}" data-bpick="o${esc(s.id)}" tabindex="0" role="button"
     aria-label="${esc(label(s) + ": " + s.title)}">
     <div class="l1"><span class="st ${t}">${sessionMark(s, s.symbol, t)}${esc(label(s))}${hand}</span><span class="t">${esc(s.title)}</span>${taskTag(s)}
     <span class="age m" title="since the last event">${ago(snap.now - s.last_ts)}</span></div>
@@ -564,7 +564,7 @@ function quietHtml(s, showProject) {
   const [glyph, word, t] = stateWord(s);
   const hand = s.handoff_hint ? ' <span class="st q">· HAND OFF</span>' : "";
   const reply = (s.state === "idle" || s.state === "replied") && s.reply ? `<div class="reply mut" title="${esc(s.reply)}">${esc(s.reply)}</div>` : "";
-  return `<div class="card quiet${s.state === "idle" || s.state === "replied" ? " " + s.state : ""}" data-open="${esc(s.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + s.title)}">
+  return `<div class="card quiet${s.state === "idle" || s.state === "replied" ? " " + s.state : ""}${boardPick === "o" + s.id ? " picked" : ""}" data-open="${esc(s.id)}" data-bpick="o${esc(s.id)}" tabindex="0" role="button" aria-label="${esc(word + ": " + s.title)}">
     <div class="l1"><span class="st ${t}">${sessionMark(s, glyph, t)}${esc(word)}${hand}</span><span class="t">${esc(s.title)}${showProject ? ` <span class="m mut">· ${esc(s.project)}</span>` : ""}</span>${taskTag(s)}
     <span class="age m">${s.state === "replied" ? ago(snap.now - s.last_ts) : spentText(s)}</span></div>${reply}</div>`;
 }
@@ -2728,6 +2728,15 @@ async function renderInspector(job) {
   if (job) { setHtml($("bwrap"), `<div class="binsp">${inspJob(job)}</div>`, { sel: ".binsp", reset: boardWrapKey() }); return; }
   if (boardPick[0] === "d") { setHtml($("bwrap"), `<div class="binsp">${inspDay(boardPick.slice(1))}</div>`, { sel: ".binsp", reset: boardWrapKey() }); $("bbackwhat").textContent = dayName(boardPick.slice(1)); return; }
   if (boardPick === "x") { setHtml($("bwrap"), `<div class="binsp">${inspSelect()}</div>`, { sel: ".binsp", reset: boardWrapKey() }); $("bbackwhat").textContent = "selection"; return; }
+  if (boardPick[0] === "o") {  // a chat with no task: shown here like a step, Open chat goes to its page
+    const sid = boardPick.slice(1);
+    await boardSessFetch(sid);
+    if (page !== "board" || boardPick !== "o" + sid) return;
+    const s = snap.sessions.find((x) => x.id === sid), html = inspSession(s), docked = html.startsWith('<div class="idock"');
+    $("bbackwhat").textContent = s ? s.title : "chat";
+    setHtml($("bwrap"), `<div class="binsp${docked ? " docked" : ""}">${html}</div>`, { sel: docked ? ".iscroll" : ".binsp", reset: boardWrapKey() });
+    return;
+  }
   const row = boardRow(boardTask);
   if (!row) {
     if (boardPick === "") await measureFetch();
@@ -2775,6 +2784,25 @@ async function boardChatFetch(d, row) {  // the picked step's chat: when the pic
   const sid = s.session, chat = await api("/api/chat?session=" + encodeURIComponent(sid)).catch(() => null);
   if (page !== "board" || boardPick !== "s" + s.n) return;
   boardChat = chat ? { sid, at: snap.now, chat, running, turn } : null;
+}
+async function boardSessFetch(sid) {  // a picked chat with no task: when the pick changed, and every 2 s while it runs
+  const live = snap.sessions.find((x) => x.id === sid), running = !!live && BUSY.has(live.state), turn = live ? live.turn_ts : 0;
+  if (boardChat && boardChat.sid === sid && boardChat.running === running && (!running || (snap.now - boardChat.at < 2 && boardChat.turn === turn))) return;
+  const chat = await api("/api/chat?session=" + encodeURIComponent(sid)).catch(() => null);
+  if (page !== "board" || boardPick !== "o" + sid) return;
+  boardChat = chat ? { sid, at: snap.now, chat, running, turn } : null;
+}
+function inspSession(s) {  // the head, the turns, and Open chat in the lever bar
+  if (!s) return '<p class="note m">This chat is gone from the list.</p>';
+  const [glyph, word, t] = stateWord(s), text = s.group === "needs" ? needText(s) : "";
+  const head = `<div class="ihead"><div class="ln1"><span class="st ${t}">${sessionMark(s, glyph, t)}${esc(word)}</span><h2>${esc(s.title)}</h2></div>
+    <div class="meta"><span>${esc(s.project)}</span><span>${esc(routeText(s))}</span><span>spent <b>${spentText(s)}</b></span><span>${ago(snap.now - s.last_ts)}</span></div></div>`
+    + (s.state === "stop" ? `<div class="askbox"><div class="q">${esc(s.stop_question)}</div></div>` : text ? `<p class="note m">${esc(text)}</p>` : "");
+  const pane = boardChat && boardChat.sid === s.id && boardChat.chat ? chatPane(boardChat.chat, s.id, s.source || "chat", { compact: true, board: true })
+    : '<p class="note m">Reading the chat.</p>';
+  const buttons = `<button class="btn sm${s.state === "replied" || s.state === "stop" ? " go" : ""}" data-open="${esc(s.id)}" title="The session page, with its levers">Open chat</button>`
+    + (s.group === "needs" ? needButtons(s, "board", false) : "");
+  return dock(head, `<div class="ipane">${pane}</div>`, buttons, "");
 }
 async function measureFetch() {  // the Measure table: once a minute per project
   const project = boardProject();
@@ -3607,6 +3635,7 @@ document.addEventListener("keydown", (e) => {
   if (id === "fu" && e.key === "Enter") return act("continue", document.querySelector('[data-act="continue"]'));
   if (id === "pk" && e.key === "Enter") return unblock(document.querySelector('[data-do="send"][data-where="peek"]'));
   if (id.startsWith("ca-") && e.key === "Enter") return unblock(e.target.closest("[data-stay]").querySelector('[data-do="send"]'));
+  if (e.key === "Enter" && e.target.matches(".card.picked[data-open]")) { backTo = { page: "board" }; openSession(e.target.dataset.open); return; }  // the second Enter opens the picked chat
   if (e.key === "Enter" && e.target.matches(".card[data-open],.card[data-prep],.card[data-task]")) { e.target.click(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); go("new"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }

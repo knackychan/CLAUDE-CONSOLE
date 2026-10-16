@@ -1,4 +1,8 @@
 """The Codex CLI adapter: `codex exec --json -` with the prompt on stdin (README 3.3, 3.4)."""
+import os
+import shutil
+from pathlib import Path
+
 from .. import claude_cli, redact
 from . import section, which
 
@@ -11,10 +15,38 @@ RESUME = True
 HOOKS = False
 EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high", "max": "high"}
 CHAT_TEXT = 4000
+HOST = "codex-code-mode-host"  # the sibling a complete native install keeps beside codex.exe (plan 38)
+NATIVE = "codex.exe" if os.name == "nt" else "codex"
+
+
+def _vendored(shim: str) -> list:
+    """The native binaries an npm install keeps under its shim's folder: what the shim's codex.js runs."""
+    root = Path(shim).parent / "node_modules" / "@openai" / "codex"
+    found = []
+    for pattern in (f"node_modules/@openai/codex-*/vendor/*/bin/{NATIVE}", f"vendor/*/bin/{NATIVE}"):
+        found += sorted(str(p) for p in root.glob(pattern) if p.is_file())
+    return found
+
+
+def _complete(exe: str) -> bool:
+    p = Path(exe)
+    return (p.parent / (HOST + p.suffix)).is_file()
 
 
 def find_exe(cfg: dict):
-    return which(EXE_NAMES, section(cfg, NAME).get("exe", ""))
+    """harnesses.codex.exe when it exists; else the native binary under an npm shim, then codex.exe on PATH, the
+    first with its command host beside it (a copy without it, like ~/.codex/.sandbox-bin, cannot run tools); else
+    the first of them; else the old order. A native binary is preferred to the .cmd shim, which re-parses argv."""
+    exe = section(cfg, NAME).get("exe", "")
+    if exe and Path(exe).exists():
+        return exe
+    shims = [s for s in (shutil.which("codex.cmd"), shutil.which("codex")) if s]
+    candidates = list(dict.fromkeys([c for shim in shims for c in _vendored(shim)] + [shutil.which("codex.exe") or ""]))
+    candidates = [c for c in candidates if c]
+    complete = [c for c in candidates if _complete(c)]
+    if complete or candidates:
+        return (complete or candidates)[0]
+    return which(EXE_NAMES)
 
 
 def version_command(exe: list) -> list:
@@ -108,10 +140,12 @@ def chat(lines: list, cwd: str) -> list:
             item = d.get("item") or {}
             if item.get("type") == "agent_message":
                 items.append({"role": "claude", "text": _item_text(item)[:CHAT_TEXT], "files": []})
+            elif item.get("type") == "error":  # plan 38: a tool error inside the turn keeps its message
+                items.append({"role": "note", "text": redact.clip(redact.mask(str(item.get("message") or "error")), 300)})
             else:
                 items.append({"role": "tool", "text": _tool_text(item)})
         elif kind == "error":
-            items.append({"role": "note", "text": redact.clip(str(d.get("message", "error")), 300)})
+            items.append({"role": "note", "text": redact.clip(redact.mask(str(d.get("message", "error"))), 300)})
         elif kind == "turn.completed":
             turns += 1
             items.append({"role": "result", "text": f"success · {turns} turns"})

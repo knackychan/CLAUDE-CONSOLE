@@ -36,6 +36,16 @@ class KindFilesTest(unittest.TestCase):
         for slot in ("$You", "$raw", "$misses", "$window"):
             self.assertIn(slot, kinds.seed_text("prep"), slot)
 
+    def test_prep_routes_findings_only_work_to_explain(self):
+        """Plan 38: a read-only audit is not a design step, which must write an implementation PLAN."""
+        text = kinds.seed_text("prep")
+        row = lambda kind: next(line for line in text.splitlines() if line.startswith(f"| {kind} |"))
+        self.assertIn("audit or review", row("explain"))
+        self.assertIn("implementation PLAN", row("design"))
+        self.assertNotIn("research", row("design"))
+        self.assertIn("A read-only audit or review that ends in findings is explain", text)
+        self.assertIn("PLAN", kinds.seed_text("design"))  # the design contract itself is unchanged
+
     def test_ensure_seeds_once_and_keeps_an_edit(self):
         self.assertEqual(kinds.ensure(self.home), list(kinds.NAMES))
         path = Path(self.home) / "kinds" / "code.md"

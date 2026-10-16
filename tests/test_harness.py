@@ -221,6 +221,63 @@ class CodexTest(unittest.TestCase):
         self.assertEqual([i["role"] for i in items], ["tool", "claude", "result"])
         self.assertTrue(items[0]["text"].startswith("command_execution"))
 
+    def test_nested_error_keeps_its_message_masked(self):
+        """Plan 38: the missing-host item of the incident; a recoverable item error does not fail the turn."""
+        lines = CODEX_LINES[:2] + [{"type": "item.completed", "item": {
+            "type": "error", "message": "codex-code-mode-host.exe could not start: not found token=sk-abcdefghijklmnopqrstuv " + "x" * 400}}] + CODEX_LINES[2:]
+        items = codex.chat(lines, "/w")
+        self.assertEqual([i["role"] for i in items], ["note", "tool", "claude", "result"])
+        self.assertTrue(items[0]["text"].startswith("codex-code-mode-host.exe could not start: not found"))
+        self.assertNotIn("sk-abcdefghijklmnopqrstuv", items[0]["text"])
+        self.assertEqual(len(items[0]["text"]), 300)
+        self.assertEqual(codex.summary(lines)["subtype"], "success")
+        bare = codex.chat([{"type": "item.completed", "item": {"type": "error"}}], "/w")
+        self.assertEqual(bare, [{"role": "note", "text": "error"}])
+
+    def install(self, root, *, host):
+        """An npm install under `root`: the shim and its vendored native binary (with or without its host)."""
+        bin_ = Path(root, "npm", "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64",
+                    "vendor", "x86_64-pc-windows-msvc", "bin")
+        bin_.mkdir(parents=True)
+        (bin_ / codex.NATIVE).write_text("x")
+        if host:
+            (bin_ / (codex.HOST + Path(codex.NATIVE).suffix)).write_text("x")
+        shim = Path(root, "npm", "codex.cmd")
+        shim.write_text("x")
+        sandbox = Path(root, ".codex", ".sandbox-bin", "codex.exe")
+        sandbox.parent.mkdir(parents=True)
+        sandbox.write_text("x")
+        return str(shim), str(bin_ / codex.NATIVE), str(sandbox)
+
+    def test_find_exe_skips_an_incomplete_sandbox_copy(self):
+        """Plan 38: codex.exe on PATH is ~/.codex/.sandbox-bin's lone copy; the npm install's native binary has its
+        command host beside it and wins. An explicit exe still wins over both."""
+        with tempfile.TemporaryDirectory() as tmp:
+            shim, native, sandbox = self.install(tmp, host=True)
+            found = {"codex.cmd": shim, "codex": shim, "codex.exe": sandbox}
+            cfg = cfg_with()
+            with mock.patch("shutil.which", side_effect=found.get):
+                self.assertEqual(codex.find_exe(cfg), native)
+                self.assertEqual(codex.find_exe(cfg_with(codex={"exe": sandbox})), sandbox)
+                self.assertEqual(codex.find_exe(cfg_with(codex={"exe": sandbox + ".gone"})), native)
+            Path(native).parent.joinpath(codex.HOST + Path(codex.NATIVE).suffix).unlink()
+            Path(sandbox).parent.joinpath(codex.HOST + Path(codex.NATIVE).suffix).write_text("x")
+            with mock.patch("shutil.which", side_effect=found.get):
+                self.assertEqual(codex.find_exe(cfg), sandbox)  # only the PATH copy is complete now
+
+    def test_find_exe_without_a_complete_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim, native, sandbox = self.install(tmp, host=False)
+            with mock.patch("shutil.which", side_effect={"codex.cmd": shim, "codex.exe": sandbox}.get):
+                self.assertEqual(codex.find_exe(cfg_with()), native)  # what the shim would run
+            with mock.patch("shutil.which", side_effect={"codex.exe": sandbox}.get):
+                self.assertEqual(codex.find_exe(cfg_with()), sandbox)
+            bare = str(Path(tmp, "bare", "codex.cmd"))
+            with mock.patch("shutil.which", side_effect={"codex.cmd": bare}.get):
+                self.assertEqual(codex.find_exe(cfg_with()), bare)  # the old order when nothing native is found
+            with mock.patch("shutil.which", return_value=None):
+                self.assertIsNone(codex.find_exe(cfg_with()))
+
     def test_fake_runs_end_to_end(self):
         r = run_fake("fake_codex.py", ["exec", "--json", "-"], "hello there")
         self.assertEqual(r.returncode, 0)

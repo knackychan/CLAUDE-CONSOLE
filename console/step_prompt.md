@@ -32,4 +32,6 @@ One line for the next step. Add `Next model: <tier>/<effort>` only when the next
 tier is haiku, sonnet or opus (cheapest to strongest, whatever CLI runs the step), the effort low, medium or high.
 Add `Lesson: <one sentence>` only when something transferable surprised you, what you would tell someone starting
 this kind of step tomorrow; most steps have none, so leave the line out rather than pad.
+Add `Status: blocked: <why>` only when the step could not do its work at all; a tool error you got round, a failing
+test or an open question is not blocked.
 END HANDOFF

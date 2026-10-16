@@ -2360,6 +2360,16 @@ class TaskServerTest(RunServerTest):
                          (409, {"error": "no plan gap waits"}))
         self.assertFalse((self.folder / "tasks" / tid / "02-design" / "plan.md").exists())
 
+    def test_blocked_step_waits_instead_of_advancing(self):
+        """Plan 38: the run ended cleanly with a valid handoff, but the step says it could not do its work."""
+        tid = self.make_task(steps=[{"kind": "test", "goal": "run the suite STEP-BLOCKED"}, {"kind": "code", "goal": "next"}])
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the blocked step")
+        self.assertEqual(task["why"], "asks: Blocked: the test runner is missing")
+        self.assertEqual([s["state"] for s in task["steps"]], ["running"] + ["planned"] * (len(task["steps"]) - 1))
+        self.assertFalse(task.get("last_good"))
+        self.hub.advance()
+        self.assertEqual(self.hub.tasks[tid]["steps"][1]["state"], "planned")
+
     def test_redo_to_a_single_plan_drops_the_parts(self):
         tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT", kinds=("scout", "design", "code"))
         self.until(tid, self.at(3), "part 1 runs")
