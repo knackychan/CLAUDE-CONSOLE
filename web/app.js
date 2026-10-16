@@ -982,9 +982,10 @@ function modelOptions(value, withAuto, kind = "") {
       groups[RANK_GROUP[x.rank]].push(x.rung);
     }
   }
+  const blocked = new Set(Object.values(cfg.tiers || {}).flat().filter((x) => x.why).map((x) => x.rung));  // plan 40: a limited rung stays out
   for (const tier of cfg.models) {
     for (const r of (cfg.ladder && cfg.ladder[tier] && cfg.ladder[tier].length ? cfg.ladder[tier] : [tier])) {
-      if (!seen.has(r) && RANK_GROUP[alias(r)]) { seen.add(r); groups[RANK_GROUP[alias(r)]].push(r); }
+      if (!seen.has(r) && !blocked.has(r) && RANK_GROUP[alias(r)]) { seen.add(r); groups[RANK_GROUP[alias(r)]].push(r); }
     }
   }
   return (withAuto ? `<option value=""${seen.has(value) ? "" : " selected"}>auto</option>` : "")
@@ -1759,7 +1760,9 @@ async function taskAct(name, button) {
   button.disabled = true;
   try {
     const box = name === "retry" ? $("b-retrynote") : null;  // plan 33: what Fred typed joins the retry's prompt
-    await api("/api/task/" + name, { task: id, ...(box && box.value.trim() ? { note: box.value.trim() } : {}) });
+    const pickBox = name === "retry" ? $("b-retrymodel") : null;  // plan 40: the model to retry on ("" = auto)
+    await api("/api/task/" + name, { task: id, ...(box && box.value.trim() ? { note: box.value.trim() } : {}),
+      ...(pickBox ? { model: pickBox.value } : {}) });
     if (name === "clear") {  // plan 30: the folder is gone; the pick clears
       boardTask = "";
       boardPick = "";
@@ -3396,6 +3399,12 @@ function taskButtons(t, d) {  // plan 39 Task 2: the task page's dock bar; each 
   const del = lv.clear === "" ? `<button class="btn sm stop" data-tact="clear" data-tid="${tid}" title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays">Delete</button>` : "";
   return add + cont + fin + ho + del;
 }
+function retryForm(t, cur, tid) {  // plan 40: a note, the model to retry on (auto first; a limited rung is not listed) and Retry
+  const n = cur ? two(cur.n) : "";
+  return `<textarea class="in" id="b-retrynote" rows="2" aria-label="Note for the retry" placeholder="Optional: tell step ${n} what to do differently. It is added to the prompt of the retry."></textarea>
+    <div class="rrow"><label class="nl" for="b-retrymodel">Model</label><select class="in" id="b-retrymodel" aria-label="Model for the retry">${modelOptions(cur && cur.pick || "", true, cur && cur.kind)}</select>
+    <button class="btn go" data-tact="retry" data-tid="${tid}">Retry</button></div>`;
+}
 function inspTask(t, d, row) {
   const shown = taskShown(row), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, lv = d.levers || {}, tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
   const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn sm${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
@@ -3418,8 +3427,7 @@ function inspTask(t, d, row) {
   } else if ((t.state === "waiting" || t.state === "stuck") && t.why) {
     const c = (lv.confirm === "" ? `<button class="btn you" data-tact="confirm" data-tid="${tid}">${esc(confirmLabel(t, row))}</button>` : "")
       + (lv.redo === "" && (t.state === "stuck" || /^plan .* KB, over /.test(t.why)) ? `<button class="btn" data-tact="redo" data-tid="${tid}" title="Runs the design step again">Redo design</button>` : "");
-    const note = retryBox ? `<textarea class="in" id="b-retrynote" rows="2" aria-label="Note for the retry" placeholder="Optional: tell step ${cur ? two(cur.n) : ""} what to do differently. It is added to the prompt of the retry."></textarea>` : "";
-    wait = `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state === "stuck" ? "stuck" : "waiting")}${word}</span><div class="q">${esc(t.why)}</div>${note}${c || retryBox ? `<div class="lr">${retryBox ? `<button class="btn go" data-tact="retry" data-tid="${tid}">Retry</button>` : ""}${c}</div>` : ""}</div>`;
+    wait = `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state === "stuck" ? "stuck" : "waiting")}${word}</span><div class="q">${esc(t.why)}</div>${retryBox ? retryForm(t, cur, tid) : ""}${c ? `<div class="lr">${c}</div>` : ""}</div>`;
   }
   if (row.paused_after) wait += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
   const qs = d.questions || [], open = qs.filter((q) => !q.closed), closed = qs.filter((q) => q.closed);

@@ -613,6 +613,32 @@ class ChainTest(unittest.TestCase):
         tasks.fred(done, "stop", NOW + 8)  # stopped between steps: step 1 is done, Retry starts step 2
         self.assertEqual(tasks.fred(done, "continue", NOW + 9)[:2], (False, "not a stopped step"))
 
+    def test_retry_takes_a_model(self):
+        """Plan 40 Task 3: Retry on a model sets the step's pick, drops a manual route and names the model."""
+        def stuck_task():
+            task = make(("scout", "explain"))
+            run(task, 1)
+            end(task, block_error="x")
+            run(task, 1)
+            end(task, block_error="x")
+            return task
+        task = stuck_task()
+        tasks.step(task, 1)["pick"] = "opus"
+        tasks.step(task, 1)["manual_route"] = {"rung": "opus"}
+        ok, _, lines = tasks.fred(task, "retry", NOW + 15, model="sonnet")
+        step = tasks.step(task, 1)
+        self.assertEqual((ok, step["pick"], "manual_route" in step), (True, "sonnet", False))
+        self.assertEqual(lines[0]["why"], "retry by Fred on sonnet")
+        auto = stuck_task()
+        tasks.step(auto, 1)["pick"] = "opus"
+        ok, _, lines = tasks.fred(auto, "retry", NOW + 15, note="try again", model="")
+        self.assertEqual((ok, tasks.step(auto, 1)["pick"]), (True, ""))
+        self.assertEqual(lines[0]["why"], "retry by Fred on auto: try again")
+        kept = stuck_task()
+        tasks.step(kept, 1)["pick"] = "opus"
+        tasks.fred(kept, "retry", NOW + 15)
+        self.assertEqual(tasks.step(kept, 1)["pick"], "opus")  # no model sent: the pick stays
+
     def test_fred_levers(self):
         task = make(("scout", "explain"))
         run(task, 1)

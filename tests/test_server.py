@@ -963,6 +963,20 @@ class TaskServerTest(RunServerTest):
         self.assertNotIn("retry_note", self.hub.tasks[tid])
         self.assertEqual(self.call("/api/task/retry", {"task": tid})[0], 409)  # running now
 
+    def test_retry_takes_a_model(self):
+        tid = self.make_task(words="")
+        task = self.until(tid, lambda t: t["state"] == "stuck", "the task is stuck")
+        old = task["steps"][0]["session"]
+        self.assertEqual(task["steps"][0]["model"], "haiku")
+        code, body = self.call("/api/task/retry", {"task": tid, "model": "no-such-model"})
+        self.assertEqual((code, body["error"]), (400, "unknown model"))
+        self.assertEqual(self.hub.tasks[tid]["state"], "stuck")
+        self.assertEqual(self.call("/api/task/retry", {"task": tid, "model": "sonnet"}),
+                         (200, {"task": tid, "state": "running"}))
+        task = self.until(tid, lambda t: t["steps"][0]["session"] != old, "step 1 runs again")
+        self.assertEqual(task["steps"][0]["model"], "sonnet")
+        self.assertIn("retry by Fred on sonnet", [c["why"] for c in self.chain(tid)])
+
     def test_verify_fail_inserts_fix_and_verify(self):
         tid = self.make_task()
         verify = self.hub.tasks[tid]["steps"][2]

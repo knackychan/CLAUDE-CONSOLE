@@ -716,7 +716,7 @@ def held(task: dict) -> bool:
     return task["state"] == "waiting" and task["why"].endswith(" over its pace")
 
 
-def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = ""):
+def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", model=None):
     """Fred's levers on the task state. (True, "", chain lines) when it applies, else (False, why, []).
     Confirm is the Fable confirm, or Run anyway for a budget hold of step `next_n` (that step only). Continue is
     Fred's Continue in the session of a stopped task's current step: the task runs on in that session. Handoff is
@@ -748,8 +748,13 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = ""):
         if state not in ("stuck", "stopped"):
             return False, "not stuck or stopped", []
         if s and s["state"] != "done":  # a finished step is not run twice: the next one is already planned
+            on = ""
+            if model is not None:  # plan 40: Retry on a model ("" = auto); a plan 36 manual route is dropped
+                s["pick"] = model
+                s.pop("manual_route", None)
+                on = f" on {model or 'auto'}"
             lines.append(_line(now, s, s["state"], "planned",
-                               "retry by Fred" + (f": {redact.clip(redact.mask(note), 160)}" if note else "")))
+                               "retry by Fred" + on + (f": {redact.clip(redact.mask(note), 160)}" if note else "")))
             s["state"] = "planned"
             if note:  # plan 33: the retry's prompt carries Fred's words, and the reason a stuck step ended
                 task["retry_note"] = note

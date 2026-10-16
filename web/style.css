@@ -805,7 +805,10 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .nform .nfrom { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; min-width: 0; }
 .nform .nfrom .lbl { color: var(--ink); }
 .nform .nrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px 8px; align-items: center; }
-.nform .nl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.nform .nl, .rrow .nl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+/* plan 40: the stuck box's Retry form: Model select beside the Retry button */
+.rrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.rrow select.in { flex: 1 1 140px; }
 .nform .nroute { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; min-width: 0; font: 11.5px var(--mono); color: var(--mut); }
 .nform .nroute .r { color: var(--bad); }
 .nform .nroute b { color: var(--ink); font-weight: 500; }

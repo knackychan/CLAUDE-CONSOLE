@@ -2013,9 +2013,13 @@ class Hub:
                          + [x for x in [self._mirror(task, cs, now)] if x])
             return 200, {"task": task_id, "file": rel, "words": task["plan"]["words"], "kb": task["plan"]["kb"]}
 
-    def task_lever(self, task_id, lever: str, note="") -> tuple:
+    def task_lever(self, task_id, lever: str, note="", model=None) -> tuple:
         """Fred's Stop, Pause, Resume, Retry, Confirm, Clear and Mark done. task_levers decides first; Stop is the run's
-        interrupt (runs.stop), never a kill. `note` (Retry only, plan 33) joins the retry's prompt. Returns (status, body)."""
+        interrupt (runs.stop), never a kill. `note` (Retry only, plan 33) joins the retry's prompt; `model` (Retry
+        only, plan 40) is "" for auto or a known model. Returns (status, body)."""
+        if lever == "retry" and model is not None and (not isinstance(model, str)
+                                                       or (model and not claude_cli.known_model(self.cfg, model))):
+            return 400, {"error": "unknown model"}
         with self.tlock:
             info = self.task_levers(task_id)
             if info is None:
@@ -2030,7 +2034,8 @@ class Hub:
             if lever == "stop" and cs and cs["state"] == "running" and self.runs.is_live(cs["session"]):
                 self.runs.stop(cs["session"])
             note = note.strip()[:NOTE_MAX] if lever == "retry" and isinstance(note, str) else ""
-            ok, why, lines = tasks.fred(task, lever, now, next_n=(self._next_step(task) or {}).get("n", 0), note=note)
+            ok, why, lines = tasks.fred(task, lever, now, next_n=(self._next_step(task) or {}).get("n", 0), note=note,
+                                        model=model if lever == "retry" else None)
             if not ok:
                 return 409, {"error": why}
             self._commit(task, lines)
@@ -2474,7 +2479,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"task": self.hub.create_task(dict(card, prompt=text), steps, effort, title.strip())})
 
     def _task_lever(self, body, lever):
-        code, data = self.hub.task_lever(body.get("task"), lever, body.get("note") or "")
+        code, data = self.hub.task_lever(body.get("task"), lever, body.get("note") or "", body.get("model"))
         return self._json(data, code)
 
     def _terminal(self, body):
