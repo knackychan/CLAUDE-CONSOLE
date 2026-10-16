@@ -1,7 +1,7 @@
 # Task actions on the task page and on any step: brainstorm
 
 Status: **decided** 2026-10-16 (Fred took option 2 and the recommended placement, then (a) on D1 to D6 the same
-day: nothing is open). Becomes [plan 39](../../plans/39-task-actions.md) (to write). Design only: no code changed here.
+day: nothing is open). Plan: [plan 39](../../plans/39-task-actions.md), written 2026-10-16. Design only: no code changed here.
 
 Context: [CLAUDE.md](../../CLAUDE.md), [BRAINSTORM.md](../../BRAINSTORM.md) (non-goals, 7.5),
 [plan 36](../../plans/36-next-step/README.md) and its [design guideline](2026-10-15-next-step.md),
