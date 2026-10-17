@@ -124,7 +124,7 @@ class ChatCopyTest(unittest.TestCase):
 
     def test_board_chat_shows_the_answer_prompt_for_a_question(self):
         setup = "snap = {sessions: [{id: 's', state: 'stop', run_live: false, stop_question: 'Shall I fix it?'}], tasks: []}; boardChat = {sid: 's', chat: {items: [], source: 'window'}};"
-        html = render(setup + "chatTab({id: 't', chat: true, state: 'running'}, {n: 1, session: 's', state: 'running'}, {})")
+        html = render(setup + "stepFooter({id: 't', chat: true, state: 'running'}, {n: 1, session: 's', state: 'running'}, {step_levers: {continue: ''}})")
         self.assertIn("Shall I fix it?", html)
         self.assertIn('data-tact="answer"', html)
         self.assertIn("Send answer", html)
@@ -186,7 +186,7 @@ class NextStepUITest(unittest.TestCase):
 
     def _setup(self, snap=None, view=None):
         s = "snap = " + json.dumps(snap or {"sessions": [], "tasks": [], "versions": {}, "projects": []}) + "; "
-        s += "nextDraft = {}; fuDraft = {}; "
+        s += "nextDraft = {}; "
         s += ("nextOpen = null; nextView = " + json.dumps(view) + "; ") if view is not None \
             else "nextOpen = null; nextView = null; "
         return s
@@ -276,7 +276,7 @@ class NextStepUITest(unittest.TestCase):
                       "steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
                       "{n: 1, session: 's', state: 'running', kind: 'chat'}, "
                       "{levers: {add_next: '', done: ''}, step_levers: {handoff: '', next: ''}}, null)")
-        self.assertIn("Continue", html)
+        self.assertIn(">Send<", html)
         self.assertIn('data-tact="cont"', html)
         self.assertNotIn("Add next step", html)  # plan 38 U3: in the dock bar, on every tab
         dock = render(self._setup(snap=snap) +
@@ -288,6 +288,29 @@ class NextStepUITest(unittest.TestCase):
         self.assertIn("Finish task", dock)
         self.assertIn("Hand off", html)
         self.assertIn("Start new task", html)
+
+    def test_step_dock_offers_stop_retry_and_mark_step_done_where_the_service_allows_it(self):
+        """Plan 41: the current step's dock reads task_levers for Stop, Retry and Mark step done; Stop is not offered on
+        a chat whose turn is over, and the failed-step buttons only on the current step."""
+        snap = {"sessions": [{"id": "s", "state": "stop", "run_live": False}], "tasks": [], "versions": {}, "projects": []}
+        chat = "{id: 't', chat: true, state: 'running', current: 1, steps: [{n: 1, session: 'gone', state: 'running', kind: 'chat'}]}"
+        stuck = render(self._setup(snap=snap) + f"stepButtons({chat}, {{n: 1, session: 'gone', state: 'running', kind: 'chat'}}, "
+                       "{levers: {stop: '', stepdone: 'no stopped or stuck step'}}, null)")
+        self.assertIn('data-tact="stop"', stuck)  # a chat step with no session row is writing as far as the service knows
+        self.assertNotIn("Mark step done", stuck)
+        replied = render(self._setup(snap=snap) + "stepButtons({id: 't', chat: true, state: 'running', current: 1, steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
+                         "{n: 1, session: 's', state: 'running', kind: 'chat'}, {levers: {stop: ''}}, null)")
+        self.assertNotIn('data-tact="stop"', replied)
+        t = "{id: 't', state: 'stopped', current: 2, steps: [{n: 1, session: 's1', state: 'done', kind: 'scout'}, {n: 2, session: 's2', state: 'failed', kind: 'code'}]}"
+        failed = render(self._setup() + f"stepButtons({t}, {{n: 2, session: 's2', state: 'failed', kind: 'code'}}, {{levers: {{retry: '', stepdone: ''}}}}, {{state: 'failed'}})")
+        self.assertIn('class="btn sm go" data-tact="retry" data-tid="t"', failed)
+        self.assertIn('data-tact="stepdone" data-tid="t"', failed)
+        self.assertIn("Mark step done", failed)
+        old = render(self._setup() + f"stepButtons({t}, {{n: 1, session: 's1', state: 'done', kind: 'scout'}}, {{levers: {{retry: '', stepdone: ''}}}}, {{state: 'done'}})")
+        self.assertNotIn("Mark step done", old)
+        off = render(self._setup() + f"stepButtons({t}, {{n: 2, session: 's2', state: 'failed', kind: 'code'}}, {{levers: {{retry: 'task is stopped', stepdone: 'still working'}}}}, {{state: 'failed'}})")
+        self.assertNotIn("Retry", off)
+        self.assertNotIn("Mark step done", off)
 
     def test_task_page_dock_shows_each_action_only_where_the_service_allows_it(self):
         """Plan 39 Task 2: the task page's dock bar reads task_levers for Add next step, Finish task and Delete, and
@@ -414,12 +437,360 @@ class NextStepUITest(unittest.TestCase):
                                 "nextStale({}, {kind: 'code', model: 'auto', instr: 'Go on'})]"),
                          [False, True, True, True, True])
 
+    def test_start_recovers_after_blank_instructions_and_a_failed_preview(self):
+        result = render(self._setup() + """(async () => {
+          const t = {id: 't', steps: [{n: 1, session: 's', kind: 'code'}]};
+          boardData = {id: 't', data: {task: t}};
+          nextOpen = {tid: 't', key: nextKey(t, t.steps[0])};
+          renderBoard = async () => {};
+          const button = {disabled: false};
+          document = {querySelector: () => button, getElementById: () => null};
+          let calls = [], fail = true;
+          api = async (path, body) => {
+            calls.push([path, body]);
+            if (fail) throw Error('offline');
+            return path.endsWith('/preview')
+              ? {revision: 'r', route: {rung: 'sonnet', effort: 'high'}} : {step: 2};
+          };
+          await nextPreview();
+          const empty = {error: nextView.error, calls: calls.length};
+          nextDraft[nextOpen.key].instr = 'take over';
+          await startNextStep(button);
+          const failed = nextView.error;
+          fail = false;
+          await startNextStep(button);
+          const reviewed = {revision: nextView.revision, calls: calls.length};
+          await startNextStep(button);
+          return {empty, failed, reviewed, calls, open: nextOpen, pick: boardPick};
+        })()""")
+        self.assertIn('Describe what this step should do', result['empty']['error'])
+        self.assertEqual(result['empty']['calls'], 0)
+        self.assertEqual(result['failed'], 'offline')
+        self.assertEqual(result['reviewed'], {'revision': 'r', 'calls': 2})
+        self.assertEqual([path for path, _ in result['calls']],
+                         ['/api/task/next/preview', '/api/task/next/preview', '/api/task/next'])
+        for _, body in result['calls']:
+            self.assertEqual(body['instructions'], 'take over')
+            self.assertEqual(body['kind'], 'code')
+        self.assertEqual(result['calls'][-1][1]['revision'], 'r')
+        self.assertIsNone(result['open'])
+        self.assertEqual(result['pick'], 's2')
+
     def test_a_reseed_shows_in_the_open_field(self):
         """Plan 36 Task 4 (headless pass): setHtml keeps a field's typed value over a redraw, so a Work switch
         writes the reseeded instructions into the open field as well as the draft."""
         out = render("(() => { const f = {value: 'Go on'}; document = {getElementById: (id) => id === 'b-ninstr' ? f : null}; "
                      "const d = {instr: 'Go on'}; setInstr(d, verifyDefault(1)); return [d.instr === verifyDefault(1), f.value === verifyDefault(1)]; })()")
         self.assertEqual(out, [True, True])
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class UnifiedTaskChatTest(unittest.TestCase):
+    setup = """snap = {now: 100, sessions: [{id: 's', state: 'stop', run_live: false,
+      window: true, project_dir: 'repo', forks: []}], tasks: [], versions: {}, projects: []};
+      t = {id: 't', title: 'Task', state: 'running', current: 1, steps: [
+        {n: 1, session: 's', kind: 'chat', state: 'running', goal: 'Implement', notes: []}]};
+      d = {task: t, levers: {stop: '', done: '', add_next: ''}, step_levers: {
+        continue: '', verify: '', handoff: '', escalate: '', escalate_to: 'opus/high',
+        next: '', terminal: '', after_verify: ['handoff', 'escalate', 'done']}};
+      boardTask = 't'; boardPick = 's1'; boardData = {id: 't', data: d};
+      row = {id: 't', state: 'running', steps: t.steps}; snap.tasks = [row];
+      boardChat = {sid: 's', chat: {items: []}}; """
+
+    def test_task_and_owned_session_entry_points_open_current_chat_and_old_attempt(self):
+        result = render(self.setup + """(async () => {
+          renderBoard = async () => {}; showPage = name => {page = name;};
+          openTask('t'); const task = [page, boardTask, boardPick, itab];
+          boardData = {id: 't', data: d};
+          await openSession('s'); const session = [page, boardTask, boardPick, itab];
+          t.steps[0].attempts = [{session: 'old'}]; row.steps = t.steps;
+          await openSession('old'); return {task, session, attempt: boardHistory};
+        })()""")
+        self.assertEqual(result, {"task": ["board", "t", "s1", "chat"],
+                                  "session": ["board", "t", "s1", "chat"], "attempt": "old"})
+
+    def test_archived_task_session_links_open_the_task_inspector(self):
+        result = render(self.setup + """(async () => {
+          snap.tasks = []; snap.older = 1; snap.sessions[0].task = 't'; snap.sessions[0].step = 1;
+          boardData = null; renderBoard = async () => {}; showPage = p => {page = p;};
+          await openSession('s'); return [page, boardTask, boardPick, olderOpen, boardHistory];
+        })()""")
+        self.assertEqual(result, ['board', 't', 's1', True, 's'])
+
+    def test_composer_is_outside_scroller_on_every_tab_and_next_form_keeps_it(self):
+        for tab in ("chat", "recv", "hand", "route", "files", "plan"):
+            with self.subTest(tab=tab):
+                html = render(self.setup + f"itab = '{tab}'; inspStep(t, t.steps[0], d, row)")
+                self.assertEqual(html.count('id="b-tcont"'), 1)
+                self.assertLess(html.index('class="idock-bar"'), html.index('id="b-tcont"'))
+                self.assertIn('Message current step 01: chat', html)
+                self.assertNotIn('Open chat', html)
+        html = render(self.setup + "nextOpen = {tid: 't', key: nextKey(t, t.steps[0])}; inspStep(t, t.steps[0], d, row)")
+        self.assertIn('id="b-ninstr"', html)
+        self.assertIn('id="b-tcont"', html)
+
+    def test_session_controls_have_parity_without_open_chat(self):
+        html = render(self.setup + "stepFooter(t, t.steps[0], d)")
+        for action in ('cont', 'resume', 'handoff', 'escalate', 'chatdone', 'terminal', 'brief', 'vbrief', 'next'):
+            # Resume and Verify-in-new-task are conditional session actions.
+            if action in ('resume', 'vbrief'):
+                continue
+            self.assertIn(f'data-tact="{action}"', html)
+        for text in ('Send', 'Attach', 'Verify', 'Hand off', 'Terminal', 'Brief a new task'):
+            self.assertIn(text, html)
+        cold = render(self.setup + "snap.sessions[0].state = 'interrupted'; d.step_levers.cold = {cost: 1, tokens: 1000, idle_s: 3600}; stepFooter(t, t.steps[0], d)")
+        for text in ('Resume', 'Verify in a new task', 'Cold cache'):
+            self.assertIn(text, cold)
+
+    def test_table_states_keep_editable_input_and_honest_delivery_gate(self):
+        cases = [('planned', 'planned', None, {}, 'not started'),
+                 ('running', 'running', 'running', {'continue': 'still working'}, 'Working'),
+                 ('waiting', 'running', 'stop', {'continue': ''}, 'Send answer'),
+                 ('running', 'running', 'idle', {'continue': ''}, '>Send<'),
+                 ('stopped', 'failed', 'interrupted', {'continue': ''}, 'Retry'),
+                 ('stuck', 'failed', 'failed', {'continue': 'usage limit'}, 'usage limit'),
+                 ('done', 'done', 'done', {'continue': ''}, 'Add next step'),
+                 ('running', 'running', 'idle', {'continue': 'runs are off'}, 'runs are off')]
+        for state, step_state, session_state, levers, text in cases:
+            with self.subTest(state=state, session=session_state):
+                html = render(self.setup + f"t.state = {json.dumps(state)}; t.steps[0].state = {json.dumps(step_state)}; "
+                              f"snap.sessions[0].state = {json.dumps(session_state)}; d.step_levers = {json.dumps(levers)}; "
+                              "if (t.state === 'planned') t.steps[0].session = ''; "
+                              "if (t.state === 'waiting') snap.sessions[0].stop_question = 'Which?'; "
+                              "stepFooter(t, t.steps[0], d)")
+                self.assertIn('id="b-tcont"', html)
+                self.assertNotIn('id="b-tcont" disabled', html)
+                self.assertIn(text, html)
+                if state not in ('waiting',) and session_state != 'idle':
+                    self.assertIn('disabled', html)
+
+    def test_history_targets_current_and_stale_draft_requires_explicit_retarget(self):
+        html = render(self.setup + "t.steps.push({n: 2, session: 's2', kind: 'code', state: 'running'}); t.current = 2; stepFooter(t, t.steps[0], d)")
+        self.assertIn('History: step 01', html)
+        self.assertIn('Message current step 02: code', html)
+        self.assertIn('data-sid="s2"', html)
+        html = render(self.setup + "taskDraftFor(t).text = 'keep me'; t.steps[0].session = 'retry'; stepFooter(t, t.steps[0], d)")
+        self.assertIn('keep me', html)
+        self.assertIn('destination changed', html)
+        self.assertIn('Use current step', html)
+
+    def test_send_preserves_draft_and_files_on_error_and_cold_confirmation(self):
+        result = render(self.setup + """(async () => {
+          const draft = taskDraftFor(t); draft.text = 'correct this';
+          const key = taskAttachKey(t.id); att[key] = [{name: 'a.txt', data: 'YQ=='}];
+          const box = {value: draft.text}, msg = {};
+          document = {getElementById: id => id === 'b-tcont' ? box : msg};
+          renderBoard = async () => {};
+          let calls = []; api = async (path, body) => {calls.push([path, body]); throw Error('offline');};
+          const b = {dataset: {tid: 't'}, textContent: 'Send'};
+          d.step_levers.cold = {cost: 1};
+          await taskChatAct('cont', b); const first = calls.length;
+          await taskChatAct('cont', b);
+          return {first, calls, text: draft.text, files: att[key].length, error: draft.error};
+        })()""")
+        self.assertEqual(result['first'], 0)
+        self.assertRegex(result['calls'][0][1].pop('request_id'), r'^[0-9a-f]{32}$')
+        self.assertEqual(result['calls'], [['/api/task/message', {'task': 't', 'text': 'correct this',
+            'target': {'step': 1, 'session': 's', 'attempt': 1}, 'confirm': True,
+            'files': [{'name': 'a.txt', 'data': 'YQ=='}]}]])
+        self.assertEqual((result['text'], result['files'], result['error']), ('correct this', 1, 'offline'))
+
+    def test_gap_answer_uses_task_route_and_does_not_drop_unsupported_attachments(self):
+        result = render(self.setup + """(async () => {
+          row.asks = 'Plan gap: choose'; d.levers.answer = ''; taskDraftFor(t).text = 'Use A';
+          const b = {dataset: {tid: 't'}, textContent: 'Send answer'};
+          let calls = []; api = async (path, body) => {calls.push([path, body]); return {};};
+          renderBoard = async () => {}; actRedraw = () => {}; await taskChatAct('answer', b);
+          return calls;
+        })()""")
+        self.assertRegex(result[0][1].pop('request_id'), r'^[0-9a-f]{32}$')
+        self.assertEqual(result, [['/api/task/message', {'task': 't', 'text': 'Use A', 'files': [],
+            'target': {'step': 1, 'session': 's', 'attempt': 1}, 'confirm': False}]])
+
+    def test_server_modes_enable_guidance_while_busy_planned_and_paused(self):
+        for state, timing in [('running', 'Queued for the end of this turn'),
+                              ('planned', 'Saved for the first step. Sending does not start the task.'),
+                              ('stopped', 'Saved guidance. Use Resume or Retry explicitly to deliver it.')]:
+            with self.subTest(state=state):
+                html = render(self.setup + f"t.state = {json.dumps(state)}; d.message = {{mode: 'queued', reason: '', timing: {json.dumps(timing)}}}; stepFooter(t, t.steps[0], d)")
+                self.assertIn(timing, html)
+                self.assertIn('data-tid="t">Send</button>', html)
+
+    def test_message_retry_reuses_request_id_and_pending_actions_are_explicit(self):
+        result = render(self.setup + """(async () => {
+          d.message = {reason: '', target: {step: 1, session: 's', attempt: 1}};
+          taskDraftFor(t).text = 'keep this'; renderBoard = () => {};
+          let calls = []; api = async (p, b) => {calls.push(b); throw Error('offline');};
+          const button = {dataset: {tid: 't'}};
+          await taskChatAct('cont', button); await taskChatAct('cont', button);
+          t.messages = [{id: 'a', status: 'queued', target: {step: 1, attempt: 1}, text: '<correction>'},
+            {id: 'b', status: 'uncertain', target: {step: 1, attempt: 1}, text: 'check me'}];
+          return {same: calls[0].request_id === calls[1].request_id, html: taskMessages(t, d)};
+        })()""")
+        self.assertTrue(result['same'])
+        for text in ('Queued', 'Outcome unknown', 'Cancel guidance', 'Dismiss after checking conversation', '&lt;correction&gt;'):
+            self.assertIn(text, result['html'])
+
+    def test_text_draft_is_restored_without_putting_attachment_bytes_in_preferences(self):
+        result = render(self.setup + """(() => {
+          const saved = {};
+          localStorage = {setItem(k, v) {saved[k] = v;}, getItem(k) {return saved[k];}};
+          const draft = taskDraftFor(t); draft.text = 'persist me'; draft.start = 2;
+          att[taskAttachKey('t')] = [{data: 'secret attachment bytes'}];
+          saveTaskDraft('t'); delete taskDraft.t;
+          return {draft: taskDraftFor(t).text, stored: saved['task-draft:t']};
+        })()""")
+        self.assertEqual(result['draft'], 'persist me')
+        self.assertNotIn('secret attachment bytes', result['stored'])
+
+    def test_task_entry_points_render_identical_actions(self):
+        result = render(self.setup + """(async () => {
+          let html = '';
+          renderBoard = async () => {boardData = {id: 't', data: d}; html = boardInspector(row, d);};
+          showPage = name => {page = name;};
+          openTask('t'); await renderBoard(); const selected = html;
+          await openSession('s'); const linked = html;
+          await goChat('t', 1); return [selected === linked, html === linked];
+        })()""")
+        self.assertEqual(result, [True, True])
+
+    def test_redraw_keeps_focus_caret_and_scroll_without_copying_another_tasks_text(self):
+        result = render("""(() => {
+          getSelection = () => ({isCollapsed: true});
+          const draw = (other) => {
+            const before = {id: 'b-tcont', value: 'draft A', dataset: {tid: 'a'},
+              selectionStart: 2, selectionEnd: 5, scrollTop: 18};
+            const after = {id: 'b-tcont', value: other ? 'draft B' : 'draft A', dataset: {tid: other ? 'b' : 'a'},
+              focus() {this.focused = true;}, setSelectionRange(a, b) {this.selection = [a, b];}};
+            let node = before;
+            const oldScroll = {scrollTop: 42, clientHeight: 100, scrollHeight: 500}, newScroll = {};
+            const el = {contains: () => true, querySelectorAll: () => [before], getAnimations: () => [],
+              set innerHTML(v) {node = after;}, querySelector: s => s === '.iscroll' ? (node === before ? oldScroll : newScroll) : node};
+            document = {activeElement: before, getElementById: () => node};
+            setHtml(el, 'new', {sel: '.iscroll'});
+            return {text: after.value, selection: after.selection || null, focused: !!after.focused,
+              scroll: newScroll.scrollTop, inputScroll: after.scrollTop || 0};
+          };
+          return [draw(false), draw(true)];
+        })()""")
+        self.assertEqual(result, [dict(text='draft A', selection=[2, 5], focused=True, scroll=42, inputScroll=18),
+                                  dict(text='draft B', selection=None, focused=False, scroll=42, inputScroll=0)])
+
+    def test_success_clears_only_submitted_text_and_files_even_after_task_switch(self):
+        result = render(self.setup + """(async () => {
+          const draft = taskDraftFor(t), key = taskAttachKey(t.id); draft.text = 'send this';
+          att[key] = [{name: 'a.txt', data: 'YQ=='}];
+          let finish; api = () => new Promise(ok => {finish = ok;});
+          const b = {dataset: {tid: 't'}};
+          const pending = taskChatAct('cont', b);
+          draft.text = 'next thought'; att[key].push({name: 'b.txt', data: 'Yg=='});
+          boardTask = 'other';
+          document = {getElementById: () => ({dataset: {tid: 'other'}, value: 'other draft'})};
+          finish({session: 's'}); await pending;
+          return {text: draft.text, files: att[key].map(f => f.name), busy: draft.busy};
+        })()""")
+        self.assertEqual(result, dict(text='next thought', files=['b.txt'], busy=False))
+
+    def test_stale_attempt_blocks_send_and_explicit_retarget_keeps_text(self):
+        result = render(self.setup + """(async () => {
+          const draft = taskDraftFor(t); draft.text = 'keep this'; t.steps[0].session = 'retry';
+          let calls = 0; api = async () => {calls++;}; renderBoard = () => {};
+          const b = {dataset: {tid: 't'}};
+          await taskChatAct('cont', b); await taskChatAct('retarget', b);
+          return [calls, draft.text, draft.target];
+        })()""")
+        self.assertEqual(result, [0, 'keep this', 't|1|retry'])
+
+    def test_history_fetch_cannot_overwrite_another_tasks_chat(self):
+        result = render(self.setup + """(async () => {
+          boardChat = null; let finish; api = () => new Promise(ok => {finish = ok;});
+          page = 'board'; const pending = boardChatFetch(d, row);
+          boardTask = 'other'; boardChat = {sid: 'other-session'};
+          finish({items: [{text: 'old task'}]}); await pending;
+          return boardChat;
+        })()""")
+        self.assertEqual(result, {'sid': 'other-session'})
+
+    def test_drafts_and_attachment_keys_are_isolated_and_external_delivery_is_a_fork(self):
+        result = render(self.setup + """(() => {
+          const a = taskDraftFor(t); a.text = 'draft A'; a.start = 2; a.end = 3;
+          att[taskAttachKey(t.id)] = [{name: 'a.txt', data: 'YQ=='}];
+          const other = {...t, id: 'other'}; taskDraftFor(other).text = 'draft B';
+          const again = taskDraftFor(t); d.step_levers.fork = true;
+          return {same: a === again, text: again.text, selection: [again.start, again.end],
+            files: att[taskAttachKey('t')].length, others: att[taskAttachKey('other')].length,
+            html: stepFooter(t, t.steps[0], d)};
+        })()""")
+        self.assertTrue(result.pop('same'))
+        html = result.pop('html')
+        self.assertEqual(result, dict(text='draft A', selection=[2, 3], files=1, others=0))
+        self.assertIn('Sends in a window copy', html)
+        self.assertIn('a.txt', html)
+
+    def test_paused_missing_tools_and_disconnected_states_disable_only_delivery(self):
+        for change, reason in [("t.owner = 'fred'", "Resume or Retry"),
+                               ("d.step_levers.continue = 'folder is gone'", "folder is gone"),
+                               ("d.step_levers.continue = 'CLI not found'", "CLI not found"),
+                               ("streamLost = true", "Disconnected")]:
+            with self.subTest(change=change):
+                html = render(self.setup + change + "; taskDraftFor(t).text = 'retained'; stepFooter(t, t.steps[0], d)")
+                self.assertIn('retained</textarea>', html)
+                self.assertIn(reason, html)
+                self.assertIn('data-tid="t" disabled>Send', html)
+
+    def test_plan_gap_files_are_retained_and_block_silent_attachment_loss(self):
+        result = render(self.setup + """(async () => {
+          row.asks = 'Plan gap: choose'; d.levers.answer = ''; taskDraftFor(t).text = 'Use A';
+          const key = taskAttachKey(t.id); att[key] = [{name: 'a.txt', data: 'YQ=='}];
+          let calls = 0; api = async () => {calls++;};
+          await taskChatAct('answer', {dataset: {tid: 't'}});
+          return {calls, files: att[key].length, html: stepFooter(t, t.steps[0], d)};
+        })()""")
+        self.assertEqual((result['calls'], result['files']), (0, 1))
+        self.assertIn('Remove the files', result['html'])
+
+    def test_finished_message_transfer_is_explicit_and_keeps_message_draft(self):
+        result = render(self.setup + """(async () => {
+          taskDraftFor(t).text = 'new instructions';
+          openNextForm = async () => {nextOpen = {tid: 't', key: 'next'}; nextDraft.next = {instr: 'seed'};};
+          nextPreview = async () => {}; document = {getElementById: () => null};
+          await taskAct('messagenext', {dataset: {tid: 't'}});
+          return [nextDraft.next.instr, taskDraftFor(t).text];
+        })()""")
+        self.assertEqual(result, ['new instructions', 'new instructions'])
+
+    def test_task_recovery_remains_reachable_from_current_conversation(self):
+        html = render(self.setup + "d.levers.resume = ''; d.levers.pause = ''; stepButtons(t, t.steps[0], d, row)")
+        for action in ('resume', 'pause'):
+            self.assertIn(f'data-tact="{action}"', html)
+        self.assertIn('data-bpick="t"', html)  # task details still expose the retry note/model and Delete
+        result = render(self.setup + """(async () => {
+          openId = 's'; let name;
+          goChat = async () => {}; taskAct = async action => {name = action;};
+          await act('stop', {dataset: {}}); return name;
+        })()""")
+        self.assertEqual(result, 'stop')
+
+    def test_delayed_inspector_cannot_restore_old_task_or_tab(self):
+        result = render(self.setup + """(async () => {
+          boardData = null; page = 'board'; let finish;
+          api = () => new Promise(ok => {finish = ok;});
+          const pending = renderInspector(null);
+          boardTask = 'other'; boardPick = 's1';
+          finish(d); await pending;
+          return [boardTask, boardData];
+        })()""")
+        self.assertEqual(result, ['other', None])
+
+    def test_delayed_navigation_does_not_steal_focus_from_another_task(self):
+        result = render(self.setup + """(async () => {
+          page = 'board'; let finish, focused = false;
+          renderBoard = () => new Promise(ok => {finish = ok;});
+          document = {getElementById: () => ({focus() {focused = true;}})};
+          const pending = goChat('t', 1); boardTask = 'other';
+          finish(); await pending; return focused;
+        })()""")
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":

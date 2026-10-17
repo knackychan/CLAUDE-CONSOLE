@@ -462,6 +462,14 @@ class ChainTest(unittest.TestCase):
         action, _ = end(task, ok=False, cap=why)
         self.assertEqual((action, task["state"]), ("stuck", "stuck"))
 
+    def test_write_denied_does_not_advance(self):
+        task = make(("code",))
+        run(task, 1)
+        why = tasks.cap_reason("error_write_denied", None)
+        self.assertIn("could not write a file", why)
+        action, _ = end(task, ok=False, cap=why)
+        self.assertEqual((action, task["current"], task["last_good"]), ("retry", 1, 0))
+
     def test_cap_reason_names_the_cap(self):
         self.assertEqual(tasks.cap_reason("error_max_turns", {"max_turns": 12}), "it hit the turn cap (12 turns)")
         self.assertEqual(tasks.cap_reason("error_max_budget_usd", {"budget": 3}), "it hit the step budget (3.00 USD)")
@@ -599,6 +607,34 @@ class ChainTest(unittest.TestCase):
         tasks.step(stuck, 1)["state"] = "failed"
         self.assertTrue(tasks.fred(stuck, "done", NOW + 9)[0])
         self.assertEqual((stuck["state"], tasks.step(stuck, 1)["state"]), ("done", "failed"))  # a failed step stays
+
+    def test_fred_stepdone_accepts_the_failed_step_and_the_chain_goes_on(self):
+        """Plan 41: Mark step done on a stopped or stuck step. Automatic: the next step is planned and the task runs;
+        manual: the task waits at the boundary; last step or a chat: the task is done."""
+        task = make(("scout", "code"))
+        run(task, 1)
+        self.assertEqual(tasks.fred(task, "stepdone", NOW + 5)[:2], (False, "no stopped or stuck step"))  # it runs
+        tasks.fred(task, "stop", NOW + 6)
+        ok, why, lines = tasks.fred(task, "stepdone", NOW + 7)
+        s = tasks.step(task, 1)
+        self.assertEqual((ok, why, s["state"], s["ended"]), (True, "", "done", NOW + 7))
+        self.assertEqual((task["state"], task["owner"], task["last_good"]), ("running", "service", 1))
+        self.assertEqual([(c["from"], c["to"], c["why"]) for c in lines],
+                         [("failed", "done", "marked done by Fred"), ("task:stopped", "task:running", "")])
+        self.assertEqual(s["attempts"][-1]["why"], "marked done by Fred")
+        self.assertEqual(tasks.fred(task, "stepdone", NOW + 8)[:2], (False, "no stopped or stuck step"))
+        manual = make(("scout", "code"))
+        manual["progression"] = "manual"
+        run(manual, 1)
+        tasks.fred(manual, "stop", NOW + 6)
+        self.assertTrue(tasks.fred(manual, "stepdone", NOW + 7)[0])
+        self.assertEqual((manual["state"], manual["why"], manual["owner"]), ("waiting", "choose next step", "fred"))
+        last = make(("scout",))
+        run(last, 1)
+        last.update(state="stuck", why="the run did not finish cleanly (after one retry)")
+        tasks.step(last, 1)["state"] = "failed"
+        self.assertTrue(tasks.fred(last, "stepdone", NOW + 7)[0])
+        self.assertEqual((last["state"], tasks.step(last, 1)["state"]), ("done", "done"))
 
     def test_fred_continue_runs_the_stopped_step_on(self):
         task = make(("scout", "code"))
@@ -809,6 +845,18 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(tasks.prune(home, 0, now=NOW), [])
             self.assertTrue(tasks.folder(home, task["id"]).exists())
             self.assertEqual(tasks.prune(home, 90, now=NOW), [task["id"]])
+
+    def test_pending_messages_survive_reload_and_retention(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = make(("scout",))
+            task.update(state="stopped", messages=[{"id": "a" * 32, "status": "queued", "text": "keep this", "target": tasks.message_target(task)}])
+            tasks.save(home, task)
+            stamp = NOW - 100 * 86400
+            os.utime(tasks.folder(home, task["id"]) / "task.json", (stamp, stamp))
+            self.assertEqual(tasks.load(home, task["id"])["messages"], task["messages"])
+            self.assertEqual(tasks.prune(home, 90, now=NOW), [])
+            old = make(("scout",))
+            self.assertEqual(tasks.pending_messages(old), [])
 
     def test_new_task_has_a_slug(self):
         self.assertEqual(make()["slug"], "add-the-export")

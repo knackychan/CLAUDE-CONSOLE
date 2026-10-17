@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from console import attach, brief, claude_cli, events, guard, levers, paths, server, tasks, usage
+from console.harness import codex as codex_adapter
 
 
 class GuardTest(unittest.TestCase):
@@ -1900,6 +1901,40 @@ class TaskServerTest(RunServerTest):
         self.until(tid, self.at(2), "the next step starts")
         self.assertEqual(self.hub.levers(sid)["continue"], "a task step: use the task's levers")
 
+    # -- plan 41: Stop, Retry and Mark step done on the current step ------------------------------------------
+
+    def test_mark_step_done_accepts_a_stopped_step_and_the_chain_goes_on(self):
+        self.brief_pass_always()
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}, {"kind": "explain", "goal": "say what changed"}])
+        sid = self.hub.tasks[tid]["steps"][0]["session"]
+        self.assertEqual(self.task(tid)[1]["levers"]["stepdone"], "still working: wait until it stops")  # it still runs
+        self.assertEqual(self.call("/api/task/stepdone", {"task": tid})[0], 409)
+        self.call("/api/task/stop", {"task": tid})
+        self.wait_idle(sid)
+        self.assertEqual(self.task(tid)[1]["levers"]["stepdone"], "")
+        self.assertEqual(self.call("/api/task/stepdone", {"task": tid}), (200, {"task": tid, "state": "running"}))
+        task = self.until(tid, self.at(2), "step 2 starts after the accepted step 1")
+        self.assertEqual(task["steps"][0]["state"], "done")
+        note = tasks.read_note(self.folder, task, 1)
+        self.assertEqual(tasks.check_handoff(note.split("\n\n", 1)[-1]), "")  # the code-built note passes the six headings
+        self.assertIn("marked this step done", note)
+        self.assertTrue(any(c["step"] == 1 and c["to"] == "done" and c["why"] == "marked done by Fred" for c in self.chain(tid)))
+        self.assertEqual(self.call("/api/task/stepdone", {"task": tid})[0], 409)  # nothing stopped now
+
+    def test_a_chat_task_with_no_live_run_can_be_stopped_and_marked_done(self):
+        """Task 20261015-155327-be2f: a chat step left running with no run, no session row and no lever."""
+        tid = self.put_task(state="running", chat=True)
+        task = self.hub.tasks[tid]
+        task.update(owner="window", current=1)
+        task["steps"][0].update(kind=tasks.CHAT, state="running", session="gone-session")
+        lv = self.task(tid)[1]["levers"]
+        self.assertEqual((lv["stop"], lv["stepdone"]), ("", "no stopped or stuck step"))
+        self.assertEqual(self.call("/api/task/stop", {"task": tid}), (200, {"task": tid, "state": "stopped"}))
+        self.assertEqual(self.task(tid)[1]["levers"]["stepdone"], "")
+        self.assertEqual(self.call("/api/task/stepdone", {"task": tid}), (200, {"task": tid, "state": "done"}))
+        self.hub.advance()
+        self.assertEqual((task["state"], task["steps"][0]["state"]), ("done", "done"))
+
     def test_session_stop_stops_the_task(self):
         tid = self.make_task(steps=[{"kind": "scout", "goal": "SLOW look"}])
         sid = self.hub.tasks[tid]["steps"][0]["session"]
@@ -2626,6 +2661,22 @@ class HarnessServerTest(TaskServerTest):
         self.assertIn("opencode:opencode-go: 5 hour limit, until ", self.hub.rung_ok("opencode:opencode-go/kimi-k3"))
         self.assertIn("opencode:opencode-go: 5 hour limit, until ", self.hub.rung_ok("opencode:opencode-go/glm-5.3"))
 
+    def test_codex_is_refused_for_writing_kinds_where_it_cannot_write(self):
+        with mock.patch.object(codex_adapter, "write_block", return_value="codex: cannot write here"):
+            self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol", "code", str(self.project)), "codex: cannot write here")
+            self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol", "verify", str(self.project)), "codex: cannot write here")
+            self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol", "scout", str(self.project)), "")
+            self.assertEqual(self.hub.rung_ok("codex:gpt-6.1-sol", "code"), "")
+            self.assertEqual(self.hub.rung_ok("sonnet", "code", str(self.project)), "")
+
+    def test_write_denied_codex_step_retries_on_another_harness(self):
+        tid = self.make_task(steps=[{"kind": "code", "goal": "DENIED HANDOFF-OK", "model": "codex:gpt-6.1-sol"}])
+        task = self.until(tid, lambda t: t["steps"][0]["state"] == "done", "the retry completes")
+        step = task["steps"][0]
+        self.assertIn("could not write a file", step["attempts"][0]["why"])
+        self.assertEqual(step["avoid"], ["codex"])
+        self.assertEqual(step["harness"], "claude")
+
     def test_expired_limit_allows_provider_again(self):
         self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/kimi-k3": "opus"})
         self.hub.limits["opencode:opencode-go"] = {"until": time.time() - 1, "why": "old limit"}
@@ -2651,6 +2702,17 @@ class HarnessServerTest(TaskServerTest):
         status, data = self.call("/api/run", {k: v for k, v in body.items() if k != "prep"})
         self.assertEqual((status, data["error"]), (409, "no usable model in this tier"))
 
+    def test_auto_chat_under_a_fable_floor_balances_the_opus_pool(self):
+        card = self.prep_card("THINK about the design")
+        self.hub.cfg["tiers"]["think"] = ["fable", "opus"]
+        floored = dict(card, route=dict(card["route"], model="fable"))
+        with mock.patch.object(server.prep, "load", return_value=floored):
+            status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "HANDOFF-OK",
+                                                  "model": "auto", "prep": card["id"]})
+        self.assertEqual(status, 200, data)
+        self.wait_idle(data["session"])
+        self.assertEqual(self.hub.runs.meta(data["session"])["model"], "opus")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.folder = Path(self.tmp.name) / "home"
@@ -2659,7 +2721,7 @@ class HarnessServerTest(TaskServerTest):
         self.folder.mkdir()
         data = Path(self.tmp.name) / "data"
         data.mkdir()
-        for patcher in (mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(data)}),
+        for patcher in (mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(data), "CODEX_HOME": str(data)}),
                         mock.patch("shutil.which", return_value=None)):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -3364,6 +3426,19 @@ class NextStepServerTest(TaskServerTest):
         self.assertEqual(task["steps"][1]["state"], "done")
         chain = self.task(tid)[1]["chain"]
         self.assertTrue(any(c["step"] == 2 and c["to"] == "done" and c["why"] == "closed by step 03" for c in chain), chain)
+
+    def test_mark_step_done_on_a_manual_task_waits_for_the_next_step(self):
+        tid = self.three_steps()
+        self.start_next(tid, "code", "the next thing SLOW")
+        task = self.until(tid, self.at(4), "step 4 runs")
+        sid = task["steps"][3]["session"]
+        self.call("/api/task/stop", {"task": tid})
+        self.wait_idle(sid)
+        self.assertEqual(self.call("/api/task/stepdone", {"task": tid})[0], 200)
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["steps"][3]["state"], task["state"], task["why"], task["owner"]),
+                         ("done", "waiting", "choose next step", "fred"))
+        self.assertEqual(self.task(tid)[1]["levers"]["add_next"], "")  # the next step branches from the accepted one
 
     def test_a_duplicate_branch_request_returns_the_same_step(self):
         tid = self.three_steps()

@@ -1,6 +1,9 @@
 """The Codex CLI adapter: `codex exec --json -` with the prompt on stdin (README 3.3, 3.4)."""
+import ctypes
 import json
 import os
+import tomllib
+from ctypes import wintypes
 from pathlib import Path
 
 from .. import claude_cli, limits, redact
@@ -15,6 +18,7 @@ RESUME = True
 HOOKS = False
 EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high", "max": "high"}
 CHAT_TEXT = 4000
+WINDOWS = os.name == "nt"
 
 
 def find_exe(cfg: dict):
@@ -57,6 +61,64 @@ def env(read_only: bool) -> dict:
     return {}
 
 
+def write_block(cwd: str) -> str:
+    """Plan 43: why Codex's Windows sandbox cannot write in `cwd`, else "". Reads only: the sandbox mode in
+    config.toml and the folder's owner; anything unreadable counts as fine (D2)."""
+    if not WINDOWS or not cwd:
+        return ""
+    if _sandbox_mode() == "unelevated":
+        return ('codex: its Windows sandbox is "unelevated", where Python temp folders fail; set '
+                '[windows] sandbox = "elevated" in ~/.codex/config.toml and run codex once')
+    if not _owned_by_me(cwd):
+        who = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}"
+        return (f"codex: {cwd} belongs to another Windows account, so its sandbox cannot write there; "
+                f'in an admin PowerShell: icacls "{cwd}" /setowner "{who}"')
+    return ""
+
+
+def _sandbox_mode() -> str:
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    try:
+        with open(os.path.join(home, "config.toml"), "rb") as f:
+            win = tomllib.load(f).get("windows")
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    return str(win.get("sandbox", "")) if isinstance(win, dict) else ""
+
+
+def _owned_by_me(path: str) -> bool:
+    """True when this process's user owns `path`; True too when Windows cannot tell (no false alarm)."""
+    advapi, kernel = ctypes.WinDLL("advapi32"), ctypes.WinDLL("kernel32")
+    advapi.GetNamedSecurityInfoW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD,
+                                            ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_void_p,
+                                            ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                          ctypes.POINTER(wintypes.DWORD)]
+    advapi.EqualSid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    owner, sd = ctypes.c_void_p(), ctypes.c_void_p()
+    if advapi.GetNamedSecurityInfoW(path, 1, 1, ctypes.byref(owner), None, None, None, ctypes.byref(sd)):
+        return True  # SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION
+    token = wintypes.HANDLE()
+    try:
+        if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):  # TOKEN_QUERY
+            return True
+        size = wintypes.DWORD()
+        advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))  # TokenUser
+        buf = ctypes.create_string_buffer(size.value)
+        if not advapi.GetTokenInformation(token, 1, buf, size, ctypes.byref(size)):
+            return True
+        return bool(advapi.EqualSid(owner, ctypes.c_void_p.from_buffer(buf).value))  # TOKEN_USER.User.Sid
+    finally:
+        if token:
+            kernel.CloseHandle(token)
+        kernel.LocalFree(sd)
+
+
 def is_result(line: dict) -> bool:
     return line.get("type") in ("turn.completed", "turn.failed")
 
@@ -72,6 +134,7 @@ def _item_text(item: dict) -> str:
 def summary(lines: list) -> dict:
     final, subtype, tokens, sid, hit = "", "", None, "", None
     shell_failed = False
+    write_failed = False
     for d in lines:
         kind = d.get("type")
         error = d.get("error")
@@ -88,6 +151,8 @@ def summary(lines: list) -> dict:
                     shell_failed = True
                 elif item.get("exit_code") == 0:
                     shell_failed = False
+            if item.get("type") == "file_change":
+                write_failed = item.get("status") == "failed"
             if item.get("type") == "agent_message":
                 final = _item_text(item)
         elif kind == "turn.completed":
@@ -102,8 +167,11 @@ def summary(lines: list) -> dict:
         elif kind == "turn.started":
             subtype = ""
             shell_failed = False
+            write_failed = False
     if subtype == "success" and shell_failed:
         subtype = "error_shell_start"
+    elif subtype == "success" and write_failed:
+        subtype = "error_write_denied"
     return {"final": final, "subtype": subtype, "cost": None, "tokens": tokens, "session_id": sid,
             "denials": [], "exit_cap": False, "limit": hit}
 
@@ -148,7 +216,7 @@ def chat(lines: list, cwd: str) -> list:
             items.append({"role": "note", "text": redact.clip(str(d.get("message", "error")), 300)})
         elif kind == "turn.completed":
             turns += 1
-            status = "error" if summary(turn_lines)["subtype"] == "error_shell_start" else "success"
+            status = "error" if summary(turn_lines)["subtype"] in ("error_shell_start", "error_write_denied") else "success"
             items.append({"role": "result", "text": f"{status} · {turns} turns"})
         elif kind == "turn.failed":
             turns += 1

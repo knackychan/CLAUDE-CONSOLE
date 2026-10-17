@@ -31,6 +31,11 @@ and `plans/NN-*.md` (zero-decision sub-plans with the final code).
 - No emojis or em-dashes in prose. Verify CLI flags and hook fields against code.claude.com docs
   before relying on them.
 
+Plan 42 extends the Board's writes: task conversations use POST /api/task/message, with availability and destination
+from GET /api/task `message`. Guidance is persisted before acknowledgement and dispatched in order before task
+progression. Stop keeps the queue; Retry carries it only with an explicit choice; actions that strand it require
+resolution. Uncertain dispatches are never replayed automatically. Standalone sessions retain POST /api/continue.
+
 ## Commands
 
 ```bat

@@ -28,10 +28,11 @@ STORAGE_S = 3600.0  # the data folder's size line is recomputed this often
 APP_ID = "claude-console"
 MAX_BODY = 256 * 1024
 MAX_FILES_BODY = attach.MAX_TOTAL * 4 // 3 + MAX_BODY  # /api/prep, /api/run and /api/continue carry base64 files
-FILE_ROUTES = ("/api/prep", "/api/run", "/api/continue")
+FILE_ROUTES = ("/api/prep", "/api/run", "/api/continue", "/api/task/message")
 MAX_PROMPT = 20000
 BOARD_TABS = ("chat", "recv", "hand", "route", "plan", "files")  # the Board's step inspector tabs (window.json board_tab)
 NOTE_MAX = 2000  # plan 33: the longest note Fred sends with Retry
+ACCEPT_TAIL = 3000  # plan 41: the characters of a step's chat a Mark step done note keeps
 DONE_DAYS = 14  # plan 30 (D8): done tasks older than this leave the snapshot; GET /api/tasks/older lists them
 FOLD_KEY = re.compile(r"[a-z][a-z0-9.]{0,39}")
 FOLDS_MAX = 64
@@ -72,6 +73,11 @@ class Hub:
         self.changed = threading.Condition(self.lock)
         self.tasks = tasks.load_all(folder)  # plan 17: id -> task; the dict itself changes under self.lock
         self.tlock = threading.RLock()  # one task move at a time: advance, create, the lever routes, the brief thread
+        for task in self.tasks.values():
+            for message in task.get("messages", []):
+                if message["status"] == "dispatching":
+                    message.update(status="uncertain", error="Service restarted during dispatch. Inspect the conversation before dismissing; it will not be replayed.")
+                    tasks.save(folder, task)
         self._notes = {}  # session id -> (stream size, live note state), for _live_note
         self.briefing = set()  # ids of the tasks whose brief thread is running
         self.storage = {}  # usage.folder_sizes of the data folder, refreshed hourly on the usage thread
@@ -239,8 +245,9 @@ class Hub:
             self.changed.notify_all()
         return {}
 
-    def rung_ok(self, rung, kind: str = "") -> str:
-        """"" when `rung` may run a step of `kind` ("" = a plain Run), else the reason (README 3.6)."""
+    def rung_ok(self, rung, kind: str = "", cwd: str = "") -> str:
+        """"" when `rung` may run a step of `kind` ("" = a plain Run), else the reason (README 3.6); cwd: the
+        step's folder, for the harness's write check (plan 43)."""
         hit = self.limited(rung) if isinstance(rung, str) else ""
         if hit:
             return hit
@@ -260,7 +267,18 @@ class Hub:
             if claude_cli.tier_of(rung, self.cfg) != "opus" and (tasks.RULES.get(kind) or ("haiku",))[0] not in (
                     "haiku", "sonnet"):
                 return f"{name}: {bare} is not a think model"
+        tools = (tasks.RULES.get(kind) or ("", "", ""))[2]
+        block = getattr(harness.get(name), "write_block", None) if name != "claude" else None
+        if block and kind and cwd and (not tools or {"Bash", "Edit", "Write"} & set(tools.split(","))):
+            why = block(cwd)
+            if why:
+                return why
         return ""
+
+    def _avoided(self, rung: str, s: dict) -> str:
+        """Plan 43: "" unless step `s` already failed to write or start its shell on this rung's harness."""
+        name = claude_cli.split_rung(rung)[0]
+        return f"{name}: could not write in this step; the retry uses another harness" if name in (s.get("avoid") or ()) else ""
 
     def limited(self, rung: str) -> str:
         now = time.time()
@@ -675,6 +693,10 @@ class Hub:
                     out[lever] = base or "a task step: use the task's levers"
         if task and cs and cs["session"] == session_id and cs.get("limit"):  # plan 40: the session cannot answer
             out["handoff"] = base or "the run hit a usage limit: Retry on another model"
+        task = task or self._task_of_session(session_id)
+        if task and tasks.pending_messages(task):
+            for lever in ("continue", "verify", "handoff", "escalate", "deescalate"):
+                out[lever] = out[lever] or "Resolve pending task guidance in the task conversation first"
         return out
 
     def pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = (), auto: int = 0) -> tuple:
@@ -884,7 +906,7 @@ class Hub:
             budget=self.budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"], cfg=self.cfg,
             prev_rung=last["model"] if last else "", prev_age=time.time() - ended if ended else None,
             hard=(task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard")),
-            refuse=lambda rung: self.rung_ok(rung, s["kind"]), pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
+            refuse=lambda rung: self.rung_ok(rung, s["kind"], task["project_dir"]) or self._avoided(rung, s), pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
 
     def _base(self, task: dict) -> str:
         """Why nothing may run in the task's folder now ("" = it may): the project left the list, no claude.exe, or
@@ -945,14 +967,18 @@ class Hub:
                 off = "a chat: use its session's levers"
                 live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
                 next_step = self.next_availability(task)
-                return {**{k: off for k in ("start", "stop", "pause", "resume", "retry", "confirm", "done",
+                return self._guidance_levers(task, {**{k: off for k in ("start", "pause", "resume", "retry", "confirm", "done",
                                             "answer", "redo", "keep")},
+                        # plan 41: a chat step left running with no run (be2f) needs a way out: Stop, then Mark step done
+                        "stop": "" if state == "running" and cs and cs["state"] == "running" else f"task is {state}",
+                        "stepdone": self._stepdone_off(task, cs, live),
+                        "retry": self._base(task) or ("" if state in ("stuck", "stopped") and cs and cs["state"] == "failed" and not live else off),
                         "done": "still working: wait until it stops" if live else "" if next_step["available"] else next_step["reason"],
                         "add_next": "" if next_step["available"] else next_step["reason"],
                         "clear": "still working: wait until it stops" if live else  # plan 30: a finished chat goes too
                         "" if state == "done" else f"task is {state}",
                         "route": f"{cs['model']}/{cs['effort']}" if cs else "", "next_route": "",
-                        "cwd": task["project_dir"]}
+                        "cwd": task["project_dir"]})
             base = self._base(task)
             live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
             if base:
@@ -1001,20 +1027,237 @@ class Hub:
             done = ("still working: wait until it stops" if live else  # Finish starts nothing
                     "" if state in ("waiting", "stuck", "stopped", "handed") or manual_chat_done else f"task is {state}")
             route = self._route_for(task, nxt) if nxt else None
-            return {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry,
+            stepdone = self._stepdone_off(task, cs, live)
+            if not stepdone and base and task.get("progression") != "manual" and cs["n"] < len(task["steps"]):
+                stepdone = base  # the chain would start the next step: it needs the project
+            return self._guidance_levers(task, {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry, "stepdone": stepdone,
                     "confirm": confirm, "clear": clear, "done": done, "answer": answer, "redo": redo, "keep": keep,
                     "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
                     "next_route": f"{route['rung']}/{route['effort']}" if route and not route["hold"] else "",
-                    "cwd": task["project_dir"], "add_next": "" if next_step["available"] else next_step["reason"]}
+                    "cwd": task["project_dir"], "add_next": "" if next_step["available"] else next_step["reason"]})
+
+    @staticmethod
+    def _guidance_levers(task, info):
+        pending = tasks.pending_messages(task)
+        if pending:
+            for lever in ("stepdone", "clear", "done", "redo", "confirm", "keep", "add_next"):
+                current = tasks.current_step(task)
+                if lever == "confirm" and (not current or current["state"] == "planned") and all(m["status"] == "queued" for m in pending):
+                    continue
+                info[lever] = info[lever] or "Resolve pending task guidance first"
+        return info
+
+    @staticmethod
+    def _stepdone_off(task: dict, cs, live: bool) -> str:
+        """Plan 41: why Mark step done is off ("" = allowed): only a stopped or stuck task whose current step failed."""
+        if live:
+            return "still working: wait until it stops"
+        if task["state"] in ("stuck", "stopped") and cs and cs["state"] == "failed":
+            return ""
+        return "no stopped or stuck step"
 
     def _commit(self, task: dict, lines=()) -> None:
         """Chain lines to chain.jsonl, task.json whole, and a new snapshot for the window."""
+        if task.get("messages"):
+            task["updated"] = time.time()
         if lines:
             tasks.log(self.folder, task["id"], list(lines))
         tasks.save(self.folder, task)
         with self.lock:
             self.version += 1
             self.changed.notify_all()
+
+    def message_availability(self, task: dict) -> dict:
+        target = tasks.message_target(task)
+        cs = tasks.step(task, target["step"])
+        off, mode, timing = self._base(task), "queued", "Queued for the end of this turn"
+        row = self.session(cs["session"]) if cs["session"] else None
+        meta = self.runs.meta(cs["session"]) or {}
+        hname = meta.get("harness") or cs.get("harness") or claude_cli.split_rung(cs["model"] or cs["pick"])[0]
+        if not off and not self.runs.exe_for(hname):
+            off = f"{hname}: not found"
+        if hname != "claude" and not harness.is_on(self.cfg, hname):
+            off = off or f"{hname} is off"
+        if meta.get("ended") and hname != "claude" and not (harness.get(hname).RESUME and meta.get("harness_session")):
+            off = off or "This conversation cannot be resumed. Stop the task and Retry explicitly."
+        if task["state"] == "done":
+            off = off or "Task finished. Use Add next step to start another step."
+        elif cs["state"] == "done":
+            off = off or "This step finished. Select Add next step or confirm the next step; your draft is kept."
+        elif task["state"] == "planned" and not cs["session"]:
+            timing = "Saved for the first step. Sending does not start the task."
+        elif task["state"] in ("stopped", "stuck", "handed") or task["owner"] == "fred":
+            timing = "Saved guidance. Use Resume or Retry explicitly to deliver it."
+            if task["state"] == "waiting" and task["why"].startswith("asks: "):
+                mode = "answer"
+        elif row and not row["run_live"] and not self.runs.is_live(cs["session"]) and meta.get("ended"):
+            info = self.levers(cs["session"]) or {}
+            question = task["state"] == "waiting" and task["why"].startswith("asks: ") or bool(row["stop_question"])
+            mode = "answer" if question else "continue" if info.get("continue") == "" else "queued"
+            timing = "Sends an answer to the current step." if question else "Sends to the current conversation."
+            if info.get("fork"):
+                timing = "Sends in a window copy. The external session stays as it is."
+        elif row and not meta:
+            if row["run_live"] or row["state"] in BUSY:
+                off = off or "External session is working. Wait to fork it; live injection is unavailable."
+            else:
+                info = self.levers(cs["session"]) or {}
+                reason = info.get("continue", "Conversation unavailable")
+                off = off or ("" if reason == "Resolve pending task guidance in the task conversation first" else reason)
+                mode, timing = "continue", "Sends in a window copy. The external session stays as it is."
+        return {"target": target, "mode": mode, "reason": off, "timing": timing,
+                "cold": self.cold(row, cs["model"]) if row and (meta.get("ended") or not meta and row["state"] not in BUSY)
+                and not row["run_live"] and task["owner"] != "fred"
+                and task["state"] in ("running", "waiting") and cs["state"] == "running" else None,
+                "attachments": hname == "claude" and cs["kind"] != replan.KIND}
+
+    def task_message(self, body: dict) -> tuple:
+        request_id, text = body.get("request_id"), body.get("text")
+        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f-]{16,36}", request_id):
+            return 400, {"error": "request_id must be a UUID"}
+        with self.tlock:
+            task = self.tasks.get(body.get("task")) if tasks.safe_id(body.get("task")) else None
+            if task is None:
+                return 404, {"error": "unknown task"}
+            message = next((m for m in task.get("messages", []) if m["id"] == request_id), None)
+            action = body.get("action", "send")
+            if action != "send":
+                if message is None:
+                    return 404, {"error": "unknown message"}
+                if action == "cancel" and message["status"] in ("queued", "failed", "uncertain"):
+                    message.update(status="dismissed" if message["status"] == "uncertain" else "cancelled")
+                    if message["status"] == "cancelled":
+                        message["error"] = ""
+                    self._commit(task)
+                    return 200, {"message": message}
+                if action == "dispatch" and message["status"] == "queued":
+                    message["confirm"] = body.get("confirm") is True
+                    self._guidance_tick(task)
+                    return 200, {"message": message}
+                return 409, {"error": "message cannot be changed in this state"}
+            if not isinstance(text, str) or not text.strip() or len(text) > MAX_PROMPT:
+                return 400, {"error": "message must contain 1 to 20000 characters"}
+            files = attach.parse(body.get("files"))
+            payload = {"target": body.get("target"), "text": text.strip(), "files": files}
+            signature = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+            if message:
+                if message["hash"] != signature:
+                    return 409, {"error": "request_id was already used with different content"}
+                return 200, {"message": message}
+            available = self.message_availability(task)
+            if payload["target"] != available["target"]:
+                return 409, {"error": "The destination changed. Confirm the current step before sending.", **available}
+            if available["reason"]:
+                return 409, {"error": available["reason"], **available}
+            if files and not available["attachments"]:
+                return 400, {"error": "This harness cannot receive attachments. Remove the files or Retry on Claude."}
+            if available["cold"] and body.get("confirm") is not True:
+                return 409, {"error": "Cold cache: confirm the re-read cost before sending.", **available}
+            message = {"id": request_id, "task": task["id"], **payload, "files": attach.summary(files),
+                       "hash": signature, "mode": available["mode"], "status": "queued", "created": time.time(),
+                       "confirm": body.get("confirm") is True, "error": ""}
+            try:
+                if files:
+                    tasks.message_files(self.folder, task, message, files)
+                updated = copy.deepcopy(task)
+                updated.setdefault("messages", []).append(message)
+                self._commit(updated)
+            except OSError as exc:
+                return 500, {"error": f"Message was not saved: {exc}"}
+            self.tasks[task["id"]] = updated
+            # Planned tasks only start through their existing start/advance action.
+            if available["mode"] != "queued":
+                self._guidance_tick(updated)
+            return 200, {"message": message}
+
+    def _dispatch_message(self, task: dict, message: dict, start) -> bool:
+        """Reserve before launching: a crash after this write never automatically replays a turn."""
+        message.update(status="dispatching", error="")
+        self._commit(task)
+        try:
+            sid = start()
+        except Exception as exc:
+            message.update(status="uncertain", error=f"Dispatch outcome unknown: {exc}. Inspect the conversation before dismissing.")
+            self._commit(task)
+            return False
+        message.update(status="dispatched", session=sid, dispatched=time.time())
+        self._commit(task)
+        return True
+
+    def _guidance_tick(self, task: dict) -> str:
+        pending = tasks.pending_messages(task)
+        if not pending or pending[0]["status"] != "queued":
+            return ""
+        m, cs = pending[0], tasks.current_step(task)
+        if task["owner"] == "fred" or task["state"] not in ("running", "waiting") or not cs or cs["state"] != "running":
+            return ""
+        target = m.get("delivery_target", m["target"])
+        if target != tasks.message_target(task):
+            m.update(status="failed", error="Destination changed. Cancel this guidance or carry it explicitly with Retry.")
+            self._commit(task)
+            return ""
+        if cs["kind"] == replan.KIND:
+            if task["id"] not in self.briefing and not self._base(task):
+                self.start_replan(task, cs["n"], guidance=m)
+                return "guidance"
+            return ""
+        sid, meta = cs["session"], self.runs.meta(cs["session"]) or {}
+        if self.runs.is_live(sid) or (meta and not meta.get("ended")):
+            return ""
+        row = self.session(sid)
+        if not row or row["run_live"]:
+            return ""
+        _, subtype = self.final_message(sid) if meta else ("", "success")
+        if subtype != "success" or row["interrupted"] or row["stopped"] or row["failed"]:
+            task["owner"] = "fred"  # a failed run cannot auto-retry past accepted guidance
+            if cs["kind"] != tasks.CHAT:
+                self._ended(task, cs)
+            cs["state"] = "failed"
+            task.update(state="stuck", owner="fred", why=task.get("why") or "Run failed. Retry explicitly with queued guidance.")
+            self._commit(task)
+            return ""
+        available = self.message_availability(task)
+        model, effort = self.route_of(sid, row)
+        rung = harness.rung(meta.get("harness") or row.get("harness") or "claude", model)
+        off = available["reason"] or self.rung_ok(rung, "" if cs["kind"] == tasks.CHAT else cs["kind"], task["project_dir"])
+        if available["cold"] and not m.get("confirm"):
+            off = off or "Cold cache: confirm dispatch to re-read this conversation."
+        if off:
+            if m.get("error") != off:
+                m["error"] = off
+                self._commit(task)
+            return ""
+        text = m["text"]
+        reply = self.final_message(sid)[0]
+        gap = plan.gap(tasks.parse_handoff(reply) or "") if task.get("plan") else ""
+        question = row["stop_question"] or tasks.reply_question(reply) or ("Plan gap: " + gap if gap else "")
+        if question:
+            task.update(state="waiting", why="asks: " + question)
+        if cs["kind"] != tasks.CHAT:
+            text += "\n\nApply this guidance to the same step before progressing. Rebuild your complete HANDOFF from the resulting work."
+            if cs["kind"] == "design":
+                text += " Include the complete updated PLAN and any SUBPLAN blocks."
+        try:
+            files = tasks.message_files(self.folder, task, m)
+        except (OSError, ValueError) as exc:
+            m.update(status="failed", error=f"Attachment could not be loaded: {exc}")
+            self._commit(task)
+            return ""
+        def start():
+            if m["mode"] == "answer" and task["why"].startswith("asks: Plan gap:") and task.get("plan"):
+                m["decision"] = self._gap_decision(task, cs, m["text"])
+            hname = meta.get("harness") or row.get("harness") or "claude"
+            return self.runs.start(task["project_dir"], text, model, effort, resume=sid if meta else None, fork="" if meta else sid,
+                                   kind="continue", files=files, harness=hname)
+        if self._dispatch_message(task, m, start):
+            if m["session"] != sid:
+                tasks.start_step(task, cs["n"], m["session"], {"model": cs["model"], "effort": cs["effort"], "notes": ["forked external conversation"]}, "", time.time())
+            task.update(state="running", why="")
+            cs.pop("asked", None)
+            self._commit(task)
+            self.poll_once()
+            return "guidance"
+        return ""
 
     def _next_source(self, task_id, source_n, source_sid):
         """The step a next step may start from, or why not. Plan 39 (D2 a): any done step with a session and a saved
@@ -1024,6 +1267,8 @@ class Hub:
         task = self.tasks.get(task_id) if isinstance(task_id, str) and tasks.safe_id(task_id) else None
         if task is None:
             return None, "unknown task"
+        if tasks.pending_messages(task):
+            return None, "Resolve pending task guidance before adding a step"
         source = (next((s for s in task["steps"] if s["n"] == source_n), None)
                   if isinstance(source_n, int) and not isinstance(source_n, bool) else None)
         if source is None or not isinstance(source_sid, str) or not source_sid or source["session"] != source_sid:
@@ -1041,7 +1286,8 @@ class Hub:
         row, meta = self.session(source_sid), self.runs.meta(source_sid) or {}
         if self.runs.is_live(source_sid) or (row is not None and row["run_live"]):
             return None, "Available when this turn finishes"
-        if row and (row["interrupted"] or row["stopped"] or row["failed"] or row["denied"]):
+        if (row and (row["interrupted"] or row["stopped"] or row["failed"] or row["denied"])
+                and not source.get("accepted")):  # plan 41: Fred's Mark step done accepted this run as it ended
             return None, "use the existing recovery action for this step"
         reply = self.final_message(source_sid)[0] if meta else ""
         if not reply and source["state"] == "done":
@@ -1174,7 +1420,7 @@ class Hub:
         if kind == tasks.CHAT:
             if requested == "auto":
                 rank = fills.rank_of(self.cfg["default_model"], self.cfg)
-                pool = fills.pool(self.cfg, rank, refuse=self.rung_ok)
+                pool = fills.pool(self.cfg, rank, refuse=lambda r: self.rung_ok(r, kind, task["project_dir"]))
                 if not pool:
                     return None, "no usable model in this tier"
                 chosen = fills.balance(pool, self.budget(), self.cfg)
@@ -1182,7 +1428,7 @@ class Hub:
                 effort = effort if effort in claude_cli.EFFORTS else self.cfg["default_effort"]
                 return {"rung": rung, "model": fills.rank_of(rung, self.cfg), "effort": effort,
                         "notes": [chosen["note"]], "hold": ""}, ""
-            why = self.rung_ok(requested, kind)
+            why = self.rung_ok(requested, kind, task["project_dir"])
             if why:
                 return None, why
             effort = next((e for _, rows in self.cfg["tiers"].items() for r, e in fills.tier_rungs(self.cfg, _)
@@ -1193,10 +1439,10 @@ class Hub:
                             checked=source["n"] if kind == "verify" else 0)
         route = self._route_for(dict(task, last_good=source["n"]), step)  # plan 39: the previous note and rung are the source's
         if requested != "auto" and route["rung"] != requested:
-            return None, self.rung_ok(requested, kind) or "selected model cannot run this step"
+            return None, self.rung_ok(requested, kind, task["project_dir"]) or "selected model cannot run this step"
         if kind == "verify" and requested == "auto":
             rank = fills.rank_of(route["rung"], self.cfg)
-            options = fills.pool(self.cfg, rank, check=True, refuse=lambda r: self.rung_ok(r, kind))
+            options = fills.pool(self.cfg, rank, check=True, refuse=lambda r: self.rung_ok(r, kind, task["project_dir"]))
             old_key = fills.model_key(source["model"], self.cfg)
             alternatives = [(r, e) for r, e in options if fills.model_key(r, self.cfg) != old_key]
             if alternatives and fills.model_key(route["rung"], self.cfg) == old_key:
@@ -1213,16 +1459,16 @@ class Hub:
             for rung, _ in fills.tier_rungs(self.cfg, tier):
                 if rung not in seen:
                     seen.add(rung)
-                    rows.append({"rung": rung, "why": self.rung_ok(rung, kind)})
+                    rows.append({"rung": rung, "why": self.rung_ok(rung, kind, task["project_dir"])})
         for tier in claude_cli.MODELS:
             for rung in self.cfg.get("ladder", {}).get(tier, [tier]):
                 if rung not in seen:
                     seen.add(rung)
-                    rows.append({"rung": rung, "why": self.rung_ok(rung, kind)})
+                    rows.append({"rung": rung, "why": self.rung_ok(rung, kind, task["project_dir"])})
         if kind == "verify":
             for row in rows[1:]:
                 if not row["why"]:
-                    row["why"] = self.rung_ok(row["rung"], kind)
+                    row["why"] = self.rung_ok(row["rung"], kind, task["project_dir"])
         return rows
 
     def preview_next(self, request):
@@ -1296,7 +1542,8 @@ class Hub:
             except OSError as exc:  # the task is unchanged and nothing launches (plan 36 Task 2)
                 return 500, {"error": f"the step was not saved: {exc}"}
             self.tasks[updated["id"]] = updated
-        self.start_step(updated, step["n"])
+        with self.tlock:
+            self.start_step(updated, step["n"])
         status = "running" if step["state"] == "running" else "held" if updated["state"] == "waiting" else "failed"
         if status == "failed":
             step["request_status"] = "failed"
@@ -1409,11 +1656,15 @@ class Hub:
                 s["attempts"][-1]["cost"] = row["cost"]
             lines = lines or [None]
         done = row["state"] == "done"
-        if done != (task["state"] == "done"):
+        # plan 41: a chat Fred closed with Mark step done stays done until a new turn runs in its session
+        closed = task["owner"] == "fred" and task["state"] == "done" and not (row["run_live"] or self.runs.is_live(sid))
+        if done != (task["state"] == "done") and not closed:
             to = "done" if done else "running"
             lines.append(tasks._line(now, s, s["state"], to, "the chat is done" if done else "the chat goes on"))
             s.update(state=to, ended=now if done else None)
             task["state"], task["why"] = to, ""
+            if not done:
+                task["owner"] = "window"
             if done:
                 task["last_good"] = s["n"] if s["handoff"] else 0
         if not lines:
@@ -1428,14 +1679,14 @@ class Hub:
         s.pop("limit", None)
         self.reload_models()  # review B12: a models.json edit reaches this step's route, not the next one
         manual = s.get("manual_route")
-        refused = self.limited(manual["rung"]) if manual else ""
+        refused = (self.limited(manual["rung"]) or self._avoided(manual["rung"], s)) if manual else ""
         if refused:
             s.pop("manual_route", None)
         route = s.get("manual_route") or self._route_for(task, s)
         if refused:
             route["notes"].append(f"manual route refused: {refused} -> auto")
-        if route.get("rung") and self.rung_ok(route["rung"], s["kind"]):
-            tasks._task_to(task, "stuck", self.rung_ok(route["rung"], s["kind"]), now, s, lines)
+        if route.get("rung") and self.rung_ok(route["rung"], s["kind"], task["project_dir"]):
+            tasks._task_to(task, "stuck", self.rung_ok(route["rung"], s["kind"], task["project_dir"]), now, s, lines)
             return self._commit(task, lines)
         if route["hold"] and task.get("hold_ok") != n:
             tasks._task_to(task, "waiting", route["hold"], now, s, lines)
@@ -1531,6 +1782,25 @@ class Hub:
         if "git_base" not in s:  # D1 a: the tree before the first attempt; the facts count the step's own lines
             head = claude_cli.git_head(task["project_dir"])
             s["git_base"] = {"commit": head, "files": claude_cli.git_snapshot(task["project_dir"], head)}
+        pending = tasks.pending_messages(task)
+        message = pending[0] if pending and pending[0]["status"] == "queued" else None
+        if message and message.get("delivery_target", message["target"]) != tasks.message_target(task):
+            return
+        if message:
+            try:
+                files = tasks.message_files(self.folder, task, message)
+            except (OSError, ValueError) as exc:
+                message.update(status="failed", error=f"Attachment could not be loaded: {exc}")
+                tasks._task_to(task, "stuck", message["error"], now, s, lines)
+                return self._commit(task, lines)
+            if files and hname != "claude":
+                tasks._task_to(task, "stuck", "Queued attachments need Claude: Retry on Claude or cancel the guidance", now, s, lines)
+                return self._commit(task, lines)
+            prompt += "\n\nGuidance from " + you + ":\n" + message["text"]
+            message["status"] = "dispatching"
+            self._commit(task)
+        else:
+            files = ()
         try:
             sid = self.runs.start(
                 task["project_dir"], prompt, model_name, route["effort"],
@@ -1538,13 +1808,20 @@ class Hub:
                 reason=" · ".join(route["notes"]), prep=tasks.prep_id(task), kind="task",
                 extra={"task": task["id"], "step": n}, disallow=tasks.DISALLOW,
                 budget=self.cfg["task_step_budget_usd"], max_turns=max_turns, harness=hname, read_only=read_only,
-                strict_mcp=True, tools=tools)
+                strict_mcp=True, tools=tools, files=files)
         except (runs.RunError, OSError) as exc:
+            if message:
+                message.update(status="uncertain", error=f"Launch outcome unknown: {exc}. Inspect the conversation before dismissing.")
             tasks._task_to(task, "stuck", str(exc), now, s, lines)
             return self._commit(task, lines)
         lines = tasks.start_step(task, n, sid, dict(route, model=model),
                                  (self.runs.meta(sid) or {}).get("start_commit", ""), now)
         s["tier"], s["harness"] = tier, hname
+        if message:
+            message.update(status="dispatched", session=sid, dispatched=time.time())
+            for m in pending[1:]:
+                if m["status"] == "queued" and m.get("delivery_target", m["target"]) == message.get("delivery_target", message["target"]):
+                    m["delivery_target"] = tasks.message_target(task)
         self._commit(task, lines)
         self.poll_once()
 
@@ -1580,7 +1857,13 @@ class Hub:
 
     def _advance_one(self, task: dict) -> str:
         current = tasks.current_step(task)
+        pending = tasks.pending_messages(task)
+        if pending and (current and current["state"] != "planned" or pending[0]["status"] != "queued"):
+            return self._guidance_tick(task)
         if task.get("chat") or (current and current["kind"] == tasks.CHAT):
+            if current and current["state"] == "planned" and task["owner"] == "service" and task["state"] == "running":
+                self.start_step(task, current["n"])
+                return "start"
             return self._chat_tick(task)
         if self.sync_costs(task):
             self._commit(task)
@@ -1658,6 +1941,8 @@ class Hub:
         meta, _, summary = self._turn_summary(sid)
         text = summary["final"]
         subtype = "error_step_timeout" if meta.get("timed_out") else summary["subtype"]
+        if subtype in ("error_write_denied", "error_shell_start"):  # plan 43 (D4): the retry goes elsewhere
+            cs["avoid"] = sorted(set(cs.get("avoid") or ()) | {claude_cli.split_rung(cs["model"])[0]})
         hit = summary.get("limit")
         if hit:
             provider = limits.provider(cs["model"])
@@ -1889,6 +2174,8 @@ class Hub:
         if nxt is None or task["owner"] != "service":  # paused: Resume starts it
             return ""
         cs = tasks.current_step(task)
+        if tasks.pending_messages(task) and cs and cs["state"] != "planned":
+            return ""
         if cs and cs["state"] == "done" and task.get("briefing"):  # between steps: the next one reads the brief
             if task["id"] not in self.briefing:
                 self.start_brief(task, task["briefing"])  # the service restarted while it ran
@@ -1915,12 +2202,20 @@ class Hub:
         self.start_step(task, nxt["n"])
         return "start"
 
-    def start_replan(self, task: dict, n: int) -> None:
+    def start_replan(self, task: dict, n: int, guidance=None) -> None:
         """A replan step has no session: the pass runs in a thread on brief_model (plan 24 3.9); the step is running
         with session "" until the answer is checked."""
         s, now = tasks.step(task, n), time.time()
-        lines = tasks.start_step(task, n, "", {"model": self.cfg["brief_model"], "effort": "low",
+        old_target = tasks.message_target(task)
+        lines = [] if guidance else tasks.start_step(task, n, "", {"model": self.cfg["brief_model"], "effort": "low",
                                               "notes": ["replan: the pass, no tools"]}, "", now)
+        if not guidance:
+            for m in tasks.pending_messages(task):
+                if m["status"] == "queued" and m.get("delivery_target", m["target"]) == old_target:
+                    m["delivery_target"] = tasks.message_target(task)
+            guidance = next((m for m in tasks.pending_messages(task) if m["status"] == "queued"), None)
+        if guidance:
+            guidance.update(status="dispatching", error="")
         s["tier"] = fills.rank_of(self.cfg["brief_model"], self.cfg)  # plan 27: the rank brief_model runs on
         raw = kinds.text(self.folder, replan.KIND)
         try:  # plan 28: the replan step's folder holds the kind file it ran with
@@ -1929,34 +2224,51 @@ class Hub:
             pass
         self._commit(task, lines)
         briefs = "\n\n".join(b for b in (tasks.read_brief(self.folder, task, k) for k in range(1, n)) if b)
+        if guidance:
+            briefs += "\n\nPrevious planning result:\n" + json.dumps(s.get("guidance_context") or {}, ensure_ascii=False)
+            briefs += "\n\nGuidance from the user:\n" + guidance["text"]
         self.briefing.add(task["id"])  # the same flag: nothing else starts while a thread of the task runs
-        threading.Thread(target=self._replan_job, args=(copy.deepcopy(task), n, briefs, raw), name="cc-replan",
+        threading.Thread(target=self._replan_job, args=(copy.deepcopy(task), n, briefs, raw, guidance["id"] if guidance else ""), name="cc-replan",
                          daemon=True).start()
 
-    def _replan_job(self, task: dict, n: int, briefs: str, raw: str = None) -> None:
+    def _replan_job(self, task: dict, n: int, briefs: str, raw: str = None, message_id="") -> None:
         cfg = dict(self.cfg)  # plan 18: brief_model as config.json says (a Claude alias runs as given)
         try:
             res = replan.run_replan(cfg, self.runs.exe, task, n, briefs, raw)
         except Exception as exc:  # run_replan never raises; if it does, the step fails like a bad answer
             res = {"steps": [], "why": "", "cost": 0, "error": f"{type(exc).__name__}: {exc}"}
-        self._replan_done(task["id"], n, res)
+        self._replan_done(task["id"], n, res, message_id)
 
-    def _replan_done(self, task_id: str, n: int, res: dict) -> None:
+    def _replan_done(self, task_id: str, n: int, res: dict, message_id="") -> None:
         with self.tlock:
             self.briefing.discard(task_id)
             task = self.tasks.get(task_id)
+            if task and message_id:
+                message = next((m for m in task.get("messages", []) if m["id"] == message_id), None)
+                if message:
+                    message.update(status="failed" if res["error"] else "dispatched", error=res["error"], dispatched=time.time())
+                    self._commit(task)
             if task is None or tasks.current_step(task) is None or tasks.current_step(task)["n"] != n \
                     or tasks.step(task, n)["state"] != "running":
                 return  # cleared or stopped while the pass ran
             s, now, lines = tasks.step(task, n), time.time(), []
-            s["attempts"][-1]["cost"] = s["cost"] = res["cost"]
+            s["attempts"][-1]["cost"] = s["cost"] = (s["cost"] if message_id else 0) + res["cost"]
             s["attempts"][-1]["final"] = True
             if res["error"]:
                 action = tasks._retry_or_stuck(task, s, f"replan failed: {res['error']}", now, lines)
+                if tasks.pending_messages(task):
+                    s["state"] = "failed"
+                    task.update(state="stuck", owner="fred")
                 self._commit(task, lines)
                 if action == "retry" and task["owner"] == "service":
                     self._go_on(task)
                 return
+            if tasks.pending_messages(task):
+                s["guidance_context"] = res
+                self._commit(task)
+                self._guidance_tick(task)
+                return
+            s.pop("guidance_context", None)
             lines += replan.propose(task, n, res["steps"], res["why"], now)
             tasks._finish(task, s, "done", now, lines)
             task["last_good"] = n
@@ -1988,12 +2300,17 @@ class Hub:
                 return 409, {"error": info["answer"]}
             if not text.strip():
                 return 400, {"error": "empty answer"}
-            task, cs, now = self.tasks[task_id], tasks.current_step(self.tasks[task_id]), time.time()
-            line = plan.add_answer(self.folder, task, text, who=paths.you(self.cfg, start=True))
-            lines = [tasks._line(now, cs, "running", "running", f"plan gap answered by Fred: {redact.clip(text, 120)}")]
-            self._commit(task, lines + [x for x in [self._mirror(task, cs, now)] if x])
+            task, cs = self.tasks[task_id], tasks.current_step(self.tasks[task_id])
+            line = self._gap_decision(task, cs, text)
         status, body = self.pull(cs["session"], "continue", text)  # the task goes running in _ended, as any answer
         return status, dict(body, task=task_id, line=line) if status == 200 else body
+
+    def _gap_decision(self, task: dict, cs: dict, text: str) -> str:
+        now = time.time()
+        line = plan.add_answer(self.folder, task, text, who=paths.you(self.cfg, start=True))
+        lines = [tasks._line(now, cs, "running", "running", f"plan gap answered by Fred: {redact.clip(text, 120)}")]
+        self._commit(task, lines + [x for x in [self._mirror(task, cs, now)] if x])
+        return line
 
     def edit_plan(self, task_id: str, text: str, part: int = 0) -> tuple:
         """Fred's in-place edit of the index or of part `part`, checked like the design step's plan."""
@@ -2027,7 +2344,7 @@ class Hub:
                          + [x for x in [self._mirror(task, cs, now)] if x])
             return 200, {"task": task_id, "file": rel, "words": task["plan"]["words"], "kb": task["plan"]["kb"]}
 
-    def task_lever(self, task_id, lever: str, note="", model=None) -> tuple:
+    def task_lever(self, task_id, lever: str, note="", model=None, pending="") -> tuple:
         """Fred's Stop, Pause, Resume, Retry, Confirm, Clear and Mark done. task_levers decides first; Stop is the run's
         interrupt (runs.stop), never a kill. `note` (Retry only, plan 33) joins the retry's prompt; `model` (Retry
         only, plan 40) is "" for auto or a known model. Returns (status, body)."""
@@ -2041,22 +2358,71 @@ class Hub:
             if info[lever]:
                 return 409, {"error": info[lever]}
             task, now = self.tasks[task_id], time.time()
+            cs = tasks.current_step(task)
+            messages = tasks.pending_messages(task)
+            if messages and lever in ("retry", "stepdone", "done", "clear", "redo", "confirm", "keep"):
+                starting = lever == "confirm" and (not cs or cs["state"] == "planned") and all(m["status"] == "queued" for m in messages)
+                if not starting and (lever != "retry" or pending != "carry" or any(m["status"] not in ("queued", "failed") for m in messages)):
+                    return 409, {"error": "Resolve pending guidance first. Cancel it, or explicitly Retry with queued guidance."}
+                if not starting:
+                    for m in messages:
+                        m.update(status="queued", error="", delivery_target=tasks.message_target(task))
             if lever == "clear":
                 self._drop(task)
                 return 200, {"task": task_id, "state": "cleared"}
-            cs = tasks.current_step(task)
+            chat_route = None
+            if lever == "retry" and cs and cs["kind"] == tasks.CHAT:
+                chat_route, why = self._next_route(task, cs, tasks.CHAT, model or "auto")
+                if why:
+                    return 409, {"error": why}
             if lever == "stop" and cs and cs["state"] == "running" and self.runs.is_live(cs["session"]):
                 self.runs.stop(cs["session"])
             note = note.strip()[:NOTE_MAX] if lever == "retry" and isinstance(note, str) else ""
+            closed = cs if lever == "stepdone" else None
             ok, why, lines = tasks.fred(task, lever, now, next_n=(self._next_step(task) or {}).get("n", 0), note=note,
                                         model=model if lever == "retry" else None)
             if not ok:
                 return 409, {"error": why}
+            if chat_route:
+                cs["manual_route"] = chat_route
+            if closed:
+                self._accept_step(task, closed)
+                if task["state"] == "running" and task.get("progression") != "manual":
+                    task["briefing"] = closed["n"]  # saved with the transition, as _ended does
             self._commit(task, lines)
-            if lever in ("retry", "confirm", "redo", "keep"):
+            if closed and task.get("briefing"):
+                self.start_brief(task, closed["n"])
+            if lever in ("retry", "confirm", "redo", "keep", "stepdone"):
                 self.advance()
+            if lever == "resume" and messages:
+                self._guidance_tick(task)
             self.poll_once()
             return 200, {"task": task_id, "state": task["state"]}
+
+    def _accept_step(self, task: dict, cs: dict) -> None:
+        """Plan 41: the files of a step Fred marked done. A step that ended without a HANDOFF gets a note built by code
+        (its goal, the tail of its chat, the facts) so the next step and the brief have something to read; a note the
+        step already wrote stays. A disk error leaves what it could write; the chain goes on."""
+        try:
+            sid = cs["session"]
+            chat = tasks.attempt_text(self.runs.chat_of(sid, limit=10 ** 6), paths.you(self.cfg)) if sid else ""
+            if len(chat) > ACCEPT_TAIL:
+                chat = "[earlier part cut]\n" + chat[-ACCEPT_TAIL:].split("\n", 1)[-1]
+            if not tasks.read_note(self.folder, task, cs["n"]):
+                tasks.write_note(self.folder, task, cs, "\n".join([
+                    "## Goal", cs["goal"] or task["goal"][:600],
+                    "## Findings", "Fred marked this step done after its run ended without a handoff. "
+                    "What it wrote last:", chat or "(nothing recorded)",
+                    "## Files touched", "- (not recorded here: read the facts below and the git status)",
+                    "## Troubleshooting", f"- the step did not finish cleanly: {redact.clip(task.get('retry_why') or 'stopped', 160)}",
+                    "## Open questions", "- (none)",
+                    "## Next", "(none)"]))
+            if chat:
+                tasks.write_step_file(self.folder, task, cs, "notes.md", chat, head=True)
+            if sid:
+                self._facts(task, cs, sid)
+        except OSError:
+            pass
 
     def allowed(self, project_dir) -> str:
         """The configured folder matching `project_dir`, or "" (runs only in listed folders)."""
@@ -2090,7 +2456,7 @@ class Hub:
 def old_done(t: dict, now: float) -> bool:
     """A finished task the window's Done days no longer show (plan 30, D8): done or stopped, and last changed more
     than DONE_DAYS ago. A task that waits, runs or was handed off always shows."""
-    return t["state"] in ("done", "stopped") and now - t["updated"] > DONE_DAYS * 86400
+    return not tasks.pending_messages(t) and t["state"] in ("done", "stopped") and now - t["updated"] > DONE_DAYS * 86400
 
 
 def prep_row(t: dict):
@@ -2260,7 +2626,8 @@ class Handler(BaseHTTPRequestHandler):
             routes[f"/api/{lever}"] = lambda body, lever=lever: self._lever(body, lever)
         routes["/api/task/answer"], routes["/api/task/plan"] = self._task_answer, self._task_plan
         routes["/api/task/next/preview"], routes["/api/task/next"] = self._task_next_preview, self._task_next
-        for lever in ("stop", "pause", "resume", "retry", "confirm", "clear", "done", "redo", "keep"):
+        routes["/api/task/message"] = self._task_message
+        for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
         path = urlparse(self.path).path
         handler = routes.get(path)
@@ -2333,7 +2700,10 @@ class Handler(BaseHTTPRequestHandler):
         balance_note = ""
         if auto:
             base = (card or {}).get("route", {}).get("model") or cfg["default_model"]
-            rungs = fills.pool(cfg, fills.rank_of(base, cfg),
+            rank = fills.rank_of(base, cfg)
+            if rank == "fable":  # a Fable floor: Auto never picks Fable unasked (credits), so it balances the opus pool
+                rank = "opus"
+            rungs = fills.pool(cfg, rank,
                                hard=(card or {}).get("route", {}).get("reasoning") == "high",
                                refuse=self.hub.rung_ok)
             rungs = [(rung, level) for rung, level in rungs if fills.rank_of(rung, cfg) != "fable"
@@ -2444,6 +2814,9 @@ class Handler(BaseHTTPRequestHandler):
         s = self.hub.session(sid) if isinstance(sid, str) else None
         if s is None:
             return self._error(404, "unknown session")
+        task = self.hub._task_of_session(sid)
+        if task and tasks.pending_messages(task):
+            return self._error(409, "Resolve pending task guidance first")
         if s["run_live"] or self.hub.runs.is_live(sid):
             return self._error(409, "a window run is still going: Stop it first")
         self.hub.runs.emit({"event": "marked_done", "session_id": sid})
@@ -2486,14 +2859,15 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
             return self._error(400, "bad steps")
         for n, item in enumerate(steps, 1):
-            why = self.hub.rung_ok(item["model"], str(item.get("kind") or "")) if item.get("model") else ""
+            why = (self.hub.rung_ok(item["model"], str(item.get("kind") or ""), card.get("project_dir") or "")
+                   if item.get("model") else "")
             if why:
                 return self._error(400, f"step {n}: {why}")
         title = body.get("title") if isinstance(body.get("title"), str) else ""
         return self._json({"task": self.hub.create_task(dict(card, prompt=text), steps, effort, title.strip())})
 
     def _task_lever(self, body, lever):
-        code, data = self.hub.task_lever(body.get("task"), lever, body.get("note") or "", body.get("model"))
+        code, data = self.hub.task_lever(body.get("task"), lever, body.get("note") or "", body.get("model"), body.get("pending"))
         return self._json(data, code)
 
     def _terminal(self, body):
@@ -2618,6 +2992,10 @@ class Handler(BaseHTTPRequestHandler):
         status, data = self.hub.answer_gap(self._text(body, "task"), self._text(body, "text"))
         return self._json(data, status)
 
+    def _task_message(self, body):
+        status, data = self.hub.task_message(body)
+        return self._json(data, status)
+
     def _task_plan(self, body):
         part = body.get("part") or 0
         if not isinstance(part, int) or isinstance(part, bool) or part < 0:
@@ -2642,6 +3020,7 @@ class Handler(BaseHTTPRequestHandler):
         sent = dict(task, steps=[{k: v for k, v in s.items() if k not in ("git_base", "touched")}  # plan 27 K6
                                  for s in task["steps"]])
         return self._json({"task": sent, "levers": self.hub.task_levers(task_id),
+                           "message": self.hub.message_availability(task),
                            "next_step": self.hub.next_availability(task),
                            "sources": self.hub.next_sources(task),
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,

@@ -2,7 +2,7 @@
 
 `exec [options] [resume <id> | fork <id>] -`: options stand before the subcommand (an option after it exits 2);
 the prompt is read on stdin. Words in the prompt: HANDOFF-OK (a HANDOFF block ends the message), FAIL
-(turn.failed), SLOW (3 s before the message), STOP-ASK (`STOP: which file?`), MAXTURNS ignored.
+(turn.failed), DENIED (a failed file_change), SLOW (3 s before the message), STOP-ASK (`STOP: which file?`), MAXTURNS ignored.
 `--version` prints `codex-cli 0.0.0-fake`.
 """
 import json
@@ -56,6 +56,9 @@ def main(argv):
                                             "exit_code": 0}})
     if "SLOW" in prompt:
         time.sleep(3)
+    if "DENIED" in prompt:
+        out({"type": "item.completed", "item": {"type": "file_change", "status": "failed",
+                                                "changes": [{"path": "PLAN.md", "kind": "update"}]}})
     out({"type": "item.completed", "item": {"type": "agent_message", "text": reply(prompt)}})
     if "FAIL" in prompt:
         out({"type": "turn.failed", "error": {"message": "fake failure"}})

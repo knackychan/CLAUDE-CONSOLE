@@ -621,6 +621,8 @@ def cap_reason(subtype: str, limits) -> str:
     limits = limits or {}
     if subtype == "error_shell_start":
         return "Codex could not start the workspace shell; check its Windows sandbox and PowerShell installation"
+    if subtype == "error_write_denied":
+        return "Codex could not write a file (its sandbox refused it or the patch failed); the retry runs on another harness"
     if subtype == "error_max_turns":
         return f"it hit the turn cap ({limits.get('max_turns') or '?'} turns)"
     if subtype == "error_max_budget_usd":
@@ -765,6 +767,21 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
                 task["retry_why"] = attempts(s)[-1]["why"]
         _task_to(task, "running" if s else "planned", "", now, s, lines)
         task["owner"] = "service"
+    elif lever == "stepdone":  # plan 41: Fred accepts the stopped or stuck step; the chain goes on from it
+        if state not in ("stuck", "stopped") or not s or s["state"] != "failed":
+            return False, "no stopped or stuck step", []
+        _finish(task, s, "done", now, lines, "marked done by Fred")
+        s["accepted"] = now  # Hub._next_source: this step's interrupted run is no reason to refuse a next step
+        task["last_good"] = s["n"]
+        if task.get("chat") or (task.get("progression") != "manual" and s["n"] >= len(task["steps"])):
+            _task_to(task, "done", "", now, s, lines)
+            task["owner"] = "fred"
+        elif task.get("progression") == "manual":
+            _task_to(task, "waiting", "choose next step", now, s, lines)
+            task["owner"] = "fred"
+        else:
+            _task_to(task, "running", "", now, s, lines)
+            task["owner"] = "service"
     elif lever == "continue":  # Fred's Continue in the stopped step's own session: the step runs on there
         if state != "stopped" or not s or s["state"] != "failed":
             return False, "not a stopped step", []
@@ -844,6 +861,29 @@ def save(home, task: dict) -> None:
     tmp = path.with_name("task.json.tmp")
     tmp.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+def message_target(task: dict) -> dict:
+    s = current_step(task) or task['steps'][0]
+    return {'step': s['n'], 'session': s['session'], 'attempt': len(attempts(s))}
+
+
+def pending_messages(task: dict) -> list:
+    return [m for m in task.get('messages', []) if m['status'] in ('queued', 'dispatching', 'uncertain', 'failed')]
+
+
+def message_files(home, task: dict, message: dict, files=None) -> list:
+    """Attachment bytes stay in the task folder, outside snapshots and window preferences."""
+    if not re.fullmatch(r'[0-9a-f-]{16,36}', message['id']):
+        raise ValueError('unsafe message id')
+    path = folder(home, task['id']) / 'messages' / (message['id'] + '.json')
+    if files is None:
+        return json.loads(path.read_text(encoding='utf-8')) if message.get('files') else []
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(files, ensure_ascii=False), encoding='utf-8')
+    os.replace(tmp, path)
+    return files
 
 
 def load(home, task_id: str):
@@ -994,7 +1034,7 @@ def prune(home, days: float, now: float = None) -> list:
         return removed
     for entry in sorted(root.iterdir()):
         task = load(home, entry.name)
-        if not task or task.get("state") not in ("done", "stopped", "stuck", "handed"):
+        if not task or pending_messages(task) or task.get("state") not in ("done", "stopped", "stuck", "handed"):
             continue
         try:
             old = (entry / "task.json").stat().st_mtime < cutoff

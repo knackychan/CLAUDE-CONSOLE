@@ -211,6 +211,41 @@ class CodexTest(unittest.TestCase):
                     "aggregated_output": "test assertion failed"}}
         self.assertEqual(codex.summary([ordinary, done])["subtype"], "success")
 
+    def test_failed_file_change_is_write_denied(self):
+        failed = {"type": "item.completed", "item": {"type": "file_change", "status": "failed",
+                  "changes": [{"path": "D:/p/PLAN.md", "kind": "update"}]}}
+        done = {"type": "turn.completed"}
+        self.assertEqual(codex.summary([failed, done])["subtype"], "error_write_denied")
+        self.assertEqual(codex.chat([failed, done], "/w")[-1]["text"], "error · 1 turns")
+        wrote = {"type": "item.completed", "item": {"type": "file_change", "status": "completed", "changes": []}}
+        self.assertEqual(codex.summary([failed, wrote, done])["subtype"], "success")
+        self.assertEqual(codex.summary([failed, done, {"type": "turn.started"}, done])["subtype"], "success")
+
+    def test_write_block_reads_the_sandbox_mode_and_the_owner(self):
+        with tempfile.TemporaryDirectory() as home:
+            config = Path(home, "config.toml")
+            with mock.patch.dict(os.environ, {"CODEX_HOME": home, "USERDOMAIN": "PC", "USERNAME": "fred"}), \
+                    mock.patch.object(codex, "WINDOWS", True):
+                with mock.patch.object(codex, "_owned_by_me", return_value=True):
+                    self.assertEqual(codex.write_block(home), "")  # no config.toml
+                    config.write_text('[windows]\nsandbox = "elevated"\n', encoding="utf-8")
+                    self.assertEqual(codex.write_block(home), "")
+                    config.write_text("not = [toml", encoding="utf-8")
+                    self.assertEqual(codex.write_block(home), "")
+                    config.write_text('[windows]\nsandbox = "unelevated"\n', encoding="utf-8")
+                    self.assertIn('[windows] sandbox = "elevated"', codex.write_block(home))
+                config.write_text('[windows]\nsandbox = "elevated"\n', encoding="utf-8")
+                with mock.patch.object(codex, "_owned_by_me", return_value=False):
+                    self.assertIn('icacls "D:/old" /setowner "PC\\fred"', codex.write_block("D:/old"))
+            with mock.patch.object(codex, "WINDOWS", False):
+                self.assertEqual(codex.write_block(home), "")
+
+    @unittest.skipUnless(os.name == "nt", "the owner check is Windows only")
+    def test_a_new_folder_is_owned_by_me(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertTrue(codex._owned_by_me(d))
+        self.assertTrue(codex._owned_by_me(str(Path(d) / "gone")))
+
     def test_command_shape(self):
         cmd, stdin = codex.run_command(["x"], "gpt-6.1-sol", "xhigh", "D:/p", "sid", prompt="hi")
         self.assertEqual(cmd[:2], ["x", "exec"])
