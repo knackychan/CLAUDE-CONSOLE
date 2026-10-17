@@ -58,6 +58,9 @@ haiku pass):
 - Save (`create=False`): require the body's `revision` to match (409 "The task changed. Refresh the handoff
   preview before saving." otherwise); `paths.write_text_atomic(root / "task-handoff.md", text)`; return
   `{"task", "file"}`. No state change.
+  Departure: the preview text is cached server-side under its revision and the client sends only the revision
+  back; the revision covers the notes/briefs/facts, not task-handoff.md, so Save then Create both work from one
+  preview.
 - Create (`create=True`): idempotent on `request_id` — a stable follow-up id
   `hashlib.sha256(f"{tid}:{request}".encode()).hexdigest()[:20]`; when a task with that id exists with the same
   `handoff_request`, return it (200). Otherwise validate `revision`, build the follow-up (3.4), write its
@@ -81,6 +84,8 @@ unavailable; restore it before starting this task")`; append the note line and `
 
 - `goal = note.strip() or "Take over the remaining work using the inherited handoff. Check existing edits
   before repeating work."`; `steps = tasks.plan_steps([{"kind": "code", "goal": goal}], 1)`.
+  Departure: the follow-up gets one code step with no verify (plan_steps would append a verify and break Add
+  step); Resume is allowed on the planned follow-up because its handoff_from is set.
 - `tasks.new_task(task["project_dir"], task["project"], "Continue: " + task["title"][:70], task.get("goal", ""),
   steps, task["type"], task["demand"], "", task["effort"], time.time(), id_=follow_up_id)`; then
   `new.update(owner="fred", progression="manual", handoff_from=tid, handoff_request={...})`.
@@ -104,13 +109,13 @@ unavailable; restore it before starting this task")`; append the note line and `
 
 ## Steps
 
-- [ ] 1. `console/handoff.py` + `compact._ask` model param + `paths.py` keys. Unit-test `digest`, `render`,
+- [x] 1. `console/handoff.py` + `compact._ask` model param + `paths.py` keys. Unit-test `digest`, `render`,
       `check`, `fallback`, and `run` with a fake exe (assert the haiku path and the fallback path). Test first.
-- [ ] 2. Server: `handoff_available`, `task_handoff` (preview/save/create), routes, `GET /api/task` fields,
+- [x] 2. Server: `handoff_available`, `task_handoff` (preview/save/create), routes, `GET /api/task` fields,
       `step_prompt` branch. Server tests for each `handoff_available` reason, the revision 409, idempotent
       create, and the `handed`/`handoff_to` transition.
-- [ ] 3. Frontend: More entry, `handoffForm`, `taskHandoff`, CSS. `node --check`.
-- [ ] 4. Tests below; whole suite green. Commit: `feat: whole-task handoff with a haiku summary and a linked follow-up (plan 44 nav T3)`.
+- [x] 3. Frontend: More entry, `handoffForm`, `taskHandoff`, CSS. `node --check`.
+- [x] 4. Tests below; whole suite green. Commit: `feat: whole-task handoff with a haiku summary and a linked follow-up (plan 44 nav T3)`.
 
 ## Tests
 

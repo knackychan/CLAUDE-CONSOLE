@@ -90,11 +90,13 @@ Two edits are independent and kept: the backtick-fence fix in `console/tasks.py`
 reuses it and adds the distinguishing link:
 
 - Follow-up task: `handoff_from = <source id>`; a copy of the summary at `inherited-handoff.md` and the evidence
-  at `handoff-source/`; one first step, kind `code`, goal = the remaining-work instructions (or a fixed fallback
-  when none were given), `state: "planned"`, `owner: "fred"`, `progression: "manual"`. It does not auto-run.
+  at `handoff-source/`; one first step, kind `code` (no verify step; plan_steps would append one and break Add
+  step), goal = the remaining-work instructions (or a fixed fallback when none were given), `state: "planned"`,
+  `owner: "fred"`, `progression: "manual"`. It does not auto-run.
 - Source task: `handoff_to = <follow-up id>`, `handoff_note = "task-handoff.md"`; `state` becomes `handed` with
   `why = "Handed off to <id>"` unless it was already `done`. History, files and streams are preserved.
-- Starting the follow-up (its Resume, the ordinary Start) runs step 1; step 1's prompt carries
+- Starting the follow-up runs step 1; Resume is allowed on the planned follow-up because its `handoff_from` is
+  set (a planned task otherwise only Starts). Step 1's prompt carries
   `inherited-handoff.md` inline (the `n == 1 and task.get("handoff_from")` branch in `step_prompt`), so the
   worker reads the context even when reads outside the project are denied.
 - `handed` without `handoff_to` keeps the existing session-level flow (`handedBox`, Start next task); `handed`

@@ -1,6 +1,6 @@
 # Task navigation and handoff redesign
 
-Date: 2026-10-17. Status: decided 2026-10-17 (Fred settled the six points in "Settled decisions"); implementation plan pending.
+Date: 2026-10-17. Status: implemented 2026-10-17 (the navigation slice, [navigation/](navigation/README.md) Tasks 1-4); the plan 44 supervisor backend is not shipped.
 Companion to [supervisor brainstorm 44](BRAINSTORM.md). This records Fred's navigation
 request after the supervisor decisions. It changes the presentation proposed in section 10,
 not the supervisor's authority, budgets, wake rules or guidance ordering.
@@ -200,28 +200,28 @@ document save or task creation must leave the source usable and expose a retryab
 
 ## Implementation scope and order
 
-The guided plan is [navigation/README.md](navigation/README.md) (4 tasks, not started): selection (T1),
-Overview and the action area (T2), the whole-task handoff (T3), tests and close (T4). This section is the
+The guided plan is [navigation/README.md](navigation/README.md) (Tasks 1-4 implemented 2026-10-17): selection
+(T1), Overview and the action area (T2), the whole-task handoff (T3), tests and close (T4). This section is the
 source for those tasks; the plan is authoritative over any interrupted attempt in the working tree.
 
 1. Fix selection centrally: `openTask`, task/header/day-row click handlers, task-owned
    session links, `goChat`, inspector selection and async fetch guards in `web/app.js`.
-   Audit every caller; use explicit step navigation only for intentional deep links.
+   Audit every caller; use explicit step navigation only for intentional deep links. Done (T1).
 2. Rebuild Overview and the action hierarchy using the existing plain HTML/CSS/JS and
    Cells palette. Consolidate `taskButtons`, `stepButtons`, `taskSessionButtons`,
    `nextActions`, `nextSecondary`, `stepFooter` and their handlers. Keep server gates.
-   Update `web/style.css`, and `web/index.html` only if the existing mounts require it.
+   Update `web/style.css`, and `web/index.html` only if the existing mounts require it. Done (T2).
 3. Add the whole-task handoff preview, saved document and linked draft creation through
    `console/server.py` and `console/tasks.py`: one cheap haiku pass over the saved digest
    (reuse `compact.run_brief` / `brief_command`), the `handed` state and `handoff_to` /
    `handoff_from` link fields. Reuse the current task creation/run path, persistence, safe
    IDs, file readers, redaction and request-id conventions. Define the minimal API and
    persisted link fields in the guided implementation plan before coding. Keep standalone
-   external-session handoff behavior separate and working.
+   external-session handoff behavior separate and working. Done (T3).
 4. Integrate plan 44 suggestions when its backend ships. Replace section 10's busy header
-   proposal with the attention area and compact setting above; do not change autonomy rules.
+   proposal with the attention area and compact setting above; do not change autonomy rules. Pending its backend.
 5. Update `tests/test_web.py`, task/server tests and
-   `tests/live_task_chat_check.py`; reconcile plans 39, 41, 42 and 44 and the master index.
+   `tests/live_task_chat_check.py`; reconcile plans 39, 41, 42 and 44 and the master index. Done (T4).
 
 No new frontend framework, dependency, router abstraction, persistent supervisor session,
 or unrelated visual theme change is required. The interrupted navigation/handoff

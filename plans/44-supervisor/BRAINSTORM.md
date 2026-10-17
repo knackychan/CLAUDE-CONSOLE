@@ -273,9 +273,10 @@ supervisor only wakes at `stuck` and (D12 a, slice C) once at `done`.
 ## 10. The Board
 
 Navigation follow-up (2026-10-17): [Task navigation and handoff redesign](NAVIGATION.md)
-records Fred's request for a task Overview, fewer actions and a whole-task handoff. It is
-a proposed replacement for the presentation below, not a change to the decided supervisor
-policy or a claim that the UI has shipped.
+records Fred's request for a task Overview, fewer actions and a whole-task handoff. The
+navigation slice shipped 2026-10-17 and replaces the presentation below: one Overview
+attention area instead of the busy header. This changes the presentation only, not the
+decided supervisor policy.
 
 Minimal, in the existing inspector (plan 25) and the task page dock (plan 39):
 
