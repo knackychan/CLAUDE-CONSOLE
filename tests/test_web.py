@@ -883,6 +883,28 @@ class TaskOverviewTest(unittest.TestCase):
         self.assertIn("incomplete", html)  # it names accepting incomplete or failed output
         self.assertLess(html.index("<details"), html.index("Accept step result"))  # in More, never prominent
 
+    def test_retry_is_not_drawn_twice_on_the_overview(self):
+        """The Overview's attention area already has the Retry form (note and model); the action area adds its own
+        one-click Retry only where that form is not on the page (the Steps and Files views)."""
+        failed = ("cfg = {models: ['opus'], ladder: {opus: ['opus']}, tiers: {think: [], write: [], read: []}}; "
+                  "t.state = 'stopped'; t.why = 'stopped by Fred'; t.steps[0].state = 'failed'; row.state = 'stopped'; "
+                  "d.levers = {retry: '', stop: 'task is stopped', done: ''}; ")
+        over = render(self.setup + failed + "taskView = 'overview'; inspTask(t, d, row)")
+        self.assertEqual(over.count('data-tact="retry"'), 1)
+        self.assertIn('id="b-retrynote"', over)
+        steps = render(self.setup + failed + "taskView = 'steps'; inspTask(t, d, row)")
+        self.assertEqual(steps.count('data-tact="retry"'), 1)
+        self.assertNotIn('id="b-retrynote"', steps)
+
+    def test_manual_boundary_does_not_say_to_resume(self):
+        """A manual task between steps waits for Add step or Mark done; the Overview must not tell Fred to Resume."""
+        boundary = ("t.state = 'waiting'; t.why = 'choose next step'; row.state = 'waiting'; row.paused_after = 1; "
+                    "d.levers = {resume: 'choose a next step or finish the task', done: '', add_next: ''}; ")
+        html = render(self.setup + boundary + "taskView = 'overview'; inspTask(t, d, row)")
+        self.assertNotIn("Nothing starts until you Resume", html)
+        paused = render(self.setup + "row.paused_after = 1; d.levers = {resume: ''}; taskView = 'overview'; inspTask(t, d, row)")
+        self.assertIn("Nothing starts until you Resume", paused)
+
     def test_verify_is_inside_add_step_not_standalone(self):
         html = render(self.setup + "taskButtons(t, d)")
         self.assertEqual(html.count('data-tact="nextopen"'), 1)
@@ -1051,6 +1073,13 @@ class HandoffFormTest(unittest.TestCase):
         self.assertIn('data-task="f1"', html)
         session_level = render(self.setup + "t.state = 'handed'; t.handoff_note = 'steps/01-handoff.md'; row.state = 'handed'; row.handoff_note = 'steps/01-handoff.md'; d.handoff = 'the note'; inspTask(t, d, row)")
         self.assertIn("Start next task", session_level)
+
+    def test_a_follow_up_task_id_has_a_label_like_every_other_task(self):
+        self.assertEqual(render("labelOf('20261015-093012-a3f2')"), "1015-a3f2")
+        self.assertEqual(render("labelOf('0123456789abcdef4567')"), "0123-4567")  # tasks.label: first and last four of 20 hex
+        self.assertEqual(render("labelOf('../0123456789abcdef4567')"), "")
+        links = render(self.setup + "t.handoff_to = '0123456789abcdef4567'; overviewBody(t, d, row)")
+        self.assertIn(">0123-4567</button>", links)
 
     def test_start_next_does_nothing_for_a_task_that_has_a_follow_up(self):
         result = render("""(async () => {

@@ -48,6 +48,8 @@ def main():
             page.wait_for_function("id => att['task:' + id]?.length === 1", arg=tid)
             box.evaluate("e => { e.focus(); e.setSelectionRange(2, 7); }")
             page.wait_for_timeout(150)
+            page.evaluate("id => goChat(id, 1)", tid)  # plan 44: a task opens its Overview; the step tabs belong to a step page
+            page.wait_for_selector('[data-itab="recv"]')
             for tab in ("recv", "hand", "route", "files", "chat"):
                 page.locator(f'[data-itab="{tab}"]').click()
                 assert box.is_visible() and box.input_value() == "retained draft"

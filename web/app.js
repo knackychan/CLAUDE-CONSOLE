@@ -2654,9 +2654,9 @@ let fileView = null;     // {key, name, text}: the Files tab's open file
 let ptab = "card";       // the Prep inspector's tab: card | scout | hand
 let prepShown = "";      // the Prep card the inspector's #pscroll holds (filled once, so edits survive the snapshots)
 
-function labelOf(id) {  // tasks.label: `20261015-093012-a3f2` -> `1015-a3f2`
-  const m = /^\d{4}(\d{4})-\d{6}-([0-9a-f]{4})$/.exec(String(id || ""));
-  return m ? `${m[1]}-${m[2]}` : "";
+function labelOf(id) {  // tasks.label: `20261015-093012-a3f2` -> `1015-a3f2`; a follow-up task's 20 hex -> first and last four
+  const m = /^\d{4}(\d{4})-\d{6}-([0-9a-f]{4})$/.exec(String(id || "")), f = /^([0-9a-f]{4})[0-9a-f]{12}([0-9a-f]{4})$/.exec(String(id || ""));
+  return m ? `${m[1]}-${m[2]}` : f ? `${f[1]}-${f[2]}` : "";
 }
 function dayOf(ts) { return dkey(new Date(ts * 1000)); }
 function todayKey() { return dayOf(snap.now); }
@@ -3661,7 +3661,7 @@ function taskButtons(t, d) {  // plan 44 nav T2: two prominent actions + More; e
   const p = [];
   if (cs && cs.state === "running" && lv.stop === "" && (!turnOver || queued)) p.push(`<button class="btn sm stop" data-tact="stop" data-tid="${tid}" title="Interrupts the run; the task stops">Stop</button>`);
   else if ((t.state === "paused" || followUp) && lv.resume === "") p.push(`<button class="btn sm go" data-tact="resume" data-tid="${tid}">${followUp ? "Start task" : "Resume"}</button>`);
-  else if (cs && cs.state === "failed" && lv.retry === "") p.push(`<button class="btn sm go" data-tact="retry" data-tid="${tid}" title="Runs this step again on the model the service picks">Retry</button>`);
+  else if (cs && cs.state === "failed" && lv.retry === "" && !(boardPick === "t" && taskView === "overview")) p.push(`<button class="btn sm go" data-tact="retry" data-tid="${tid}" title="Runs this step again on the model the service picks">Retry</button>`);
   if (sl && sl.continue === "" && srow && srow.window && srow.state === "interrupted") p.push(`<button class="btn sm go" data-tact="chatresume" data-tid="${tid}">Resume</button>`);
   if (lv.add_next === "") p.push(`<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${n}" title="A fresh session in this task, in the same folder, with step ${two(n)}'s handover">Add step</button>`);
   if (doneConfirm === t.id) p.push(`<span class="done-confirm"><span class="m">Mark this task done? History stays available.</span><button class="btn sm complete" data-tact="confirmdone" data-tid="${tid}">Confirm done</button><button class="btn sm" data-tact="canceldone" data-tid="${tid}">Cancel</button></span>`);
@@ -3716,7 +3716,7 @@ function attentionArea(t, d, row) {
     const [w, tone] = stuck ? ["Stuck", "r"] : t.state === "stopped" ? ["Stopped", "q"] : ["Waiting", "y"];
     out += `<div class="askbox${stuck ? " r" : ""}"><span class="st ${tone}">${sprite(stuck ? "stuck" : t.state === "stopped" ? "stopped" : "waiting")}${w}</span><div class="q">${esc(reason)}</div>${retry ? retryForm(t, cur, tid) : ""}${confirm || redo ? `<div class="lr">${confirm}${redo}</div>` : ""}</div>`;
   }
-  if (row.paused_after) out += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
+  if (row.paused_after && lv.resume !== "choose a next step or finish the task") out += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
   return out ? `<section class="task-attention">${out}</section>` : "";
 }
 function handoffForm(t) {  // plan 44 nav T3: the Hand off task form; Save document and Create follow-up task follow a preview of this note

@@ -457,9 +457,13 @@ def new_task(project_dir: str, project: str, title: str, goal: str, steps: list,
 
 def label(task_id: str) -> str:
     """The short form of a task id (plan 30, D11): `20261015-093012-a3f2` -> `1015-a3f2`, MMDD and the four hex
-    characters. The window's chip shows it and copies the full id; "" for an id of another shape."""
+    characters; a follow-up task's 20 hex (plan 44) is its first and last four. The window's chip shows it and
+    copies the full id; "" for an id of another shape."""
     m = re.fullmatch(r"\d{4}(\d{4})-\d{6}-([0-9a-f]{4})", str(task_id or ""))
-    return f"{m.group(1)}-{m.group(2)}" if m else ""
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    f = re.fullmatch(r"([0-9a-f]{4})[0-9a-f]{12}([0-9a-f]{4})", str(task_id or ""))
+    return f"{f.group(1)}-{f.group(2)}" if f else ""
 
 
 def prep_id(task: dict) -> str:

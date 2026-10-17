@@ -1429,6 +1429,7 @@ class BoardTest(unittest.TestCase):
     def test_label_is_mmdd_and_the_hex(self):  # plan 30 (D11)
         self.assertEqual(tasks.label("20261015-093012-a3f2"), "1015-a3f2")
         self.assertEqual(tasks.label(prep.new_id())[4], "-")
+        self.assertEqual(tasks.label("0123456789abcdef4567"), "0123-4567")  # plan 44: a follow-up task's 20-hex id
         for bad in ("", "x", "20261015-093012-A3F2", "../20261015-093012-a3f2", None):
             self.assertEqual(tasks.label(bad), "")
 
