@@ -1,7 +1,7 @@
 # Plan 44: an event-driven supervisor for tasks and steps. Brainstorm
 
-Status: **decided** 2026-10-17 (Fred took option (a) on D1 to D13, section 15; the skill library of section 14 adds
-D14 to D18, open, each written for its recommended (a)). The guided plan comes next. Design only: no code changed here.
+Status: **decided** 2026-10-17 (Fred took option (a) on D1 to D17 and "no limit" on D18, section 15; nothing is
+open). The guided plan comes next. Design only: no code changed here.
 
 Context: [CLAUDE.md](../../CLAUDE.md), [BRAINSTORM.md](../../BRAINSTORM.md) (non-goals, D16),
 [2026-10-13-orchestration.md](../../design/brainstorm/2026-10-13-orchestration.md) (D-1: no orchestrator agent),
@@ -384,7 +384,6 @@ kinds: [design, verify, code]        # Console: the step kinds it may ride with;
 tags: [ui-ux, web]                   # Console: matched against the task's tags (Prep, plan part, Fred)
 paths: ["web/**"]                    # Console too: matched against the plan part's Files or the source's Files touched
 always: false                        # Console: true = every step of its kinds, no tag needed (a house-rules skill)
-max_kb: 8                            # Console: refuse to inline over this (default skills_max_kb)
 ---
 ```
 
@@ -395,17 +394,19 @@ written to disk (the folder is the registry). A skill with a parse error is list
 
 1. **Code** (`skills.pick(registry, kind, tags, files, cfg) -> list`, pure, tested): a skill is picked when `kind`
    is in its `kinds` (or `kinds` is empty) and (`always`, or one of its `tags` is among the step's tags, or one of
-   its `paths` globs matches a file the step is about). Ordered `always` first, then by the number of matches, cut
-   at `skills_max_per_step` (3) and `skills_max_kb_total` (24). Deterministic: the same inputs give the same list.
+   its `paths` globs matches a file the step is about). Ordered `always` first, then by the number of matches. No
+   count or size limit (D18, Fred): selection by kind, tags and paths alone decides what loads; the received.md
+   line and the Board chip show each skill's size so Fred sees what a step paid. Deterministic: the same inputs
+   give the same list.
 2. **Tags come from** (in order, merged): Prep's card, whose SCHEMA gains `tags` (a list of short words the prompt
    asks for from a fixed vocabulary the registry advertises: `tags` of every skill, plus `backend`, `web`, `tests`,
    `docs`, `data`); the plan part's `Files` and a `Tags:` line the design kind file asks for under each `### Step N`;
    the step's own instructions when Fred or the supervisor wrote them (matched word for word against the vocabulary);
    the source step's `Files touched` for the `paths` match.
 3. **The supervisor** may add `"skills": ["ui-ux-review"]` to an `add_next_step` decision. `supervisor.check`
-   validates every name against the registry and the kind, refuses more than `skills_max_per_step`, and the digest
-   lists the registry (name and description only, about 20 tokens per skill) under "Skills available". A refused
-   name is logged, the rest are kept.
+   validates every name against the registry and the kind, and the digest lists the registry (name and description
+   only, about 20 tokens per skill) under "Skills available". An unknown name or a kind mismatch is logged and
+   dropped, the rest are kept.
 4. **Fred** overrides last: the Prep card's step rows and the Add next step form carry a skills multi-select (preset
    to the code's pick; `none` empties it); `step["skills"]` is stored as picked, with `step["skills_by"]`
    (`code`, `supervisor`, `fred`). A Fred pick beats code and the supervisor; an empty Fred pick stays empty.
@@ -413,8 +414,8 @@ written to disk (the folder is the registry). A skill with a parse error is list
 ### 14.5 Enforcement: unselected skills are not loaded (D17 a)
 
 The selected skills ride **inside the step prompt**: `tasks.step_prompt` gains a `$skills` slot right after the role
-text, "Skills for this step:" then each SKILL.md body (frontmatter stripped, `redact.mask`ed, cut at `max_kb` with a
-`[cut]` line), and nothing else. The step run adds `--disable-slash-commands`, so no personal or project skill
+text, "Skills for this step:" then each SKILL.md body whole (frontmatter stripped, `redact.mask`ed, never cut or
+trimmed for size), and nothing else. The step run adds `--disable-slash-commands`, so no personal or project skill
 description reaches a step's context any more (today they all do): a step pays only for what was picked. This is
 harness-neutral (Codex, OpenCode and Command Code steps get the same text), deterministic (the body is in the prompt,
 not behind a Skill call that may never happen), and the prompt is saved whole as role.md's neighbour
@@ -424,7 +425,7 @@ line gains `skills ui-ux-review, design-review` and `received.md` lists them wit
 The rejected (b), a per-step staging folder `<step dir>/skills/.claude/skills/<name>/` passed with `--add-dir` so the
 skills load as real skills (description in context, body on invocation), saves tokens only for long skills that a
 step may not invoke, works on Claude only, and would make the service write `.claude/` folders under the task
-folder; it stays an option for slice C if a skill grows past `skills_max_kb`.
+folder; it stays an option for slice C for a very long skill a step may never invoke.
 
 Window runs that are plain chats (`chat_task`) are unchanged: a chat is Fred's session and keeps its personal skills
 and slash commands (the Hand off lever runs `/session-handoff` there). Only task steps carry the library.
@@ -446,20 +447,10 @@ the source's Files touched, the `$skills` slot, `--disable-slash-commands` on st
 the chain line, the Board chip, two seed skills (`handoff-quality`: how to write a six-heading block that passes the
 brief checks, kinds any, always; `ui-ux-review`, kinds design / verify / code, tags ui-ux / web). Slice B: Prep's
 `tags`, the supervisor's `skills` field, the multi-selects on the Prep card and the Add next step form. Slice C: the
-Skills tab next to Kinds (edit in place, `KIND_MAX`-like cap), the plan parts' `Tags:` line, the `--add-dir` mode
+Skills tab next to Kinds (edit in place, no size cap), the plan parts' `Tags:` line, the `--add-dir` mode
 behind `skills_load: "inline" | "add-dir"`.
 
-### 14.8 Open decisions (recommended (a); the design above is written for it)
-
-| # | Question | Options |
-|---|---|---|
-| D14 | Where the library lives | (a) `~/.claude/console/skills/`, seeded from `dotclaude/console/skills/` like kinds, read by the service only; (b) `dotclaude/skills/` copied to `~/.claude/skills` with the Console reading the frontmatter there (personal skills then also load in every VS Code chat) |
-| D15 | Registry format | (a) frontmatter only (`kinds`, `tags`, `paths`, `always`, `max_kb` next to Claude's fields; the folder is the index); (b) a hand-edited `skills/index.json` that names each skill and its tags |
-| D16 | Who picks | (a) code by kind, tags and paths; the supervisor may add names; Fred overrides last; (b) code only; (c) the supervisor always picks (one more pass per step) |
-| D17 | How the pick is enforced | (a) bodies inlined in the step prompt plus `--disable-slash-commands` on every step run (harness-neutral, deterministic, saved as skills.md); (b) a staged `.claude/skills/` per step through `--add-dir` (Claude only, lazy bodies) |
-| D18 | Caps | (a) `skills_max_per_step` 3, `skills_max_kb` 8 per skill, `skills_max_kb_total` 24; (b) Fred's numbers |
-
-## 15. Decisions (Fred, 2026-10-17: option (a) on D1 to D13)
+## 15. Decisions (Fred, 2026-10-17: option (a) on D1 to D17; D18 no limit)
 
 | # | Question | Taken |
 |---|---|---|
@@ -476,8 +467,13 @@ behind `skills_load: "inline" | "add-dir"`.
 | D11 | Per-project override | `supervisor_projects` map in config.json, edited on the Models and tuning page |
 | D12 | Automatic chains at `done` | one suggest-only wake asking whether a step is missing, when room is left |
 | D13 | `stepdone` | suggest only, at every mode |
+| D14 | Where the skill library lives | `~/.claude/console/skills/`, seeded from `dotclaude/console/skills/` like kinds, read by the service only |
+| D15 | Registry format | frontmatter only (`kinds`, `tags`, `paths`, `always` next to Claude's fields); the folder is the index |
+| D16 | Who picks skills | code by kind, tags and paths; the supervisor may add names; Fred overrides last |
+| D17 | How the pick is enforced | bodies inlined whole in the step prompt plus `--disable-slash-commands` on every step run, saved as skills.md |
+| D18 | Skill limits | no limit (Fred, 2026-10-17): no cap on the count per step or the size of a skill, nothing trimmed or refused for size; kind, tags and paths alone decide what loads |
 
-Open: D14 to D18 (section 14.8), the skill library.
+Nothing is open.
 
 ## History
 
