@@ -258,10 +258,12 @@ function setHtml(el, html, scroller) {
   if (picked && !picked.isCollapsed && el.contains(picked.anchorNode)) return false;
   const active = document.activeElement, key = active && el.contains(active) ? focusKey(active) : "";
   const fields = [...el.querySelectorAll("input[id],textarea[id]")].map((f) => [f.id, f.value, f.selectionStart, f.selectionEnd, f.dataset.tid, f.scrollTop]);
+  const details = [...el.querySelectorAll("details[data-key]")].filter((d) => d.dataset && d.dataset.key).map((d) => [d.dataset.key, d.open]);
   const old = scroller && el.querySelector(scroller.sel);
   const top = old ? old.scrollTop : 0, atEnd = old ? old.scrollTop + old.clientHeight >= old.scrollHeight - 4 : false;
   el.innerHTML = html;
   el._html = html;
+  for (const [dk, open] of details) { const d = el.querySelector(`details[data-key="${dk}"]`); if (d) d.open = open; }
   for (const a of el.getAnimations({ subtree: true }))  // loops (sprites, live cells) run on the page clock: a repaint does not restart them at frame 0
     if (a.effect.getTiming().iterations === Infinity) a.startTime = 0;
   for (const [id, value, a, b, tid, scroll] of fields) {
@@ -1228,7 +1230,6 @@ function noteLine(s) {  // one muted line, only when there is something to say
   }
   if (s.handoff_hint) out.push(`<span class="${s.group === "needs" ? "y" : ""}">↻ hand off: ${s.ctx_tone === "red" ? "the context is large" : s.follow_ups + " follow-ups"}, one task = one chat</span>`);
   if (s.rules_warn) out.push(`△ rules: ${esc(s.rules_warn)}${s.project_dir ? ' · <span class="link" data-act="review" title="Haiku proposes what to cut; nothing is written">Review</span>' : ""}`);
-  if (s.delegate_hint) out.push(`⇢ delegate? ${s.reads} reads in the main chat this turn`);
   if (s.two_writers) out.push("△ 2 writers: another session edits files in this repo");
   if (s.escalated) out.push(`↑ escalated ${esc(s.escalated)}`);
   if (s.forked_from) out.push(`↳ copy of ${link(s.forked_from)}`);
@@ -1542,15 +1543,11 @@ async function renderLevers(s) {
   };
   for (const k of lv ? lv.after_verify : ["done"]) buttons += after[k] || "";
   if (s.window && !s.run_live) buttons += '<button class="btn" data-act="terminal" title="Open in terminal">Terminal</button>';
-  if (lv && s.project_dir) {  // a new task that takes over: built here from the transcript, no model call
-    buttons += `<button class="btn${cold ? " go" : ""}" data-act="brief" title="A new task with the goal, the last message, the edited files and the git status of this one">Brief a new task</button>`;
-    if (cold) buttons += '<button class="btn" data-act="vbrief" title="The Verify text plus the same facts, in a new task">Verify in a new task</button>';
-  }
   if (buttons) html += `<div class="lr">${buttons}</div>`;
-  if (cold) html += `<div class="say">Cold cache: ${kTokens(cold.tokens)} tokens, idle ${Math.round(cold.idle_s / 3600)} h. Continue, Verify, Hand off and Escalate re-read them at full price, about $${money(cold.cost)} (a second click confirms). A new task with a brief costs almost nothing.</div>`;
+  if (cold) html += `<div class="say">Cold cache: ${kTokens(cold.tokens)} tokens, idle ${Math.round(cold.idle_s / 3600)} h. Continue, Verify, Hand off and Escalate re-read them at full price, about $${money(cold.cost)} (a second click confirms).</div>`;
   let off = "";
-  if (lv && lv.continue) off = "Levers off: " + lv.continue;
-  else if (lv && lv.handoff) off = "Hand off is off: " + lv.handoff;
+  if (lv && lv.continue) off = "Unavailable: " + lv.continue;
+  else if (lv && lv.handoff) off = "Handoff unavailable: " + lv.handoff;
   if (lv && !lv.continue && s.verdict === "FAIL" && lv.escalate) off += (off ? " · " : "") + "Escalate is off: " + lv.escalate;
   html += `<div class="say">${esc(off)}</div><div id="f-msg" class="say"></div>`;
   setHtml($("levers"), html);
@@ -1837,11 +1834,15 @@ async function taskAct(name, button) {
   if (name === "gochat") return goChat(id, Number(button.dataset.n) || 0);
   if (name === "nextcancel") { cancelNextForm(); return; }
   if (name === "nextstart") return startNextStep(button);
+  if (name === "taskview") { taskView = button.dataset.view || "overview"; doneConfirm = ""; renderBoard(); return; }
+  if (name === "done") { doneConfirm = id; renderBoard(); return; }
+  if (name === "canceldone") { doneConfirm = ""; renderBoard(); return; }
+  if (name === "confirmdone") { doneConfirm = ""; name = "done"; }
   if (!id) return;
   const carry = name === "retry" && (boardData?.data?.task?.messages || []).some(m => ["queued", "failed"].includes(m.status));
   const arm = carry ? "Retry and carry queued guidance? Click again" : { stop: "Stop the task? Click again", clear: "Delete the task folder? Click again",
-    handoff: "Hand off ends the task? Click again", done: "Mark the task done? Click again",
-    stepdone: "Mark the step done? Click again" }[name];
+    handoff: "Hand off ends the task? Click again",
+    stepdone: "Accept this step's incomplete result? Click again" }[name];
   if (arm && !button.dataset.armed) {  // two clicks: a stop loses the running step, a clear deletes the notes
     button.dataset.armed = "1";
     button.dataset.label = button.textContent;
@@ -3150,17 +3151,9 @@ function taskBreadcrumb(t, step = null) {  // Tasks / title / Step NN, or Tasks 
     : `<span class="olink">Overview</span>`;
   return `<nav class="task-crumb" aria-label="Task navigation"><button class="olink" data-go="bback">Tasks</button><span aria-hidden="true">/</span>${mid}</nav>`;
 }
-function stepButtons(t, s, d, row) {  // the step's levers: they sit in the dock bar under the pane
-  const shown = stepShown(t, s, row), lv = d.levers || {};
-  const failedTry = shown === "failed" && (s.attempts || []).length > 1 ? (s.attempts.find((a) => a.why) || s.attempts[0]) : null;
-  return nextActions(t, s, d)
-    + (s.state === "running" && lv.stop === "" && (!(t.chat && chatReplied(s)) || (t.messages || []).some(m => m.status === "queued")) ? `<button class="btn sm stop" data-tact="stop" data-tid="${esc(t.id)}" title="Interrupts the run; the task stops">Stop</button>` : "")
-    + (s.n === t.current && s.state === "failed" && lv.retry === "" ? `<button class="btn sm go" data-tact="retry" data-tid="${esc(t.id)}" title="Runs this step again on the model the service picks; the task page's Retry takes a note and a model">Retry</button>` : "")
-    + (s.n === t.current && s.state === "failed" && lv.stepdone === "" ? `<button class="btn sm" data-tact="stepdone" data-tid="${esc(t.id)}" title="Accepts this step as it ended (its last messages become its note) and the task goes on from it">Mark step done</button>` : "")
-    + (lv.pause === "" ? `<button class="btn sm" data-tact="pause" data-tid="${esc(t.id)}">Pause</button>` : "")
-    + (lv.resume === "" ? `<button class="btn sm go" data-tact="resume" data-tid="${esc(t.id)}">Resume</button>` : "")
-    + (failedTry ? `<button class="btn sm" data-open="${esc(failedTry.session)}">Open try 1</button>` : "")
-    + `<button class="btn sm" data-bpick="t" data-btask="${esc(t.id)}" title="Task details: prompt.md, the chain log, retry options and Delete">Task</button>`;
+function stepButtons(t, s, d, row) {  // plan 44 nav T2: the current step carries the task action area; an older step one branch action
+  if (s.n === t.current) return taskButtons(t, d);
+  return nextActions(t, s, d);
 }
 function stepHead(t, s, d, row, extra = "") {
   const shown = stepShown(t, s, row), [word, tn, spr] = BWORD[shown];
@@ -3323,7 +3316,7 @@ function nextFormHtml(t, s, row, d) {
   const work = NEXT_WORK.map(([k, l]) => `<option value="${k}"${draft.kind === k ? " selected" : ""}>${l}</option>`).join("");
   const routed = view && view.route && view.route.rung
     ? `<span class="chip m" title="the exact rung this step starts on">${esc(view.route.rung)}/${esc(view.route.effort)}</span>` : "";
-  return `<div class="askbox cont nform" role="group" aria-label="Add next step">
+  return `<div class="askbox cont nform" role="group" aria-label="Add step">
     <div class="nfrom"><span class="lbl">Next step</span><span class="m">From ${two(s.n)} ${esc(s.kind)}</span>` +
     `<span class="m">Same project: ${esc(projectName(t.project_dir))}</span></div>` +
     `${sinceLine(t, s)}
@@ -3341,29 +3334,15 @@ function nextFormHtml(t, s, row, d) {
       : `<div class="lr"><button class="btn go" data-tact="nextstart" data-tid="${esc(t.id)}" disabled>Start step</button>
       <button class="btn" data-tact="nextcancel" data-tid="${esc(t.id)}">Cancel</button></div>`}</div>`;
 }
-function nextActions(t, s, d) {  // plan 38 U3: in stepButtons, on every tab; plan 39: an older done step offers a branch
+function nextActions(t, s, d) {  // plan 44 nav T2: one Add step / Add step from here button, only where the service allows it
   const open = nextOpen && nextOpen.key === nextKey(t, s), last = latestStep(t), latest = !last || s.n === last.n;
   if (!s.session || open || (s.state === "running" && !chatReplied(s))) return "";
   const lv = d.levers || {}, tid = esc(t.id);
-  if (!latest) {  // the service's answer per step (GET /api/task sources); the Board reproduces no rule of its own
-    const why = (d.sources || {})[two(s.n)];
-    if (why == null) return "";
-    return why === ""
-      ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${s.n}" title="A fresh session in this task from step ${two(s.n)}'s handover, on the project as it is now">Add step from here</button>`
-        + `<button class="btn sm" data-tact="nextverify" data-tid="${tid}" data-n="${s.n}" title="A fresh session checks step ${two(s.n)} against its goal, its tests and its risks">Verify this step</button>`
-      : `<button class="btn sm" disabled title="${esc(why)}">Add step from here</button>`;
-  }
-  const add = lv.add_next === ""
-    ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${s.n}" title="A fresh session in this task, in the same folder, with the handover">Add next step</button>`
-    : `<button class="btn sm" disabled title="${esc(lv.add_next || "Add next step is not available yet")}">Add next step</button>`;
-  const fin = lv.done === "" ? `<button class="btn sm" data-tact="done" data-tid="${tid}">Finish task</button>` : "";
-  return add + fin;
-}
-function nextSecondary(t, d) {
-  const lv = d.step_levers || {}, tid = esc(t.id);  // plan 39: Hand off and Start new task are session levers, never task_levers
-  const ho = lv.handoff === "" ? `<button class="btn sm" data-tact="handoff" data-tid="${tid}" title="Prepare a handoff for a separate task.">Hand off</button>` : "";
-  const nx = lv.next === "" ? `<button class="btn sm" data-tact="next" data-tid="${tid}" title="A new task seeded with the handoff note">Start new task</button>` : "";
-  return ho || nx ? `<div class="lr sub">${ho}${nx}</div>` : "";
+  if (latest) return lv.add_next === ""
+    ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${s.n}" title="A fresh session in this task, in the same folder, with the handover">Add step</button>` : "";
+  const why = (d.sources || {})[two(s.n)];
+  if (why !== "") return "";
+  return `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${s.n}" title="A fresh session in this task from step ${two(s.n)}'s handover, on the project as it is now">Add step from here</button>`;
 }
 function histFoot(t, s, d) {  // plan 39: an older step's footer keeps only the way to the latest step; its actions are in the dock
   const latest = latestStep(t);
@@ -3380,18 +3359,17 @@ function stepFooter(t, s, d, row) {
   const historical = s && cur && s.n !== cur.n || boardHistory;
   const destination = cur ? `Message current step ${two(cur.n)}: ${cur.kind}` : "Message task before its first step";
   const b = (name, label) => `<button class="btn sm" data-tact="${name}" data-tid="${tid}">${label}</button>`;
-  const extra = taskSessionButtons(t, d, state);
   return `<div class="task-composer" data-task-composer="${tid}">
     ${historical ? `<div class="say history">History: step ${two(s?.n || cur.n)}${boardHistory ? " · earlier attempt" : ""}. Messages go to the current step.</div>` : ""}
     <label for="b-tcont">${esc(destination)}</label>
     ${state.question ? `<div class="q">${esc(state.question)}</div>` : ""}
-    <textarea class="in" id="b-tcont" data-tid="${tid}" data-sid="${esc(cur?.session || "")}" rows="2" aria-describedby="b-delivery" placeholder="${state.question ? "Your answer" : "Message for the current step"}">${esc(draft.text)}</textarea>
+    <textarea class="in" id="b-tcont" data-tid="${tid}" data-sid="${esc(cur?.session || "")}" rows="2" aria-describedby="b-delivery" placeholder="${state.answer ? "Your answer" : "Message for the current step"}">${esc(draft.text)}</textarea>
     <ul class="files" aria-label="Attached files">${filesHtml(key)}</ul>
     <div class="say" id="b-delivery">${esc(off || d.message?.timing || (state.gap ? "Your answer joins the plan's Decisions and continues this step." : lv.fork ? "Sends in a window copy. The external session stays as it is." : "Sends to the current conversation."))}</div>
-    <div class="lr"><button class="btn ${state.question ? "you" : "go"}" data-tact="${state.question ? "answer" : "cont"}" data-tid="${tid}"${off || draft.busy ? " disabled" : ""}>${draft.busy ? "Sending ..." : state.question ? "Send answer" : "Send"}</button>
-      <button class="btn sm" data-attach="${key}"${d.message?.attachments === false ? ' disabled title="This harness cannot receive attachments"' : ""}>Attach</button>${changed ? b("retarget", "Use current step") : ""}${t.state === "done" && d.levers?.add_next === "" ? b("messagenext", "Use message in Add next step") : ""}</div>
+    <div class="lr"><button class="btn ${state.answer ? "you" : "go"}" data-tact="${state.answer ? "answer" : "cont"}" data-tid="${tid}"${off || draft.busy ? " disabled" : ""}>${draft.busy ? "Sending ..." : state.answer ? "Send answer" : "Send"}</button>
+      <button class="btn sm" data-attach="${key}"${d.message?.attachments === false ? ' disabled title="This harness cannot receive attachments"' : ""}>Attach</button>${changed ? b("retarget", "Use current step") : ""}${t.state === "done" && d.levers?.add_next === "" ? b("messagenext", "Use message in Add step") : ""}</div>
     ${taskMessages(t, d)}
-    ${extra}${draft.error ? `<div class="say r" role="status">${esc(draft.error)}</div>` : ""}
+    ${draft.error ? `<div class="say r" role="status">${esc(draft.error)}</div>` : ""}
     ${cold ? `<div class="say">Cold cache: ${kTokens(cold.tokens)} tokens, idle ${Math.round(cold.idle_s / 3600)} h. Re-read about $${money(cold.cost)}; a second click confirms.</div>` : ""}
     </div>`;
 }
@@ -3426,39 +3404,24 @@ function taskMessageState(t, d) {
   const cur = (t.steps || []).find((x) => x.n === t.current) || t.steps?.[0], lv = d.step_levers || {};
   const row = snap?.sessions.find((x) => x.id === cur?.session), tr = boardRow(t.id) || {};
   const gap = /^(asks: )?Plan gap:/.test(tr.asks || tr.why || t.why || "");
-  const question = gap ? String(tr.asks || tr.why || t.why).replace(/^(asks: )?Plan gap:\s*/, "") : row?.stop_question || tr.asks || "";
+  const answer = gap || !!(row?.stop_question || tr.asks);  // answer mode: Send answer, not Send
+  const question = gap ? "" : row?.stop_question || "";  // only a session STOP question repeats in the composer; a worker question lives in the attention area
   let off = lv.continue || "";
   if (d.message) {
     off = d.message.reason || "";
     if (d.message.attachments === false && att[taskAttachKey(t.id)].length) off = "This harness cannot receive attachments. Remove the files or Retry on Claude.";
     if (streamLost || taskDisconnected.has(t.id)) off = "Disconnected. Draft kept; delivery is unavailable.";
-    return {off, question, gap, row, cur};
+    return {off, question, answer, gap, row, cur};
   }
   if (!cur?.session) off = "Task not started. Keep your draft here; delivery is not available yet.";
-  else if (row?.run_live || BUSY.has(row?.state) || (!row && cur.state === "running")) off = "Working. Sending is unavailable until this turn finishes. Add next step is available when this turn finishes.";
-  else if (t.state === "done") off = "Task finished. Use Add next step to start another step.";
+  else if (row?.run_live || BUSY.has(row?.state) || (!row && cur.state === "running")) off = "Working. Sending is unavailable until this turn finishes. Add step is available when this turn finishes.";
+  else if (t.state === "done") off = "Task finished. Use Add step to start another step.";
   else if (gap) off = (d.levers || {}).answer === "" ? "" : (d.levers || {}).answer || "Answer unavailable";
   else if (t.owner === "fred" || ["stopped", "stuck", "handed", "paused"].includes(t.state) || cur.state === "failed") off = [t.why || lv.continue, "Use Resume or Retry explicitly before sending."].filter(Boolean).join(" ");
   else if (lv.continue !== "") off = lv.continue || "Reading delivery availability. Draft kept.";
   if (gap && att[taskAttachKey(t.id)].length) off = "Plan-gap answers do not support attachments yet. Remove the files to send this answer.";
   if (streamLost || taskDisconnected.has(t.id)) off = "Disconnected. Draft kept; delivery is unavailable.";
-  return { off, question, gap, row, cur };
-}
-function taskSessionButtons(t, d, state) {
-  const lv = d.step_levers || {}, s = state.row, cur = state.cur, tid = esc(t.id);
-  if (!s || !cur?.session) return nextSecondary(t, d);
-  const b = (name, label) => `<button class="btn sm" data-tact="${name}" data-tid="${tid}">${label}</button>`;
-  let html = nextSecondary(t, d);
-  if (lv.continue === "" && s.window && s.state === "interrupted") html += b("chatresume", "Resume");
-  if (lv.verify === "") html += `<button class="btn sm" data-tact="nextverify" data-tid="${tid}" data-n="${cur.n}">Verify</button>`;
-  for (const action of lv.after_verify || ["done"]) {
-    if (action === "escalate" && lv.escalate === "") html += b("escalate", `Escalate to ${esc(lv.escalate_to)}`);
-    if (action === "done" && !s.run_live && !(t.messages || []).some(m => ["queued", "failed", "dispatching", "uncertain"].includes(m.status)) && (s.group !== "done" || (s.chat_task && s.state !== "done"))) html += b("chatdone", "Mark done");
-  }
-  if (!s.run_live && s.window && lv.terminal === "") html += b("terminal", "Terminal");
-  if (s.project_dir) { html += b("brief", "Brief a new task"); if (lv.cold) html += b("vbrief", "Verify in a new task"); }
-  if (s.rules_warn && s.project_dir) html += b("review", "Review rules");
-  return html ? `<div class="lr sub">${html}</div>` : "";
+  return { off, question, answer, gap, row, cur };
 }
 async function openNextForm(tid, kind, n) {  // plan 39: from step n (0: the service's latest source), on that step's Chat tab
   const bd = boardData && boardData.id === tid ? boardData.data : null;
@@ -3619,19 +3582,31 @@ function inspGap(t, s, d, row) {
 function latestStep(t) {  // plan 39: the step with the highest number (the only one Continue and Hand off can reach)
   return (t.steps || []).reduce((a, x) => (x.n > (a ? a.n : 0) ? x : a), null);
 }
-function taskButtons(t, d) {  // plan 39 Task 2: the task page's dock bar; each button only where the service allows it
-  const lv = d.levers || {}, sl = d.step_levers || {}, ns = d.next_step || {}, tid = esc(t.id), last = latestStep(t);
-  const n = ns.source_step || (last ? last.n : 0);
-  const add = lv.add_next === ""
-    ? `<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${n}" title="A fresh session in this task, in the same folder, with step ${two(n)}'s handover">Add next step</button>`
-      + `<button class="btn sm" data-tact="nextverify" data-tid="${tid}" data-n="${n}" title="Add next step with Verify selected: a fresh session checks step ${two(n)}">Verify</button>`
-    : `<button class="btn sm" disabled title="${esc(lv.add_next || "Add next step is not available yet")}">Add next step</button>`;
-  const cont = sl.continue === "" && last && last.session && last.kind === "chat"  // D1 a: one click lands in the latest chat's follow-up box
-    ? `<button class="btn sm" data-tact="gochat" data-tid="${tid}" data-n="${last.n}" title="The latest chat's follow-up box: more conversation with this agent">Continue</button>` : "";
-  const fin = lv.done === "" ? `<button class="btn sm${lv.add_next === "" ? "" : " go"}" data-tact="done" data-tid="${tid}" title="Ends this task; its history stays">Finish task</button>` : "";
-  const ho = sl.handoff === "" ? `<button class="btn sm" data-tact="handoff" data-tid="${tid}" title="Prepare a handoff for a separate task.">Hand off</button>` : "";
-  const del = lv.clear === "" ? `<button class="btn sm stop" data-tact="clear" data-tid="${tid}" title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays">Delete</button>` : "";
-  return add + cont + fin + ho + del;
+function taskButtons(t, d) {  // plan 44 nav T2: two prominent actions + More; each button only where the service allows it
+  const lv = d.levers || {}, sl = d.step_levers || {}, ns = d.next_step || {}, tid = esc(t.id);
+  const cs = t.steps.find((x) => x.n === t.current), last = latestStep(t);
+  const n = ns.source_step || (cs ? cs.n : (last ? last.n : 0));
+  const srow = cs && cs.session ? snap.sessions.find((x) => x.id === cs.session) : null;
+  const started = t.steps.some((x) => x.state !== "planned"), followUp = t.handoff_from && !started;
+  const queued = (t.messages || []).some((m) => m.status === "queued"), turnOver = t.chat && cs && chatReplied(cs);
+  const p = [];
+  if (cs && cs.state === "running" && lv.stop === "" && (!turnOver || queued)) p.push(`<button class="btn sm stop" data-tact="stop" data-tid="${tid}" title="Interrupts the run; the task stops">Stop</button>`);
+  else if ((t.state === "paused" || followUp) && lv.resume === "") p.push(`<button class="btn sm go" data-tact="resume" data-tid="${tid}">${followUp ? "Start task" : "Resume"}</button>`);
+  else if (cs && cs.state === "failed" && lv.retry === "") p.push(`<button class="btn sm go" data-tact="retry" data-tid="${tid}" title="Runs this step again on the model the service picks">Retry</button>`);
+  if (sl && sl.continue === "" && srow && srow.window && srow.state === "interrupted") p.push(`<button class="btn sm go" data-tact="chatresume" data-tid="${tid}">Resume</button>`);
+  if (lv.add_next === "") p.push(`<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${n}" title="A fresh session in this task, in the same folder, with step ${two(n)}'s handover">Add step</button>`);
+  if (doneConfirm === t.id) p.push(`<span class="done-confirm"><span class="m">Mark this task done? History stays available.</span><button class="btn sm complete" data-tact="confirmdone" data-tid="${tid}">Confirm done</button><button class="btn sm" data-tact="canceldone" data-tid="${tid}">Cancel</button></span>`);
+  else if (lv.done === "" && t.state !== "done") p.push(`<button class="btn sm complete" data-tact="done" data-tid="${tid}" title="Ends this task; its history stays">Mark done</button>`);
+  const m = [];
+  if (lv.pause === "") m.push(`<button class="btn sm" data-tact="pause" data-tid="${tid}">Pause task</button>`);
+  if (lv.stepdone === "") m.push(`<button class="btn sm" data-tact="stepdone" data-tid="${tid}" title="Accepts the current step as it ended, incomplete or failed; the task goes on from it">Accept step result</button>`);
+  if (d.handoff_available === "") m.push(`<button class="btn sm" data-tact="handofftask" data-tid="${tid}">Hand off task</button>`);
+  if (sl && sl.terminal === "") m.push(`<button class="btn sm" data-tact="terminal" data-tid="${tid}">Open in terminal</button>`);
+  if (sl && sl.escalate === "") m.push(`<button class="btn sm" data-tact="escalate" data-tid="${tid}">Use a stronger model</button>`);
+  if (srow && srow.rules_warn && t.project_dir) m.push(`<button class="btn sm" data-tact="review" data-tid="${tid}">Review rules</button>`);
+  m.push(`<button class="btn sm" data-tact="folder" data-tid="${tid}" title="${esc(taskDir(t.id))}">Open task folder</button>`);
+  if (lv.clear === "") m.push(`<button class="btn sm stop" data-tact="clear" data-tid="${tid}" title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays">Delete task</button>`);
+  return `<div class="task-actions">${p.join("")}${m.length ? `<details class="action-more" data-key="more"><summary class="btn sm">More</summary><div class="action-list">${m.join("")}</div></details>` : ""}</div>`;
 }
 function retryForm(t, cur, tid) {  // plan 40: a note, the model to retry on (auto first; a limited rung is not listed) and Retry
   const n = cur ? two(cur.n) : "";
@@ -3639,46 +3614,88 @@ function retryForm(t, cur, tid) {  // plan 40: a note, the model to retry on (au
     <div class="rrow"><label class="nl" for="b-retrymodel">Model</label><select class="in" id="b-retrymodel" aria-label="Model for the retry">${modelOptions(cur && cur.pick || "", true, cur && cur.kind)}</select>
     <button class="btn go" data-tact="retry" data-tid="${tid}">Retry</button></div>`;
 }
-function inspTask(t, d, row) {
-  const shown = taskShown(row), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, lv = d.levers || {}, tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
-  const b = (name, cls, label) => (lv[name] === "" ? `<button class="btn sm${cls}" data-tact="${name}" data-tid="${tid}">${label}</button>` : "");
-  const gap = /^(asks: )?Plan gap:/.test(row.asks || row.why || ""), replan = (t.why || "").startsWith("replanned:");
-  const retryBox = t.state === "stuck" && !!t.why && lv.retry === "";  // plan 33: a stuck task's Retry sits under its reason, with a note
-  const handedRetry = t.state === "handed" && !d.handoff && lv.retry === "";  // plan 40: handedBox carries its Retry form
-  const buttons = b("stop", " stop", "Stop") + b("pause", "", "Pause") + b("resume", " go", "Resume") + (retryBox || handedRetry ? "" : b("retry", " go", "Retry")) + b("stepdone", "", "Mark step done");
-  const nxt = cur && t.steps.find((x) => x.n === cur.n + 1);
-  const now = cur && cur.state === "running" && !(t.chat && chatReplied(cur))
-    ? `<div class="now"><span class="cells"><i class="f live"></i></span><span>Now <b>${stepNo(cur)} ${esc(cur.kind)}</b> · ${rungTime(cur)}</span><span class="m">${nxt ? `next ${stepNo(nxt)} ${esc(nxt.kind)}` : "last step"}</span></div>` : "";
-  let wait = "";
-  if (row.asks && !gap) {
-    wait = `<div class="askbox"><span class="st y">${sprite("waiting")}Asks you <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span><div class="q">${esc(row.asks)}</div>
-      </div>`;
-  } else if (gap || replan) {
-    wait = `<div class="askbox"><span class="st y">${sprite("waiting")}${gap ? "Plan gap" : "Replanned"} <span class="lc">· answered in step ${cur ? two(cur.n) : ""}</span></span>
-      <div class="lr">${cur ? `<button class="btn" data-bpick="s${cur.n}">Open step ${cur.n}</button>` : ""}</div></div>`;
-  } else if (t.state === "handed" && cur) {
-    wait = handedBox(d, t, cur, shown);
-  } else if ((t.state === "waiting" || t.state === "stuck") && t.why) {
-    const c = (lv.confirm === "" ? `<button class="btn you" data-tact="confirm" data-tid="${tid}">${esc(confirmLabel(t, row))}</button>` : "")
-      + (lv.redo === "" && (t.state === "stuck" || /^plan .* KB, over /.test(t.why)) ? `<button class="btn" data-tact="redo" data-tid="${tid}" title="Runs the design step again">Redo design</button>` : "");
-    wait = `<div class="askbox${t.state === "stuck" ? " r" : ""}"><span class="st ${tn}">${sprite(t.state === "stuck" ? "stuck" : "waiting")}${word}</span><div class="q">${esc(t.why)}</div>${retryBox ? retryForm(t, cur, tid) : ""}${c ? `<div class="lr">${c}</div>` : ""}</div>`;
-  }
-  if (row.paused_after) wait += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
+function chainFold(d) {  // the chain log as the Steps view's Activity fold
+  const log = d.chain || [];
+  if (!log.length) return "";
+  const move = (c) => `${c.step ? two(c.step) : "task"} ${esc(c.from)} -> ${esc(c.to)}`;
+  return fold("Activity", `${log.length}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" });
+}
+function questionsFold(d) {
   const qs = d.questions || [], open = qs.filter((q) => !q.closed), closed = qs.filter((q) => q.closed);
   const qrow = (q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.opened)}${q.closed ? " · closed " + two(q.closed) : ""}</span></div>`;
-  const log = d.chain || [], last = log[log.length - 1];
-  const move = (c) => `${c.step ? two(c.step) : "task"} ${esc(c.from)} -> ${esc(c.to)}`;
-  const n = row.count;
-  const off = ["stop", "retry", "clear"].filter((k) => lv[k]).map((k) => `${k === "clear" ? "Delete" : k[0].toUpperCase() + k.slice(1)} off: ${esc(lv[k])}`).join(" · ");
-  const head = `${taskBreadcrumb(t)}<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
-    <div class="meta"${off ? ` title="${off}"` : ""}>${labHtml(t.id)}<button class="olink" data-tact="folder" data-tid="${tid}" title="${esc(taskDir(t.id))}">Open folder</button></div>
-    <div class="meta"><span>${esc(t.project)}</span><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span>${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}</div></div>`;
-  const body = `${now}${wait}
-    ${fold("prompt.md", "", `<pre class="text">${esc(t.goal)}</pre>`, { key: "promptmd" })}
-    ${open.length || closed.length ? `<div class="blk">${open.length ? `<span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("")}</div>` : ""}
-      ${closed.length ? fold(`${closed.length} closed question${closed.length === 1 ? "" : "s"}`, "", `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf", key: "qclosed" }) : ""}</div>` : ""}
-    ${log.length ? fold("Chain log", `${log.length}`, `<div class="clog">${log.map((c) => `<div><span>${hms(c.ts)}</span><span title="${esc(c.why)}">${move(c)}${c.why ? ` (${esc(c.why)})` : ""}</span></div>`).join("")}</div>`, { key: "clog" }) : ""}`;
-  return dock(head, `<div class="ipane">${body}</div>`, taskButtons(t, d), t.id, stepFooter(t, cur, d));
+  if (!open.length && !closed.length) return "";
+  return `<div class="blk">${open.length ? `<span class="lbl">Open questions · <span class="y">${open.length} open</span></span><div class="oq">${open.map(qrow).join("")}</div>` : ""}
+    ${closed.length ? fold(`${closed.length} closed question${closed.length === 1 ? "" : "s"}`, "", `<div class="oq">${closed.map(qrow).join("")}</div>`, { cls: "qf", key: "qclosed" }) : ""}</div>`;
+}
+function attentionArea(t, d, row) {
+  const lv = d.levers || {}, tid = esc(t.id), cur = t.steps.find((x) => x.n === t.current);
+  const gap = /^(asks: )?Plan gap:/.test(row.asks || row.why || ""), replan = (t.why || "").startsWith("replanned:");
+  let out = "";
+  if (row.asks && !gap) {
+    out += `<div class="askbox"><span class="st y">${sprite("waiting")}Asks you <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span><div class="q">${esc(row.asks)}</div></div>`;
+  } else if (gap || replan) {
+    const q = gap ? String(row.asks || row.why || "").replace(/^(asks: )?Plan gap:\s*/, "") : t.why;
+    out += `<div class="askbox"><span class="st y">${sprite("waiting")}${gap ? "Plan gap" : "Replanned"} <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span>
+      <div class="q">${esc(q)}</div><div class="lr">${cur ? `<button class="btn" data-bpick="s${cur.n}" data-btask="${tid}">Open step ${cur.n}</button>` : ""}</div></div>`;
+  } else if (t.state === "handed" && cur) {
+    out += handedBox(d, t, cur, taskShown(row));
+  } else if (["waiting", "stuck", "stopped"].includes(t.state) && (t.why || (cur && cur.state === "failed"))) {
+    const stuck = t.state === "stuck", reason = t.why || (cur && cur.state === "failed" ? "The current step failed." : "");
+    const retry = lv.retry === "" && (stuck || (cur && cur.state === "failed"));
+    const confirm = lv.confirm === "" ? `<button class="btn you" data-tact="confirm" data-tid="${tid}">${esc(confirmLabel(t, row))}</button>` : "";
+    const redo = lv.redo === "" && (stuck || /^plan .* KB, over /.test(t.why || "")) ? `<button class="btn" data-tact="redo" data-tid="${tid}" title="Runs the design step again">Redo design</button>` : "";
+    const [w, tone] = stuck ? ["Stuck", "r"] : t.state === "stopped" ? ["Stopped", "q"] : ["Waiting", "y"];
+    out += `<div class="askbox${stuck ? " r" : ""}"><span class="st ${tone}">${sprite(stuck ? "stuck" : t.state === "stopped" ? "stopped" : "waiting")}${w}</span><div class="q">${esc(reason)}</div>${retry ? retryForm(t, cur, tid) : ""}${confirm || redo ? `<div class="lr">${confirm}${redo}</div>` : ""}</div>`;
+  }
+  if (row.paused_after) out += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
+  return out ? `<section class="task-attention">${out}</section>` : "";
+}
+function overviewBody(t, d, row) {
+  const tid = esc(t.id), cur = t.steps.find((x) => x.n === t.current);
+  const links = [];
+  if (t.handoff_from) links.push(`<span>Follow-up of <button class="olink" data-task="${esc(t.handoff_from)}">${esc(labelOf(t.handoff_from))}</button></span>`);
+  if (t.handoff_to) links.push(`<span>Handed off to follow-up <button class="olink" data-task="${esc(t.handoff_to)}">${esc(labelOf(t.handoff_to))}</button></span>`);
+  const nxt = cur && t.steps.find((x) => x.n === cur.n + 1);
+  const progress = cur ? `<div class="blk"><span class="lbl">Current progress</span>
+    <button class="olink" data-bpick="s${cur.n}" data-btask="${tid}">Step ${two(cur.n)} ${esc(cur.kind)} · ${esc(stepShown(t, cur, row))}${nxt ? ` · next ${two(nxt.n)} ${esc(nxt.kind)}` : " · last step"}</button></div>` : "";
+  const last = latestStep(t), note = last ? (d.notes || {})[String(last.n)] || "" : "";
+  const latest = note && last && last.state !== "planned" && last.state !== "running"
+    ? fold(`Latest result · step ${two(last.n)} ${esc(last.kind)}`, `${wc(note)} w`, `<div class="hb">${headingBlock(handoffSections(note))}</div>`, { key: "latest" }) : "";
+  return `${links.length ? `<div class="m hlinks">${links.join(" · ")}</div>` : ""}
+    <div class="blk"><span class="lbl">Goal</span><pre class="text goal">${esc(t.goal)}</pre></div>
+    ${attentionArea(t, d, row)}
+    ${questionsFold(d)}
+    ${progress}
+    ${latest}`;
+}
+function stepsBody(t, d) {
+  const rows = (t.steps || []).map((s) => {
+    const shown = stepShown(t, s, t);
+    const tone = shown === "failed" ? "r" : shown === "done" ? "g" : shown === "waiting" ? "y" : shown === "running" ? "" : "q";
+    return `<button class="v-step" data-bpick="s${s.n}" data-btask="${esc(t.id)}"><span class="n">${two(s.n)}</span><span class="k">${esc(s.kind)}</span><span class="g">${esc(s.goal)}</span><span class="st ${tone}">${esc(shown)}</span></button>`;
+  }).join("");
+  return `${rows || '<p class="note m">No steps yet.</p>'}${chainFold(d)}`;
+}
+function filesBody(t, d) {
+  const cur = t.steps.find((x) => x.n === t.current) || t.steps[0];
+  const plan = t.plan && cur ? planPane(t, d, cur) : "";
+  const doc = d.handoff_document ? fold("Task handoff", "", `<pre class="text">${esc(d.handoff_document)}</pre>`, { key: "handoffdoc" }) : "";
+  const ctx = d.handoff_context ? fold("Inherited handoff", "", `<pre class="text">${esc(d.handoff_context)}</pre>`, { key: "handoffctx" }) : "";
+  const per = (t.steps || []).map((s) => {
+    const names = (d.files || {})[String(s.n)] || [];
+    return fold(`Step ${two(s.n)} · ${esc(s.kind)}`, `${names.length} ${names.length === 1 ? "file" : "files"}`, filesPane(t, s, d), { key: "fstep" + s.n });
+  }).join("");
+  return `${fold("Original prompt", "", `<pre class="text">${esc(t.goal)}</pre>`, { key: "promptmd" })}${plan}${doc}${ctx}${per}`;
+}
+function inspTask(t, d, row) {
+  const shown = taskShown(row), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
+  const view = taskView === "steps" ? "steps" : taskView === "files" ? "files" : "overview";
+  const viewBar = `<nav class="tabs" role="tablist" aria-label="Task views">${["overview", "steps", "files"].map((v) =>
+    `<button role="tab" data-tact="taskview" data-view="${v}" aria-current="${view === v ? "page" : "false"}">${v === "overview" ? "Overview" : v === "steps" ? "Steps" : "Files"}</button>`).join("")}</nav>`;
+  const head = `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2></div>
+    <div class="meta"><span>${esc(t.project)}</span><span>cost <b>${money(row.cost)}</b></span>${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}</div></div>`;
+  const body = view === "overview" ? overviewBody(t, d, row) : view === "steps" ? stepsBody(t, d) : filesBody(t, d);
+  return dock(`${taskBreadcrumb(t)}${head}${viewBar}`, `<div class="ipane">${body}</div>`, taskButtons(t, d), t.id, stepFooter(t, cur, d));
 }
 function inspPrep(t, d, row) {  // step 00 of a task that ran: the card Prep left (task.prep, plan 29) and its 00-prep/ files
   const p = t.prep && typeof t.prep === "object" ? t.prep : null, pf = d.prep_files || {};

@@ -984,6 +984,27 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .task-crumb { display: flex; gap: 8px; align-items: baseline; color: var(--mut); min-width: 0; font-size: 12px; }
 .task-crumb .olink { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-crumb > :last-child { min-width: 0; }
+.tabs [aria-current="page"] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px var(--ink); }
+.btn.complete { background: var(--ok); border-color: var(--ok); color: var(--on-ok); }
+.task-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; flex: 1 1 100%; justify-content: flex-start; }
+.action-more { position: relative; }
+.action-more > summary { list-style: none; }
+.action-more > summary::-webkit-details-marker { display: none; }
+.action-list { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 5; display: grid; gap: 2px; min-width: 190px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--raise); box-shadow: 0 8px 24px rgb(0 0 0 / 24%); }
+.action-list .btn { justify-content: flex-start; text-align: left; }
+.done-confirm { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.done-confirm .m { color: var(--mut); font-size: 12px; }
+.v-step { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 7px 8px; text-align: left; background: transparent; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.v-step:hover { border-color: var(--ink); }
+.v-step .n { font: 11px var(--mono); color: var(--mut); }
+.v-step .k { font: 600 12px var(--ui); color: var(--ink); min-width: 0; }
+.v-step .g { grid-column: 2 / -1; font: 12px/1.4 var(--ui); color: var(--mut); min-width: 0; overflow-wrap: anywhere; }
+.v-step .st { grid-column: 3; font: 11px var(--mono); }
+.pre.text.goal, pre.text.goal { max-height: 8em; }
+.task-attention { display: grid; gap: 8px; }
+.task-attention .askbox { margin: 0; }
+.hlinks { display: flex; gap: 8px; flex-wrap: wrap; }
+.hlinks .olink { white-space: nowrap; }
 .v-files { display: grid; gap: 1px; }
 .v-fr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
 .v-fr:first-child { border-top: 0; }
