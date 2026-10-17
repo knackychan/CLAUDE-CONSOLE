@@ -49,6 +49,17 @@ ends with working, tested software.
 | 42 | [plans/42-unified-task-chat.md](plans/42-unified-task-chat.md) - One task conversation, shared persistent composer, remove redundant Open chat, and task guidance during work with explicit queued/live delivery | queued release implemented 2026-10-17; full run 837 tests OK, final focused run 210 OK, browser checks pass; real-provider check open |
 | 43 | [plans/43-codex-write-check.md](plans/43-codex-write-check.md) - Codex is not routed a writing step where its Windows sandbox cannot write (folder owned by another account, or `sandbox = "unelevated"`; the refusal names the fix), a turn whose writes all failed ends `error_write_denied` and the retry skips that harness (tasks a93e and 2d28) | code done 2026-10-17 (Tasks 1-4, D1-D6 as proposed; harness, tasks, server and web suites OK); Fred's live check (Task 5) open |
 
+## Supervisor and navigation design (2026-10-17)
+
+[Plan 44 supervisor brainstorm](plans/44-supervisor/BRAINSTORM.md): supervisor policy
+decisions recorded; implementation plan pending. Its
+[navigation companion](plans/44-supervisor/NAVIGATION.md) is decided: task Overview as the
+default destination, fewer controls, and a whole-task handoff into a linked follow-up task.
+The navigation plan replaces plan 42's current-step landing rule when implemented;
+its shared composer and guidance delivery guarantees remain in force. Its guided plan is
+[plans/44-supervisor/navigation/](plans/44-supervisor/navigation/README.md) (4 tasks, not started).
+Neither proposal is marked shipped.
+
 ## Next-step continuation (2026-10-15)
 
 Plan 36: [guided implementation](plans/36-next-step/README.md) and

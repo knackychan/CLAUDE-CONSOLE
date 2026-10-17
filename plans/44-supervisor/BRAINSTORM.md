@@ -272,6 +272,11 @@ supervisor only wakes at `stuck` and (D12 a, slice C) once at `done`.
 
 ## 10. The Board
 
+Navigation follow-up (2026-10-17): [Task navigation and handoff redesign](NAVIGATION.md)
+records Fred's request for a task Overview, fewer actions and a whole-task handoff. It is
+a proposed replacement for the presentation below, not a change to the decided supervisor
+policy or a claim that the UI has shipped.
+
 Minimal, in the existing inspector (plan 25) and the task page dock (plan 39):
 
 - One line in the task head: `Supervisor: suggest · 3 wakes · $0.004`, with a select `off / suggest / auto` that
