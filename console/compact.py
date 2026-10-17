@@ -241,10 +241,12 @@ def as_is(cfg: dict, prev_brief: str, raw: str) -> str:
     return text if words(text) <= cfg["brief_max_words"] else ""
 
 
-def _ask(cfg: dict, exe: list, project_dir: str, prompt: str, schema: dict = BRIEF_SCHEMA, info: dict = None):
-    """One `claude -p` pass on brief_model with no tools, the answer shaped by `schema`; (answer dict, cost) or
-    BriefError with the reason. `info`, when given, gets the pass's `turns`. The replan pass uses it too."""
-    cmd = claude_cli.brief_command(exe, cfg["brief_model"], schema)
+def _ask(cfg: dict, exe: list, project_dir: str, prompt: str, schema: dict = BRIEF_SCHEMA, info: dict = None,
+         model: str = ""):
+    """One `claude -p` pass on `model` (default brief_model) with no tools, the answer shaped by `schema`; (answer
+    dict, cost) or BriefError with the reason. `info`, when given, gets the pass's `turns`. The replan and the
+    whole-task handoff passes use it too."""
+    cmd = claude_cli.brief_command(exe, model or cfg["brief_model"], schema)
     try:
         out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"), capture_output=True,
                              timeout=cfg["brief_timeout_s"], env=claude_cli.child_env(),

@@ -1005,6 +1005,15 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .task-attention .askbox { margin: 0; }
 .hlinks { display: flex; gap: 8px; flex-wrap: wrap; }
 .hlinks .olink { white-space: nowrap; }
+/* plan 44 nav T3: the Hand off task form in the Overview, beside the next-step form's tokens */
+.handoff-form { margin: 0; gap: 9px; min-width: 0; }
+.handoff-form .lbl { color: var(--ink); }
+.handoff-form .nl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.handoff-form textarea.in { width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; }
+.handoff-form .r { color: var(--bad); overflow-wrap: anywhere; }
+.handoff-form .g { color: var(--ok); }
+.handoff-form pre.text { max-height: 18em; overflow: auto; }
+.handoff-form .lr .btn { min-width: 0; }
 .v-files { display: grid; gap: 1px; }
 .v-fr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
 .v-fr:first-child { border-top: 0; }

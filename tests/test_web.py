@@ -915,5 +915,152 @@ class TaskOverviewTest(unittest.TestCase):
         self.assertNotIn("delegate?", note)
 
 
+@unittest.skipUnless(NODE, "Node is not installed")
+class HandoffFormTest(unittest.TestCase):
+    """Plan 44 navigation T3: More > Hand off task opens a form in the Overview. Preview first; Save document and
+    Create follow-up task only after a preview that matches the note; a handed source with handoff_to is not the
+    session-level handed task."""
+    setup = TaskOverviewTest.setup + """
+      PV = {task: 't', text: '## Goal\\ng\\n## Findings\\n- 01: found\\n## Files touched\\nNone recorded.\\n## Troubleshooting\\nNone recorded.\\n## Open questions\\nNone recorded.\\n## Next\\nn',
+            revision: 'r1', cost: 0.03, model: 'haiku', fallback: ''};
+    """
+
+    def test_handoff_form_is_closed_until_opened(self):
+        self.assertEqual(render(self.setup + "handoffForm(t)"), "")
+        self.assertEqual(render(self.setup + "handoffDraft.t = {open: false, note: ''}; handoffForm(t)"), "")
+
+    def test_form_offers_only_preview_before_one_exists(self):
+        html = render(self.setup + "handoffDraft.t = {open: true, note: 'finish it'}; handoffForm(t)")
+        self.assertIn("handoff-form", html)
+        self.assertIn('id="b-handoff-note"', html)
+        self.assertIn('data-tid="t"', html)
+        self.assertIn("finish it", html)
+        self.assertIn('data-tact="handoffpreview"', html)
+        self.assertIn('data-tact="handoffcancel"', html)
+        for text in ("Save document", "Create follow-up task", "handoffsave", "handoffcreate"):
+            self.assertNotIn(text, html)
+
+    def test_form_offers_save_and_create_after_a_matching_preview(self):
+        html = render(self.setup + "handoffDraft.t = {open: true, note: 'finish it', preview: Object.assign({asked: 'finish it'}, PV)}; handoffForm(t)")
+        for text in ("Save document", "Create follow-up task", 'data-tact="handoffsave"', 'data-tact="handoffcreate"',
+                     "Refresh preview", "## Findings", "haiku"):
+            self.assertIn(text, html)
+
+    def test_a_changed_note_invalidates_the_preview(self):
+        html = render(self.setup + "handoffDraft.t = {open: true, note: 'something else', preview: Object.assign({asked: 'finish it'}, PV)}; handoffForm(t)")
+        for text in ("Save document", "Create follow-up task", "handoffsave", "handoffcreate"):
+            self.assertNotIn(text, html)
+        self.assertIn('data-tact="handoffpreview"', html)
+        typed = render(self.setup + """(() => {
+          handoffDraft.t = {open: true, note: 'finish it', preview: Object.assign({asked: 'finish it'}, PV)};
+          let drawn = 0; renderBoard = async () => { drawn++; };
+          const kept = handoffTyped({id: 'b-handoff-note', dataset: {tid: 't'}, value: 'finish it '});
+          const changed = handoffTyped({id: 'b-handoff-note', dataset: {tid: 't'}, value: 'finish it now'});
+          return [kept, changed, drawn, handoffDraft.t.note];
+        })()""")
+        self.assertEqual(typed, [False, True, 1, "finish it now"])  # only the move from fresh to stale redraws
+
+    def test_a_fallback_preview_says_it_was_built_by_code(self):
+        html = render(self.setup + "PV.fallback = 'the pass returned no JSON'; PV.model = ''; handoffDraft.t = {open: true, note: '', preview: Object.assign({asked: ''}, PV)}; handoffForm(t)")
+        self.assertIn("the pass returned no JSON", html)
+        self.assertIn("Save document", html)  # a fallback is still a handoff
+
+    def test_actions_post_the_preview_save_and_create_requests(self):
+        result = render(self.setup + """(async () => {
+          const calls = [];
+          renderBoard = async () => {};
+          showPage = () => {};
+          api = async (path, body) => {
+            calls.push([path, body]);
+            if (path === '/api/task/handoff/preview') return Object.assign({}, PV);
+            if (path === '/api/task/handoff') return body.create ? {task: 'new1', source: 't'} : {task: 't', file: 'task-handoff.md'};
+            if (path === '/api/state') return {now: 200, sessions: [], tasks: [{id: 'new1', title: 'Continue', state: 'planned', steps: []}], versions: {}, projects: [], counts: {}};
+            return {};
+          };
+          taskView = 'steps';
+          await taskHandoff('handofftask', 't');
+          const opened = [handoffDraft.t.open, taskView];
+          handoffDraft.t.note = ' finish it ';
+          await taskHandoff('handoffpreview', 't');
+          const previewed = [handoffDraft.t.preview.revision, handoffDraft.t.preview.asked, /^[0-9a-f]{32}$/.test(handoffDraft.t.request)];
+          await taskHandoff('handoffsave', 't');
+          const saved = handoffDraft.t.saved;
+          await taskHandoff('handoffcreate', 't');
+          return {calls, opened, previewed, saved, after: [boardTask, boardPick, taskView, handoffDraft.t]};
+        })()""")
+        self.assertEqual(result["opened"], [True, "overview"])
+        self.assertEqual(result["previewed"], ["r1", "finish it", True])
+        self.assertTrue(result["saved"])
+        paths = [c[0] for c in result["calls"]]
+        self.assertEqual(paths, ["/api/task/handoff/preview", "/api/task/handoff", "/api/task/handoff", "/api/state"])
+        self.assertEqual(result["calls"][0][1], {"task": "t", "note": "finish it"})
+        save, create = result["calls"][1][1], result["calls"][2][1]
+        self.assertEqual((save["create"], save["revision"], save["note"], save["task"]), (False, "r1", "finish it", "t"))
+        self.assertEqual((create["create"], create["revision"], create["request_id"]), (True, "r1", save["request_id"]))
+        self.assertRegex(create["request_id"], r"^[0-9a-f]{32}$")
+        self.assertEqual(result["after"][:3], ["new1", "t", "overview"])  # the follow-up's Overview opens
+        self.assertIsNone(result["after"][3])  # the source's draft is gone
+
+    def test_a_failed_request_keeps_the_draft_and_says_why(self):
+        result = render(self.setup + """(async () => {
+          renderBoard = async () => {};
+          api = async () => { throw new Error('This task already has a follow-up task.'); };
+          handoffDraft.t = {open: true, note: 'x'};
+          await taskHandoff('handoffpreview', 't');
+          return [handoffDraft.t.open, handoffDraft.t.error, handoffDraft.t.busy, handoffForm(t)];
+        })()""")
+        self.assertEqual(result[:3], [True, "This task already has a follow-up task.", False])
+        self.assertIn("This task already has a follow-up task.", result[3])
+
+    def test_cancel_closes_the_form_and_keeps_the_note(self):
+        result = render(self.setup + """(async () => {
+          renderBoard = async () => {};
+          handoffDraft.t = {open: true, note: 'keep me'};
+          await taskHandoff('handoffcancel', 't');
+          return [handoffDraft.t.open, handoffDraft.t.note, handoffForm(t)];
+        })()""")
+        self.assertEqual(result, [False, "keep me", ""])
+
+    def test_overview_shows_the_form_and_a_stale_conflict_asks_for_a_refresh(self):
+        html = render(self.setup + "handoffDraft.t = {open: true, note: ''}; taskView = 'overview'; inspTask(t, d, row)")
+        self.assertIn("handoff-form", html)
+        conflict = render(self.setup + """(async () => {
+          renderBoard = async () => {};
+          api = async (path) => { if (path.endsWith('/preview')) return Object.assign({}, PV);
+            throw new Error('The task changed. Refresh the handoff preview before saving.'); };
+          handoffDraft.t = {open: true, note: ''};
+          await taskHandoff('handoffpreview', 't');
+          await taskHandoff('handoffsave', 't');
+          return [handoffDraft.t.preview, handoffDraft.t.error];
+        })()""")
+        self.assertIsNone(conflict[0])  # the stale preview is dropped: Save and Create are gone until Refresh
+        self.assertIn("Refresh the handoff preview", conflict[1])
+
+    def test_a_source_with_a_follow_up_is_not_the_session_level_handed_task(self):
+        self.assertEqual(render("taskShown({state: 'handed', handoff_note: 'task-handoff.md', handoff_to: 'f1'})"), "handed_to")
+        self.assertEqual(render("taskShown({state: 'handed', handoff_note: 'steps/01-handoff.md'})"), "handed")
+        self.assertEqual(render("taskShown({state: 'handed', group: 'working'})"), "handing")
+        self.assertEqual(render("TASK_WORD.handed_to[0]"), "Handed off")
+        why = render(self.setup + "snap.now = 100; headWhy({state: 'handed', handoff_note: 'task-handoff.md', handoff_to: 'f1', group: 'done', steps: []})")
+        self.assertEqual(why[0], "handed off to follow-up")
+        old = render(self.setup + "headWhy({state: 'handed', handoff_note: 'steps/01-handoff.md', group: 'needs', steps: []})")
+        self.assertEqual(old[0], "handed off · Start next task")
+        html = render(self.setup + "t.state = 'handed'; t.handoff_note = 'task-handoff.md'; t.handoff_to = 'f1'; row.state = 'handed'; row.handoff_note = 'task-handoff.md'; row.handoff_to = 'f1'; d.handoff = 'old note'; inspTask(t, d, row)")
+        self.assertNotIn("Start next task", html)
+        self.assertIn("Handed off to follow-up", html)
+        self.assertIn('data-task="f1"', html)
+        session_level = render(self.setup + "t.state = 'handed'; t.handoff_note = 'steps/01-handoff.md'; row.state = 'handed'; row.handoff_note = 'steps/01-handoff.md'; d.handoff = 'the note'; inspTask(t, d, row)")
+        self.assertIn("Start next task", session_level)
+
+    def test_start_next_does_nothing_for_a_task_that_has_a_follow_up(self):
+        result = render("""(async () => {
+          snap = {now: 1, sessions: [], tasks: [{id: 't', handoff_to: 'f1', current: 1, steps: [{n: 1, session: 's'}]}], versions: {}, projects: []};
+          let called = false; api = async () => { called = true; return {}; };
+          await startNext('t', {disabled: false});
+          return called;
+        })()""")
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

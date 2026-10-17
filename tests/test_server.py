@@ -3456,5 +3456,226 @@ for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, 
         setattr(NextStepServerTest, _name, None)
 
 
+class HandoffServerTest(TaskServerTest):
+    """Plan 44 navigation Task 3: the whole-task handoff through the service. The task is built by hand (steps done,
+    notes saved, the task stopped) so no run is live; the Haiku pass is the fake claude."""
+
+    NOTE = ("## Goal\nFix add() in calc.py\n## Findings\nadd() is in calc.py:2\n## Files touched\n- calc.py\n"
+            "## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\nFix add() and run the test")
+
+    def stopped(self, state="stopped"):
+        steps = tasks.plan_steps([{"kind": "scout", "goal": "find add()"}, {"kind": "code", "goal": "fix add()"}], 6)
+        task = tasks.new_task(str(self.project), "proj", "Fix add", "Fix add() in calc.py", steps, "normal", {}, "",
+                              "auto", time.time())
+        for s in task["steps"]:
+            s.update(model="haiku", effort="low", session=f"fake-{s['n']}", state="done", cost=0.01)
+        task["steps"][2].update(state="failed")
+        task.update(state=state, why="stopped by Fred", owner="fred", current=3, last_good=2)
+        tasks.save(self.folder, task)
+        tasks.write_note(self.folder, task, task["steps"][0], self.NOTE)
+        with self.hub.tlock:
+            self.hub.tasks[task["id"]] = task
+        return task["id"]
+
+    def preview(self, tid, note="finish the sign rule", expect=200):
+        status, data = self.call("/api/task/handoff/preview", {"task": tid, "note": note})
+        self.assertEqual(status, expect, data)
+        return data
+
+    def commit(self, tid, pv, create, request="a" * 32, expect=200, note="finish the sign rule"):
+        status, data = self.call("/api/task/handoff", {"task": tid, "note": note, "revision": pv["revision"],
+                                                        "create": create, "request_id": request})
+        self.assertEqual(status, expect, data)
+        return data
+
+    def folder_of(self, tid):
+        return self.folder / "tasks" / tid
+
+    def test_available_unless_one_of_the_four_reasons(self):
+        tid = self.stopped()
+        task = self.hub.tasks[tid]
+        self.assertEqual(self.hub.handoff_available(task), "")
+        task["messages"] = [{"id": "m" * 16, "status": "queued"}]
+        self.assertEqual(self.hub.handoff_available(task), "Resolve pending guidance before handing off this task.")
+        del task["messages"]
+        with mock.patch.object(self.hub.runs, "is_live", return_value=True):
+            self.assertEqual(self.hub.handoff_available(task), "Wait for the current run to finish, or stop it first.")
+        self.hub.briefing.add(tid)
+        self.assertEqual(self.hub.handoff_available(task), "The step summary is still being saved.")
+        self.hub.briefing.discard(tid)
+        task["handoff_to"] = "f" * 20
+        self.assertEqual(self.hub.handoff_available(task), "This task already has a follow-up task.")
+        del task["handoff_to"]
+        task["chat"] = True
+        self.assertIn("chat", self.hub.handoff_available(task))
+
+    def test_preview_runs_the_pass_and_changes_nothing(self):
+        tid = self.stopped()
+        before = (self.folder_of(tid) / "task.json").read_bytes()
+        pv = self.preview(tid)
+        self.assertEqual((pv["task"], pv["model"], pv["fallback"], pv["cost"]), (tid, "haiku", "", 0.03))
+        self.assertIn("fake handoff summary", pv["text"])
+        self.assertIn("finish the sign rule", pv["text"])
+        self.assertRegex(pv["revision"], r"^[0-9a-f]{64}$")
+        self.assertEqual((self.folder_of(tid) / "task.json").read_bytes(), before)
+        self.assertFalse((self.folder_of(tid) / "task-handoff.md").exists())
+        self.assertEqual(self.hub.tasks[tid]["state"], "stopped")
+        self.assertEqual(self.preview(tid, note="")["revision"] == pv["revision"], False)  # the note is part of it
+
+    def test_preview_uses_the_code_fallback_when_the_pass_fails(self):
+        tid = self.stopped()
+        pv = self.preview(tid, note="BROKEN")
+        self.assertIn("no JSON", pv["fallback"])
+        self.assertIn("Step 01 (scout, done)", pv["text"])
+        self.assertEqual(tasks.check_handoff(pv["text"]), "")
+
+    def test_request_validation(self):
+        tid = self.stopped()
+        self.assertEqual(self.call("/api/task/handoff/preview", {"task": "nope-1", "note": ""})[0], 404)
+        self.assertEqual(self.call("/api/task/handoff/preview", {"task": tid, "note": 5})[0], 400)
+        self.assertEqual(self.call("/api/task/handoff/preview", {"task": tid, "note": "x" * 1001})[0], 400)
+        pv = self.preview(tid)
+        for body in ({"create": True, "request_id": "short"}, {"create": "yes", "request_id": "a" * 32},
+                     {"request_id": "a" * 32}):
+            status, _ = self.call("/api/task/handoff", dict(body, task=tid, note="", revision=pv["revision"]))
+            self.assertEqual(status, 400, body)
+
+    def test_a_refused_task_answers_409_with_the_reason(self):
+        tid = self.stopped()
+        with mock.patch.object(self.hub.runs, "is_live", return_value=True):
+            status, data = self.call("/api/task/handoff/preview", {"task": tid, "note": ""})
+        self.assertEqual((status, data["error"]), (409, "Wait for the current run to finish, or stop it first."))
+
+    def test_save_writes_the_document_and_changes_nothing_else(self):
+        tid = self.stopped()
+        pv = self.preview(tid)
+        before = copy.deepcopy(self.hub.tasks[tid])
+        data = self.commit(tid, pv, create=False)
+        self.assertEqual((data["task"], data["file"]), (tid, "task-handoff.md"))
+        self.assertEqual((self.folder_of(tid) / "task-handoff.md").read_text(encoding="utf-8"), pv["text"])
+        self.assertEqual(self.hub.tasks[tid], before)  # no state change, no link
+        self.assertEqual(sorted(p.name for p in (self.folder / "tasks").iterdir()), [tid])  # no follow-up
+        self.assertEqual([p.name for p in self.folder_of(tid).glob("*.tmp")], [])
+
+    def test_a_changed_task_or_an_unknown_revision_is_a_409(self):
+        tid = self.stopped()
+        pv = self.preview(tid)
+        self.hub.tasks[tid]["why"] = "something else"
+        self.hub.tasks[tid]["steps"][2]["state"] = "planned"
+        data = self.commit(tid, pv, create=False, expect=409)
+        self.assertEqual(data["error"], "The task changed. Refresh the handoff preview before saving.")
+        self.assertFalse((self.folder_of(tid) / "task-handoff.md").exists())
+        self.assertEqual(self.commit(tid, {"revision": "0" * 64}, create=True, expect=409)["error"],
+                         "The task changed. Refresh the handoff preview before saving.")
+
+    def test_create_makes_a_linked_planned_follow_up_and_hands_the_source(self):
+        tid = self.stopped()
+        pv = self.preview(tid)
+        history = copy.deepcopy(self.hub.tasks[tid]["steps"])
+        data = self.commit(tid, pv, create=True, request="b" * 32)
+        new_id = data["task"]
+        self.assertEqual(data["source"], tid)
+        self.assertEqual(new_id, __import__("hashlib").sha256(f"{tid}:{'b' * 32}".encode()).hexdigest()[:20])
+        new = self.hub.tasks[new_id]
+        self.assertEqual((new["state"], new["owner"], new["progression"], new["handoff_from"]),
+                         ("planned", "fred", "manual", tid))
+        self.assertEqual([(s["n"], s["kind"], s["state"], s["goal"]) for s in new["steps"]],
+                         [(1, "code", "planned", "finish the sign rule")])  # one first step, no verify after it
+        self.assertEqual(new["title"], "Continue: Fix add")
+        self.assertEqual(new["project_dir"], str(self.project))
+        folder = self.folder_of(new_id)
+        self.assertEqual((folder / "inherited-handoff.md").read_text(encoding="utf-8"), pv["text"])
+        copied = folder / "handoff-source" / tasks.note_file(self.hub.tasks[tid], self.hub.tasks[tid]["steps"][0])
+        self.assertEqual(copied.read_text(encoding="utf-8"), tasks.read_note(self.folder, self.hub.tasks[tid], 1))
+        saved = tasks.load(self.folder, new_id)
+        self.assertEqual(saved["handoff_from"], tid)
+        source = self.hub.tasks[tid]
+        self.assertEqual((source["state"], source["why"], source["handoff_to"], source["handoff_note"]),
+                         ("handed", f"Handed off to {new_id}", new_id, "task-handoff.md"))
+        self.assertEqual(source["steps"], history)  # history preserved
+        self.assertEqual((self.folder_of(tid) / "task-handoff.md").read_text(encoding="utf-8"), pv["text"])
+        self.assertTrue(any(line.get("why") == f"follow-up task: {new_id}" for line in self.chain(tid)))
+        self.assertEqual([s["state"] for s in new["steps"]], ["planned"])  # nothing started
+        self.assertEqual(self.hub.runs.live, {})
+
+    def test_create_is_idempotent_on_the_request_id(self):
+        tid = self.stopped()
+        pv = self.preview(tid)
+        first = self.commit(tid, pv, create=True, request="c" * 32)
+        again = self.commit(tid, pv, create=True, request="c" * 32)
+        self.assertEqual(again, first)
+        again2 = self.commit(tid, {"revision": "0" * 64}, create=True, request="c" * 32)  # even a stale revision
+        self.assertEqual(again2, first)
+        self.assertEqual(sorted(p.name for p in (self.folder / "tasks").iterdir()), sorted([tid, first["task"]]))
+        other = self.commit(tid, pv, create=True, request="d" * 32, expect=409)  # another request: one follow-up only
+        self.assertEqual(other["error"], "This task already has a follow-up task.")
+
+    def test_a_done_task_stays_done_when_handed_off(self):
+        tid = self.stopped(state="done")
+        pv = self.preview(tid)
+        data = self.commit(tid, pv, create=True, request="e" * 32)
+        source = self.hub.tasks[tid]
+        self.assertEqual((source["state"], source["handoff_to"]), ("done", data["task"]))
+
+    def test_get_task_carries_the_handoff_fields(self):
+        tid = self.stopped()
+        body = self.task(tid)[1]
+        self.assertEqual((body["handoff_available"], body["handoff_document"], body["handoff_context"]), ("", "", ""))
+        pv = self.preview(tid)
+        self.commit(tid, pv, create=False)
+        self.assertEqual(self.task(tid)[1]["handoff_document"], pv["text"])
+        data = self.commit(tid, pv, create=True, request="f" * 32)
+        self.assertEqual(self.task(tid)[1]["handoff_available"], "This task already has a follow-up task.")
+        follow = self.task(data["task"])[1]
+        self.assertEqual(follow["handoff_context"], pv["text"])
+        self.assertEqual(follow["task"]["handoff_from"], tid)
+
+    def test_the_follow_up_resumes_and_step_one_carries_the_handoff_inline(self):
+        tid = self.stopped()
+        pv = self.preview(tid)
+        new_id = self.commit(tid, pv, create=True, request="1" * 32)["task"]
+        self.assertEqual(self.hub.task_levers(new_id)["resume"], "")
+        for _ in range(3):  # a planned follow-up starts nothing by itself
+            self.hub.poll_once()
+            self.hub.advance()
+        self.assertEqual(self.hub.tasks[new_id]["steps"][0]["state"], "planned")
+        self.assertEqual(self.call("/api/task/resume", {"task": new_id})[0], 200)
+        task = self.until(new_id, self.at(1), "step 1 runs")
+        prompt = self.prompt_of(task["steps"][0]["session"])
+        self.assertIn("fake handoff summary", prompt)
+        self.assertIn("finish the sign rule", prompt)
+
+    def test_a_missing_inherited_handoff_stops_the_start(self):
+        tid = self.stopped()
+        pv = self.preview(tid)
+        new_id = self.commit(tid, pv, create=True, request="2" * 32)["task"]
+        (self.folder_of(new_id) / "inherited-handoff.md").unlink()
+        self.call("/api/task/resume", {"task": new_id})
+        task = self.until(new_id, lambda t: t["state"] == "stuck", "the start is refused")
+        self.assertIn("Inherited handoff is unavailable; restore it before starting this task", task["why"])
+        self.assertEqual(task["steps"][0]["state"], "planned")
+
+    def test_the_handed_source_is_not_a_pending_session_handoff(self):
+        tid = self.stopped()
+        new_id = self.commit(tid, self.preview(tid), create=True, request="3" * 32)["task"]
+        rows = {r["id"]: r for r in self.hub.snapshot()["tasks"]}
+        self.assertEqual((rows[tid]["state"], rows[tid]["handoff_to"], rows[tid]["group"]), ("handed", new_id, "done"))
+        self.assertEqual(rows[new_id]["handoff_from"], tid)
+
+    def test_a_disk_error_is_a_retryable_409_and_leaves_the_source_usable(self):
+        tid = self.stopped()
+        pv = self.preview(tid)
+        with mock.patch.object(server.paths, "write_text_atomic", side_effect=PermissionError(13, "in use")):
+            data = self.commit(tid, pv, create=False, expect=409)
+        self.assertIn("Try again", data["error"])
+        self.assertEqual(self.hub.tasks[tid]["state"], "stopped")
+        self.commit(tid, pv, create=False)  # the same revision still saves
+
+
+for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
+    if _name.startswith("test_") and _name not in HandoffServerTest.__dict__:
+        setattr(HandoffServerTest, _name, None)
+
+
 if __name__ == "__main__":
     unittest.main()

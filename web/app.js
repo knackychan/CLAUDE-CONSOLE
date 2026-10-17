@@ -17,7 +17,7 @@ const TABS = [["chat", "Chat"], ["steps", "Steps"], ["agents", "Agents"], ["time
 const EFF_LEVELS = ["auto", "low", "medium", "high", "xhigh", "max"];  // the slider's values, in order
 const TASK_WORD = { planned: ["Task", "n"], running: ["Task", "n"], waiting: ["Waiting", "y"],
   stuck: ["Stuck", "r"], done: ["Done", "g"], stopped: ["Stopped", "q"], handed: ["Handed off", "y"],  // [word, tone]
-  handing: ["Handing off", "n"], handed_no_note: ["Handed off", "q"] };  // handed: the note is in, the next task is Fred's
+  handing: ["Handing off", "n"], handed_no_note: ["Handed off", "q"], handed_to: ["Handed off", "q"] };  // handed: the note is in, the next task is Fred's
 const SESSION_SPRITE = { running: "running", stop: "waiting", blocked: "stuck", done: "done" };  // session state -> sprite
 
 const px = (tone, ...rows) => rows.join("").split("").map((c) => (c === "x" ? tone : ""));  // one class per cell, "" is an off cell
@@ -44,6 +44,7 @@ const SPRITE = {  // grid (5 by default), ms per frame, frames as one class per 
   done: { frames: [px("g", ".....", "....x", "...x.", "x.x..", ".x...")] },
   handed: { frames: [px("y", "..x..", "...x.", "xxxxx", "...x.", "..x..")] },  // an arrow: on to the next task
   handed_no_note: { frames: [px("q", "..x..", "...x.", "xxxxx", "...x.", "..x..")] },
+  handed_to: { frames: [px("q", "..x..", "...x.", "xxxxx", "...x.", "..x..")] },  // plan 44: the follow-up task has it
   planned: { frames: [Array.from({ length: 25 }, (_, k) => (k === 12 ? "l2" : ""))] },
 };
 function sprite(name, flip = false) {
@@ -61,7 +62,7 @@ function fresh(kind, id, value, ms) {  // true for ms after value changed from a
   if (was !== undefined && was !== value) freshUntil.set(key, now + ms);
   return (freshUntil.get(key) || 0) > now;
 }
-const taskSprite = (t) => (t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? "paused" : t.state === "handing" ? "running" : t.state);
+const taskSprite = (t) => (t.owner === "fred" && (t.state === "running" || t.state === "waiting") ? "paused" : t.state === "handing" ? "running" : t.state === "handed" && t.handoff_to ? "handed_to" : t.state);
 const sessionMark = (s, glyph, tn) => {  // the sprite of a session state, or its glyph (a finished session with a FAIL verdict keeps its x)
   const name = SESSION_SPRITE[s.state];
   return !name || (name === "done" && tn !== "g") ? glyph + " " : sprite(name, fresh("f", "s" + s.id, s.state, 240));
@@ -118,6 +119,7 @@ let measureData = null;  // {project, at, data}: GET /api/measure
 let nextOpen = null;     // {tid, key}: the source step whose Add next step form is open (plan 36 Task 3)
 let nextDraft = {};      // key -> {kind, model, instr, hi}: the form's draft, kept per task + source step + session
 let nextView = null;     // {key, busy, error, revision, route, models, text, ...}: the served preview
+let handoffDraft = {};   // task -> {note, request, preview, saved, busy, open, error}: the Hand off task form (plan 44 nav T3)
 let nextFocus = "";      // a step number to focus once after Start (the new step's heading)
 let focusWork = false;   // focus the form's Work select once, after the next draw
 const taskDraft = {};   // task -> text, destination and selection; attachment bytes stay in att
@@ -127,6 +129,7 @@ let boardHistory = "";  // an explicitly opened earlier attempt, read only
 let inspectorSeq = 0;
 document.addEventListener("input", (e) => {  // plan 36: the next-step draft survives every snapshot's redraw
   if (nextOpen && e.target.id === "b-ninstr") { nextDraft[nextOpen.key].instr = e.target.value; nextDraft[nextOpen.key].hi = true; }
+  if (e.target.id === "b-handoff-note") handoffTyped(e.target);
   if (e.target.id === "b-tcont") {
     const d = taskDraft[e.target.dataset.tid];
     if (d) { d.text = e.target.value; d.error = ""; saveTaskDraft(e.target.dataset.tid); }
@@ -565,7 +568,7 @@ function spendRow(sp) {  // 30 cells = $15 soft limit; capped so cells never col
 // -- tasks (plan 17): their state words, the step tag on their sessions ----------------------------------
 function sameDir(a, b) { const n = (p) => String(p || "").replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase(); return n(a) === n(b); }
 function taskGroup(t) { return t.group === "working" ? "work" : t.group; }  // the service decides (task_row), counts read the same
-const taskShown = (t) => (t.state === "handed" ? (t.handoff_note ? "handed" : t.group === "working" ? "handing" : "handed_no_note")
+const taskShown = (t) => (t.state === "handed" ? (t.handoff_to ? "handed_to" : t.handoff_note ? "handed" : t.group === "working" ? "handing" : "handed_no_note")  // handed_to: plan 44, a follow-up task holds the work
   : t.state === "running" && (t.asks || t.hand_off) ? "waiting" : t.state);  // a step's chat waits for Fred
 const handText = (h) => `↻ hand off: ${h}, one task = one chat`;
 function taskStep(t) { return t.steps.find((x) => x.n === t.current) || t.steps.find((x) => x.state !== "done") || t.steps[0]; }
@@ -1818,6 +1821,11 @@ async function taskAct(name, button) {
     return;
   }
   if (name === "next") return startNext(id, button);
+  if (["handofftask", "handoffpreview", "handoffsave", "handoffcreate", "handoffcancel"].includes(name)) {
+    const more = button.closest && button.closest("details");
+    if (more) more.open = false;  // the More list closes behind the entry that opened the form
+    return taskHandoff(name, id);
+  }
   if (name === "edit") { planEdit = !planEdit; renderBoard(); return; }
   if (name === "saveplan") return savePlan(button);
   if (name === "gapanswer") return taskChatAct("answer", button);
@@ -1891,7 +1899,7 @@ async function savePlan(button) {  // Fred's edit of the index or of a part, thr
 
 async function startNext(id, button) {  // a handed-off task: the new-task box seeded with its handoff note; nothing runs yet
   const row = (snap.tasks || []).find((x) => x.id === id), cur = row && row.steps.find((x) => x.n === row.current);
-  if (!cur || !cur.session) return;
+  if (!cur || !cur.session || row.handoff_to) return;  // a task handed to a follow-up task has no "next task" to seed
   button.disabled = true;
   try {
     seedBox(await api("/api/brief?session=" + encodeURIComponent(cur.session) + "&kind=next"));
@@ -1903,6 +1911,66 @@ async function startNext(id, button) {  // a handed-off task: the new-task box s
   button.disabled = false;
 }
 
+const handoffFresh = (h) => !!(h && h.preview && h.preview.asked === String(h.note || "").trim());  // the preview was made for this note
+function handoffTyped(el) {  // the Hand off note changed: a preview made for another note is stale, so Save and Create go until Refresh
+  const h = handoffDraft[el.dataset.tid];
+  if (!h) return false;
+  const was = handoffFresh(h);
+  h.note = el.value;
+  h.error = "";
+  const stale = was && !handoffFresh(h);
+  if (stale) { h.saved = false; renderBoard(); }
+  return stale;
+}
+async function taskHandoff(action, tid) {  // plan 44 nav T3: Hand off task. Preview reads the saved files; Save writes a document; Create makes the follow-up
+  const h = handoffDraft[tid] || (handoffDraft[tid] = { note: "", open: false });
+  if (action === "handofftask") {
+    h.open = true;
+    h.error = "";
+    taskView = "overview";
+    await renderBoard();
+    const f = $("b-handoff-note");
+    if (f) f.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "handoffcancel") { h.open = false; h.error = ""; renderBoard(); return; }
+  if (h.busy) return;
+  const note = String(h.note || "").trim();
+  if (action === "handoffpreview") {
+    h.busy = true;
+    h.error = "";
+    renderBoard();
+    try {
+      h.preview = { ...(await api("/api/task/handoff/preview", { task: tid, note })), asked: note };
+      h.request = uuid();
+      h.saved = false;
+    } catch (e) { h.error = e.message; }
+    h.busy = false;
+    renderBoard();
+    return;
+  }
+  if (!handoffFresh(h)) return;  // Save and Create only follow a preview of this note
+  const create = action === "handoffcreate";
+  h.busy = true;
+  h.error = "";
+  renderBoard();
+  try {
+    const data = await api("/api/task/handoff", { task: tid, note, revision: h.preview.revision, create, request_id: h.request });
+    if (create) {
+      try { snap = await api("/api/state"); } catch (e) { /* the stream brings the follow-up soon */ }
+      delete handoffDraft[tid];
+      openTask(data.task);
+      return;
+    }
+    h.saved = true;
+    boardData = null;  // the Files view reads the new document
+  } catch (e) {
+    h.error = e.message;
+    if (/changed|follow-up/.test(e.message)) h.preview = null;  // the preview is stale: Refresh it
+  }
+  h.busy = false;
+  renderBoard();
+}
 async function openTaskFolder(id, button) {  // plan 30: the service opens tasks/<id> in Explorer (409 outside Windows)
   button.disabled = true;
   try { await api("/api/task/folder", { task: id }); }
@@ -2745,6 +2813,7 @@ function headWhy(t) {  // the head's second line: what the task waits on, where 
   if (t.hand_off) return [handText(t.hand_off), "y"];
   if (t.state === "waiting" || t.state === "stuck") return [t.why || t.state, t.state === "stuck" ? "r" : "y"];
   if (shown === "handed") return ["handed off · Start next task", "y"];
+  if (shown === "handed_to") return ["handed off to follow-up", "q"];
   if (t.chat) return [`a chat${t.prep && t.prep.state === "skipped" ? " · Raw, prep skipped" : ""} · ${ago(snap.now - t.updated)}`, ""];
   if (t.group !== "done") {
     const s = taskStep(t);
@@ -3637,7 +3706,7 @@ function attentionArea(t, d, row) {
     const q = gap ? String(row.asks || row.why || "").replace(/^(asks: )?Plan gap:\s*/, "") : t.why;
     out += `<div class="askbox"><span class="st y">${sprite("waiting")}${gap ? "Plan gap" : "Replanned"} <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span>
       <div class="q">${esc(q)}</div><div class="lr">${cur ? `<button class="btn" data-bpick="s${cur.n}" data-btask="${tid}">Open step ${cur.n}</button>` : ""}</div></div>`;
-  } else if (t.state === "handed" && cur) {
+  } else if (t.state === "handed" && cur && !t.handoff_to) {  // a task handed to a follow-up task has the link row, not Start next task
     out += handedBox(d, t, cur, taskShown(row));
   } else if (["waiting", "stuck", "stopped"].includes(t.state) && (t.why || (cur && cur.state === "failed"))) {
     const stuck = t.state === "stuck", reason = t.why || (cur && cur.state === "failed" ? "The current step failed." : "");
@@ -3649,6 +3718,26 @@ function attentionArea(t, d, row) {
   }
   if (row.paused_after) out += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
   return out ? `<section class="task-attention">${out}</section>` : "";
+}
+function handoffForm(t) {  // plan 44 nav T3: the Hand off task form; Save document and Create follow-up task follow a preview of this note
+  const h = handoffDraft[t.id];
+  if (!h || !h.open) return "";
+  const tid = esc(t.id), p = h.preview, fresh = handoffFresh(h), busy = h.busy ? " disabled" : "";
+  const info = p ? `${wc(p.text)} w · ${p.fallback ? "built from the saved files" : esc(p.model || "haiku")}${p.cost ? " · $" + money(p.cost) : ""}` : "";
+  return `<section class="askbox cont handoff-form" role="group" aria-label="Hand off task">
+    <span class="lbl">Hand off task</span>
+    <p class="note m">One Haiku pass summarizes what this task saved. The live chat is not re-read, nothing runs, and this task is not marked done.</p>
+    <label class="nl" for="b-handoff-note">What should the follow-up do? (optional)</label>
+    <textarea class="in" id="b-handoff-note" data-tid="${tid}" rows="3" maxlength="1000" aria-label="What the follow-up task should do">${esc(h.note || "")}</textarea>
+    ${h.error ? `<span class="r" role="alert">${esc(h.error)}</span>` : ""}
+    ${h.busy ? '<span class="m">Working…</span>' : ""}
+    ${p && fresh ? fold("Handoff preview", info, `<pre class="text">${esc(p.text)}</pre>`, { key: "handoffprev", open: true }) : ""}
+    ${p && fresh && p.fallback ? `<span class="m">The pass did not answer (${esc(p.fallback)}); this text is built from the saved files.</span>` : ""}
+    ${h.saved && fresh ? '<span class="m g">Saved to task-handoff.md in the task folder.</span>' : ""}
+    <div class="lr"><button class="btn${fresh ? "" : " go"}" data-tact="handoffpreview" data-tid="${tid}"${busy}>${fresh ? "Refresh preview" : "Preview"}</button>
+      ${fresh ? `<button class="btn" data-tact="handoffsave" data-tid="${tid}"${busy} title="Writes task-handoff.md in this task's folder; nothing else changes">Save document</button>
+      <button class="btn go" data-tact="handoffcreate" data-tid="${tid}"${busy} title="Creates a follow-up task you start yourself, and marks this task handed off">Create follow-up task</button>` : ""}
+      <button class="btn" data-tact="handoffcancel" data-tid="${tid}">Cancel</button></div></section>`;
 }
 function overviewBody(t, d, row) {
   const tid = esc(t.id), cur = t.steps.find((x) => x.n === t.current);
@@ -3663,6 +3752,7 @@ function overviewBody(t, d, row) {
     ? fold(`Latest result · step ${two(last.n)} ${esc(last.kind)}`, `${wc(note)} w`, `<div class="hb">${headingBlock(handoffSections(note))}</div>`, { key: "latest" }) : "";
   return `${links.length ? `<div class="m hlinks">${links.join(" · ")}</div>` : ""}
     <div class="blk"><span class="lbl">Goal</span><pre class="text goal">${esc(t.goal)}</pre></div>
+    ${handoffForm(t)}
     ${attentionArea(t, d, row)}
     ${questionsFold(d)}
     ${progress}

@@ -12,8 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import (attach, brief, claude_cli, compact, events, facts, fills, guard, harness, kinds, levers, limits, paths, plan, prep, redact, replan,
-               review, routing, runs, tasks, transcript, tuning, usage)
+from . import (attach, brief, claude_cli, compact, events, facts, fills, guard, handoff, harness, kinds, levers, limits, paths, plan, prep, redact,
+               replan, review, routing, runs, tasks, transcript, tuning, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -33,6 +33,9 @@ MAX_PROMPT = 20000
 BOARD_TABS = ("chat", "recv", "hand", "route", "plan", "files")  # the Board's step inspector tabs (window.json board_tab)
 NOTE_MAX = 2000  # plan 33: the longest note Fred sends with Retry
 ACCEPT_TAIL = 3000  # plan 41: the characters of a step's chat a Mark step done note keeps
+HANDOFF_KEEP = 16  # plan 44: previewed whole-task handoffs the service holds for Save and Create
+HANDOFF_CHANGED = "The task changed. Refresh the handoff preview before saving."
+HANDOFF_GOAL = "Take over the remaining work using the inherited handoff. Check existing edits before repeating work."
 DONE_DAYS = 14  # plan 30 (D8): done tasks older than this leave the snapshot; GET /api/tasks/older lists them
 FOLD_KEY = re.compile(r"[a-z][a-z0-9.]{0,39}")
 FOLDS_MAX = 64
@@ -80,6 +83,7 @@ class Hub:
                     tasks.save(folder, task)
         self._notes = {}  # session id -> (stream size, live note state), for _live_note
         self.briefing = set()  # ids of the tasks whose brief thread is running
+        self.handoffs = {}  # plan 44: revision -> the previewed whole-task handoff text (the last HANDOFF_KEEP)
         self.storage = {}  # usage.folder_sizes of the data folder, refreshed hourly on the usage thread
         self.storage_at = 0.0
         self.version = 0
@@ -999,7 +1003,8 @@ class Hub:
             stop = "" if state in ("running", "waiting") else f"task is {state}"
             pause = ("" if owner == "service" and state in ("running", "waiting") else
                      "already paused" if owner == "fred" and state in ("running", "waiting") else f"task is {state}")
-            resume = base or ("" if owner == "fred" and state in ("running", "waiting") else "not paused")
+            resume = base or ("" if owner == "fred" and (state in ("running", "waiting") or (
+                state == "planned" and task.get("handoff_from"))) else "not paused")  # plan 44: a follow-up draft starts here
             if task.get("progression") == "manual" and owner == "fred" and cs and cs["state"] == "done" \
                     and state == "waiting":
                 resume = "choose a next step or finish the task"
@@ -1554,6 +1559,151 @@ class Hub:
         self._commit(updated)
         return 200, {"task": updated["id"], "step": step["n"], "request_id": request_id, "status": status}
 
+    def handoff_available(self, task: dict) -> str:
+        """Plan 44: why the whole-task handoff is off ("" = allowed). The one gate: GET /api/task shows it and the
+        preview, Save and Create ask it again under tlock."""
+        if task.get("chat"):
+            return "A chat task hands off through its session."
+        if tasks.pending_messages(task):
+            return "Resolve pending guidance before handing off this task."
+        if any(self.runs.is_live(sid) for sid in tasks.sessions_of(task)):
+            return "Wait for the current run to finish, or stop it first."
+        if task.get("briefing") or task["id"] in self.briefing:
+            return "The step summary is still being saved."
+        if task.get("handoff_to"):
+            return "This task already has a follow-up task."
+        return ""
+
+    def _handoff_text(self, task: dict, name: str) -> str:
+        """A whole-task handoff file of the task's folder, "" when absent or unreadable."""
+        try:
+            return (tasks.folder(self.folder, task["id"]) / name).read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    def _handoff_material(self, task: dict, note: str) -> str:
+        """What a previewed handoff stands on: the task's moving parts (never its costs), the saved notes, briefs and
+        facts the digest reads, and the note. Save and Create refuse a revision whose material is no longer the
+        task's. A Save does not change it, so Save then Create works on one preview."""
+        steps = [(s["n"], s["kind"], s["state"], s["session"], s["verdict"], s["retries"], s["handoff"],
+                  len(tasks.attempts(s))) for s in task["steps"]]
+        documents = [(tasks.read_note(self.folder, task, s["n"]), tasks.read_brief(self.folder, task, s["n"]),
+                      tasks.read_facts(self.folder, task, s["n"])) for s in task["steps"]]
+        return json.dumps([task["id"], task["state"], task["why"], task["owner"], task["current"], task["last_good"],
+                           task.get("handoff_to") or "", [(m["id"], m["status"]) for m in task.get("messages", [])],
+                           steps, documents, note], ensure_ascii=False)
+
+    @staticmethod
+    def _handoff_revision(material: str, text: str) -> str:
+        return hashlib.sha256((material + "\n" + text).encode("utf-8")).hexdigest()
+
+    def task_handoff(self, body: dict, preview: bool = False) -> tuple:
+        """Plan 44: the whole-task handoff. Preview runs the digest and the Haiku pass (outside tlock) and holds the text
+        under its revision; Save (create false) writes task-handoff.md and nothing else; Create makes the linked
+        follow-up (a planned draft that starts nothing) and hands the source off. Returns (status, body)."""
+        tid, note = body.get("task"), body.get("note", "")
+        if not isinstance(note, str) or len(note) > tasks.STEP_GOAL_MAX:
+            return 400, {"error": f"note: at most {tasks.STEP_GOAL_MAX} characters"}
+        note = note.strip()
+        create, request = body.get("create"), body.get("request_id")
+        if not preview and (not isinstance(create, bool) or not isinstance(request, str)
+                            or not re.fullmatch(r"[0-9a-f]{32}", request)):
+            return 400, {"error": "create must be true or false and request_id 32 hex characters"}
+        if preview:
+            with self.tlock:
+                task = self.tasks.get(tid) if tasks.safe_id(tid) else None
+                if task is None:
+                    return 404, {"error": "unknown task"}
+                why = self.handoff_available(task)
+                if why:
+                    return 409, {"error": why}
+                copied, material, base = copy.deepcopy(task), self._handoff_material(task, note), self._base(task)
+            res = handoff.run(dict(self.cfg, handoff_on=False) if base else self.cfg, self.runs.exe, self.folder,
+                              copied, note)  # outside tlock: the pass takes seconds
+            if base and not res["fallback"].startswith(base):
+                res["fallback"] = base
+            revision = self._handoff_revision(material, res["text"])
+            with self.tlock:
+                self.handoffs[revision] = res["text"]
+                while len(self.handoffs) > HANDOFF_KEEP:
+                    self.handoffs.pop(next(iter(self.handoffs)))
+            return 200, {"task": tid, "text": res["text"], "revision": revision, "cost": res["cost"],
+                         "model": res["model"], "fallback": res["fallback"]}
+        with self.tlock:
+            task = self.tasks.get(tid) if tasks.safe_id(tid) else None
+            if task is None:
+                return 404, {"error": "unknown task"}
+            follow = hashlib.sha256(f"{tid}:{request}".encode("utf-8")).hexdigest()[:20]
+            known = self.tasks.get(follow) if create else None
+            if known is not None:  # a repeated request returns its follow-up whatever the source state is now
+                if known.get("handoff_request") != {"request_id": request, "source": tid}:
+                    return 409, {"error": "request_id was already used with different content"}
+                if task.get("handoff_to") != follow:  # a crash between the two writes: finish the link
+                    try:
+                        return self._link_handoff(task, follow, self._handoff_text(known, "inherited-handoff.md"))
+                    except OSError as exc:
+                        return 409, {"error": f"The handoff could not be saved ({exc.strerror or exc}). Try again; the task is unchanged."}
+                return 200, {"task": follow, "source": tid}
+            why = self.handoff_available(task)
+            if why:
+                return 409, {"error": why}
+            revision = body.get("revision")
+            text = self.handoffs.get(revision) if isinstance(revision, str) else None
+            if text is None or revision != self._handoff_revision(self._handoff_material(task, note), text):
+                return 409, {"error": HANDOFF_CHANGED}
+            try:
+                if not create:
+                    paths.write_text_atomic(tasks.folder(self.folder, tid) / "task-handoff.md", text)
+                    return 200, {"task": tid, "file": "task-handoff.md"}
+                new = self._follow_up(task, follow, request, note, text)
+                with self.lock:
+                    self.tasks[follow] = new
+                status, data = self._link_handoff(task, follow, text)
+            except OSError as exc:
+                return 409, {"error": f"The handoff could not be saved ({exc.strerror or exc}). Try again; the task is unchanged."}
+            self.poll_once()
+            return status, data
+
+    def _follow_up(self, task: dict, follow: str, request: str, note: str, text: str) -> dict:
+        """The linked follow-up draft: one first code step, planned, owned by Fred, with the summary and the evidence
+        copied into its folder. task.json is written last, so the draft is visible only once its files are durable."""
+        steps = tasks.plan_steps([{"kind": "code", "goal": note or HANDOFF_GOAL}], 1)[:1]  # no verify: manual progression
+        new = tasks.new_task(task["project_dir"], task["project"], "Continue: " + task["title"][:70], task.get("goal", ""),
+                             steps, task["type"], task["demand"], "", task["effort"], time.time(), id_=follow)
+        new.update(owner="fred", progression="manual", handoff_from=task["id"],
+                   handoff_request={"request_id": request, "source": task["id"]})
+        src, dest = tasks.folder(self.folder, task["id"]), tasks.folder(self.folder, follow)
+        paths.write_text_atomic(dest / "inherited-handoff.md", text)
+        evidence = ["prompt.md"]
+        if task.get("plan"):
+            evidence += [plan.index_file(task)] + [p["file"] for p in task["plan"].get("parts", [])]
+        for s in task["steps"]:
+            evidence += [tasks.note_file(task, s), tasks.step_file(s, "notes.md"), tasks.facts_file(task, s),
+                         tasks.step_file(s, "verdict.md")]
+        for rel in dict.fromkeys(evidence):
+            try:
+                copied = (src / rel).read_text(encoding="utf-8")
+            except OSError:
+                continue  # the step never wrote it
+            paths.write_text_atomic(dest / "handoff-source" / rel, copied)
+        tasks.save(self.folder, new)
+        return new
+
+    def _link_handoff(self, task: dict, follow: str, text: str) -> tuple:
+        """The source's side of a Create: task-handoff.md, `handoff_to`, and `handed` (a done task stays done). History,
+        files and streams are untouched. Under tlock; the live task changes only once task.json is written."""
+        now, lines = time.time(), []
+        paths.write_text_atomic(tasks.folder(self.folder, task["id"]) / "task-handoff.md", text)
+        updated = copy.deepcopy(task)
+        updated.update(handoff_to=follow, handoff_note="task-handoff.md", updated=now)  # a done task changes too: the Board refetches
+        if updated["state"] != "done":
+            tasks._task_to(updated, "handed", f"Handed off to {follow}", now, tasks.current_step(updated), lines)
+            updated["owner"] = "fred"
+        lines.append(tasks._line(now, tasks.current_step(updated), "handoff", "handoff", f"follow-up task: {follow}"))
+        self._commit(updated, lines)
+        self.tasks[task["id"]] = updated
+        return 200, {"task": follow, "source": task["id"]}
+
     def create_task(self, card: dict, steps: list, effort: str, title: str = "") -> str:
         """A task from a Prep card and the step list Fred edited on it; step 1 starts at once."""
         folder = self.allowed(card.get("project_dir"))
@@ -1717,6 +1867,13 @@ class Hub:
             if prev:
                 read = ["prep handoff"]
                 got = [f"{prep.DIR}/handoff.md (Prep's scouting, cut to {prep.FINDINGS_CUT} characters)"]
+        if n == 1 and task.get("handoff_from"):  # plan 44: a follow-up reads the inherited handoff inline
+            try:
+                prev = (tasks.folder(self.folder, task["id"]) / "inherited-handoff.md").read_text(encoding="utf-8")
+            except OSError:
+                raise runs.RunError("Inherited handoff is unavailable; restore it before starting this task")
+            read = ["inherited handoff"]
+            got = [f"inherited-handoff.md (the handoff of task {task['handoff_from']}, whole)"]
         you, raw_role = paths.you(self.cfg), kinds.text(self.folder, kind)
         if kind == "design":
             role = plan.design_text(task, s, self.cfg, redo=task.get("redo", ""), raw=raw_role)
@@ -2481,7 +2638,7 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             r["stop_question"] if over and r["state"] == "stop" else "")
     hand_off = ("" if not (over and r["handoff_hint"]) else
                 "the context is large" if r["ctx_tone"] == "red" else f"{r['follow_ups']} follow-ups")
-    noted = t["state"] == "handed" and bool(t.get("handoff_note"))  # a pending handoff: Start next task
+    noted = t["state"] == "handed" and bool(t.get("handoff_note")) and not t.get("handoff_to")  # a pending handoff: Start next task
     handing = t["state"] == "handed" and not noted and r is not None and r["state"] in BUSY  # the skill writes it
     group = ("needs" if t["state"] in ("waiting", "stuck") or asks or hand_off or noted else
              "working" if t["state"] in ("planned", "running") or handing else "done")
@@ -2497,6 +2654,7 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
             "briefing": t.get("briefing") or 0, "cleared": bool(t.get("cleared")),
             "handoff_note": t.get("handoff_note") or "",
+            "handoff_to": t.get("handoff_to") or "", "handoff_from": t.get("handoff_from") or "",  # plan 44: whole-task links
             "paused_after": cs["n"] if t["owner"] == "fred" and t["state"] in ("running", "waiting") and cs
             and cs["state"] != "running" else 0,  # the step ended while paused: nothing starts until Resume
             "hold": t["why"].endswith(" over its pace"),
@@ -2627,6 +2785,7 @@ class Handler(BaseHTTPRequestHandler):
         routes["/api/task/answer"], routes["/api/task/plan"] = self._task_answer, self._task_plan
         routes["/api/task/next/preview"], routes["/api/task/next"] = self._task_next_preview, self._task_next
         routes["/api/task/message"] = self._task_message
+        routes["/api/task/handoff/preview"], routes["/api/task/handoff"] = self._task_handoff_preview, self._task_handoff
         for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
         path = urlparse(self.path).path
@@ -3011,6 +3170,14 @@ class Handler(BaseHTTPRequestHandler):
         status, data = self.hub.request_next(body)
         return self._json(data, status)
 
+    def _task_handoff_preview(self, body):
+        status, data = self.hub.task_handoff(body, preview=True)
+        return self._json(data, status)
+
+    def _task_handoff(self, body):
+        status, data = self.hub.task_handoff(body)
+        return self._json(data, status)
+
     def _task(self, task_id: str):
         task = self.hub.tasks.get(task_id) if tasks.safe_id(task_id) else None
         if task is None:
@@ -3027,6 +3194,9 @@ class Handler(BaseHTTPRequestHandler):
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
                            "handoff": tasks.read_handoff(self.hub.folder, task),
+                           "handoff_available": self.hub.handoff_available(task),  # plan 44: the whole-task handoff
+                           "handoff_document": self.hub._handoff_text(task, "task-handoff.md"),
+                           "handoff_context": self.hub._handoff_text(task, "inherited-handoff.md"),
                            **texts,
                            "plan": plan.read(self.hub.folder, task),
                            "parts": {p["n"]: plan.read_part(self.hub.folder, task, p["n"])

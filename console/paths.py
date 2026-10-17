@@ -87,6 +87,10 @@ DEFAULTS = {
     "brief_model": "haiku",
     "brief_max_words": 500,
     "brief_timeout_s": 60,
+    "handoff_on": True,  # plan 44 navigation: the Haiku pass that summarizes a whole task's saved digest for a follow-up
+    "handoff_model": "haiku",
+    "handoff_max_words": 800,
+    "handoff_timeout_s": 90,
     # USD per million tokens, API list prices (claude-api skill, 2026-10-06); fast mode costs 2x.
     # Haiku's higher price for prompts over 100K tokens is left out.
     "prices": {

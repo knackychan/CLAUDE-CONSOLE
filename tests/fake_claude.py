@@ -24,6 +24,8 @@ Run (--input-format stream-json): per user message prints init / assistant / res
   plan with two parts / a plan without ## Acceptance, then the HANDOFF block (plan 24).
   "PLAN-GAP" in any other step's message: a Plan gap under Open questions and `STOP: Plan gap: ...`.
   "REPLAN-ASK" in the message with HANDOFF-OK: the block's Next ends with `Replan: a search step is needed first`.
+  A request that starts with "Summarize a whole task" is the whole-task handoff pass (plan 44): the six handoff
+  fields, "LONG" in it gives 80 findings (over the word cap), "BROKEN"/"SLOW" as above.
   A request that starts with "Replan the rest of a task" is the replan pass: the remaining steps unchanged
   (`no change`), or with "REPLAN-ADD" in it one search step first (`search first`).
   "TESTS-OK" / "TESTS-FAIL" in the message: before the reply, a Bash tool_use `py -m unittest discover -s tests` and
@@ -74,6 +76,12 @@ def prep():
                                   "past its word cap" for i in range(80)]
         if "HUGE" in raw:
             fields["findings"] = ["word " * 550]
+    if raw.startswith("Summarize a whole task"):  # the whole-task handoff pass (console/handoff.py)
+        fields = {"goal": "Fix add() in calc.py", "findings": ["fake handoff summary: step 01 found add() in calc.py:2"],
+                  "files": ["calc.py"], "troubleshooting": [], "questions": [], "next": "Fix add() and run the test"}
+        if "LONG" in raw:
+            fields["findings"] = [f"finding {i} says that this long line holds a good many words to pad the handoff "
+                                  "past its word cap" for i in range(80)]
     if raw.startswith("Replan the rest of a task"):  # the replan pass (console/replan.py)
         rest = raw.split("The remaining steps", 1)[-1].split("Answer with the JSON", 1)[0]
         kept = [{"kind": m.group(1), "goal": m.group(2)} for m in re.finditer(r"^- ([a-z]+): (.+)$", rest, re.M)]
