@@ -981,6 +981,9 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .v-levers { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
 .v-levers .m { color: var(--mut); }
 .olink { font: 11.5px var(--mono); color: var(--ink); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; background: none; border: 0; padding: 0; text-align: left; overflow-wrap: anywhere; }
+.task-crumb { display: flex; gap: 8px; align-items: baseline; color: var(--mut); min-width: 0; font-size: 12px; }
+.task-crumb .olink { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-crumb > :last-child { min-width: 0; }
 .v-files { display: grid; gap: 1px; }
 .v-fr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
 .v-fr:first-child { border-top: 0; }

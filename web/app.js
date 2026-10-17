@@ -109,6 +109,8 @@ let coldTimer = null;
 let freshHandoff = false;  // Hand off after a PASS starts a new chat from a brief: it re-reads nothing
 let boardTask = "";      // the picked task ("" none: the Board picks the newest in scope)
 let boardPick = "";      // "" nothing (the Measure table), "t" the task head, "s<n>" a step, "c<n>" the connector after step n
+let taskView = "overview";  // the task head's view (overview | steps | files); only when boardPick === "t"
+let doneConfirm = "";    // the task id whose Mark-done inline confirm is armed ("" = none)
 let itab = "chat";       // the step inspector's tab (window.json board_tab)
 let boardData = null;    // {id, sig, data}: GET /api/task of boardTask
 let boardChat = null;    // {sid, at, chat}: GET /api/chat of the picked step's session
@@ -2853,7 +2855,7 @@ async function renderBoard() {
   await renderInspector(job);
 }
 async function renderInspector(job) {
-  const seq = ++inspectorSeq, pick = boardPick;
+  const seq = ++inspectorSeq, pick = boardPick, view = taskView;
   const sessionOn = page === "session";
   document.querySelector('[data-page="session"]').hidden = !sessionOn;
   if (sessionOn) {
@@ -2886,7 +2888,7 @@ async function renderInspector(job) {
   const sig = taskRowSig(row);
   if (!boardData || boardData.id !== row.id || boardData.sig !== sig) {
     const id = row.id, data = await api("/api/task?id=" + encodeURIComponent(id)).catch(() => null);
-    if (seq !== inspectorSeq || page !== "board" || boardTask !== id || boardPick !== pick) return;
+    if (seq !== inspectorSeq || page !== "board" || boardTask !== id || boardPick !== pick || taskView !== view) return;
     if (!data) {
       taskDisconnected.add(id);
       const t = boardData?.id === id && boardData.data?.task || row;
@@ -2899,7 +2901,7 @@ async function renderInspector(job) {
   }
   const d = boardData.data;
   if (d && boardPick[0] === "s") await boardChatFetch(d, row);
-  if (seq !== inspectorSeq || page !== "board" || boardTask !== row.id || boardPick !== pick) return;
+  if (seq !== inspectorSeq || page !== "board" || boardTask !== row.id || boardPick !== pick || taskView !== view) return;
   $("bbackwhat").textContent = row.title;
   const sameTask = $("b-tcont")?.dataset.tid === boardTask;
   const html = boardInspector(row, d), docked = html.startsWith('<div class="idock"');  // a step page docks its head and levers; the pane alone scrolls
@@ -2919,7 +2921,7 @@ function inspJob(j) {  // a Prep job that runs or failed (a ready card fills #ip
     ${isReview ? "" : `<button class="btn sm" data-prep="${esc(j.id)}" data-pdo="edit">Edit</button>`}<button class="btn sm" data-prep="${esc(j.id)}" data-pdo="drop">Dismiss</button></div>`;
 }
 function boardWrapKey() {  // true when the pick changed since the last draw: a new pick starts at the top, a redraw keeps the scroll
-  const k = boardTask + "|" + boardPick + "|" + itab + "|" + ptab, changed = boardWrapKey.last !== k;
+  const k = boardTask + "|" + boardPick + "|" + itab + "|" + ptab + "|" + taskView, changed = boardWrapKey.last !== k;
   boardWrapKey.last = k;
   return changed;
 }
@@ -3047,11 +3049,11 @@ async function copyLabel(id) {
   renderBoard();
 }
 
-function openTask(id) {  // a task from the session page or a card: picked on the Board
-  const row = boardData?.id === id && boardData.data?.task || boardRow(id);
+function openTask(id) {  // a task from the session page or a card: picked on the Board, always its Overview
   boardTask = id;
-  const n = row?.current || row?.steps?.[0]?.n;
-  boardPick = n ? "s" + n : "t";
+  boardPick = "t";
+  taskView = "overview";
+  doneConfirm = "";
   boardHistory = "";
   itab = "chat";
   boardData = boardChat = null;
@@ -3142,6 +3144,12 @@ function sentWords(t, d, s) {  // the words step s received: the previous step's
   return b ? wc(b) : null;
 }
 function busyBox(tid) { return `<div id="b-msg" class="say" data-tid="${esc(tid)}"></div>`; }
+function taskBreadcrumb(t, step = null) {  // Tasks / title / Step NN, or Tasks / Overview on the task views
+  const mid = step
+    ? `<button class="olink" data-task="${esc(t.id)}">${esc(t.title)}</button><span>Step ${two(step.n)}</span>`
+    : `<span class="olink">Overview</span>`;
+  return `<nav class="task-crumb" aria-label="Task navigation"><button class="olink" data-go="bback">Tasks</button><span aria-hidden="true">/</span>${mid}</nav>`;
+}
 function stepButtons(t, s, d, row) {  // the step's levers: they sit in the dock bar under the pane
   const shown = stepShown(t, s, row), lv = d.levers || {};
   const failedTry = shown === "failed" && (s.attempts || []).length > 1 ? (s.attempts.find((a) => a.why) || s.attempts[0]) : null;
@@ -3157,7 +3165,7 @@ function stepButtons(t, s, d, row) {  // the step's levers: they sit in the dock
 function stepHead(t, s, d, row, extra = "") {
   const shown = stepShown(t, s, row), [word, tn, spr] = BWORD[shown];
   const rung = s.state === "planned" ? "rung at start" : modelText(rungOf(s.harness, s.model), s.effort), time = stepTime(s);
-  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(spr)}${word}</span><h2>${stepNo(s)} ${esc(s.kind)}${extra}</h2></div>
+  return `${taskBreadcrumb(t, s)}<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(spr)}${word}</span><h2>${stepNo(s)} ${esc(s.kind)}${extra}</h2></div>
     <div class="meta"><span>${esc(rung)}</span><span>cost <b>${stepCostFig(s)}</b></span>${time ? `<span>${time}</span>` : ""}<span>task ${labHtml(t.id)}</span></div></div>`;
 }
 function dock(head, body, buttons, tid, composer = "") {
@@ -3662,7 +3670,7 @@ function inspTask(t, d, row) {
   const move = (c) => `${c.step ? two(c.step) : "task"} ${esc(c.from)} -> ${esc(c.to)}`;
   const n = row.count;
   const off = ["stop", "retry", "clear"].filter((k) => lv[k]).map((k) => `${k === "clear" ? "Delete" : k[0].toUpperCase() + k.slice(1)} off: ${esc(lv[k])}`).join(" · ");
-  const head = `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
+  const head = `${taskBreadcrumb(t)}<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2><span class="lr">${buttons}</span></div>
     <div class="meta"${off ? ` title="${off}"` : ""}>${labHtml(t.id)}<button class="olink" data-tact="folder" data-tid="${tid}" title="${esc(taskDir(t.id))}">Open folder</button></div>
     <div class="meta"><span>${esc(t.project)}</span><span>${row.state === "done" || !t.current ? `${n} steps` : `step <b>${t.current}</b> of ${n}`}</span><span>cost <b>${money(row.cost)}</b></span><span>effort ${esc(t.effort)}</span>${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}</div></div>`;
   const body = `${now}${wait}
@@ -3715,7 +3723,7 @@ async function go(name, button) {
   if (name === "list") { backTo = null; showPage("board"); }
   if (name === "back") goBack();
   if (name === "board") showPage("board");
-  if (name === "bback") { if (page === "session") { goBack(); return; } boardPick = ""; boardTask = ""; prepShown = ""; renderBoard(); }
+  if (name === "bback") { if (page === "session") { goBack(); return; } boardPick = ""; boardTask = ""; taskView = "overview"; doneConfirm = ""; prepShown = ""; renderBoard(); }
   if (name === "new") { if (form === "pill") await setForm("open"); showPage("board"); $("c-prompt").focus(); }
   if (name === "needs") {
     if (scope) pick("");
@@ -3801,7 +3809,7 @@ document.addEventListener("click", async (e) => {
   }
   if (t.dataset.bpick !== undefined) {  // a pick on the chain, or a row of the day's list
     const tid = t.dataset.btask || boardTask;
-    if (t.dataset.bpick === "t" && t.closest(".v-th, .v-dayr")) { openTask(tid); return; }
+    if (t.dataset.bpick === "t") { openTask(tid); return; }
     if (tid !== boardTask) { boardTask = tid; boardData = boardChat = null; }
     boardHistory = "";
     boardPick = t.dataset.bpick;

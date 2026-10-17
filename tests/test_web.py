@@ -497,16 +497,16 @@ class UnifiedTaskChatTest(unittest.TestCase):
       row = {id: 't', state: 'running', steps: t.steps}; snap.tasks = [row];
       boardChat = {sid: 's', chat: {items: []}}; """
 
-    def test_task_and_owned_session_entry_points_open_current_chat_and_old_attempt(self):
+    def test_task_entry_opens_overview_and_step_links_open_the_step(self):
         result = render(self.setup + """(async () => {
           renderBoard = async () => {}; showPage = name => {page = name;};
-          openTask('t'); const task = [page, boardTask, boardPick, itab];
+          openTask('t'); const task = [page, boardTask, boardPick, taskView, itab];
           boardData = {id: 't', data: d};
           await openSession('s'); const session = [page, boardTask, boardPick, itab];
           t.steps[0].attempts = [{session: 'old'}]; row.steps = t.steps;
           await openSession('old'); return {task, session, attempt: boardHistory};
         })()""")
-        self.assertEqual(result, {"task": ["board", "t", "s1", "chat"],
+        self.assertEqual(result, {"task": ["board", "t", "t", "overview", "chat"],
                                   "session": ["board", "t", "s1", "chat"], "attempt": "old"})
 
     def test_archived_task_session_links_open_the_task_inspector(self):
@@ -648,9 +648,10 @@ class UnifiedTaskChatTest(unittest.TestCase):
           let html = '';
           renderBoard = async () => {boardData = {id: 't', data: d}; html = boardInspector(row, d);};
           showPage = name => {page = name;};
-          openTask('t'); await renderBoard(); const selected = html;
-          await openSession('s'); const linked = html;
-          await goChat('t', 1); return [selected === linked, html === linked];
+          openTask('t'); await renderBoard(); const overview = html;
+          await goChat('t', 1); const step = html;
+          openTask('t'); await renderBoard(); const again = html;
+          return [overview === again, overview !== step];
         })()""")
         self.assertEqual(result, [True, True])
 
@@ -791,6 +792,56 @@ class UnifiedTaskChatTest(unittest.TestCase):
           finish(); await pending; return focused;
         })()""")
         self.assertFalse(result)
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class SelectionTest(unittest.TestCase):
+    """Plan 44 navigation T1: a task entry point opens the task's Overview; a step link opens that step."""
+    setup = """snap = {now: 100, sessions: [{id: 's', state: 'stop', run_live: false,
+      window: true, project_dir: 'repo', forks: []}], tasks: [], versions: {}, projects: []};
+      t = {id: 't', title: 'Task', state: 'running', current: 1, steps: [
+        {n: 1, session: 's', kind: 'chat', state: 'running', goal: 'Implement', notes: []}]};
+      d = {task: t, levers: {stop: '', done: '', add_next: ''}, step_levers: {continue: '', verify: '', handoff: ''}};
+      boardTask = 't'; boardPick = 't'; taskView = 'overview';
+      boardData = {id: 't', data: d};
+      row = {id: 't', state: 'running', steps: t.steps}; snap.tasks = [row];
+      boardChat = {sid: 's', chat: {items: []}}; """
+
+    def test_task_entry_points_open_overview_not_a_step(self):
+        result = render(self.setup + """(async () => {
+          renderBoard = async () => {}; showPage = n => {page = n;};
+          t.steps.push({n: 2, session: '', kind: 'code', state: 'planned', goal: 'g'}); t.current = 2;
+          openTask('t'); return [page, boardTask, boardPick, taskView];
+        })()""")
+        self.assertEqual(result, ['board', 't', 't', 'overview'])
+
+    def test_step_link_opens_that_step(self):
+        result = render(self.setup + """(async () => {
+          renderBoard = async () => {}; showPage = n => {page = n;};
+          boardData = {id: 't', data: d};
+          t.steps.push({n: 2, session: '', kind: 'code', state: 'planned', goal: 'g'}); t.current = 2;
+          await goChat('t', 1); return [boardPick, boardTask, itab];
+        })()""")
+        self.assertEqual(result, ['s1', 't', 'chat'])
+
+    def test_breadcrumb_shows_tasks_title_and_step(self):
+        over = render(self.setup + "taskBreadcrumb(t)")
+        self.assertIn('data-go="bback"', over)
+        self.assertIn('Overview', over)
+        step = render(self.setup + "taskBreadcrumb(t, t.steps[0])")
+        self.assertIn('data-task="t"', step)
+        self.assertIn('Step 01', step)
+
+    def test_late_fetch_for_a_different_task_is_dropped(self):
+        result = render(self.setup + """(async () => {
+          boardData = null; page = 'board'; boardPick = 't'; taskView = 'overview';
+          let finish; api = () => new Promise(ok => {finish = ok;});
+          const pending = renderInspector(null);
+          taskView = 'steps';
+          finish(d); await pending;
+          return [boardTask, boardPick, taskView, boardData];
+        })()""")
+        self.assertEqual(result, ['t', 't', 'steps', None])
 
 
 if __name__ == "__main__":
