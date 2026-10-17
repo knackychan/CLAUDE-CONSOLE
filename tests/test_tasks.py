@@ -1089,6 +1089,8 @@ class ChainTest(unittest.TestCase):
                       "**Claude:** half done", text)
         self.assertLess(text.index("earlier attempt wrote this"), text.index("What the earlier steps left you:"))
         self.assertIn("ended without a handoff: the run hit a limit", text)
+        bare = tasks.step_prompt(task, step, "", "the run hit a limit", tried="**Claude:** half done, no code")
+        self.assertIn("\n```\n**Claude:** half done, no code\n```", bare)  # a chat with no backticks: the 3-tick fence
 
     def test_step_prompt_text(self):
         task = make(("scout", "code"))

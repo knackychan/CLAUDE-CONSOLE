@@ -1308,7 +1308,7 @@ def step_prompt(task: dict, step: dict, prev_note: str, retry_reason: str = "", 
     if note:
         retry += ("\n" if retry else "") + f"{you} adds for this retry: {note}"
     if tried:  # inline: an OpenCode run may be denied reads outside the project
-        fence = "`" * max(3, max(len(run) for run in re.findall(r"`+", tried) or [0]) + 1)
+        fence = "`" * max(3, max(map(len, re.findall(r"`+", tried)), default=0) + 1)
         retry += ("\n" if retry else "") + (
             "Your earlier attempt wrote this before it stopped (its chat, newest last). Keep what still holds, and "
             f"check the working tree for edits it already made before you redo them:\n{fence}\n{tried}\n{fence}")
