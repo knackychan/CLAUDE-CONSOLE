@@ -1,7 +1,7 @@
 # Plan 44: an event-driven supervisor for tasks and steps. Brainstorm
 
-Status: **decided** 2026-10-17 (Fred took option (a) on D1 to D17 and "no limit" on D18, section 15; nothing is
-open). The guided plan comes next. Design only: no code changed here.
+Status: **decided** 2026-10-17 (Fred took option (a) on D1 to D17 except D15 (b), and "no limit" on D18, section 15;
+nothing is open). The guided plan comes next. Design only: no code changed here.
 
 Context: [CLAUDE.md](../../CLAUDE.md), [BRAINSTORM.md](../../BRAINSTORM.md) (non-goals, D16),
 [2026-10-13-orchestration.md](../../design/brainstorm/2026-10-13-orchestration.md) (D-1: no orchestrator agent),
@@ -315,7 +315,7 @@ Minimal, in the existing inspector (plan 25) and the task page dock (plan 39):
    fold, `POST /api/task/supervisor`, config keys with `supervisor_mode` `suggest`, fake claude words
    (`SUP-VERIFY`, `SUP-CODE`, `SUP-FINISH`, `SUP-ESCALATE`, `SUP-BAD`), tests for digest size, check refusals,
    idempotent request ids, no wake with pending guidance. Skill library part 1 (section 14.7): the folder and its
-   seeds, the frontmatter registry, code-only matching by kind, the selected bodies inlined in the step prompt,
+   seeds, the `index.json` registry, code-only matching by kind, the selected bodies inlined in the step prompt,
    `received.md` and the chain `read:` line naming them, the Board chip. Fred's live check on one real manual task.
 2. **Slice B, auto within caps**: the `auto` mode and the hard stops, Run supervised on the Prep card, every manual
    boundary as a wake, `confirm` / `keep` on plan holds, the Usage row. Skill library part 2: Prep's `tags`, the
@@ -367,28 +367,48 @@ ui-ux skills; a code step on the service does not pay for them.
 `~/.claude/console/skills/<name>/SKILL.md` (plus any files the skill references), seeded from
 `dotclaude/console/skills/` by `skills.ensure(home)` exactly as kinds are (D14 a). It is the Console's own library:
 not copied to `~/.claude/skills`, never loaded by a VS Code chat, read by the service only. Fred adds a skill by
-dropping a folder there (or on the Skills tab, slice C). A skill may also be a pointer: a SKILL.md whose frontmatter
-has `source: ~/.claude/skills/<name>` and no body makes a personal skill selectable per step without a copy.
+dropping a folder there and one line in `index.json` (14.3). A skill may also be a pointer: an index entry with
+`"source": "~/.claude/skills/<name>"` and no folder makes a personal skill selectable per step without a copy.
 
-### 14.3 The registry: frontmatter, no second file (D15 a)
+### 14.3 The registry: a hand-edited `index.json` (D15 b)
 
-`skills.registry(home) -> dict` reads each SKILL.md's frontmatter once per service start and when a file changes
-(mtime, as `Hub.reload_tuning` does for config.json). Fields, Claude's then the Console's:
+`~/.claude/console/skills/index.json`, one object keyed by skill folder name, is the registry. SKILL.md keeps only
+Claude's own frontmatter (so a skill copied from `~/.claude/skills` works unchanged); what the Console needs to pick
+it is in the index, which Fred edits by hand (or on the Skills tab, slice C):
 
-```yaml
----
-name: ui-ux-review
-description: Checks a screen against the Console Cells rules (tokens, 340 px, state never colour alone).
-when_to_use: design or verify steps on web/*.html, web/style.css, web/app.js
-kinds: [design, verify, code]        # Console: the step kinds it may ride with; empty = any kind
-tags: [ui-ux, web]                   # Console: matched against the task's tags (Prep, plan part, Fred)
-paths: ["web/**"]                    # Console too: matched against the plan part's Files or the source's Files touched
-always: false                        # Console: true = every step of its kinds, no tag needed (a house-rules skill)
----
+```json
+{"ui-ux-review": {
+   "description": "Checks a screen against the Console Cells rules (tokens, 340 px, state never colour alone).",
+   "kinds": ["design", "verify", "code"],
+   "tags": ["ui-ux", "web"],
+   "paths": ["web/**"],
+   "always": false},
+ "handoff-quality": {
+   "description": "How to write a six-heading HANDOFF block that passes the brief checks.",
+   "kinds": [], "tags": [], "paths": [], "always": true}}
 ```
 
-`GET /api/config` gains `skills: [{name, description, kinds, tags, always, kb}]` for the window; the index is never
-written to disk (the folder is the registry). A skill with a parse error is listed with `why` and never picked.
+Fields: `description` (shown on the Board and in the supervisor's digest; a missing one falls back to the SKILL.md
+`description` frontmatter, else the folder name), `kinds` (step kinds it may ride with; `[]` = any), `tags`
+(matched against the task's tags), `paths` (globs matched against the plan part's Files or the source's Files
+touched), `always` (every step of its kinds, no tag needed). Unknown keys are ignored and kept.
+
+- `skills.ensure(home)` copies the seed folders from `dotclaude/console/skills/` and, when `index.json` is missing,
+  writes the seed index `dotclaude/console/skills/index.json`; when it exists, it adds only the entries of seed skills
+  the index does not name (so a new seed shows up after an update) and never rewrites an entry Fred edited, as
+  `kinds.ensure` never replaces an edited kind file. The write goes through a temp file and `os.replace`
+  (plan 34 rule). Nothing else writes the index.
+- `skills.registry(home) -> dict` reads the index once per service start and again when its mtime or the folder
+  listing changes (as `Hub.reload_tuning` watches config.json). It joins the index with the folders:
+  - an entry whose folder or SKILL.md is missing: listed with `why: "no SKILL.md"`, never picked;
+  - a folder absent from the index: listed with `why: "not in index.json"` and the SKILL.md description, never picked
+    by code or the supervisor; Fred may still pick it by hand (the multi-select shows it dimmed), which is the
+    cheap way to try a new skill before indexing it;
+  - an invalid entry (not an object, `kinds` with an unknown kind, `tags` or `paths` not lists of strings, `always`
+    not a bool): listed with `why: "index: <what>"`, never picked; an unparsable index.json keeps the last good
+    registry and the task head says `skills: index.json invalid`.
+- `GET /api/config` gains `skills: [{name, description, kinds, tags, paths, always, kb, why}]` for the window, in
+  index order, the unindexed folders last.
 
 ### 14.4 Who picks (D16 a: code first, the supervisor and Fred on top)
 
@@ -442,7 +462,7 @@ and slash commands (the Hand off lever runs `/session-handoff` there). Only task
 
 ### 14.7 Slicing (also folded into section 12)
 
-Slice A: the folder and `skills.ensure`, the frontmatter registry, `skills.pick` by kind, `always` and `paths` from
+Slice A: the folder, `skills.ensure` with the seed `index.json`, the registry, `skills.pick` by kind, `always` and `paths` from
 the source's Files touched, the `$skills` slot, `--disable-slash-commands` on steps, `skills.md`, received.md and
 the chain line, the Board chip, two seed skills (`handoff-quality`: how to write a six-heading block that passes the
 brief checks, kinds any, always; `ui-ux-review`, kinds design / verify / code, tags ui-ux / web). Slice B: Prep's
@@ -450,7 +470,7 @@ brief checks, kinds any, always; `ui-ux-review`, kinds design / verify / code, t
 Skills tab next to Kinds (edit in place, no size cap), the plan parts' `Tags:` line, the `--add-dir` mode
 behind `skills_load: "inline" | "add-dir"`.
 
-## 15. Decisions (Fred, 2026-10-17: option (a) on D1 to D17; D18 no limit)
+## 15. Decisions (Fred, 2026-10-17: option (a) on D1 to D17 except D15 (b); D18 no limit)
 
 | # | Question | Taken |
 |---|---|---|
@@ -468,7 +488,7 @@ behind `skills_load: "inline" | "add-dir"`.
 | D12 | Automatic chains at `done` | one suggest-only wake asking whether a step is missing, when room is left |
 | D13 | `stepdone` | suggest only, at every mode |
 | D14 | Where the skill library lives | `~/.claude/console/skills/`, seeded from `dotclaude/console/skills/` like kinds, read by the service only |
-| D15 | Registry format | frontmatter only (`kinds`, `tags`, `paths`, `always` next to Claude's fields); the folder is the index |
+| D15 | Registry format | (b), Fred 2026-10-17: a hand-edited `index.json` in the library folder (name -> description, kinds, tags, paths, always), seeded by `skills.ensure`; SKILL.md keeps Claude's frontmatter only |
 | D16 | Who picks skills | code by kind, tags and paths; the supervisor may add names; Fred overrides last |
 | D17 | How the pick is enforced | bodies inlined whole in the step prompt plus `--disable-slash-commands` on every step run, saved as skills.md |
 | D18 | Skill limits | no limit (Fred, 2026-10-17): no cap on the count per step or the size of a skill, nothing trimmed or refused for size; kind, tags and paths alone decide what loads |
@@ -483,3 +503,5 @@ Nothing is open.
 - 2026-10-17 - Fred took (a) on D1 to D13 (section 15); the body now reads for them. Fred's skill library idea added
   as section 14, checked against the skills and CLI reference pages of code.claude.com (discovery paths, `--add-dir`,
   `--disable-slash-commands`, `skillOverrides`, unknown frontmatter ignored); D14 to D18 open.
+- 2026-10-17 - Fred took (a) on D14, D16 and D17, (b) on D15 (a hand-edited `index.json`, section 14.3) and ruled
+  no limit on D18: every skill cap left the design (section 15). Nothing is open.
