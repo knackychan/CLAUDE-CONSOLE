@@ -970,7 +970,7 @@ class AutonomyTest(DispatchTest):
             with mock.patch.object(self.hub, "task_lever") as lever:
                 self.hub._sup_auto(tid, 1)
             self.assertEqual(lever.call_count, 0, d)
-            self.assertIn("approval", self.hub.tasks[tid]["supervisor"]["pending"]["error"])
+            self.assertTrue(self.hub.tasks[tid]["supervisor"]["pending"]["error"])  # stays a suggestion
 
     def held_add(self, tid):
         return mock.patch.object(self.hub, "request_next", side_effect=lambda req, **kw: (
@@ -1149,6 +1149,244 @@ class AutonomyTest(DispatchTest):
         self.assertEqual(len(self.calls), 2)
         self.assertIn(third, self.hub.wakes)  # retained behind the visible hold, not spent
         self.assertEqual(path.read_text(encoding="utf-8"), "{bad")
+
+
+
+class HoldsStallsDoneTest(AutonomyTest):
+    """Plan 44 T9: plan holds, stepdone, automatic done and stalls, live and after a restart."""
+
+    def at(self, tid, state, why, frm="task:running", owner=None, ts=200.0):
+        task = self.hub.tasks[tid]
+        task.update(state=state, why=why, owner=owner or task["owner"])
+        tasks.log(self.folder, tid, [tasks._line(ts, task["steps"][0], frm, f"task:{state}", why)])
+        tasks.save(self.folder, task)
+        return task
+
+    def done_task(self, tid="20260101-000000-d0d0", briefing=0):
+        tid = self.supervised_task(tid)
+        task = self.hub.tasks[tid]
+        task["progression"] = None
+        task["briefing"] = briefing
+        self.at(tid, "done", "", owner="service")
+        return tid
+
+    def test_each_real_boundary_and_hold_wakes_once(self):
+        self.hub.sup_recovered = True
+        for i, why in enumerate(("plan ready: confirm", "plan 30 KB, over 24", "replanned: 1 step added")):
+            tid = self.supervised_task(f"20260101-00000{i}-e0e0")
+            task = self.at(tid, "waiting", why)
+            found = supervisor.boundary(task, tasks.read_chain(self.folder, task))
+            self.assertEqual(found["trigger"], "hold", why)
+            self.hub._sup_hook(task)
+            self.hub._sup_hook(task)
+            self.assertEqual(len(self.hub.wakes[tid]["events"]), 1)
+        for why in ("plan edited by Fred", "plan saved: 3 KB", "planning"):
+            tid = self.supervised_task("20260101-000009-e0e0")
+            task = self.at(tid, "waiting", why)
+            self.assertIsNone(supervisor.boundary(task, tasks.read_chain(self.folder, task)), why)
+        # Mark step done on a manual stuck step makes a new choose-next boundary
+        tid = self.stuck_task("20260101-000000-e1e1")
+        self.hub.wakes.pop(tid, None)
+        with mock.patch.object(self.hub, "_accept_step"):
+            self.assertEqual(self.hub.task_lever(tid, "stepdone")[0], 200)
+        self.assertEqual(self.hub.wakes[tid]["triggers"], ["choose_next"])
+
+    def test_questions_fable_pace_and_guidance_do_not_wake_or_dispatch(self):
+        for i, why in enumerate(("asks: which file?", "asks: Plan gap: the schema", "confirm Fable",
+                                 "step 02 opus over its pace")):
+            tid = self.supervised_task(f"20260101-00000{i}-f0f0")
+            task = self.at(tid, "waiting", why, owner="service")
+            self.hub._sup_hook(task)
+        for at in range(0, 400, 20):
+            self.tick(float(at))
+        self.drain()
+        self.assertEqual(self.calls, [])
+
+    def test_manual_confirm_and_automatic_keep_use_shared_progression(self):
+        self.hub.sup_recovered = True
+        tid = self.supervised_task()
+        task = self.at(tid, "waiting", "plan 30 KB, over 24")
+        task["plan"] = {"from": 1, "dir": "01-scout", "parts": [], "kb": 30, "words": 10}
+        with mock.patch.object(self.hub, "start_step") as start:
+            self.assertEqual(self.hub.task_lever(tid, "confirm")[0], 200)
+        self.assertEqual(start.call_count, 0)
+        task = self.hub.tasks[tid]
+        self.assertEqual((task["state"], task["why"], task["owner"], len(task["steps"])),
+                         ("waiting", "choose next step", "fred", 1))
+        self.assertEqual(self.hub.wakes[tid]["triggers"], ["choose_next"])  # a new real manual boundary, once
+
+    def test_done_wakes_after_final_brief_only_and_is_always_suggest(self):
+        self.hub.sup_recovered = True
+        tid = self.done_task(briefing=1)
+        self.hub.tasks[tid]["supervisor"]["mode"] = "auto"
+        self.hub._sup_hook(self.hub.tasks[tid])
+        for at in range(0, 200, 20):
+            self.tick(float(at))
+        self.assertEqual(self.calls, [])  # the final brief is still writing
+        self.hub._brief_done(tid, 1, {"fallback": "", "words": 3, "cost": 0.0, "text": "brief", "model": "haiku",
+                                      "cut": []}, "raw")
+        self.assertEqual(len(self.hub.wakes[tid]["events"]), 1)  # callback and earlier hook: one event
+        self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
+        self.tick(400.0)
+        self.drain()
+        self.assertEqual(len(self.calls), 1)
+        pending = self.hub.tasks[tid]["supervisor"]["pending"]
+        self.assertEqual(pending["status"], "suggest")  # never automatic, even in auto mode
+        self.assertIn("report only", pending["error"])
+        self.hub._brief_done(tid, 1, {"fallback": "", "words": 3, "cost": 0.0, "text": "brief", "model": "haiku",
+                                      "cut": []}, "raw")
+        for at in range(400, 800, 20):
+            self.tick(float(at))
+        self.drain()
+        self.assertEqual(len(self.calls), 1)
+        # no room: no paid check
+        self.hub.cfg["task_max_steps"] = 1
+        full = self.done_task("20260101-000000-d1d1")
+        self.hub._sup_hook(self.hub.tasks[full])
+        self.tick(1000.0)
+        self.drain()
+        self.assertEqual(len(self.calls), 1)
+
+    def test_restart_before_claim_recovers_holds_and_done(self):
+        ids = {}
+        for i, why in enumerate(("plan ready: confirm", "plan 30 KB, over 24", "replanned: no change")):
+            tid = self.supervised_task(f"20260101-00000{i}-a9a9")
+            self.at(tid, "waiting", why)
+            ids[why] = tid
+        ids["done"] = self.done_task()
+        ids["briefing"] = self.done_task("20260101-000000-d2d2", briefing=1)
+        consumed = self.supervised_task("20260101-000005-a9a9")
+        task = self.at(consumed, "waiting", "plan ready: confirm")
+        event = supervisor.boundary(task, tasks.read_chain(self.folder, task))["event"]
+        supervisor.append_log(self.folder, consumed, {"ts": 1.0, "wake": 1, "phase": "claimed", "events": [event]})
+        supervisor.append_log(self.folder, consumed, {"ts": 2.0, "wake": 1, "phase": "result", "events": [event],
+                                                      "status": "rejected"})
+        old = self.supervised_task("20260101-000006-a9a9")
+        self.at(old, "waiting", "plan ready: confirm")
+        self.at(old, "running", "", frm="task:waiting", owner="service")  # superseded historical hold
+        hub = self.restarted()
+        for at in range(0, 300, 10):
+            self.now = float(at)
+            hub._supervisor_tick()
+            for th in hub.sup_threads:
+                th.join(10)
+        want = sorted(ids[k] for k in ("plan ready: confirm", "plan 30 KB, over 24", "replanned: no change", "done"))
+        self.assertEqual(sorted(c["task"] for c in self.calls), want)
+        self.assertIn(ids["briefing"], hub.wakes)  # retained until its final brief is written
+
+    def stalled(self, tid="20260101-000000-5a5a", live=True, harness="claude", idle=1800.0):
+        tid = self.supervised_task(tid)
+        task = self.hub.tasks[tid]
+        task.update(progression=None, owner="service", state="running", why="")
+        task["steps"][0].update(state="running", session="s1")
+        task["steps"][0]["attempts"][-1].update(final=False, started=50.0)
+        row = {"state": "stall", "last_ts": 10_000.0 - idle, "harness": harness, "cost": 0.0, "run_live": True}
+        return tid, row
+
+    def test_stall_threshold_and_one_wake_per_attempt(self):
+        tid, row = self.stalled(idle=1799.0)
+        with mock.patch.object(self.hub.runs, "is_live", return_value=True), \
+                mock.patch.object(self.hub, "session", return_value=row):
+            self.assertEqual(self.hub._sup_stalls(now=10_000.0), [])
+            row["last_ts"] = 10_000.0 - 1800.0
+            self.assertEqual(self.hub._sup_stalls(now=10_000.0), [tid])
+            self.hub._sup_stalls(now=10_050.0)
+            self.assertEqual(len(self.hub.wakes[tid]["events"]), 1)  # the same attempt: one event
+            for excluded in ("codex",):
+                row["harness"] = excluded
+                other, _ = self.stalled("20260101-000000-5b5b")
+                self.assertNotIn(other, self.hub._sup_stalls(now=10_000.0))
+            row["harness"] = "claude"
+            self.hub.tasks[tid]["supervisor"]["mode"] = "off"
+            self.hub.wakes.clear()
+            self.assertNotIn(tid, self.hub._sup_stalls(now=10_000.0))
+            self.hub.tasks[tid]["supervisor"]["mode"] = "suggest"
+            # a new attempt may wake again
+            self.hub.tasks[tid]["steps"][0]["attempts"].append({"session": "s1", "cost": 0, "started": 900.0,
+                                                                "ended": None, "why": "", "final": False})
+            self.hub._sup_stalls(now=10_000.0)
+        self.assertEqual(len(self.hub.wakes[tid]["events"]), 1)
+        self.assertEqual(self.hub.wakes[tid]["triggers"], ["stalled"])
+
+    def test_stall_stop_and_followup_retry_each_need_approve(self):
+        self.hub.sup_recovered = True
+        tid, row = self.stalled()
+        self.hub.tasks[tid]["supervisor"]["mode"] = "auto"
+        self.answer = dict(decision=dict(decision="stop", reason="stalled", confidence="high", for_fred=""),
+                           cost=0.004, model="sonnet", turns=2, error="")
+        with mock.patch.object(self.hub.runs, "is_live", return_value=True), \
+                mock.patch.object(self.hub, "session", return_value=row), \
+                mock.patch.object(self.hub.runs, "stop") as stop:
+            self.hub._sup_stalls(now=10_000.0)
+            self.tick(100.0)
+            self.drain()
+            self.assertEqual(self.calls[0]["model"], "sonnet")
+            pending = self.hub.tasks[tid]["supervisor"]["pending"]
+            self.assertEqual((pending["status"], pending["decision"]["decision"]), ("suggest", "stop"))
+            self.assertEqual(stop.call_count, 0)  # auto mode cannot stop
+            self.assertEqual(self.hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})[0], 200)
+            self.assertEqual(stop.call_count, 1)  # the stream interrupt through task_lever('stop') only
+        task = self.hub.tasks[tid]
+        self.assertEqual(task["state"], "stopped")
+        with mock.patch.object(self.hub.runs, "is_live", return_value=False), \
+                mock.patch.object(self.hub, "task_lever", wraps=self.hub.task_lever) as lever:
+            self.tick(200.0)
+            self.drain()
+            pending = self.hub.tasks[tid]["supervisor"]["pending"]
+            self.assertEqual((pending["decision"]["decision"], pending["decision"]["note"]),
+                             ("retry", supervisor.STALLED_NOTE))
+            self.assertEqual(len(self.calls), 1)  # the follow-up is fixed: no second model call
+            self.hub._sup_auto(tid, pending["wake"])
+            self.assertEqual(lever.call_count, 0)  # still needs Fred
+        # Fred's ordinary Stop makes no follow-up
+        plain, _ = self.stalled("20260101-000000-5c5c")
+        with mock.patch.object(self.hub.runs, "stop"):
+            self.hub.task_lever(plain, "stop")
+        self.assertNotIn(plain, self.hub.wakes)
+
+    def test_restart_after_approved_stalled_stop_preserves_followup(self):
+        tid, row = self.stalled()
+        task = self.hub.tasks[tid]
+        task.update(state="stopped", owner="fred", why="stopped by Fred")
+        task["steps"][0]["state"] = "failed"
+        tasks.save(self.folder, task)
+        follow = {"ts": 300.0, "step": 1, "session": "s1", "from": "stalled", "to": "stopped", "why": "stalled_stop",
+                  "attempt": 1}
+        supervisor.append_log(self.folder, tid, {"ts": 300.0, "wake": 1, "phase": "outcome", "status": "dispatched",
+                                                 "action": "approve", "by": "fred", "followup": follow})
+        hub = self.restarted()
+        with mock.patch.object(hub.runs, "is_live", return_value=False):
+            self.now = 0.0
+            hub._supervisor_tick()
+            self.now = 100.0
+            hub._supervisor_tick()
+        pending = hub.tasks[tid]["supervisor"]["pending"]
+        self.assertEqual(pending["decision"]["note"], supervisor.STALLED_NOTE)
+        again = self.restarted()  # the follow-up is consumed now: no duplicate
+        with mock.patch.object(again.runs, "is_live", return_value=False):
+            self.now = 200.0
+            again._supervisor_tick()
+            self.now = 400.0
+            again._supervisor_tick()
+        claims = [r for r in supervisor.read_log(self.folder, tid) if r.get("phase") == "claimed"]
+        self.assertEqual(len(claims), 1)
+
+    def test_stuck_model_is_one_sonnet_pass_without_escalation_loop(self):
+        self.hub.sup_recovered = True
+        tid = self.stuck_task()
+        self.answer = dict(decision=None, cost=0.01, model="sonnet", turns=6, error="no decision (unknown field x)")
+        self.hub._sup_hook(self.hub.tasks[tid])
+        for at in range(0, 600, 10):
+            self.tick(float(at))
+        self.drain()
+        self.assertEqual([c["model"] for c in self.calls], ["sonnet"])
+
+
+# Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
+for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest):
+    for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
+        setattr(_cls, _name, None)
+del _cls, _name
 
 
 if __name__ == "__main__":

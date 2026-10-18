@@ -205,7 +205,10 @@ def append_log(home, task_id: str, record: dict) -> None:
         fh.flush()
 
 
-VISIBLE = ("suggest", "held", "escalate", "refused")  # pending statuses Fred sees; wait/no-decision leave none
+VISIBLE = ("suggest", "held", "escalate", "refused")
+HOLD = re.compile(r"plan ready: confirm|plan \d+(\.\d+)? KB, over \d+(\.\d+)?|replanned: .*", re.S)
+REPORT_ONLY = ("done", "stalled", "stalled_stop")  # D6/D12: these wakes only ever suggest, in every mode
+STALLED_NOTE = "the earlier attempt stalled for 30 min"  # pending statuses Fred sees; wait/no-decision leave none
 
 
 def boundary(task: dict, chain: list):
@@ -221,13 +224,18 @@ def boundary(task: dict, chain: list):
     why, trigger, want = task.get("why", ""), "", ""
     if task.get("state") == "stuck":
         trigger, want = "stuck", "task:stuck"
+    elif task.get("state") == "waiting" and HOLD.fullmatch(why):  # the exact plan holds, never any "plan ..." text
+        trigger, want = "hold", "task:waiting"
+    elif (task.get("state") == "done" and task.get("progression") != "manual"
+          and isinstance(task.get("supervisor"), dict)):  # an automatic task done (one created with a policy)
+        trigger, want = "done", "task:done"
     elif (task.get("progression") == "manual" and task.get("state") == "waiting" and task.get("owner") == "fred"
           and cs and cs["state"] == "done" and (why == "choose next step" or why.startswith("VERDICT: FAIL"))):
         trigger, want = ("choose_next" if why == "choose next step" else "fail"), "task:waiting"
     if not trigger:
         return None
-    line = next((r for r in reversed(chain or []) if r.get("to") == want and (trigger == "stuck" or r.get("why") == why)),
-                None)
+    line = next((r for r in reversed(chain or []) if r.get("to") == want and r.get("from") != want  # a real move
+                 and (trigger in ("stuck", "done") or r.get("why") == why)), None)
     if line is None:
         return None
     return {"trigger": trigger, "line": line, "event": event_id(line)}
@@ -677,6 +685,8 @@ def auto_reason(decision: dict, task: dict, policy: dict) -> str:
     kind = decision.get("decision")
     if policy.get("mode") != "auto":
         return f"the supervisor mode is {policy.get('mode', 'off')}"
+    if any(t in REPORT_ONLY for t in policy.get("triggers") or ()):
+        return "report only: Fred approves this one"
     if kind not in AUTO_KINDS:
         return f"{kind} needs Fred's approval"
     settings = policy.get("settings") or {}

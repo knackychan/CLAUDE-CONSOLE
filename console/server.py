@@ -492,6 +492,10 @@ class Hub:
         with self.lock:
             self.version += 1
             self.changed.notify_all()
+        try:
+            self._sup_stalls()
+        except Exception as exc:  # observation only: never stops the loop
+            self._log(f"supervisor stall check failed: {type(exc).__name__}: {exc}")
 
     def run(self) -> None:
         self.runs.reconcile()
@@ -1485,6 +1489,13 @@ class Hub:
             found = supervisor.boundary(task, tasks.read_chain(self.folder, task, 50))
             if found:
                 self.wake_supervisor(task, found["trigger"], found["line"], now)
+            try:
+                records = supervisor.read_log(self.folder, task["id"])
+            except ValueError:
+                continue
+            for rec in records:  # D6: an approved stalled stop's follow-up survives a restart (consumed ones dedupe)
+                if isinstance(rec.get("followup"), dict):
+                    self.wake_supervisor(task, "stalled_stop", rec["followup"], now)
 
     def _sup_record(self, task_id: str, record: dict) -> None:
         supervisor.append_log(self.folder, task_id, dict(record, ts=time.time()))
@@ -1548,9 +1559,21 @@ class Hub:
             return False
         if pol["paused"] or tasks.pending_messages(task) or task.get("briefing") or tid in self.briefing:
             return False  # retained until the existing path resolves it (a Pause defers, Resume lets it drain)
-        if supervisor.boundary(task, tasks.read_chain(self.folder, task, 50)) is None:
-            self.wakes.pop(tid, None)  # superseded: the task moved on
-            return False
+        special = set(entry["triggers"]) & {"stalled", "stalled_stop"}
+        if special:
+            if not self._sup_special_ok(task, entry):
+                self.wakes.pop(tid, None)
+                return False
+            if "stalled_stop" in special:
+                return self._sup_fixed_retry(task, entry)
+        else:
+            found = supervisor.boundary(task, tasks.read_chain(self.folder, task, 50))
+            if found is None:
+                self.wakes.pop(tid, None)  # superseded: the task moved on
+                return False
+            if found["trigger"] == "done" and not self._sup_room(task):
+                self.wakes.pop(tid, None)  # no room for anything more: no paid "anything left?" check
+                return False
         base = self._base(task)
         if base:
             self._sup_terminal(task, entry, base)
@@ -1857,9 +1880,13 @@ class Hub:
                 task.pop("sup_cause", None)  # nothing continues from this dispatch
             body = {k: v for k, v in (body or {}).items() if k in ("task", "step", "request_id", "status", "state",
                                                                    "error")}
+            followup = None
+            if kind == "stop" and status == "dispatched" and by == "fred" and cs:  # D6: the one fixed follow-up
+                followup = {"ts": time.time(), "step": cs["n"], "session": cs.get("session", ""), "from": "stalled",
+                            "to": "stopped", "why": "stalled_stop", "attempt": len(tasks.attempts(cs))}
             try:
                 self._sup_record(task_id, {"wake": wake, "phase": "outcome", "status": status, "code": code,
-                                           "body": body, "by": by, "action": "approve",
+                                           "body": body, "by": by, "action": "approve", "followup": followup,
                                            "events": pending.get("events") or []})
             except OSError:
                 pass  # the dispatching record stays: a restart shows it uncertain, never replays it
@@ -1867,6 +1894,8 @@ class Hub:
             sup["pending"] = (dict(pending, status="uncertain", error=body.get("error", "")) if status == "uncertain"
                               else dict(pending, status="refused", error=body.get("error", ""), dispatch=intent)
                               if status == "refused" else None)
+            if followup:
+                self.wake_supervisor(task, "stalled_stop", followup)
             what = (f"step {body['step']:02d}" + (" held for Fred" if held else "")) if body.get("step") else kind
             try:
                 self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
@@ -2054,8 +2083,9 @@ class Hub:
             n = decision.get("source_step", task.get("current"))
             source = next((x for x in task["steps"] if x["n"] == n), None)
             room = min(tasks.room_after(task, n, max_steps), max_steps - len(task["steps"])) if source else 0
+        pending = (task.get("supervisor") or {}).get("pending") or {}
         return dict(pol, work_usd=self._sup_work(task), room=room, source=source,
-                    current=cs["n"] if cs else 0)
+                    current=cs["n"] if cs else 0, triggers=pending.get("triggers") or [])
 
     def _sup_auto(self, task_id: str, wake: int) -> None:
         """Auto mode: dispatch a fresh suggestion by itself when auto_reason allows it; else it stays a suggestion
@@ -2066,6 +2096,74 @@ class Hub:
         if supervisor.policy(self.cfg, task, time.time())["mode"] != "auto":
             return
         self._supervisor_dispatch(task_id, wake, "auto")
+
+    def _sup_room(self, task: dict) -> bool:
+        """Room for one more supervisor step: room_after the current step and the physical task_max_steps."""
+        cs = tasks.current_step(task)
+        max_steps = self.cfg["task_max_steps"]
+        return bool(cs) and tasks.room_after(task, cs["n"], max_steps) > 0 and len(task["steps"]) < max_steps
+
+    def _sup_special_ok(self, task: dict, entry: dict) -> bool:
+        """The live checks of a report-only wake that is not a chain boundary: a stall needs the same running Claude
+        attempt; the stalled-stop follow-up needs that attempt closed (stopped, no live run)."""
+        cs = tasks.current_step(task)
+        if not cs:
+            return False
+        if "stalled_stop" in entry["triggers"]:
+            return task["state"] == "stopped" and cs["state"] == "failed" and not (
+                cs["session"] and self.runs.is_live(cs["session"]))
+        return task["state"] == "running" and cs["state"] == "running" and bool(cs["session"])
+
+    def _sup_fixed_retry(self, task: dict, entry: dict) -> bool:
+        """D6: after Fred approved the stop of a stalled step and its attempt closed, the fixed follow-up is a
+        suggested Retry with a set note: no model call, and it needs another Approve in every mode."""
+        sup = task.setdefault("supervisor", supervisor.initial(self.cfg, task["project_dir"], time.time()))
+        wake = (sup.get("wakes") or 0) + 1
+        decision = {"decision": "retry", "note": supervisor.STALLED_NOTE, "reason": supervisor.STALLED_NOTE,
+                    "confidence": "high", "for_fred": "Retry the step that stalled?"}
+        revision = supervisor.revision(self.folder, task)
+        base = {"wake": wake, "events": entry["events"], "triggers": entry["triggers"]}
+        try:
+            self._sup_record(task["id"], dict(base, phase="claimed", revision=revision, epoch=sup.get("epoch", 0)))
+            self._sup_record(task["id"], dict(base, phase="result", cost=0.0, decision=decision, status="suggest",
+                                              error="", revision=revision, epoch=sup.get("epoch", 0), by=""))
+        except OSError:
+            return False
+        sup["wakes"] = wake
+        sup["pending"] = dict(base, decision=decision, revision=revision, epoch=sup.get("epoch", 0),
+                              status="suggest", error="", by="", dispatch=None)
+        self.wakes.pop(task["id"], None)
+        self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
+                             "to": task["state"], "session": "", "why": "supervisor: suggest retry (stalled)"}])
+        return False  # nothing was launched
+
+    def _sup_stalls(self, now=None) -> list:
+        """Hub.tick's observation: a live, service-owned Claude task step whose session reads stall and has had no
+        event for supervisor_stall_s in all gets one report-only wake per attempt (keyed by step/session/attempt).
+        No timer, no stop, no other harness."""
+        now = time.time() if now is None else now
+        woke = []
+        with self.tlock:
+            for task in list(self.tasks.values()):
+                cs = tasks.current_step(task) if task.get("current") else None
+                if (task.get("chat") or task["state"] != "running" or task["owner"] != "service" or not cs
+                        or cs["state"] != "running" or not cs["session"] or not self.runs.is_live(cs["session"])):
+                    continue
+                pol = supervisor.policy(self.cfg, task, now)
+                if pol["mode"] == "off" or pol["paused"]:
+                    continue
+                row = self.session(cs["session"])
+                if row is None or (row.get("harness") or "claude") != "claude" or row["state"] != "stall":
+                    continue
+                if now - (row.get("last_ts") or now) < pol["settings"]["supervisor_stall_s"]:
+                    continue
+                attempt = len(tasks.attempts(cs))
+                started = (tasks.attempts(cs) or [{}])[-1].get("started") or cs.get("started") or 0
+                line = {"ts": started, "step": cs["n"], "session": cs["session"], "from": "running", "to": "stalled",
+                        "why": "stalled", "attempt": attempt}
+                self.wake_supervisor(task, "stalled", line)
+                woke.append(task["id"])
+        return woke
 
     def _sup_drain_held(self) -> None:
         """A decision held by guidance: once the queue is empty, unchanged evidence and epoch make it a suggestion
@@ -3019,8 +3117,8 @@ class Hub:
             else:
                 lines.append(tasks._line(now, cs, "done", "done", f"replan refused: no room ({ask})"))
         self._commit(task, lines)
-        if action in ("manual", "stuck"):
-            self._sup_hook(task)  # plan 44: the committed boundary wakes the supervisor (deduplicated by event)
+        if action in ("manual", "stuck", "wait"):
+            self._sup_hook(task)  # plan 44: the committed boundary or plan hold wakes the supervisor (once per event)
         if ended and not manual:  # automatic tasks prepare a brief before their next planned step
             self.start_brief(task, cs["n"])
         if action in ("next", "fix", "retry") and task["owner"] == "service":
@@ -3139,7 +3237,9 @@ class Hub:
                     lines.append(self._clear_done(task, s))
                 self._commit(task, lines)
             except OSError:  # the folder is gone (cleared by hand, or the data folder was removed)
-                pass
+                return
+            if task["state"] == "done":
+                self._sup_hook(task)  # plan 44 (D12): one report-only "anything left?" wake after the final brief
 
     def _clear_done(self, task: dict, s: dict) -> dict:
         """task_clear_on_done: the step streams go (runs/, the big part); plan 28: the task folder stays whole, every
@@ -3225,6 +3325,14 @@ class Hub:
         self._replan_done(task["id"], n, res, message_id)
 
     def _replan_done(self, task_id: str, n: int, res: dict, message_id="") -> None:
+        """The replan pass ended (_replan_finish), then plan 44: a replanned hold or a stuck task wakes once."""
+        self._replan_finish(task_id, n, res, message_id)
+        with self.tlock:
+            task = self.tasks.get(task_id)
+            if task is not None:
+                self._sup_hook(task)
+
+    def _replan_finish(self, task_id: str, n: int, res: dict, message_id="") -> None:
         with self.tlock:
             self.briefing.discard(task_id)
             task = self.tasks.get(task_id)
@@ -3390,6 +3498,8 @@ class Hub:
                 if task["state"] == "running" and task.get("progression") != "manual":
                     task["briefing"] = closed["n"]  # saved with the transition, as _ended does
             self._commit(task, lines)
+            if lever in ("stepdone", "confirm", "keep") and tasks.manual_boundary(task):
+                self._sup_hook(task)  # plan 44: a manual boundary Fred's act produced wakes once
             if closed and task.get("briefing"):
                 self.start_brief(task, closed["n"])
             if lever in ("retry", "confirm", "redo", "keep", "stepdone"):
