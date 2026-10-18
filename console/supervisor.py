@@ -6,9 +6,10 @@ import hashlib
 import json
 import math
 import os
+import re
 import uuid
 
-from . import redact, tasks
+from . import plan, redact, tasks
 
 MODES = ("off", "suggest", "auto")
 
@@ -252,3 +253,276 @@ def fold_log(records: list) -> dict:
                        "dispatch": r.get("dispatch")}
     return {"wakes": wakes, "cost": round(sum(w["cost"] for w in wakes.values()), 6), "days": days,
             "uncertain": uncertain, "pending": pending}
+
+
+# -- digest and decision contract (Task 3) --------------------------------------------------------------------
+
+DIGEST_MAX = 12 * 1024  # UTF-8 bytes, omission markers included
+ACCEPT_TAIL = 3000  # characters of a stuck attempt's notes.<k>.md
+CHAIN_TAIL = 10
+REASON_MAX, FOR_FRED_MAX, TEXT_MAX = 1000, 400, 400
+NOTE_MAX = 2000  # server.NOTE_MAX's Retry-note contract; kept here so this module never imports server
+DECISIONS = ("add_next_step", "confirm", "keep", "retry", "stepdone", "stop", "finish", "answer",
+             "escalate_to_fred", "wait")
+CONFIDENCE = ("low", "medium", "high")
+RETRY_MODELS = ("", "haiku", "sonnet", "opus")
+_OPTIONAL = {"kind": str, "instructions": str, "model": str, "source_step": int, "note": str, "text": str}
+_FIELDS = {"add_next_step": ("kind", "instructions", "model", "source_step"), "retry": ("note", "model"),
+           "answer": ("text",)}  # every other decision carries the four required fields only
+_LEVER = {"confirm": "confirm", "keep": "keep", "retry": "retry", "stepdone": "stepdone", "stop": "stop",
+          "finish": "done"}
+_CONFIRMABLE = re.compile(r"plan ready: confirm|plan \d+(\.\d+)? KB, over \d+(\.\d+)?|replanned:.*", re.S)
+
+SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["decision", "reason", "confidence", "for_fred"],
+    "properties": {
+        "decision": {"type": "string", "enum": list(DECISIONS)},
+        "reason": {"type": "string", "minLength": 1, "maxLength": REASON_MAX},
+        "confidence": {"type": "string", "enum": list(CONFIDENCE)},
+        "for_fred": {"type": "string", "maxLength": FOR_FRED_MAX},
+        "kind": {"type": "string", "enum": list(tasks.NEXT_KINDS)},
+        "instructions": {"type": "string", "minLength": 1, "maxLength": tasks.STEP_GOAL_MAX},
+        "model": {"type": "string"},
+        "source_step": {"type": "integer", "minimum": 1},
+        "note": {"type": "string", "maxLength": NOTE_MAX},
+        "text": {"type": "string", "maxLength": TEXT_MAX},
+    },
+}
+
+
+class DigestError(Exception):
+    """The mandatory digest head cannot fit DIGEST_MAX, or required evidence cannot be read: launch no model."""
+
+
+def _size(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _task_file(home, task: dict, rel: str):
+    """A saved file of this task by its relative name; None when absent. Never a path outside the task folder."""
+    if not isinstance(rel, str) or not rel or ".." in rel.replace("\\", "/").split("/"):
+        return None
+    try:
+        return (tasks.folder(home, task["id"]) / rel).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _body(text: str) -> str:
+    """A note file without its `# Step NN:` head line."""
+    return text.split("\n\n", 1)[1] if text.startswith("# Step ") and "\n\n" in text else text
+
+
+def _plan_view(home, task: dict) -> str:
+    meta = task.get("plan") if isinstance(task.get("plan"), dict) else None
+    if not meta:
+        return ""
+    text = _task_file(home, task, plan.index_file(task))
+    if text is None:
+        return f"Plan: unavailable ({plan.index_file(task)} missing)"
+    keep, inside, out = ("## Goal", "## Decisions", "## Acceptance"), False, []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line.strip() in keep
+        if inside or line.startswith("### Step "):
+            out.append(line)
+    states = {s["n"]: s["state"] for s in task["steps"]}
+    for p in meta.get("parts") or []:
+        out.append(f"- part {p.get('n')}: {p.get('title', '')} (step {p.get('step') or '-'}: "
+                   f"{states.get(p.get('step'), 'not started')})")
+    return "Plan (plan.md index):\n" + "\n".join(out).strip()
+
+
+def digest(home, task: dict, context: dict) -> str:
+    """The bounded model input of one wake, built from this task's saved files and the gate/policy numbers the Hub
+    captured under tlock (`context`): triggers, policy, levers, sources, owned, budget, reject_note, stuck. No
+    transcript, run stream, git or network. Blocks are added whole in priority order; a block that cannot fit is
+    named by file and size. Raises DigestError when the mandatory head, step table and Allowed now cannot fit."""
+    pol = context.get("policy") or {}
+    budget = context.get("budget") or {}
+    cs = tasks.current_step(task) if task.get("current") else None
+    total = round(sum(tasks.step_cost(s) for s in task["steps"]), 4)
+    head = [f"# Task {task['id']}: {task.get('title', '')}", f"Project: {task.get('project', '')}",
+            "Goal: " + (tasks.prompt_goal(task, cs) if cs else str(task.get("goal", ""))[:tasks.PROMPT_GOAL_MAX]),
+            f"Progression: {task.get('progression') or 'automatic'}",
+            f"State: {task['state']} / owner {task['owner']} / why: {task['why']}",
+            "Triggers: " + ", ".join(context.get("triggers") or []),
+            f"Created: {task.get('created')}; work cost ${total}; supervisor spend ${pol.get('usd', 0.0)}"]
+    if context.get("reject_note"):
+        head.append("Fred rejected the last suggestion: " + redact.clip(str(context["reject_note"]), NOTE_MAX))
+    table = ["Steps (n kind model/effort state verdict cost retries source):"]
+    for s in task["steps"]:
+        table.append(f"{s['n']:02d} {s['kind']} {s.get('model') or '-'}/{s.get('effort') or '-'} {s['state']} "
+                     f"{s.get('verdict') or '-'} ${tasks.step_cost(s)} {s.get('retries', 0)} "
+                     f"{s.get('source_step') or '-'} " + redact.clip(str(s.get("goal", "")), 80))
+    levers = context.get("levers") or {}
+    allowed = [k for k, v in levers.items() if v == "" and k not in ("route", "next_route", "cwd", "add_next")]
+    sources = [n for n, why in (context.get("sources") or {}).items() if why == ""]
+    gates = ["Allowed now:", "- levers: " + (", ".join(allowed) or "none")]
+    if levers.get("add_next") == "" and sources:
+        gates.append("- add_next_step from " + ", ".join(sources) + " (kinds " + ", ".join(tasks.NEXT_KINDS) +
+                     ", model auto)")
+    gates.append(f"- mode {pol.get('mode', 'off')}; auto steps left {pol.get('auto_steps_left', 0)}; retries left "
+                 f"{context.get('retries_left', 0)}; work USD left {pol.get('work_usd_left', 0.0)}; "
+                 f"own USD left task {budget.get('task_left', 0.0)} day {budget.get('day_left', 0.0)}")
+    proposed = [p.get("kind") for p in pol.get("proposed") or [] if isinstance(p, dict) and p.get("kind")]
+    if proposed:
+        gates.append("- Prep proposed kinds: " + ", ".join(proposed))
+    mandatory = ["\n".join(head), "\n".join(table), "\n".join(gates)]
+    used = sum(_size(b) + 2 for b in mandatory)
+    if used > DIGEST_MAX:
+        raise DigestError(f"digest head is {used} bytes, over {DIGEST_MAX}")
+
+    blocks = []  # (title, relative file or "", text or None when missing), priority order
+    good = tasks.step(task, task["last_good"]) if task.get("last_good") else None
+    if good:
+        rel = tasks.note_file(task, good)
+        text = _task_file(home, task, rel)
+        if text is None:
+            rel = tasks.brief_file(task, good)
+            text = _task_file(home, task, rel)
+            blocks.append(("Last good brief", rel, text))
+        else:
+            blocks.append(("Last good handoff", rel, _body(text)))
+        blocks.append(("Its facts", tasks.facts_file(task, good), _task_file(home, task, tasks.facts_file(task, good))))
+    verifies = [s for s in task["steps"] if s["kind"] == "verify" and s["state"] in ("done", "failed")]
+    if verifies and ((cs and cs["kind"] == "verify") or "stuck" in (context.get("triggers") or [])):
+        rel = tasks.step_file(verifies[-1], "verdict.md")
+        blocks.append(("Last verify verdict", rel, _task_file(home, task, rel)))
+    view = _plan_view(home, task)
+    if view:
+        blocks.append(("", "", view))
+    briefs = {s["n"]: _task_file(home, task, tasks.brief_file(task, s)) or "" for s in task["steps"]}
+    qs = [q["q"] for q in tasks.open_questions(task, briefs) if not q["closed"]]
+    if qs:
+        blocks.append(("Open questions", "", "\n".join(f"- {q}" for q in qs)))
+    chain = tasks.read_chain(home, task, CHAIN_TAIL)
+    if chain:
+        blocks.append(("Chain tail", "chain.jsonl", "\n".join(
+            json.dumps({k: r.get(k) for k in ("ts", "step", "from", "to", "why")}, ensure_ascii=False) for r in chain)))
+    stuck = context.get("stuck") if isinstance(context.get("stuck"), dict) else None
+    if stuck and cs:
+        k = stuck.get("attempt")
+        rel = tasks.step_file(cs, f"notes.{k}.md") if isinstance(k, int) and not isinstance(k, bool) else ""
+        tail = _task_file(home, task, rel) if rel else None
+        text = "Reason: " + redact.clip(str(stuck.get("reason", "")), 400)
+        if tail:
+            text += f"\nTail of {rel}:\n" + tail[-ACCEPT_TAIL:]
+        blocks.append(("Stuck attempt", "", text))
+
+    chosen = {}
+    for i, (title, rel, text) in enumerate(blocks):
+        if text is None:
+            out = f"{title}: unavailable ({rel} missing)"
+        else:
+            out = (f"{title} ({rel}):\n" if title and rel else f"{title}:\n" if title else "") + text.strip()
+        if used + _size(out) + 2 > DIGEST_MAX:
+            out = f"{title or 'Plan'}: omitted ({rel or 'evidence'}, {_size(text or '')} bytes)"
+            if used + _size(out) + 2 > DIGEST_MAX:
+                continue
+        chosen[i] = out
+        used += _size(out) + 2
+    parts = mandatory[:2] + [chosen[i] for i in sorted(chosen)] + mandatory[2:]
+    return "\n\n".join(parts) + "\n"
+
+
+def revision(home, task: dict) -> str:
+    """Semantic hash of what a decision was made over: goal, project, progression, state/why/owner, explicit pause
+    and epoch, step identity/state/session/attempts/lineage, saved notes/briefs/facts/verdicts and the plan. Cost,
+    timestamps, own-spend counters, the audit and the chain are left out; kind text is left out too (R3)."""
+    sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+    steps = []
+    for s in task["steps"]:
+        files = {name: _task_file(home, task, rel) for name, rel in (
+            ("note", tasks.note_file(task, s)), ("brief", tasks.brief_file(task, s)),
+            ("facts", tasks.facts_file(task, s)), ("verdict", tasks.step_file(s, "verdict.md")))}
+        steps.append({"n": s["n"], "kind": s["kind"], "goal": s.get("goal"), "state": s["state"],
+                      "session": s.get("session"), "attempts": [a.get("session") for a in tasks.attempts(s)],
+                      "source": s.get("source_step"), "verdict": s.get("verdict"),
+                      "detail": s.get("verdict_detail"), "files": files})
+    meta = task.get("plan") if isinstance(task.get("plan"), dict) else None
+    data = {"goal": task.get("goal"), "project": task.get("project_dir"), "progression": task.get("progression"),
+            "state": task["state"], "why": task["why"], "owner": task["owner"], "current": task.get("current"),
+            "paused": sup.get("paused") is True, "epoch": sup.get("epoch"), "steps": steps,
+            "plan": {"meta": {k: meta.get(k) for k in ("from", "dir", "parts")} if meta else None,
+                     "text": _task_file(home, task, plan.index_file(task)) if meta else None}}
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+def _text(value, limit: int, blank_ok: bool = False) -> bool:
+    return isinstance(value, str) and len(value) <= limit and (blank_ok or bool(value.strip()))
+
+
+def check(decision, task: dict, levers: dict, sources: dict, policy: dict) -> tuple:
+    """(ok, why) for one model decision against the live gates: shape first, then the action's own rule. Pure: no
+    files, no mutation. `policy` carries triggers, owned source steps and retries_left; it can only narrow what the
+    supplied levers/sources allow, never override a refusal. Confidence grants nothing."""
+    if not isinstance(decision, dict):
+        return False, "decision is not an object"
+    for key in decision:
+        if key not in SCHEMA["properties"]:
+            return False, f"unknown field {key}"
+    for key in SCHEMA["required"]:
+        if not isinstance(decision.get(key), str):
+            return False, f"{key} is missing or not text"
+    kind = decision["decision"]
+    if kind not in DECISIONS:
+        return False, "unknown decision"
+    if not _text(decision["reason"], REASON_MAX):
+        return False, "reason must be 1 to 1000 characters"
+    if decision["confidence"] not in CONFIDENCE:
+        return False, "confidence must be low, medium or high"
+    if not _text(decision["for_fred"], FOR_FRED_MAX, blank_ok=True):
+        return False, "for_fred is over 400 characters"
+    for key, typ in _OPTIONAL.items():
+        if key in decision:
+            value = decision[key]
+            if not isinstance(value, typ) or isinstance(value, bool):
+                return False, f"{key} has the wrong type"
+            if key not in _FIELDS.get(kind, ()):
+                return False, f"{key} is not a field of {kind}"
+    levers, sources, policy = levers or {}, sources or {}, policy or {}
+    triggers = policy.get("triggers") or []
+    if kind == "answer":
+        return False, "questions are Fred's"
+    if kind == "wait":
+        return True, ""
+    if kind == "escalate_to_fred":
+        return (True, "") if _text(decision["for_fred"], FOR_FRED_MAX) else (False, "escalate_to_fred needs for_fred")
+    if kind == "add_next_step":
+        if decision.get("kind") not in tasks.NEXT_KINDS:
+            return False, "kind must be one of " + ", ".join(tasks.NEXT_KINDS)
+        if not _text(decision.get("instructions"), tasks.STEP_GOAL_MAX):
+            return False, f"instructions must be 1 to {tasks.STEP_GOAL_MAX} characters"
+        if decision.get("model") != "auto":
+            return False, "a supervisor step runs on model auto"
+        n = decision.get("source_step", task.get("current"))
+        src = next((s for s in task["steps"] if s["n"] == n), None) if isinstance(n, int) else None
+        if src is None:
+            return False, "unknown source step"
+        if src["state"] != "done" or not src.get("session") or n not in (policy.get("owned") or []):
+            return False, "the source must be a done step this service ran"
+        if levers.get("add_next") != "":
+            return False, levers.get("add_next") or "add next step is off"
+        why = sources.get(f"{n:02d}")
+        if why != "":
+            return False, why or "not a source step"
+        return True, ""
+    if kind == "retry":
+        if not _text(decision.get("note"), NOTE_MAX):
+            return False, "retry needs a note of 1 to 2000 characters"
+        if decision.get("model", "") not in RETRY_MODELS:
+            return False, "retry model must be empty, haiku, sonnet or opus"
+        if not isinstance(policy.get("retries_left"), int) or policy["retries_left"] <= 0:
+            return False, "no supervisor retry left for this step"
+    if kind == "stop" and "stalled" not in triggers:
+        return False, "stop is only for a stalled step"
+    if kind == "confirm":
+        why = str(task.get("why", ""))
+        if why == "confirm Fable" or tasks.held(task) or not _CONFIRMABLE.fullmatch(why):
+            return False, "only Fred confirms this"
+    lever = levers.get(_LEVER[kind])
+    if lever != "":
+        return False, lever or f"{kind} is off"
+    return True, ""
