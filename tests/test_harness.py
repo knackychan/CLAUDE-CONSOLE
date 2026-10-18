@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import types
 import unittest
 from pathlib import Path
@@ -256,8 +257,10 @@ class CodexTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-s") + 1], "workspace-write")
         self.assertEqual(cmd[-1], "-")
         self.assertTrue(stdin.decode().endswith(claude_cli.STOP_FOOTER))
+        self.assertIn("sandbox_workspace_write.network_access=true", cmd)
         ro, _ = codex.run_command(["x"], "m", "low", "/w", "sid", prompt="hi", read_only=True)
         self.assertEqual(ro[ro.index("-s") + 1], "read-only")
+        self.assertFalse(any(a.startswith("sandbox_workspace_write.") for a in ro))
         res, _ = codex.run_command(["x"], "m", "low", "/w", "sid", prompt="hi", resume=True)
         self.assertEqual(res[-3:], ["resume", "sid", "-"])
         self.assertLess(res.index("-s"), res.index("resume"))
@@ -265,6 +268,37 @@ class CodexTest(unittest.TestCase):
         self.assertEqual(frk[-3:], ["fork", "th", "-"])
         for banned in ("--full-auto", "--ephemeral", "--worktree", "-o"):
             self.assertNotIn(banned, cmd)
+
+    def test_package_roots_overrides_and_toml_quoting(self):
+        with tempfile.TemporaryDirectory() as d:
+            folders = [Path(d, name) for name in ("npm's cache", "cargo", "rustup")]
+            for folder in folders:
+                folder.mkdir()
+            overrides = dict(zip(("npm_config_cache", "CARGO_HOME", "RUSTUP_HOME"),
+                                 (p.name for p in folders)))
+            with mock.patch.dict(os.environ, overrides):
+                for options in ({}, {"resume": True}, {"fork": "thread"}):
+                    cmd, _ = codex.run_command(["x"], "m", "low", d, "sid", prompt="hi", **options)
+                    setting = next(a for a in cmd if a.startswith("sandbox_workspace_write.writable_roots="))
+                    roots = tomllib.loads(setting)["sandbox_workspace_write"]["writable_roots"]
+                    self.assertEqual(roots, [p.resolve().as_posix() for p in folders])
+                with mock.patch.dict(os.environ, {"CARGO_HOME": folders[0].name, "RUSTUP_HOME": "gone"}):
+                    self.assertEqual(codex._package_roots(d), [folders[0].resolve().as_posix()])
+                with mock.patch.dict(os.environ, {key: "gone" for key in overrides}):
+                    cmd, _ = codex.run_command(["x"], "m", "low", d, "sid", prompt="hi")
+                    self.assertFalse(any("writable_roots" in a for a in cmd))
+
+    def test_package_roots_defaults(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("npm-cache", ".npm", ".cargo", ".rustup"):
+                Path(d, name).mkdir()
+            with mock.patch.dict(os.environ, {"npm_config_cache": "", "CARGO_HOME": "", "RUSTUP_HOME": "",
+                                              "LOCALAPPDATA": d}), \
+                    mock.patch.object(codex.os.path, "expanduser", side_effect=lambda p: d + p[1:]):
+                for windows, npm in ((True, "npm-cache"), (False, ".npm")):
+                    with mock.patch.object(codex, "WINDOWS", windows):
+                        self.assertEqual(codex._package_roots(d),
+                                         [Path(d, p).resolve().as_posix() for p in (npm, ".cargo", ".rustup")])
 
     def test_summary_from_documented_lines(self):
         s = codex.summary(CODEX_LINES)

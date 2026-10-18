@@ -5,3 +5,10 @@
 - Preserves existing uncommitted documentation changes rather than discarding or overwriting them. Confidence: 0.85
 - Records actual results in plans and indexes, and keeps unperformed checks explicitly open rather than claiming them done. Confidence: 0.9
 - Closes work with a structured summary: fixes made, tests run, remaining limitations, and unresolved findings. Confidence: 0.9
+- Runs each task's focused tests plus the full regression suite before its commit boundary, and commits only files belonging to that task. Confidence: 0.85
+- Never runs paid model calls, installs hooks, or edits another CLI's settings. Confidence: 0.9
+- Verifies required CLI flags against official documentation rather than assuming. Confidence: 0.85
+- Resolves routine implementation details autonomously, and explains the concrete conflict before changing decided/designed behavior. Confidence: 0.85
+- Does not present fake/mock-provider tests as proof of real CLI behavior. Confidence: 0.85
+- Updates checklists only after implementation and verification. Confidence: 0.8
+- Prefers a self-contained, paste-ready resume prompt capturing current state and next steps when work pauses mid-task. Confidence: 0.7

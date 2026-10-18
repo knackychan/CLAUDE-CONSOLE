@@ -48,18 +48,21 @@ ends with working, tested software.
 | 41 | [plans/41-step-actions.md](plans/41-step-actions.md) - Stop, Retry and Mark step done on the current step: new lever `stepdone` (step done with a code-built note, the chain goes on), a chat step left running with no run can be stopped and closed (task be2f, "writing" for 42 hours), the step dock carries the three buttons | code done 2026-10-17 (791 tests OK); Fred's live check open |
 | 42 | [plans/42-unified-task-chat.md](plans/42-unified-task-chat.md) - One task conversation, shared persistent composer, remove redundant Open chat, and task guidance during work with explicit queued/live delivery | queued release implemented 2026-10-17; full run 837 tests OK, final focused run 210 OK, browser checks pass; real-provider check open |
 | 43 | [plans/43-codex-write-check.md](plans/43-codex-write-check.md) - Codex is not routed a writing step where its Windows sandbox cannot write (folder owned by another account, or `sandbox = "unelevated"`; the refusal names the fix), a turn whose writes all failed ends `error_write_denied` and the retry skips that harness (tasks a93e and 2d28) | code done 2026-10-17 (Tasks 1-4, D1-D6 as proposed; harness, tasks, server and web suites OK); Fred's live check (Task 5) open |
+| 44 | [plans/44-supervisor/README.md](plans/44-supervisor/README.md) - Supervisor backend guided plan: one bounded tool-free pass per coalesced task wake, saved suggestions and approvals, existing Hub dispatch, autonomy/spend limits, recovery, supervised intake and replay | plan written 2026-10-18, 12 test-first tasks; backend not implemented; UI and skill library separate |
 
 ## Supervisor and navigation design (2026-10-17)
 
 [Plan 44 supervisor brainstorm](plans/44-supervisor/BRAINSTORM.md): supervisor policy
-decisions recorded; implementation plan pending. Its
+decisions recorded; [guided backend implementation plan](plans/44-supervisor/README.md) written
+2026-10-18 (12 test-first tasks, no backend code implemented). Its
 [navigation companion](plans/44-supervisor/NAVIGATION.md) is decided: task Overview as the
 default destination, fewer controls, and a whole-task handoff into a linked follow-up task.
 The navigation slice replaced plan 42's current-step landing rule when it shipped; plan 42's
 shared composer and guidance delivery guarantees remain in force. Its guided plan,
 [plans/44-supervisor/navigation/](plans/44-supervisor/navigation/README.md), is implemented
 2026-10-17 (Tasks 1-5, 910 tests OK, headless Edge pass at 900/400/340 px). The supervisor
-backend is not shipped and stays "implementation plan pending".
+backend is not shipped; its guided plan is ready for a later implementation run. Board UI and the skill
+library remain separate work, explicitly parked by the backend plan.
 The 2026-10-17 implementation review's six navigation/handoff gaps are fixed in
 [navigation Task 5](plans/44-supervisor/navigation/05-review-fixes.md): Resume for paused tasks,
 handoff recovery/revision validation, chat-task handoff, replan approval on Overview and the latest

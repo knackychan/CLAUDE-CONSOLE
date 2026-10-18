@@ -37,6 +37,12 @@ def run_command(exe: list, model: str, effort: str, cwd: str, session_id: str, *
     cmd = list(exe) + ["exec", "--json", "-C", cwd, "--skip-git-repo-check", "-m", model,
                        "-c", f'model_reasoning_effort="{EFFORT.get(effort, "medium")}"',
                        "-s", "read-only" if read_only else "workspace-write"]
+    if not read_only:
+        # Package installs need network access and writable package/toolchain caches.
+        cmd += ["-c", "sandbox_workspace_write.network_access=true"]
+        roots = _package_roots(cwd)
+        if roots:
+            cmd += ["-c", "sandbox_workspace_write.writable_roots=" + json.dumps(roots, ensure_ascii=False)]
     if env(read_only):
         # Keep Store app aliases available to commands after Codex selects a runnable shell.
         cmd += ["-c", "shell_environment_policy.set.PATH=" + json.dumps(os.environ.get("PATH", ""))]
@@ -46,6 +52,24 @@ def run_command(exe: list, model: str, effort: str, cwd: str, session_id: str, *
         cmd += ["resume", session_id]
     cmd += ["-"]
     return cmd, (prompt + claude_cli.STOP_FOOTER).encode("utf-8")
+
+
+def _package_roots(cwd: str) -> list[str]:
+    """Existing npm and Rust storage folders; resolve relative overrides against the step's workspace."""
+    npm = os.environ.get("npm_config_cache") or (
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "npm-cache") if WINDOWS
+        else os.path.join(os.path.expanduser("~"), ".npm"))
+    roots = []
+    for value in (npm, os.environ.get("CARGO_HOME") or os.path.expanduser("~/.cargo"),
+                  os.environ.get("RUSTUP_HOME") or os.path.expanduser("~/.rustup")):
+        path = Path(value)
+        if not path.is_absolute():
+            path = Path(cwd) / path
+        if path.is_dir():
+            root = path.resolve().as_posix()
+            if root not in roots:
+                roots.append(root)
+    return roots
 
 
 def env(read_only: bool) -> dict:

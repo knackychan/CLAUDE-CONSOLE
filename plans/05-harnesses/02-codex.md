@@ -10,6 +10,12 @@
 
 ## `console/harness/codex.py`
 
+2026-10-18 package-install fix: writable runs enable `sandbox_workspace_write.network_access`
+and add existing npm, Cargo and rustup storage directories to `sandbox_workspace_write.writable_roots`.
+Honor `npm_config_cache`, `CARGO_HOME` and `RUSTUP_HOME`; resolve relative overrides against the run's
+workspace and encode paths as TOML-compatible strings. Missing directories are skipped. Read-only
+runs receive neither override. Restart the Console service before retrying a step to load adapter changes.
+
 ```text
 NAME = "codex"; EXE_NAMES = ("codex.exe", "codex.cmd", "codex"); TIERS = tuple(claude_cli.MODELS)
 CAPS = False; INTERRUPT = False; RESUME = True; HOOKS = False

@@ -1465,9 +1465,93 @@ class SupervisedIntakeHubTest(SupervisorServerTest):
         self.assertEqual(task["goal"], "Fix add()")
 
 
+class AcceptanceTest(WakeTest):
+    """Plan 44 T12: cross-feature safety cases that close the backend."""
+
+    def test_supervised_manual_lifecycle_end_to_end(self):
+        tid = self.supervised_task()
+        task = self.hub.tasks[tid]
+        tasks.write_note(self.folder, task, task["steps"][0],
+                         "## Goal\ngoal\n## Findings\n- found\n## Files touched\n- (none)\n"
+                         "## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\n- code")
+        self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
+        self.hub._sup_hook(task)
+        self.tick(30.0)
+        self.drain()
+        pending = self.hub.tasks[tid]["supervisor"]["pending"]
+        self.assertEqual(pending["decision"]["decision"], "add_next_step")
+        with mock.patch.object(self.hub, "request_next", wraps=self.hub.request_next) as rn:
+            code, body = self.hub._supervisor_dispatch(tid, 1, "fred")
+        self.assertEqual(code, 200, body)
+        self.assertEqual(rn.call_count, 1)
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
+        self.assertIsNone(self.hub.tasks[tid]["supervisor"]["pending"])
+        self.assertNotIn(tid, self.hub.supervising)
+
+    def test_crash_at_each_dispatch_boundary_has_at_most_one_effect(self):
+        names = ("after_claim", "after_result", "after_intent", "after_reservation", "after_worker")
+        for i, name in enumerate(names, 1):
+            with self.subTest(name=name):
+                tid = self.supervised_task(f"20260101-0000{i}-aaaa")
+                task = self.hub.tasks[tid]
+                if name == "after_claim":
+                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "claimed",
+                                                             "events": ["e1"]})
+                elif name == "after_result":
+                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "claimed",
+                                                             "events": ["e1"]})
+                    supervisor.append_log(self.folder, tid, {"ts": 2.0, "wake": 1, "phase": "result", "cost": 0.01,
+                                                             "status": "wait", "decision": dict(WAIT)})
+                elif name == "after_intent":
+                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "dispatching",
+                                                             "dispatch": {"call": "task_lever", "lever": "done"}})
+                elif name == "after_reservation":
+                    task["steps"][0].update(state="planned", request_status="starting", request_id="r1",
+                                            source_step=0, session="")
+                    task.update(state="waiting", owner="fred", why="starting step 01")
+                    tasks.save(self.folder, task)
+                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "dispatching",
+                                                             "dispatch": {"call": "request_next", "request_id": "r1",
+                                                                          "step": 1}})
+                elif name == "after_worker":
+                    task["steps"][0].update(state="running", request_status="running", request_id="r1", session="s9")
+                    task.update(state="running", owner="service", why="")
+                    tasks.save(self.folder, task)
+                hub = server.Hub(self.hub.cfg, self.folder, exe=self.hub.runs.exe)
+                hub.user_home = self.hub.user_home
+                with mock.patch.object(hub, "task_lever", wraps=hub.task_lever) as lever, \
+                        mock.patch.object(hub, "request_next", wraps=hub.request_next) as rn, \
+                        mock.patch.object(hub.runs, "start", side_effect=AssertionError("no direct start")) as start:
+                    hub.reconcile_supervisor()
+                    hub.reconcile_next_steps()
+                self.assertEqual((lever.call_count, rn.call_count, start.call_count), (0, 0, 0), name)
+
+    def test_all_pending_guidance_states_block_all_supervisor_actions(self):
+        tid = self.supervised_task()
+        task = self.hub.tasks[tid]
+        for status in ("queued", "dispatching", "uncertain", "failed"):
+            with self.subTest(status=status):
+                task["messages"] = [{"id": "m", "status": status}]
+                self.hub.wakes.clear()
+                self.hub.supervising.clear()
+                self.hub._sup_hook(task)
+                self.tick(100.0)
+                self.assertEqual(self.calls, [])
+                task["supervisor"]["pending"] = {"wake": 1, "events": ["e"], "triggers": ["choose_next"],
+                                                 "decision": dict(ADD),
+                                                 "revision": supervisor.revision(self.folder, task),
+                                                 "epoch": 0, "status": "suggest", "error": "", "by": "",
+                                                 "dispatch": None}
+                tasks.save(self.folder, task)
+                self.assertEqual(self.hub._supervisor_dispatch(tid, 1, "fred")[0], 409)
+                self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": 1})[0], 409)
+        task.pop("messages", None)
+        self.hub.wakes.clear()
+
+
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
 for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
-              ReplayTest):
+              ReplayTest, AcceptanceTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name
