@@ -1382,8 +1382,35 @@ class HoldsStallsDoneTest(AutonomyTest):
         self.assertEqual([c["model"] for c in self.calls], ["sonnet"])
 
 
+class SupervisedIntakeHubTest(SupervisorServerTest):
+    """Plan 44 T10 (Hub level): create_task builds one manual worker and keeps the rest as proposals."""
+
+    def card(self, prompt="Fix add()"):
+        return {"id": "20260102-000000-cafe", "project_dir": str(self.project), "prompt": prompt,
+                "raw": prompt, "route": {"type": "normal"}, "demand": {}, "fields": {"goal": prompt}}
+
+    def test_supervised_intake_keeps_one_step_and_proposals(self):
+        tid = self.hub.create_task(self.card(), [{"kind": "scout", "goal": "look"},
+                                                 {"kind": "code", "goal": "fix"}], "auto", supervised=True)
+        task = self.hub.tasks[tid]
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
+        self.assertEqual(task["progression"], "manual")
+        self.assertEqual(task["supervisor"]["proposed"], [{"kind": "code", "goal": "fix", "model": ""}])
+        self.assertEqual(task["supervisor"]["mode"], "suggest")
+        saved = tasks.load(self.folder, tid)
+        self.assertEqual(saved["supervisor"]["proposed"], task["supervisor"]["proposed"])
+        self.assertEqual(saved["progression"], "manual")
+
+    def test_supervised_intake_no_steps_gets_one_scout(self):
+        tid = self.hub.create_task(self.card("Fix add()"), [], "auto", supervised=True)
+        task = self.hub.tasks[tid]
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
+        self.assertEqual(task["steps"][0]["goal"], "Fix add()"[:tasks.STEP_GOAL_MAX])
+        self.assertEqual(task["goal"], "Fix add()")
+
+
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
-for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest):
+for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name

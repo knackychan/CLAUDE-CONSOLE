@@ -3822,9 +3822,101 @@ class HandoffServerTest(TaskServerTest):
         self.assertEqual((status, data["error"]), (409, "Resolve pending guidance before handing off this task."))
 
 
+class SupervisedIntakeTest(TaskServerTest):
+    """Plan 44 T10: supervised intake through the existing Prep route; one manual worker plus proposals."""
+
+    def post_supervised(self, card, steps=None, mode=None, words="HANDOFF-OK", effort="auto", **extra):
+        body = {"prep": card["id"], "prompt": f"{card['prompt']}\n{words}".strip(),
+                "steps": steps if steps is not None else [{"kind": s["kind"], "goal": s["goal"]} for s in card["steps"]],
+                "effort": effort, "supervised": True}
+        if mode is not None:
+            body["supervisor_mode"] = mode
+        body.update(extra)
+        return self.call("/api/task", body)
+
+    def test_supervised_intake_starts_one_manual_step_and_preserves_proposals(self):
+        card = self.prep_card()
+        status, data = self.post_supervised(card)
+        self.assertEqual(status, 200, data)
+        tid = data["task"]
+        task = self.until(tid, self.at(1, "running"), "one worker starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
+        self.assertEqual(task["progression"], "manual")
+        self.assertEqual(task["supervisor"]["proposed"],
+                         [{"kind": "code", "goal": "fix add() and its test", "model": ""}])
+        reloaded = self.task(tid)[1]["task"]
+        self.assertEqual(reloaded["supervisor"]["proposed"], task["supervisor"]["proposed"])
+        self.assertEqual(reloaded["progression"], "manual")
+
+    def test_no_step_prep_gets_one_scout_and_full_goal_is_preserved(self):
+        card = self.prep_card("fix add")
+        text = f"{card['prompt']}\nHANDOFF-OK".strip()
+        status, data = self.post_supervised(card, steps=[])
+        self.assertEqual(status, 200, data)
+        task = self.until(data["task"], self.at(1, "running"), "the scout starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
+        self.assertEqual(task["steps"][0]["goal"], server.redact.clip(text, tasks.STEP_GOAL_MAX))
+        self.assertEqual(task["goal"], text[:tasks.GOAL_MAX])
+        self.assertTrue((self.folder / "tasks" / data["task"] / "00-prep" / "prompt.md").is_file())
+
+    def test_supervised_mode_precedence_is_explicit(self):
+        self.hub.cfg["supervisor_mode"] = "suggest"
+        self.hub.cfg["supervisor_projects"] = {}
+        card = self.prep_card("fix add")
+        tid = self.post_supervised(card, steps=[])[1]["task"]
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["mode"], "suggest")
+        self.hub.cfg["supervisor_projects"] = {str(self.project): "auto"}
+        tid2 = self.post_supervised(self.prep_card("fix add"), steps=[])[1]["task"]
+        self.assertEqual(self.hub.tasks[tid2]["supervisor"]["mode"], "auto")
+        tid3 = self.post_supervised(self.prep_card("fix add"), steps=[], mode="off")[1]["task"]
+        self.assertEqual(self.hub.tasks[tid3]["supervisor"]["mode"], "off")
+        self.assertEqual(self.call("/api/task", {"prep": card["id"], "prompt": "x", "steps": [],
+                                                  "supervisor_mode": "auto"})[0], 400)
+        self.assertEqual(self.call("/api/task", {"prep": card["id"], "prompt": "x", "steps": [],
+                                                  "supervised": True, "supervisor_mode": "turbo"})[0], 400)
+
+    def test_supervised_validation_preserves_project_model_and_money_gates(self):
+        card = self.prep_card("fix add")
+        self.hub.cfg["projects"] = []
+        self.assertEqual(self.post_supervised(card, steps=[])[0], 403)
+        self.hub.cfg["projects"] = [str(self.project)]
+        self.assertEqual(self.post_supervised(card, steps=[], effort="extreme")[0], 400)
+        self.assertEqual(self.post_supervised(card, steps=[{"kind": "scout", "goal": "x", "model": "gpt-9"}])[0], 400)
+        self.assertEqual(self.post_supervised(card, steps=[{"kind": "chat", "goal": " "}])[0], 409)
+        self.assertEqual(self.call("/api/task", {"prep": card["id"], "prompt": "x", "steps": [],
+                                                  "supervised": "yes"})[0], 400)
+
+    def test_ordinary_chain_and_chat_intake_are_unchanged(self):
+        card = self.prep_card()
+        status, data = self.post_task(card)
+        self.assertEqual(status, 200)
+        task = self.until(data["task"], self.at(1, "running"), "ordinary chain starts")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])
+        self.assertEqual(task["supervisor"]["proposed"], [])
+        self.assertIsNone(task.get("progression"))
+        status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "hi", "model": "sonnet",
+                                              "effort": "low"})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(self.hub.tasks[data["task"]]["chat"], True)
+
+    def test_supervised_design_does_not_rebuild_a_tail(self):
+        card = self.prep_card()
+        steps = [{"kind": "design", "goal": "plan it"}, {"kind": "code", "goal": "do code"}]
+        status, data = self.post_supervised(card, steps=steps, words="HANDOFF-OK PLAN-OK")
+        self.assertEqual(status, 200, data)
+        tid = data["task"]
+        task = self.until(tid, lambda t: t["state"] == "waiting" and t["why"] == "choose next step",
+                          "the manual boundary")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["design"])
+        self.assertTrue(task.get("plan"))
+        self.assertEqual(task["supervisor"]["proposed"], [{"kind": "code", "goal": "do code", "model": ""}])
+        self.assertEqual(self.task(tid)[1]["levers"]["add_next"], "")
+
+
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
-    if _name.startswith("test_") and _name not in HandoffServerTest.__dict__:
-        setattr(HandoffServerTest, _name, None)
+    for _cls in (HandoffServerTest, SupervisedIntakeTest):
+        if _name.startswith("test_") and _name not in _cls.__dict__:
+            setattr(_cls, _name, None)
 
 
 if __name__ == "__main__":

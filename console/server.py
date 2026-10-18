@@ -2600,13 +2600,15 @@ class Hub:
         self.tasks[task["id"]] = updated
         return 200, {"task": follow, "source": task["id"]}
 
-    def create_task(self, card: dict, steps: list, effort: str, title: str = "") -> str:
-        """A task from a Prep card and the step list Fred edited on it; step 1 starts at once."""
+    def create_task(self, card: dict, steps: list, effort: str, title: str = "", *,
+                    supervised: bool = False, supervisor_mode=None) -> str:
+        """A task from a Prep card and the step list Fred edited on it; step 1 starts at once. Supervised intake
+        (plan 44 T10) keeps one manual worker and the rest as proposals, never an automatic tail."""
         folder = self.allowed(card.get("project_dir"))
         if not folder:
             raise runs.RunError("runs are off in this project: pick it on the home view and allow runs")
         planned = tasks.plan_steps(steps, self.cfg["task_max_steps"])
-        if not planned:
+        if not planned and not supervised:
             raise runs.RunError("a task needs at least one step")
         # plan_steps keeps tier aliases only; a rung of the ladder that Fred picked on the card is put back
         shown = [i for i in steps if isinstance(i, dict) and i.get("kind") in tasks.PREP_KINDS
@@ -2616,6 +2618,16 @@ class Hub:
                 step["pick"] = item["model"]
         with self.tlock:
             name = redact.clip(title or (card.get("fields") or {}).get("goal") or card.get("raw") or "task", 80)
+            if supervised:
+                task = self._supervised_task(folder, name, card, steps, shown, planned, effort, supervisor_mode)
+                self._prep_files(task, card, task["steps"][0]["goal"])
+                tasks.save(self.folder, task)
+                with self.lock:
+                    self.tasks[task["id"]] = task
+                self.drop_prep(card["id"])
+                self.advance()
+                self.poll_once()
+                return task["id"]
             task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], planned,
                                   (card.get("route") or {}).get("type") or "", card.get("demand") or {},
                                   prep.summary(card), effort, time.time(), id_=self._free_id(card["id"]))
@@ -2628,6 +2640,29 @@ class Hub:
             self.advance()
             self.poll_once()
         return task["id"]
+
+    def _supervised_task(self, folder: str, name: str, card: dict, steps: list, shown: list, planned: list,
+                         effort: str, supervisor_mode=None) -> dict:
+        """Plan 44 T10: one valid worker step plus saved proposals. No verify insert, no automatic tail."""
+        if steps and not shown:
+            raise runs.RunError("a task needs at least one valid step")
+        if shown:
+            first = planned[0]
+            proposed = [{"kind": i["kind"], "goal": redact.clip(i["goal"], tasks.STEP_GOAL_MAX),
+                         "model": i.get("model") or ""} for i in shown[1:]]
+        else:
+            goal = redact.clip(card.get("prompt") or (card.get("fields") or {}).get("goal") or card.get("raw") or "",
+                               tasks.STEP_GOAL_MAX)
+            first = tasks._blank(1, "scout", goal)
+            proposed = []
+        task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], [first],
+                              (card.get("route") or {}).get("type") or "", card.get("demand") or {},
+                              prep.summary(card), effort, time.time(), id_=self._free_id(card["id"]))
+        sup = supervisor.initial(self.cfg, folder, time.time(), mode=supervisor_mode)
+        sup["proposed"] = proposed
+        task["supervisor"] = sup
+        task["progression"] = "manual"
+        return task
 
     def _free_id(self, prep_id: str) -> str:
         """The card's id for its task (plan 29), unless a task already holds it (the same card run twice): "" then."""
@@ -3969,7 +4004,12 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(data, code)
 
     def _task_new(self, body):
-        """Run as task: the card (Prep job id), its prompt as edited on the page and the step list."""
+        """Run as task: the card (Prep job id), its prompt as edited on the page and the step list. Supervised
+        intake (plan 44 T10) accepts only supervised + supervisor_mode; counters and decisions never ride here."""
+        forbidden = {"supervisor", "mode", "wake", "action", "decision", "pending", "note",
+                     "auto_steps", "retries", "usd", "work_usd", "epoch", "paused", "last_event", "proposed"}
+        if set(body) & forbidden:
+            return self._error(400, "unexpected supervisor field")
         card = prep.load(self.hub.folder, body.get("prep")) if isinstance(body.get("prep"), str) else None
         if card is None:
             return self._error(404, "unknown Prep card")
@@ -3982,13 +4022,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "unknown effort")
         if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
             return self._error(400, "bad steps")
+        supervised = body.get("supervised", False)
+        if not isinstance(supervised, bool):
+            return self._error(400, "supervised must be true or false")
+        supervisor_mode = body.get("supervisor_mode")
+        if supervisor_mode is not None and supervisor_mode not in supervisor.MODES:
+            return self._error(400, "supervisor_mode must be off, suggest or auto")
+        if supervisor_mode is not None and not supervised:
+            return self._error(400, "supervisor_mode needs supervised intake")
         for n, item in enumerate(steps, 1):
             why = (self.hub.rung_ok(item["model"], str(item.get("kind") or ""), card.get("project_dir") or "")
                    if item.get("model") else "")
             if why:
                 return self._error(400, f"step {n}: {why}")
         title = body.get("title") if isinstance(body.get("title"), str) else ""
-        return self._json({"task": self.hub.create_task(dict(card, prompt=text), steps, effort, title.strip())})
+        return self._json({"task": self.hub.create_task(dict(card, prompt=text), steps, effort, title.strip(),
+                                                        supervised=supervised, supervisor_mode=supervisor_mode)})
 
     def _task_lever(self, body, lever):
         code, data = self.hub.task_lever(body.get("task"), lever, body.get("note") or "", body.get("model"), body.get("pending"))
