@@ -152,7 +152,7 @@ def policy(cfg: dict, task: dict, now: float) -> dict:
 
 # -- audit, event identity and restart recovery -----------------------------------------------------------
 
-_EVENT_KEYS = ("ts", "step", "session", "from", "to", "why")  # never mutable cost or supervisor audit text
+_EVENT_KEYS = ("ts", "step", "session", "from", "to", "why", "attempt")  # never cost or supervisor audit text
 
 
 def event_id(line: dict) -> str:
@@ -203,6 +203,34 @@ def append_log(home, task_id: str, record: dict) -> None:
         fh.flush()
 
 
+VISIBLE = ("suggest", "held", "escalate", "refused")  # pending statuses Fred sees; wait/no-decision leave none
+
+
+def boundary(task: dict, chain: list):
+    """The one eligibility classifier (live hooks and the restart scan, R1): {trigger, line, event} when the task
+    stands at an eligible boundary now, with the original chain line that explains it; else None. Chat tasks and
+    Fred's explicit Pause never qualify."""
+    if not isinstance(task, dict) or task.get("chat") or not task.get("steps"):
+        return None
+    sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+    if sup.get("paused") is True:
+        return None
+    cs = tasks.current_step(task) if task.get("current") else None
+    why, trigger, want = task.get("why", ""), "", ""
+    if task.get("state") == "stuck":
+        trigger, want = "stuck", "task:stuck"
+    elif (task.get("progression") == "manual" and task.get("state") == "waiting" and task.get("owner") == "fred"
+          and cs and cs["state"] == "done" and (why == "choose next step" or why.startswith("VERDICT: FAIL"))):
+        trigger, want = ("choose_next" if why == "choose next step" else "fail"), "task:waiting"
+    if not trigger:
+        return None
+    line = next((r for r in reversed(chain or []) if r.get("to") == want and (trigger == "stuck" or r.get("why") == why)),
+                None)
+    if line is None:
+        return None
+    return {"trigger": trigger, "line": line, "event": event_id(line)}
+
+
 def fold_log(records: list) -> dict:
     """Fold lifecycle records by wake and phase: per-wake state, claimed events, pending, total priced cost (a
     result is counted once per wake, never once per lifecycle row), per-day cost/reservations and uncertainty."""
@@ -215,7 +243,9 @@ def fold_log(records: list) -> dict:
         if not isinstance(wake, int) or isinstance(wake, bool):
             continue
         w = wakes.setdefault(wake, {"events": [], "status": "", "cost": 0.0, "uncertain": False,
-                                    "decision": None, "record": None})
+                                    "decision": None, "record": None, "state": ""})
+        if isinstance(rec.get("status"), str):
+            w["state"] = rec["status"]  # the latest lifecycle status of this wake
         for e in rec.get("events") or []:
             if isinstance(e, str) and e not in w["events"]:
                 w["events"].append(e)
@@ -247,10 +277,11 @@ def fold_log(records: list) -> dict:
         if w["uncertain"] and w["status"] in ("dispatching", "recovered"):
             pending = {"wake": top, "events": w["events"], "decision": None, "status": "uncertain",
                        "error": "Service restarted during dispatch; it will not be replayed.", "by": "", "dispatch": None}
-        elif w["decision"] is not None and w["record"]:
+        elif w["decision"] is not None and w["record"] and w["state"] in VISIBLE:
             r = w["record"]
-            pending = {"wake": top, "events": w["events"], "decision": w["decision"],
-                       "status": r.get("status", "suggest"), "error": r.get("error", ""), "by": r.get("by", ""),
+            pending = {"wake": top, "events": w["events"], "triggers": r.get("triggers") or [],
+                       "decision": w["decision"], "revision": r.get("revision", ""), "epoch": r.get("epoch", 0),
+                       "status": w["state"], "error": r.get("error", ""), "by": r.get("by", ""),
                        "dispatch": r.get("dispatch")}
     return {"wakes": wakes, "cost": round(sum(w["cost"] for w in wakes.values()), 6), "days": days,
             "uncertain": uncertain, "pending": pending}

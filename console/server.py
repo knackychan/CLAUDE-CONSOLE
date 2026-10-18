@@ -95,6 +95,11 @@ class Hub:
         self.config_mtime = self._config_mtime()  # config.json as the tuning keys were read
         self.models_error = ""
         self.reconcile_supervisor()  # plan 44: rebuild the task supervisor projections from their durable journals
+        self.wakes = {}  # plan 44: task id -> {due (monotonic), triggers, events, n}; empty after every restart
+        self.supervising = {}  # plan 44: task id -> the active pass {wake, snapshot}; never Hub.briefing
+        self.sup_clock = time.monotonic  # the debounce clock (tests pass their own)
+        self.sup_recovered = False  # R1: the first advance scans the saved boundaries once
+        self.sup_threads = []  # the bounded pass threads (tests join them)
         self.probing = threading.Thread(target=self.probe, name="probe", daemon=True)
         self.probing.start()
 
@@ -1386,8 +1391,8 @@ class Hub:
                     sup["usd"], changed = usd, True
                 top = max((r.get("wake") for r in records if isinstance(r.get("wake"), int)
                            and not isinstance(r.get("wake"), bool)), default=0)
-                if top >= (sup.get("wakes") or 0):
-                    sup["wakes"], changed = top + 1, True
+                if top > (sup.get("wakes") or 0):
+                    sup["wakes"], changed = top, True
                 pending = folded.get("pending")
                 if pending is not None and pending != sup.get("pending"):
                     sup["pending"], changed = pending, True
@@ -1414,6 +1419,265 @@ class Hub:
                         pass
                     acted.append(task["id"])
         return acted
+
+    # -- plan 44: supervisor wakes (Task 5) ---------------------------------------------------------------
+
+    def _sup_hook(self, task: dict) -> None:
+        """A named transition hook: classify the committed boundary and wake the supervisor once for its event."""
+        found = supervisor.boundary(task, tasks.read_chain(self.folder, task, 50))
+        if found:
+            self.wake_supervisor(task, found["trigger"], found["line"])
+
+    def _sup_consumed(self, task_id: str) -> set:
+        try:
+            folded = supervisor.fold_log(supervisor.read_log(self.folder, task_id))
+        except ValueError:
+            return set()
+        return {e for w in folded["wakes"].values() for e in w["events"]}
+
+    def wake_supervisor(self, task: dict, trigger: str, line: dict, now=None) -> None:
+        """Merge one qualifying committed transition into Hub.wakes: a new event re-arms the debounce, a duplicate or
+        an already consumed event does nothing. Never launches anything."""
+        now = self.sup_clock() if now is None else now
+        with self.tlock:
+            pol = supervisor.policy(self.cfg, task, time.time())
+            if pol["mode"] == "off" or task.get("chat"):
+                return
+            eid = supervisor.event_id(line)
+            entry = self.wakes.get(task["id"])
+            if (entry and eid in entry["events"]) or eid in self._sup_consumed(task["id"]):
+                return
+            entry = self.wakes.setdefault(task["id"], {"due": now, "triggers": [], "events": [], "n": 0})
+            entry["events"].append(eid)
+            if trigger not in entry["triggers"]:
+                entry["triggers"].append(trigger)
+            entry["n"] += 1
+            entry["due"] = now + pol["settings"]["supervisor_debounce_s"]
+
+    def _sup_recover(self, now: float) -> None:
+        """R1: once, on the first advance, enqueue every saved eligible current boundary whose original event has no
+        claim or terminal record, with a fresh debounce. Nothing is launched here."""
+        self.sup_recovered = True
+        for task in list(self.tasks.values()):
+            found = supervisor.boundary(task, tasks.read_chain(self.folder, task, 50))
+            if found:
+                self.wake_supervisor(task, found["trigger"], found["line"], now)
+
+    def _sup_record(self, task_id: str, record: dict) -> None:
+        supervisor.append_log(self.folder, task_id, dict(record, ts=time.time()))
+
+    def _sup_terminal(self, task: dict, entry: dict, why: str) -> None:
+        """A wake that can never run (no claude.exe, the project refused, a spent cap): one claim and one no-decision
+        record consume its events, so the same event never loops. No model is called."""
+        sup = task.setdefault("supervisor", supervisor.initial(self.cfg, task["project_dir"], time.time()))
+        wake = (sup.get("wakes") or 0) + 1
+        try:
+            self._sup_record(task["id"], {"wake": wake, "phase": "claimed", "events": entry["events"],
+                                          "triggers": entry["triggers"]})
+            self._sup_record(task["id"], {"wake": wake, "phase": "result", "events": entry["events"], "cost": 0.0,
+                                          "decision": None, "status": "no-decision", "error": why})
+        except OSError:
+            return  # retained: the next advance tries again
+        sup["wakes"] = wake
+        self.wakes.pop(task["id"], None)
+        self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
+                             "to": task["state"], "why": f"supervisor: no decision ({why})", "session": ""}])
+
+    def _sup_owned(self, task: dict) -> list:
+        return [s["n"] for s in task["steps"] if s["state"] == "done" and s.get("session")
+                and any(a.get("session") == s["session"] for a in s.get("attempts") or [])]
+
+    def _supervisor_tick(self, now=None) -> list:
+        """Called once at the end of advance: recover missing boundary wakes once, then drain the due entries (by due,
+        then task id) up to supervisor_parallel. Each admitted wake saves its claim and starts one bounded pass thread.
+        Returns the task ids started."""
+        now = self.sup_clock() if now is None else now
+        started = []
+        with self.tlock:
+            if not self.sup_recovered:
+                self._sup_recover(now)
+            for tid, entry in sorted(self.wakes.items(), key=lambda kv: (kv[1]["due"], kv[0])):
+                if entry["due"] > now or tid in self.supervising:
+                    continue
+                parallel = supervisor.policy(self.cfg, {}, time.time())["settings"]["supervisor_parallel"]
+                if len(self.supervising) >= parallel:
+                    break
+                if self._sup_admit(tid, entry):
+                    started.append(tid)
+        return started
+
+    def _sup_admit(self, tid: str, entry: dict) -> bool:
+        """Admission of one due wake under tlock. Blocked (guidance, brief, pause, ledger hold): retained, no line.
+        Superseded (no current boundary, mode off): dropped. Never runnable: one terminal no-decision record."""
+        task = self.tasks.get(tid)
+        if task is None:
+            self.wakes.pop(tid, None)
+            return False
+        pol = supervisor.policy(self.cfg, task, time.time())
+        if pol["mode"] == "off" or supervisor.boundary(task, tasks.read_chain(self.folder, task, 50)) is None:
+            self.wakes.pop(tid, None)
+            return False
+        if pol["paused"] or tasks.pending_messages(task) or task.get("briefing") or tid in self.briefing:
+            return False  # retained until the existing path resolves it
+        base = self._base(task)
+        if base:
+            self._sup_terminal(task, entry, base)
+            return False
+        sup = task.setdefault("supervisor", supervisor.initial(self.cfg, task["project_dir"], time.time()))
+        wake = (sup.get("wakes") or 0) + 1
+        pid, day = supervisor.request_id(tid, wake), usage.day_of(time.time())
+        settings = pol["settings"]
+        got = usage.reserve_supervisor(self.folder, pid, {"task": tid, "wake": wake, "day": day, "kind": "wake"},
+                                       settings["supervisor_task_usd"], settings["supervisor_day_usd"])
+        if got["status"] == "duplicate" and got["record"].get("task") == tid and got["record"].get("status") == "reserved":
+            got = {"status": "reserved", "reserved": got["record"].get("reserved", 0.0)}  # our own crash before claim
+        if got["status"] == "cap":
+            self._sup_terminal(task, entry, "supervisor spend cap reached")
+            return False
+        if got["status"] != "reserved":
+            return False  # defer or an unreadable ledger: a visible hold, never a free allowance
+        try:
+            snap = self._sup_snapshot(task, entry, pol, wake, pid, day, got["reserved"])
+        except supervisor.DigestError as exc:
+            usage.record_supervisor(self.folder, pid, {"cost": 0.0})
+            self._sup_terminal(task, entry, str(exc))
+            return False
+        claim = {"wake": wake, "phase": "claimed", "events": entry["events"], "triggers": entry["triggers"],
+                 "revision": snap["revision"], "epoch": snap["epoch"], "prompt_hash": snap["prompt_hash"],
+                 "model": snap["model"], "day": day, "reserved": got["reserved"], "pass": pid,
+                 "context": snap["gates"]}
+        try:
+            self._sup_record(tid, claim)
+        except OSError:
+            usage.record_supervisor(self.folder, pid, {"cost": 0.0})
+            return False  # nothing launched; the wake stays queued
+        old = sup.get("pending")
+        if isinstance(old, dict) and old.get("status") in ("suggest", "held", "escalate", "refused"):
+            sup["pending"] = None  # superseded by this newer boundary
+        sup["wakes"] = wake
+        try:
+            tasks.save(self.folder, task)
+        except OSError:
+            try:
+                self._sup_record(tid, {"wake": wake, "phase": "result", "events": entry["events"], "cost": 0.0,
+                                       "decision": None, "status": "no-decision", "error": "task.json not saved"})
+            except OSError:
+                pass
+            usage.record_supervisor(self.folder, pid, {"cost": 0.0})
+            self.wakes.pop(tid, None)
+            return False
+        self.wakes.pop(tid, None)
+        self.supervising[tid] = {"wake": wake, "snapshot": snap}
+        thread = threading.Thread(target=self._supervisor_job, args=(tid, wake, snap), name=f"sup-{tid}", daemon=True)
+        self.sup_threads.append(thread)
+        thread.start()
+        return True
+
+    def _sup_snapshot(self, task: dict, entry: dict, pol: dict, wake: int, pid: str, day: str, reserved: float) -> dict:
+        """Everything the pass reads, copied under tlock: the digest, revision, epoch, gates and the prompt, built
+        once (R3: the same bytes are hashed and run)."""
+        levers_now = self.task_levers(task["id"]) or {}
+        sources = self.next_sources(task)
+        cs = tasks.current_step(task)
+        settings = pol["settings"]
+        retries_left = max(0, settings["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
+        task_spent, task_active = usage.supervisor_spent(self.folder, task=task["id"])
+        day_spent, day_active = usage.supervisor_spent(self.folder, day=day)
+        budget = {"task_left": round(max(0.0, settings["supervisor_task_usd"] - task_spent - task_active), 4),
+                  "day_left": round(max(0.0, settings["supervisor_day_usd"] - day_spent - day_active), 4)}
+        stuck = ({"reason": task["why"], "attempt": len(tasks.attempts(cs))}
+                 if "stuck" in entry["triggers"] and cs else None)
+        sup = task.get("supervisor") or {}
+        context = {"triggers": list(entry["triggers"]), "policy": pol, "levers": levers_now, "sources": sources,
+                   "owned": self._sup_owned(task), "budget": budget, "reject_note": sup.get("reject_note") or "",
+                   "stuck": stuck, "retries_left": retries_left}
+        digest_text = supervisor.digest(self.folder, task, context)
+        prompt = supervisor.build_prompt(kinds.text(self.folder, "supervisor"), task, digest_text, paths.you(self.cfg))
+        gates = {"levers": [k for k, v in levers_now.items() if v == "" and k not in ("route", "next_route", "cwd")],
+                 "sources": [n for n, why in sources.items() if why == ""], "owned": context["owned"],
+                 "retries_left": retries_left, "mode": pol["mode"]}
+        return {"task": copy.deepcopy(task), "prompt": prompt, "prompt_hash": supervisor.prompt_hash(prompt),
+                "revision": supervisor.revision(self.folder, task), "epoch": pol["epoch"],
+                "triggers": list(entry["triggers"]), "events": list(entry["events"]),
+                "model": supervisor.pass_model(settings, entry["triggers"]), "reserved": reserved, "pass": pid,
+                "day": day, "gates": gates, "cfg": copy.deepcopy(self.cfg)}
+
+    def _supervisor_job(self, task_id: str, wake: int, snapshot: dict) -> None:
+        """Exactly one supervisor.run outside both locks; any failure is a no-decision result; completion always
+        runs."""
+        result = {"decision": None, "cost": None, "model": snapshot["model"], "turns": 0, "error": "the pass did not run"}
+        try:
+            result = supervisor.run(snapshot["cfg"], self.runs.exe, snapshot["task"], snapshot["prompt"],
+                                    snapshot["model"], snapshot["reserved"])
+        except Exception as exc:
+            result = dict(result, error=f"the pass failed: {redact.clip(str(exc), 200)}")
+        finally:
+            self._supervisor_done(task_id, wake, snapshot, result)
+
+    def _supervisor_done(self, task_id: str, wake: int, snapshot: dict, result: dict) -> None:
+        """Account and audit the result once, refetch the live task, validate against its live gates and save the
+        suggestion / escalation / wait / no-decision. Nothing is dispatched here at this checkpoint. New events that
+        came in during the pass leave one debounced follow-up entry."""
+        cost = result.get("cost")
+        with self.tlock:
+            if self.supervising.get(task_id, {}).get("wake") == wake:
+                self.supervising.pop(task_id, None)
+            usage.record_supervisor(self.folder, snapshot["pass"], {"cost": cost})
+            task = self.tasks.get(task_id)
+            if task is None:
+                return  # deleted while the pass ran: the ledger keeps the spend, the task is not recreated
+            entry = self.wakes.get(task_id)
+            if entry:  # one dirty follow-up, after its own debounce from now
+                debounce = supervisor.policy(self.cfg, task, time.time())["settings"]["supervisor_debounce_s"]
+                entry["due"] = max(entry["due"], self.sup_clock() + debounce)
+            status, why, decision = self._sup_judge(task, snapshot, result)
+            sup = task.setdefault("supervisor", supervisor.initial(self.cfg, task["project_dir"], time.time()))
+            known = isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost == cost and cost >= 0
+            record = {"wake": wake, "phase": "result", "events": snapshot["events"], "triggers": snapshot["triggers"],
+                      "cost": float(cost) if known else None, "day": snapshot["day"], "model": result.get("model"),
+                      "turns": result.get("turns", 0), "decision": decision, "original": result.get("decision"),
+                      "status": status, "error": why, "revision": snapshot["revision"], "epoch": snapshot["epoch"],
+                      "by": ""}
+            try:
+                self._sup_record(task_id, record)
+            except OSError:
+                pass  # the ledger settled the spend; the projection below still shows the result
+            if known:
+                sup["usd"] = round((sup.get("usd") or 0.0) + float(cost), 6)
+            visible = status in ("suggest", "held", "escalate", "refused")
+            sup["pending"] = ({"wake": wake, "events": snapshot["events"], "triggers": snapshot["triggers"],
+                               "decision": decision, "revision": snapshot["revision"], "epoch": snapshot["epoch"],
+                               "status": status, "error": why, "by": "", "dispatch": None} if visible else None)
+            text = {"wait": "wait", "no-decision": f"no decision ({why})"}.get(status, f"{status}: {redact.clip(why or (decision or {}).get('decision', ''), 120)}")
+            self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
+                                 "to": task["state"], "why": f"supervisor: {text}", "session": ""}])
+
+    def _sup_judge(self, task: dict, snapshot: dict, result: dict) -> tuple:
+        """(status, why, effective decision) of one result against the live task: no-decision, wait, escalate,
+        refused, held (pending guidance), stale (evidence or Fred moved) or suggest."""
+        decision = result.get("decision")
+        if decision is None:
+            return "no-decision", result.get("error") or "no decision", None
+        if decision["decision"] == "answer":
+            return "escalate", "questions are Fred's", {"decision": "escalate_to_fred", "reason": decision["reason"],
+                                                         "confidence": decision["confidence"],
+                                                         "for_fred": redact.clip(decision.get("text") or decision["reason"], 400)}
+        if decision["decision"] == "wait":
+            return "wait", "", decision
+        if decision["decision"] == "escalate_to_fred":
+            ok, why = supervisor.check(decision, task, {}, {}, {})
+            return ("escalate", "", decision) if ok else ("no-decision", why, None)
+        pol = supervisor.policy(self.cfg, task, time.time())
+        if supervisor.revision(self.folder, task) != snapshot["revision"] or pol["epoch"] != snapshot["epoch"]:
+            return "stale", "the task changed during the pass", decision
+        if tasks.pending_messages(task):
+            return "held", "held: pending guidance", decision
+        cs = tasks.current_step(task)
+        retries_left = max(0, pol["settings"]["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
+        ok, why = supervisor.check(decision, task, self.task_levers(task["id"]) or {}, self.next_sources(task),
+                                   {"triggers": snapshot["triggers"], "owned": self._sup_owned(task),
+                                    "retries_left": retries_left})
+        return ("suggest", "", decision) if ok else ("refused", why, decision)
 
     def _next_package(self, task, source, meta, kind, instructions, requested, route):
         sid = source["session"]
@@ -1950,7 +2214,8 @@ class Hub:
             route["notes"].append(f"manual route refused: {refused} -> auto")
         if route.get("rung") and self.rung_ok(route["rung"], s["kind"], task["project_dir"]):
             tasks._task_to(task, "stuck", self.rung_ok(route["rung"], s["kind"], task["project_dir"]), now, s, lines)
-            return self._commit(task, lines)
+            self._commit(task, lines)
+            return self._sup_hook(task)
         if route["hold"] and task.get("hold_ok") != n:
             tasks._task_to(task, "waiting", route["hold"], now, s, lines)
             return self._commit(task, lines)
@@ -2107,6 +2372,10 @@ class Hub:
                     action = self._broken(task, exc)
                 if action:
                     acted.append((task.get("id", ""), action))
+            try:
+                self._supervisor_tick()
+            except Exception as exc:  # the supervisor never stops the hub loop
+                self._log(f"supervisor tick failed: {type(exc).__name__}: {exc}")
         return acted
 
     def sync_costs(self, task: dict) -> bool:
@@ -2167,6 +2436,7 @@ class Hub:
         """A task move raised (a disk error, a task.json from another version): the task is stuck with the error
         as its why, saved when the disk lets it."""
         now, why = time.time(), redact.clip(f"{type(exc).__name__}: {exc}", 200)
+        was = task.get("state")
         line = {"ts": now, "step": task.get("current") or 0, "from": f"task:{task.get('state', '')}",
                 "to": "task:stuck", "why": why, "session": ""}
         task.update(state="stuck", why=why, updated=now)
@@ -2176,6 +2446,12 @@ class Hub:
             with self.lock:
                 self.version += 1
                 self.changed.notify_all()
+            return "stuck"
+        if was != "stuck":  # plan 44: a repeated failure of a stuck task is not a new event
+            try:
+                self._sup_hook(task)
+            except Exception:
+                pass
         return "stuck"
 
     def _handed(self, task: dict, cs: dict) -> str:
@@ -2306,6 +2582,8 @@ class Hub:
             else:
                 lines.append(tasks._line(now, cs, "done", "done", f"replan refused: no room ({ask})"))
         self._commit(task, lines)
+        if action in ("manual", "stuck"):
+            self._sup_hook(task)  # plan 44: the committed boundary wakes the supervisor (deduplicated by event)
         if ended and not manual:  # automatic tasks prepare a brief before their next planned step
             self.start_brief(task, cs["n"])
         if action in ("next", "fix", "retry") and task["owner"] == "service":
@@ -2530,6 +2808,8 @@ class Hub:
                     s["state"] = "failed"
                     task.update(state="stuck", owner="fred")
                 self._commit(task, lines)
+                if task["state"] == "stuck":
+                    self._sup_hook(task)  # plan 44: a failed replan is a stuck boundary
                 if action == "retry" and task["owner"] == "service":
                     self._go_on(task)
                 return

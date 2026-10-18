@@ -185,7 +185,7 @@ class RunServerTest(unittest.TestCase):
         home = mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(data)})
         home.start()
         self.addCleanup(home.stop)
-        cfg = dict(paths.load_config(), projects=[str(self.project)])
+        cfg = dict(paths.load_config(), projects=[str(self.project)], supervisor_mode="off")  # plan 44: no surprise passes
         fake = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
         self.httpd, self.hub = server.make_server(cfg, port=0, folder=self.folder, exe=fake)
         self.hub.user_home = Path(self.tmp.name)  # no ~/.claude/skills here unless a test adds one
@@ -2726,7 +2726,7 @@ class HarnessServerTest(TaskServerTest):
                         mock.patch("shutil.which", return_value=None)):
             patcher.start()
             self.addCleanup(patcher.stop)
-        cfg = dict(paths.load_config(), projects=[str(self.project)])
+        cfg = dict(paths.load_config(), projects=[str(self.project)], supervisor_mode="off")  # plan 44: no surprise passes
         cfg["harnesses"]["codex"]["on"] = True
         cfg["models"]["codex"] = {"gpt-6.1-sol": "sonnet"}
         (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)]}), encoding="utf-8")

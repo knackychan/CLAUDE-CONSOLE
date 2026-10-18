@@ -494,3 +494,9 @@ def record_supervisor(folder, pass_id: str, result: dict) -> dict:
         except OSError as exc:
             return {"status": "error", "error": f"cannot write usage-days.json: {exc}"}
         return {"status": rec["status"], "record": rec}
+
+
+def supervisor_spent(folder, *, task: str = "", day: str = "") -> tuple:
+    """(settled cost, active reservations) of one task or one day in the ledger; an unreadable ledger counts as
+    nothing left to spend is decided by reserve_supervisor, so this read-only view returns (0.0, 0.0) then."""
+    return _supervisor_used(load_supervisor(folder)["records"], task=task, day=day)
