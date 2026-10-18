@@ -100,6 +100,7 @@ class Hub:
         self.sup_clock = time.monotonic  # the debounce clock (tests pass their own)
         self.sup_recovered = False  # R1: the first advance scans the saved boundaries once
         self.sup_threads = []  # the bounded pass threads (tests join them)
+        self.sup_auto = False  # plan 44 Task 8 turns automatic dispatch on; until then every dispatch is an Approve
         self.probing = threading.Thread(target=self.probe, name="probe", daemon=True)
         self.probing.start()
 
@@ -1496,6 +1497,7 @@ class Hub:
         with self.tlock:
             if not self.sup_recovered:
                 self._sup_recover(now)
+            self._sup_drain_held()
             for tid, entry in sorted(self.wakes.items(), key=lambda kv: (kv[1]["due"], kv[0])):
                 if entry["due"] > now or tid in self.supervising:
                     continue
@@ -1679,6 +1681,149 @@ class Hub:
                                     "retries_left": retries_left})
         return ("suggest", "", decision) if ok else ("refused", why, decision)
 
+    # -- plan 44: gated, idempotent dispatch (Task 6) -------------------------------------------------------
+
+    _SUP_LEVER = {"confirm": "confirm", "keep": "keep", "retry": "retry", "stepdone": "stepdone", "stop": "stop",
+                  "finish": "done"}
+
+    def _sup_outcome(self, task_id: str, wake: int):
+        """The saved outcome of a wake that already dispatched, or None: a repeated call returns it, no effect."""
+        for rec in reversed(supervisor.read_log(self.folder, task_id)):
+            if rec.get("wake") == wake and rec.get("phase") == "outcome":
+                return rec
+        return None
+
+    def _sup_refuse(self, task: dict, pending: dict, why: str, status: str = "refused", code: int = 409) -> tuple:
+        pending.update(status=status, error=why)
+        try:
+            self._commit(task)
+        except OSError:
+            pass
+        return code, {"error": why}
+
+    def _supervisor_dispatch(self, task_id: str, wake: int, by: str) -> tuple:
+        """Dispatch the saved pending decision of `wake` through the existing Hub operation, once. `by` is "fred" (an
+        Approve) or "auto". Never reads a decision, source, model or request id from a request body. Rechecks mode,
+        pause, revision, epoch, questions, guidance, live gates and authority under tlock; persists the dispatching
+        intent before the side effect and the outcome after it. Returns (status, body)."""
+        with self.tlock:
+            task = self.tasks.get(task_id) if isinstance(task_id, str) else None
+            if task is None:
+                return 404, {"error": "unknown task"}
+            done = self._sup_outcome(task_id, wake)
+            if done is not None:
+                return done.get("code", 200), dict(done.get("body") or {}, repeated=True)
+            sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+            pending = sup.get("pending")
+            if not isinstance(pending, dict) or pending.get("wake") != wake:
+                return 409, {"error": "this suggestion was superseded"}
+            if pending.get("status") in ("uncertain", "dispatching"):
+                return 409, {"error": "an earlier dispatch is uncertain: inspect the task, then dismiss it"}
+            if pending.get("status") not in ("suggest", "held"):
+                return 409, {"error": "nothing to dispatch: " + (pending.get("error") or pending.get("status", ""))}
+            decision = pending.get("decision") or {}
+            kind = decision.get("decision")
+            pol = supervisor.policy(self.cfg, task, time.time())
+            if pol["mode"] == "off":
+                return 409, {"error": "the supervisor is off for this task"}
+            if pol["paused"] or (task["owner"] == "fred" and task["state"] == "running"):
+                return 409, {"error": "the task is paused"}
+            if supervisor.revision(self.folder, task) != pending.get("revision") or pol["epoch"] != pending.get("epoch"):
+                return self._sup_refuse(task, pending, "the task changed since this suggestion", "stale")
+            if tasks.pending_messages(task):
+                return self._sup_refuse(task, pending, "held: pending guidance", "held")
+            base = self._base(task)
+            if base:
+                return 409, {"error": base}
+            if task["state"] == "waiting" and task["why"].startswith("asks:"):
+                return 409, {"error": "a question waits for Fred"}
+            if kind not in self._SUP_LEVER and kind != "add_next_step":
+                return 409, {"error": f"{kind} is never dispatched"}
+            if by != "fred" and (kind in ("stepdone", "stop") or pol["mode"] != "auto" or not self.sup_auto):
+                return 409, {"error": f"{kind} needs Fred's approval"}
+            cs = tasks.current_step(task)
+            retries_left = max(0, pol["settings"]["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
+            ok, why = supervisor.check(decision, task, self.task_levers(task_id) or {}, self.next_sources(task),
+                                       {"triggers": pending.get("triggers") or [], "owned": self._sup_owned(task),
+                                        "retries_left": retries_left})
+            if not ok:
+                return self._sup_refuse(task, pending, why)
+            if kind == "add_next_step":
+                n = decision.get("source_step", task["current"])
+                req = {"task": task_id, "source_step": n, "source_session": tasks.step(task, n)["session"],
+                       "kind": decision["kind"], "instructions": decision["instructions"].strip(), "model": "auto"}
+                intent = {"call": "request_next", "request_id": supervisor.request_id(task_id, wake), "source_step": n}
+            else:
+                intent = {"call": "task_lever", "lever": self._SUP_LEVER[kind]}
+            try:
+                self._sup_record(task_id, {"wake": wake, "phase": "dispatching", "status": "dispatching",
+                                           "dispatch": intent, "by": by, "events": pending.get("events") or []})
+                pending.update(status="dispatching", by=by, dispatch=intent)
+                tasks.save(self.folder, task)
+            except OSError as exc:
+                pending.update(status="suggest", dispatch=None)
+                return 500, {"error": f"the intent was not saved, nothing started: {exc}"}
+            try:
+                if kind == "add_next_step":
+                    code, body = self.preview_next(req)
+                    if code == 200:
+                        code, body = self.request_next(dict(req, revision=body["revision"],
+                                                            request_id=intent["request_id"]), origin="supervisor")
+                else:
+                    code, body = self.task_lever(task_id, intent["lever"],
+                                                 note=decision.get("note", "") if kind == "retry" else "",
+                                                 model=decision.get("model", "") if kind == "retry" else None,
+                                                 origin="supervisor")
+                status = "dispatched" if code == 200 else "refused"
+            except Exception as exc:  # the effect may have happened: uncertain, never replayed
+                code, body, status = 500, {"error": f"uncertain: {redact.clip(str(exc), 200)}"}, "uncertain"
+            task = self.tasks.get(task_id) or task  # request_next replaces the task dict
+            sup = task.setdefault("supervisor", sup)
+            body = {k: v for k, v in (body or {}).items() if k in ("task", "step", "request_id", "status", "state",
+                                                                   "error")}
+            try:
+                self._sup_record(task_id, {"wake": wake, "phase": "outcome", "status": status, "code": code,
+                                           "body": body, "by": by, "events": pending.get("events") or []})
+            except OSError:
+                pass  # the dispatching record stays: a restart shows it uncertain, never replays it
+            held = status == "dispatched" and body.get("status") == "held"
+            sup["pending"] = (dict(pending, status="uncertain", error=body.get("error", "")) if status == "uncertain"
+                              else dict(pending, status="refused", error=body.get("error", ""), dispatch=intent)
+                              if status == "refused" else None)
+            what = (f"step {body['step']:02d}" + (" held for Fred" if held else "")) if body.get("step") else kind
+            try:
+                self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
+                                     "to": task["state"], "session": "",
+                                     "why": f"supervisor: {status} {kind} ({what}, wake {wake}, by {by})"}])
+            except OSError:
+                pass
+            return code, body
+
+    def _sup_drain_held(self) -> None:
+        """A decision held by guidance: once the queue is empty, unchanged evidence and epoch make it a suggestion
+        again; a change supersedes it with one fresh debounced wake that keeps its triggers. Never replays guidance."""
+        for task in list(self.tasks.values()):
+            sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else None
+            pending = sup.get("pending") if sup else None
+            if not isinstance(pending, dict) or pending.get("status") != "held" or tasks.pending_messages(task):
+                continue
+            pol = supervisor.policy(self.cfg, task, time.time())
+            if supervisor.revision(self.folder, task) == pending.get("revision") and pol["epoch"] == pending.get("epoch"):
+                pending.update(status="suggest", error="")
+                self._commit(task)
+                continue
+            sup["pending"] = None
+            try:
+                self._sup_record(task["id"], {"wake": pending["wake"], "phase": "outcome", "status": "superseded",
+                                              "events": pending.get("events") or []})
+            except OSError:
+                pass
+            self._commit(task)
+            if pol["mode"] != "off" and task["id"] not in self.wakes:
+                debounce = pol["settings"]["supervisor_debounce_s"]
+                self.wakes[task["id"]] = {"due": self.sup_clock() + debounce,
+                                          "triggers": list(pending.get("triggers") or []), "events": [], "n": 1}
+
     def _next_package(self, task, source, meta, kind, instructions, requested, route):
         sid = source["session"]
         reply, _ = self.final_message(sid)
@@ -1811,7 +1956,7 @@ class Hub:
         package = self._next_package(task, source, meta, kind, instructions.strip(), requested, route)
         return 200, {**package, "models": self.next_model_options(task, source, kind)}
 
-    def request_next(self, request):
+    def request_next(self, request, *, origin: str = "fred"):
         request_id = request.get("request_id")
         if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f-]{16,36}", request_id):
             return 400, {"error": "request_id must be a UUID"}
@@ -2894,10 +3039,11 @@ class Hub:
                          + [x for x in [self._mirror(task, cs, now)] if x])
             return 200, {"task": task_id, "file": rel, "words": task["plan"]["words"], "kb": task["plan"]["kb"]}
 
-    def task_lever(self, task_id, lever: str, note="", model=None, pending="") -> tuple:
+    def task_lever(self, task_id, lever: str, note="", model=None, pending="", *, origin: str = "fred") -> tuple:
         """Fred's Stop, Pause, Resume, Retry, Confirm, Clear and Mark done. task_levers decides first; Stop is the run's
         interrupt (runs.stop), never a kill. `note` (Retry only, plan 33) joins the retry's prompt; `model` (Retry
-        only, plan 40) is "" for auto or a known model. Returns (status, body)."""
+        only, plan 40) is "" for auto or a known model. `origin` (plan 44, private) is "supervisor" when an approved or
+        automatic supervisor decision calls it: the gates are the same. Returns (status, body)."""
         if lever == "retry" and model is not None and (not isinstance(model, str)
                                                        or (model and not claude_cli.known_model(self.cfg, model))):
             return 400, {"error": "unknown model"}
