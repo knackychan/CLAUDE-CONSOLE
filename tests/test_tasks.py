@@ -834,6 +834,15 @@ class ChainTest(unittest.TestCase):
             files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
             self.assertEqual(files, ["01-scout/plan.md", "01-scout/plan/01-a.md", "02-code/handoff.md"])
 
+    def test_clear_keeps_the_supervisor_journal(self):
+        with tempfile.TemporaryDirectory() as home:  # plan 44 T2: Clear keeps the task-root audit byte for byte
+            task = make(("scout",))
+            tasks.save(home, task)
+            path = tasks.folder(home, task["id"]) / "supervisor.jsonl"
+            path.write_bytes(b'{"wake": 1, "phase": "result", "cost": 0.01}\n')
+            tasks.clear(home, task, keep_last=True)
+            self.assertEqual(path.read_bytes(), b'{"wake": 1, "phase": "result", "cost": 0.01}\n')
+
     def test_prune_keeps_everything_at_zero_days(self):
         self.assertEqual(paths.DEFAULTS["task_retention_days"], 0)  # plan 28 (D9)
         with tempfile.TemporaryDirectory() as home:

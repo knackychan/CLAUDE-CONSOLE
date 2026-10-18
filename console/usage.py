@@ -3,6 +3,7 @@ config.json ("prices", USD per million tokens). Read only, as the files grow: on
 A message's usage repeats on each of its content-block lines, and a fork copies its parent's lines,
 so a message id counts once, in the first file it was seen in."""
 import json
+import math
 import os
 import shutil
 import threading
@@ -391,3 +392,105 @@ def folder_sizes(home) -> dict:
                 sizes["other"] += size
     sizes["total"] = sum(sizes.values())
     return sizes
+
+
+# -- plan 44: the supervisor's own-pass reservations and settled results --------------------------------
+# The same usage-days.json is the spend authority; a pass id (supervisor.request_id) is the identity, so a
+# deleted task or a replayed log settles exactly once and a restart never frees a reserved allowance.
+
+def load_supervisor(folder) -> dict:
+    """The supervisor ledger from usage-days.json as {pass_id: record}. A missing section is valid empty; an
+    unreadable or malformed section is an explicit error, never a free empty allowance."""
+    data = _read(folder)
+    if data is None:
+        return {"error": "usage-days.json is unreadable", "records": {}}
+    sup = data.get("supervisor")
+    if sup is None:
+        return {"error": "", "records": {}}
+    if not isinstance(sup, dict):
+        return {"error": "usage-days.json supervisor is not an object", "records": {}}
+    return {"error": "", "records": sup}
+
+
+def _supervisor_used(records, *, task: str = "", day: str = ""):
+    """Settled cost and active reservations of one task or day, from all saved identities."""
+    settled = active = 0.0
+    for pid, rec in records.items():
+        if not isinstance(rec, dict):
+            continue
+        if task and rec.get("task") != task:
+            continue
+        if day and rec.get("day") != day:
+            continue
+        cost = rec.get("cost")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost):
+            settled += float(cost)
+        if rec.get("status") in ("reserved", "unknown"):  # unknown spend keeps its reservation
+            reserved = rec.get("reserved")
+            if isinstance(reserved, (int, float)) and not isinstance(reserved, bool) and math.isfinite(reserved):
+                active += float(reserved)
+    return settled, active
+
+
+def reserve_supervisor(folder, pass_id: str, record: dict, task_limit: float, day_limit: float) -> dict:
+    """Atomically reserve the lesser remaining task/day allowance for one supervisor pass. Returns a status dict
+    and never calls a model; a duplicate pass id, an exhausted cap or an unreadable ledger refuses admission."""
+    with FILE_LOCK:
+        data = _read(folder)
+        if data is None:
+            _set_aside(folder)
+            return {"status": "error", "error": "usage-days.json is unreadable"}
+        sup = data.get("supervisor", {})
+        if not isinstance(sup, dict):
+            return {"status": "error", "error": "usage-days.json supervisor is not an object"}
+        if pass_id in sup:
+            return {"status": "duplicate", "error": "pass already reserved", "record": sup[pass_id]}
+        task, day = record.get("task"), record.get("day") or day_of(time.time())
+        settled_task, active_task = _supervisor_used(sup, task=task)
+        settled_day, active_day = _supervisor_used(sup, day=day)
+        if settled_task >= task_limit or settled_day >= day_limit:
+            return {"status": "cap", "error": "supervisor spend cap reached", "reserved": 0.0}
+        remaining = min(task_limit - settled_task - active_task, day_limit - settled_day - active_day)
+        if remaining <= 0:
+            return {"status": "defer", "error": "an in-flight reservation holds the allowance", "reserved": 0.0}
+        sup[pass_id] = {"task": task, "wake": record.get("wake"), "day": day, "kind": record.get("kind", "wake"),
+                        "reserved": round(remaining, 6), "cost": 0.0, "status": "reserved"}
+        data["supervisor"] = sup
+        try:
+            _write(folder, data)
+        except OSError as exc:
+            return {"status": "error", "error": f"cannot write usage-days.json: {exc}"}
+        return {"status": "reserved", "reserved": round(remaining, 6), "task": task, "day": day}
+
+
+def record_supervisor(folder, pass_id: str, result: dict) -> dict:
+    """Settle one reservation with the reported cost. Unknown spend retains the reservation as unknown; a known
+    cost is recorded in full even above the reservation. Settlement is idempotent and conflicting settlements are
+    refused. The admission day is preserved."""
+    cost = result.get("cost")
+    known = isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost)
+    with FILE_LOCK:
+        data = _read(folder)
+        if data is None:
+            _set_aside(folder)
+            return {"status": "error", "error": "usage-days.json is unreadable"}
+        sup = data.get("supervisor", {})
+        if not isinstance(sup, dict):
+            return {"status": "error", "error": "usage-days.json supervisor is not an object"}
+        rec = sup.get(pass_id)
+        if rec is None:
+            return {"status": "error", "error": "no reservation for this pass"}
+        if rec.get("status") == "settled":
+            if known and round(float(rec.get("cost") or 0.0), 6) == round(float(cost), 6):
+                return {"status": "settled", "record": rec}
+            return {"status": "conflict", "error": "already settled with a different cost", "record": rec}
+        if not known:
+            rec.update(cost=0.0, status="unknown")  # keep the reservation: it cannot be reclaimed silently
+        else:
+            rec.update(cost=round(float(cost), 6), reserved=round(float(cost), 6), status="settled")
+        data["supervisor"] = sup
+        try:
+            _write(folder, data)
+        except OSError as exc:
+            return {"status": "error", "error": f"cannot write usage-days.json: {exc}"}
+        return {"status": rec["status"], "record": rec}

@@ -257,5 +257,102 @@ class UnreadableDaysFileTest(unittest.TestCase):
             self.assertFalse(usage.save_days(tmp, {"2026-10-12": {"cost": 2.0}}, "2026-10-14"))
 
 
+class SupervisorLedgerTest(unittest.TestCase):
+    """Plan 44 T2: the supervisor's own-pass reservations and results in usage-days.json."""
+
+    def rec(self, task="t1", wake=1, day="2026-10-18"):
+        return {"task": task, "wake": wake, "day": day, "kind": "wake"}
+
+    def test_reservation_takes_the_lesser_remaining_allowance(self):
+        with tempfile.TemporaryDirectory() as folder:
+            got = usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)
+            self.assertEqual((got["status"], got["reserved"]), ("reserved", 0.5))
+            self.assertEqual(usage.reserve_supervisor(folder, "p2", self.rec(wake=2), 0.5, 2.0)["status"], "defer")
+            self.assertEqual(usage.record_supervisor(folder, "p1", {"cost": 0.2})["status"], "settled")
+            got = usage.reserve_supervisor(folder, "p2", self.rec(wake=2), 0.5, 2.0)
+            self.assertEqual((got["status"], got["reserved"]), ("reserved", 0.3))
+            self.assertEqual(usage.reserve_supervisor(folder, "p3", self.rec(task="t2"), 0.5, 0.4)["status"], "defer")
+            self.assertEqual(usage.reserve_supervisor(folder, "p2", self.rec(wake=2), 0.5, 2.0)["status"], "duplicate")
+
+    def test_zero_and_exact_limits_refuse_without_writing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(usage.reserve_supervisor(folder, "p0", self.rec(), 0.0, 2.0)["status"], "cap")
+            self.assertFalse((Path(folder) / usage.DAYS_FILE).exists())
+            usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)
+            usage.record_supervisor(folder, "p1", {"cost": 0.5})  # exactly the task limit
+            self.assertEqual(usage.reserve_supervisor(folder, "p2", self.rec(wake=2), 0.5, 2.0)["status"], "cap")
+            usage.reserve_supervisor(folder, "p3", self.rec(task="t2"), 2.0, 0.5)
+            usage.record_supervisor(folder, "p3", {"cost": 0.0})
+            self.assertEqual(usage.reserve_supervisor(folder, "p4", self.rec(task="t3"), 2.0, 0.5)["status"], "cap")
+
+    def test_settlement_is_idempotent_and_a_conflict_is_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)
+            self.assertEqual(usage.record_supervisor(folder, "p1", {"cost": 0.7})["record"]["cost"], 0.7)  # in full
+            self.assertEqual(usage.record_supervisor(folder, "p1", {"cost": 0.7})["status"], "settled")
+            self.assertEqual(usage.record_supervisor(folder, "p1", {"cost": 0.1})["status"], "conflict")
+            records = usage.load_supervisor(folder)["records"]
+            self.assertEqual((records["p1"]["cost"], records["p1"]["day"]), (0.7, "2026-10-18"))
+            self.assertEqual(usage.record_supervisor(folder, "nope", {"cost": 0.1})["status"], "error")
+
+    def test_unknown_spend_keeps_the_reservation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)
+            self.assertEqual(usage.record_supervisor(folder, "p1", {"cost": None})["status"], "unknown")
+            self.assertEqual(usage.reserve_supervisor(folder, "p2", self.rec(wake=2), 0.5, 2.0)["status"], "defer")
+            self.assertEqual(usage.reserve_supervisor(folder, "p3", self.rec(task="t2"), 2.0, 0.5)["status"], "defer")
+
+    def test_corrupt_or_unwritable_file_refuses_admission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            path = folder / usage.DAYS_FILE
+            path.write_text("{bad", encoding="utf-8")
+            self.assertEqual(usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)["status"], "error")
+            self.assertEqual(path.read_text(encoding="utf-8"), "{bad")
+            self.assertTrue((folder / (usage.DAYS_FILE + ".bad")).exists())
+            self.assertTrue(usage.load_supervisor(folder)["error"])
+            path.write_text('{"supervisor": []}', encoding="utf-8")
+            self.assertTrue(usage.load_supervisor(folder)["error"])
+            self.assertEqual(usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)["status"], "error")
+            path.unlink()
+            with mock.patch.object(usage, "_write", side_effect=OSError("disk full")):
+                self.assertEqual(usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)["status"], "error")
+            self.assertEqual(usage.load_supervisor(folder)["records"], {})  # a failed write reserved nothing
+
+    def test_other_writers_keep_the_ledger(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)
+            usage.add_other(folder, "s1@1.0", "2026-10-18", "kimi-k3", None, 1.0)
+            usage.save_days(folder, {"2026-10-12": {"cost": 2.0}}, "2026-10-18")
+            usage.record_supervisor(folder, "p1", {"cost": 0.1})
+            self.assertEqual(usage.load_other(folder)["2026-10-18"]["kimi-k3"]["cost"], 1.0)
+            self.assertEqual(usage.load_days(folder)["2026-10-12"]["cost"], 2.0)
+            self.assertEqual(usage.load_supervisor(folder)["records"]["p1"]["cost"], 0.1)
+
+    def test_concurrent_writers_lose_nothing(self):
+        import threading
+        with tempfile.TemporaryDirectory() as folder:
+            def sup(i):
+                usage.reserve_supervisor(folder, f"p{i}", self.rec(task=f"t{i}"), 0.5, 100.0)
+                usage.record_supervisor(folder, f"p{i}", {"cost": 0.01})
+            def other(i):
+                usage.add_other(folder, f"o{i}@1.0", "2026-10-18", "kimi-k3", None, 0.1)
+            threads = [threading.Thread(target=f, args=(i,)) for i in range(10) for f in (sup, other)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(len(usage.load_supervisor(folder)["records"]), 10)
+            self.assertEqual(usage.load_other(folder)["2026-10-18"]["kimi-k3"]["runs"], 10)
+
+    def test_task_deletion_does_not_reset_the_day(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.reserve_supervisor(folder, "p1", self.rec(task="gone"), 2.0, 0.5)
+            usage.record_supervisor(folder, "p1", {"cost": 0.4})
+            # the task folder never held the ledger: a new task the same day sees the spent day
+            got = usage.reserve_supervisor(folder, "p2", self.rec(task="new"), 2.0, 0.5)
+            self.assertAlmostEqual(got["reserved"], 0.1)
+
+
 if __name__ == "__main__":
     unittest.main()

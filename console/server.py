@@ -94,6 +94,7 @@ class Hub:
         self.models_mtime = self._models_mtime()  # models.json as cfg["models"] was read
         self.config_mtime = self._config_mtime()  # config.json as the tuning keys were read
         self.models_error = ""
+        self.reconcile_supervisor()  # plan 44: rebuild the task supervisor projections from their durable journals
         self.probing = threading.Thread(target=self.probe, name="probe", daemon=True)
         self.probing.start()
 
@@ -1361,6 +1362,57 @@ class Hub:
                 step["state"], step["request_status"] = "planned", "failed"
                 self._commit(task, lines)
                 acted.append((task["id"], "stuck"))
+        return acted
+
+    def reconcile_supervisor(self) -> list:
+        """Plan 44 (R1 recovery): rebuild each task's atomic `supervisor` projection from its durable journal and
+        append recovered records for interrupted passes/dispatches. It never launches a pass, a lever or a worker;
+        Task 5's first advance enqueues the unclaimed current boundaries from their original transitions."""
+        acted = []
+        with self.tlock:
+            for task in self.tasks.values():
+                if not isinstance(task.get("supervisor"), dict):
+                    continue
+                try:
+                    records = supervisor.read_log(self.folder, task["id"])
+                except ValueError:
+                    continue
+                if not records:
+                    continue
+                folded = supervisor.fold_log(records)
+                sup, changed = task["supervisor"], False
+                usd = round(folded.get("cost") or 0.0, 6)
+                if round(sup.get("usd") or 0.0, 6) != usd:
+                    sup["usd"], changed = usd, True
+                top = max((r.get("wake") for r in records if isinstance(r.get("wake"), int)
+                           and not isinstance(r.get("wake"), bool)), default=0)
+                if top >= (sup.get("wakes") or 0):
+                    sup["wakes"], changed = top + 1, True
+                pending = folded.get("pending")
+                if pending is not None and pending != sup.get("pending"):
+                    sup["pending"], changed = pending, True
+                for wake, st in folded["wakes"].items():
+                    if st.get("uncertain") and st.get("status") == "dispatching":
+                        record = {"ts": time.time(), "wake": wake, "phase": "recovered",
+                                  "events": st["events"], "outcome": "uncertain",
+                                  "error": "Service restarted during dispatch; it will not be replayed."}
+                    elif st.get("status") == "claimed":  # a pass cut by the restart: no decision, unknown spend
+                        record = {"ts": time.time(), "wake": wake, "phase": "recovered", "events": st["events"],
+                                  "outcome": "no-decision",
+                                  "error": "Service restarted during the pass; its cost is unknown and it is not retried."}
+                        usage.record_supervisor(self.folder, supervisor.request_id(task["id"], wake), {"cost": None})
+                    else:
+                        continue
+                    try:
+                        supervisor.append_log(self.folder, task["id"], record)
+                    except OSError:
+                        pass
+                if changed:
+                    try:
+                        tasks.save(self.folder, task)
+                    except OSError:
+                        pass
+                    acted.append(task["id"])
         return acted
 
     def _next_package(self, task, source, meta, kind, instructions, requested, route):

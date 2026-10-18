@@ -1,8 +1,10 @@
 """Plan 44 backend: the supervisor's policy, audit, digest and bounded pass (pure tests)."""
 import math
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from console import paths, supervisor, tasks
 
@@ -72,6 +74,53 @@ class PolicyTest(unittest.TestCase):
         p = supervisor.policy(cfg(supervisor_max_auto_steps=0, supervisor_work_usd=0), {"project_dir": "D:\\work"}, 0.0)
         self.assertEqual((p["auto_steps_left"], p["work_usd_left"]), (0, 0.0))
 
+
+class AuditTest(unittest.TestCase):
+    def test_event_and_request_ids_are_stable(self):
+        line = {"ts": 100.0, "step": 2, "session": "s1", "from": "running", "to": "done", "why": "x", "cost": 1.0}
+        self.assertEqual(supervisor.event_id(line), supervisor.event_id(dict(line, cost=9.0)))
+        self.assertNotEqual(supervisor.event_id(line), supervisor.event_id(dict(line, step=3)))
+        self.assertNotEqual(supervisor.event_id(line), supervisor.event_id(dict(line, why="y")))
+        one = supervisor.request_id("task-1", 1)
+        self.assertEqual(one, supervisor.request_id("task-1", 1))
+        self.assertRegex(one, r"[0-9a-f-]{16,36}")
+        self.assertNotEqual(one, supervisor.request_id("task-1", 2))
+        self.assertNotEqual(one, supervisor.request_id("task-2", 1))
+
+    def test_append_is_masked_and_fold_counts_cost_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tid = "20260101-000000-abcd"
+            claim = {"ts": 100.0, "wake": 1, "phase": "claimed", "events": ["e1"], "day": "2026-01-01",
+                     "reserved": 0.1, "token": "sk-secret12345678"}
+            result = {"ts": 101.0, "wake": 1, "phase": "result", "cost": 0.03, "day": "2026-01-01", "decision": {}}
+            supervisor.append_log(tmp, tid, claim)
+            supervisor.append_log(tmp, tid, result)
+            supervisor.append_log(tmp, tid, {"ts": 102.0, "wake": 1, "phase": "dispatching"})
+            supervisor.append_log(tmp, tid, {"ts": 103.0, "wake": 1, "phase": "outcome"})
+            supervisor.append_log(tmp, tid, dict(result))  # a repeated result never multiplies spend
+            records = supervisor.read_log(tmp, tid)
+            folded = supervisor.fold_log(records)
+            self.assertEqual(folded["cost"], 0.03)
+            self.assertEqual(folded["days"]["2026-01-01"]["cost"], 0.03)
+            self.assertEqual(folded["wakes"][1]["events"], ["e1"])
+            raw = (Path(tmp) / "tasks" / tid / "supervisor.jsonl").read_text(encoding="utf-8")
+            self.assertNotIn("sk-secret12345678", raw)
+            self.assertIn("***", raw)
+            with self.assertRaises(ValueError):
+                supervisor.append_log(tmp, "../x", claim)
+
+    def test_corrupt_or_truncated_log_is_a_visible_hold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tid = "20260101-000000-abcd"
+            folder = Path(tmp) / "tasks" / tid
+            folder.mkdir(parents=True)
+            (folder / "supervisor.jsonl").write_text(
+                '{"wake": 1, "phase": "result", "cost": 0.01}\nnot json\n{"wake": 2, "phase": "claimed", "events": ["e2"]}\n',
+                encoding="utf-8")
+            records = supervisor.read_log(tmp, tid)
+            self.assertTrue(any(r.get("corrupt") for r in records))
+            self.assertTrue(supervisor.fold_log(records)["uncertain"])
+            self.assertEqual(supervisor.read_log(tmp, "20260101-000000-ffff"), [])  # missing file is valid empty
 
 if __name__ == "__main__":
     unittest.main()
