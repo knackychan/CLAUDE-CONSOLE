@@ -361,6 +361,16 @@ class SupervisorLedgerTest(unittest.TestCase):
             got = usage.reserve_supervisor(folder, "p2", self.rec(task="new"), 2.0, 0.5)
             self.assertAlmostEqual(got["reserved"], 0.1)
 
+    def test_spend_view_reports_actual_cost_once(self):
+        from console import supervisor
+        with tempfile.TemporaryDirectory() as folder:
+            usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)
+            usage.record_supervisor(folder, "p1", {"cost": 0.2})
+            usage.reserve_supervisor(folder, "p2", self.rec(wake=2), 0.5, 2.0)
+            view = supervisor.spend_view(usage.load_supervisor(folder)["records"])
+            day = view["days"]["2026-10-18"]
+            self.assertEqual((day["cost"], day["runs"], day["reserved"]), (0.2, 2, 0.3))
+
 
 if __name__ == "__main__":
     unittest.main()

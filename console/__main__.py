@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 import threading
+import urllib.error
 import urllib.request
 
 from . import events, kinds, paths, prep, runs, server, tasks
@@ -28,15 +29,58 @@ def log_harnesses(hub) -> None:
         for name, h in found.items()))
 
 
+def replay_supervisor_cli(pair) -> int:
+    """The --supervisor-replay branch: one guarded local request to the already running service. No Hub, no probe,
+    no model call in this process; the service remains the single admission owner."""
+    task, wake = pair
+    if not tasks.safe_id(task):
+        print("task must be a task id", file=sys.stderr)
+        return 2
+    if not wake.isdigit() or int(wake) < 1:
+        print("wake must be a positive whole number", file=sys.stderr)
+        return 2
+    wake = int(wake)
+    cfg = paths.load_config()
+    port = cfg["port"]
+    if not already_running(port):
+        print("Start the Console service before replay", file=sys.stderr)
+        return 1
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/task/supervisor/replay",
+                                 data=json.dumps({"task": task, "wake": wake}).encode("utf-8"),
+                                 headers={"X-CC": "1", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=cfg["supervisor_timeout_s"] + 10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            data = json.loads(exc.read().decode("utf-8"))
+        except (ValueError, OSError):
+            data = {"error": f"HTTP {exc.code}"}
+        print(json.dumps(data, ensure_ascii=False), file=sys.stdout)
+        return 1
+    except OSError as exc:
+        print(f"replay failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(data, ensure_ascii=False))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="console")
     parser.add_argument("--serve", action="store_true", help="service only, no window")
     parser.add_argument("--window", action="store_true", help="the window only, for a running service")
+    parser.add_argument("--supervisor-replay", nargs=2, metavar=("TASK", "WAKE"),
+                        help="dry-run replay of one supervisor wake through the running service")
     args = parser.parse_args(argv)
 
     if sys.stderr is None:  # started with pythonw (run.bat): keep errors readable
         paths.home().mkdir(parents=True, exist_ok=True)
         sys.stderr = open(paths.home() / "window-errors.log", "a", encoding="utf-8")
+    if args.supervisor_replay:
+        if args.serve or args.window:
+            print("--supervisor-replay cannot be combined with --serve or --window", file=sys.stderr)
+            return 2
+        return replay_supervisor_cli(args.supervisor_replay)
     cfg = paths.ensure_config()
     port = cfg["port"]
     url = f"http://127.0.0.1:{port}/"

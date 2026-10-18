@@ -8,6 +8,7 @@ import re
 import subprocess
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -403,12 +404,19 @@ class Hub:
         days = fills.merge_other(days, other)  # plan 18: the other harnesses' priced runs and unknown counts
         with self.tlock:
             hours = fills.fail_hours(self.tasks, self.cfg, now)
+        ledger = usage.load_supervisor(self.folder)
+        spend = supervisor.spend_view(ledger["records"])
         return {"ready": ready, "today": today, "first": min(days) if days else "",
                 "limit": self.cfg["daily_budget_usd"], "days": days,
                 "weeks": usage.weeks(days, today), "months": usage.months(days, today),
                 "storage": storage, "storage_warn_mb": self.cfg["storage_warn_mb"],
                 "fills": self.budget(), "fail_hours": hours, "warn_at": self.cfg["budget_warn_at"],
-                "balance_margin": self.cfg["balance_margin"]}
+                "balance_margin": self.cfg["balance_margin"],
+                # plan 44 T11: the supervisor's own non-transcript pass costs, shown separately and exactly once
+                "supervisor": {"days": spend["days"],
+                               "today": spend["days"].get(today, {"cost": 0.0, "runs": 0, "unknown": 0, "reserved": 0.0}),
+                               "task_limit": self.cfg["supervisor_task_usd"],
+                               "day_limit": self.cfg["supervisor_day_usd"], "error": ledger["error"]}}
 
     def history_loop(self) -> None:
         while not self._stop.is_set():
@@ -2191,6 +2199,110 @@ class Hub:
                 self.wakes[task["id"]] = {"due": self.sup_clock() + debounce,
                                           "triggers": list(pending.get("triggers") or []), "events": [], "n": 1}
 
+    def _sup_replay_snapshot(self, task: dict, pol: dict, wake: int, pid: str, day: str, reserved: float) -> dict:
+        """The live snapshot of one replay pass, built once under tlock (R3: the same bytes are hashed and run)."""
+        levers_now = self.task_levers(task["id"]) or {}
+        sources = self.next_sources(task)
+        cs = tasks.current_step(task)
+        settings = pol["settings"]
+        retries_left = max(0, settings["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
+        task_spent, task_active = usage.supervisor_spent(self.folder, task=task["id"])
+        day_spent, day_active = usage.supervisor_spent(self.folder, day=day)
+        budget = {"task_left": round(max(0.0, settings["supervisor_task_usd"] - task_spent - task_active), 4),
+                  "day_left": round(max(0.0, settings["supervisor_day_usd"] - day_spent - day_active), 4)}
+        sup = task.get("supervisor") or {}
+        context = {"triggers": ["replay"], "policy": pol, "levers": levers_now, "sources": sources,
+                   "owned": self._sup_owned(task), "budget": budget, "reject_note": sup.get("reject_note") or "",
+                   "stuck": None, "retries_left": retries_left}
+        digest_text = supervisor.digest(self.folder, task, context)
+        prompt = supervisor.build_prompt(kinds.text(self.folder, "supervisor"), task, digest_text, paths.you(self.cfg))
+        gates = {"levers": [k for k, v in levers_now.items() if v == "" and k not in ("route", "next_route", "cwd")],
+                 "sources": [n for n, why in sources.items() if why == ""], "owned": context["owned"],
+                 "retries_left": retries_left, "mode": pol["mode"]}
+        return {"task": copy.deepcopy(task), "prompt": prompt, "prompt_hash": supervisor.prompt_hash(prompt),
+                "revision": supervisor.revision(self.folder, task), "epoch": pol["epoch"],
+                "triggers": ["replay"], "events": [], "model": supervisor.pass_model(settings, ["replay"]),
+                "reserved": reserved, "pass": pid, "day": day, "gates": gates, "cfg": copy.deepcopy(self.cfg),
+                "wake": wake}
+
+    def replay_supervisor(self, body: dict) -> tuple:
+        """POST /api/task/supervisor/replay {task, wake}: one bounded dry-run pass over the current saved evidence,
+        admitted by the live service and the shared ledger. Accounting only; it never dispatches, and never writes
+        task.json, the audit/chain, pending decisions, project files, modes, counters, approvals or workers."""
+        if not isinstance(body, dict):
+            return 400, {"error": "expected a JSON object"}
+        tid = body.get("task")
+        wake = body.get("wake")
+        if not isinstance(tid, str) or not tasks.safe_id(tid):
+            return 400, {"error": "task must be a task id"}
+        if isinstance(wake, bool) or not isinstance(wake, int) or wake < 1:
+            return 400, {"error": "wake must be a positive whole number"}
+        with self.tlock:
+            task = self.tasks.get(tid)
+            if task is None:
+                return 404, {"error": "unknown task"}
+            pol = supervisor.policy(self.cfg, task, time.time())
+            if pol["mode"] == "off":
+                return 409, {"error": "the supervisor is off for this task"}
+            if pol["paused"] or tasks.pending_messages(task) or task.get("briefing") or tid in self.briefing:
+                return 409, {"error": "the task is paused or has pending guidance"}
+            base = self._base(task)
+            if base:
+                return 409, {"error": base}
+            if tid in self.supervising or tid in self.wakes:
+                return 409, {"error": "the task is busy"}
+            if len(self.supervising) >= pol["settings"]["supervisor_parallel"]:
+                return 409, {"error": "the supervisor is busy"}
+            records = supervisor.read_log(self.folder, tid)
+            claim = next((r for r in reversed(records) if r.get("wake") == wake and r.get("phase") == "claimed"), None)
+            if claim is None:
+                return 404, {"error": "unknown wake"}
+            pid, day = str(uuid.uuid4()), usage.day_of(time.time())
+            got = usage.reserve_supervisor(self.folder, pid, {"task": tid, "wake": wake, "day": day, "kind": "replay"},
+                                           pol["settings"]["supervisor_task_usd"], pol["settings"]["supervisor_day_usd"])
+            if got["status"] == "cap":
+                return 409, {"error": "supervisor spend cap reached"}
+            if got["status"] != "reserved":
+                return 409, {"error": got.get("error") or "the supervisor spend allowance is held"}
+            try:
+                snap = self._sup_replay_snapshot(task, pol, wake, pid, day, got["reserved"])
+            except supervisor.DigestError as exc:
+                usage.record_supervisor(self.folder, pid, {"cost": 0.0})
+                return 409, {"error": str(exc)}
+            self.supervising[tid] = {"wake": wake, "replay": True}
+        try:
+            result = supervisor.run(snap["cfg"], self.runs.exe, snap["task"], snap["prompt"], snap["model"],
+                                    snap["reserved"])
+        except Exception as exc:
+            result = {"decision": None, "cost": None, "model": snap["model"], "turns": 0,
+                      "error": f"the pass failed: {redact.clip(str(exc), 200)}"}
+        finally:
+            with self.tlock:
+                settled = usage.record_supervisor(self.folder, pid, {"cost": result.get("cost")})
+                if settled.get("status") == "error":
+                    self.sup_unsettled[pid] = result.get("cost")
+                self.supervising.pop(tid, None)
+        decision = result.get("decision")
+        if decision is not None:
+            cs = tasks.current_step(task)
+            retries_left = max(0, pol["settings"]["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
+            ok, why = supervisor.check(decision, task, self.task_levers(tid) or {}, self.next_sources(task),
+                                       {"triggers": ["replay"], "owned": self._sup_owned(task),
+                                        "retries_left": retries_left})
+            check = {"ok": ok, "why": why}
+        else:
+            check = {"ok": False, "why": result.get("error") or "no decision"}
+        logged = next((r for r in reversed(records) if r.get("wake") == wake and r.get("phase") in ("result", "outcome")), None)
+        original_decision = (logged or {}).get("decision") if isinstance((logged or {}).get("decision"), dict) else None
+        return 200, {"task": tid, "wake": wake, "no_dispatch": True, "cost": result.get("cost"),
+                     "model": result.get("model"), "turns": result.get("turns"), "error": result.get("error"),
+                     "original": {"revision": claim.get("revision", ""),
+                                  "prompt_hash": claim.get("prompt_hash") or None,
+                                  "decision": original_decision,
+                                  "outcome": (logged or {}).get("status", "") if isinstance(logged, dict) else ""},
+                     "fresh": {"revision": snap["revision"], "prompt_hash": snap["prompt_hash"],
+                               "decision": decision, "check": check}}
+
     def _next_package(self, task, source, meta, kind, instructions, requested, route):
         sid = source["session"]
         reply, _ = self.final_message(sid)
@@ -3785,6 +3897,7 @@ class Handler(BaseHTTPRequestHandler):
         routes["/api/task/next/preview"], routes["/api/task/next"] = self._task_next_preview, self._task_next
         routes["/api/task/message"] = self._task_message
         routes["/api/task/supervisor"] = self._task_supervisor
+        routes["/api/task/supervisor/replay"] = self._task_supervisor_replay
         routes["/api/task/handoff/preview"], routes["/api/task/handoff"] = self._task_handoff_preview, self._task_handoff
         for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
@@ -4186,6 +4299,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _task_supervisor(self, body):
         status, data = self.hub.supervisor_action(body)
+        return self._json(data, status)
+
+    def _task_supervisor_replay(self, body):
+        status, data = self.hub.replay_supervisor(body)
         return self._json(data, status)
 
     def _task_handoff_preview(self, body):

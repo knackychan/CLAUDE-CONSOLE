@@ -707,3 +707,46 @@ def auto_reason(decision: dict, task: dict, policy: dict) -> str:
         if cs and (policy.get("retries") or {}).get(cs["n"], 0) >= settings.get("supervisor_max_retries", 0):
             return "the supervisor retry of this step is used"
     return ""
+
+
+# -- spend projection and replay (Task 11) -----------------------------------------------------------------
+
+def spend_view(records: dict) -> dict:
+    """Fold the durable daily ledger into per-day {cost, runs, unknown, reserved} plus per-task and per-wake
+    detail. A settled pass counts its cost once; a reservation or an unknown spend counts its held reservation."""
+    days, tasks = {}, {}
+
+    def add(row, cost=None, reserved=None):
+        row["runs"] = row.get("runs", 0) + 1
+        if cost is not None:
+            row["cost"] = round(row.get("cost", 0.0) + float(cost), 6)
+        if reserved is not None:
+            row["reserved"] = round(row.get("reserved", 0.0) + float(reserved), 6)
+
+    for rec in records.values():
+        if not isinstance(rec, dict):
+            continue
+        status = rec.get("status")
+        cost = rec.get("cost")
+        reserved = rec.get("reserved")
+        known = isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost)
+        res = isinstance(reserved, (int, float)) and not isinstance(reserved, bool) and math.isfinite(reserved)
+        if isinstance(rec.get("day"), str):
+            d = days.setdefault(rec["day"], {"cost": 0.0, "runs": 0, "unknown": 0, "reserved": 0.0})
+            add(d, cost if status == "settled" and known else None, reserved if status != "settled" and res else None)
+            if status == "unknown":
+                d["unknown"] += 1
+        if isinstance(rec.get("task"), str):
+            t = tasks.setdefault(rec["task"], {"cost": 0.0, "runs": 0, "unknown": 0, "reserved": 0.0, "wakes": {}})
+            add(t, cost if status == "settled" and known else None, reserved if status != "settled" and res else None)
+            if status == "unknown":
+                t["unknown"] += 1
+            wake = rec.get("wake")
+            if isinstance(wake, int) and not isinstance(wake, bool):
+                w = t["wakes"].setdefault(wake, {"cost": 0.0, "runs": 0})
+                add(w, cost if status == "settled" and known else None, None)
+    total = {"cost": round(sum(d["cost"] for d in days.values()), 6),
+             "runs": sum(d["runs"] for d in days.values()),
+             "unknown": sum(d["unknown"] for d in days.values()),
+             "reserved": round(sum(d["reserved"] for d in days.values()), 6)}
+    return {"days": days, "tasks": tasks, "total": total}

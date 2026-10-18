@@ -1382,6 +1382,62 @@ class HoldsStallsDoneTest(AutonomyTest):
         self.assertEqual([c["model"] for c in self.calls], ["sonnet"])
 
 
+class ReplayTest(SupervisorServerTest):
+    """Plan 44 T11 (Hub level): a replay is a bounded, accounting-only pass over the current saved evidence."""
+
+    def replay_task(self, tid="20260101-000000-1111"):
+        tid = self.supervised_task(tid)
+        task = self.hub.tasks[tid]
+        rev = supervisor.revision(self.folder, task)
+        supervisor.append_log(self.folder, tid, {"ts": 100.0, "wake": 1, "phase": "claimed", "events": ["e1"],
+                                                 "revision": rev, "epoch": 0, "prompt_hash": "abc123"})
+        supervisor.append_log(self.folder, tid, {"ts": 101.0, "wake": 1, "phase": "result", "cost": 0.01,
+                                                 "status": "suggest",
+                                                 "decision": {"decision": "wait", "reason": "r", "confidence": "low",
+                                                              "for_fred": ""},
+                                                 "revision": rev, "epoch": 0})
+        return tid
+
+    def test_replay_uses_current_files_and_never_dispatches(self):
+        tid = self.replay_task()
+        before = (self.folder / "tasks" / tid / "task.json").read_bytes()
+        captured = {}
+        fake = mock.patch.object(supervisor, "run",
+                                 side_effect=lambda cfg, exe, task, prompt, model, max_cost: captured.update(
+                                     prompt=prompt) or {"decision": dict(WAIT), "cost": 0.001, "model": "haiku",
+                                                        "turns": 2, "error": ""})
+        fake.start()
+        self.addCleanup(fake.stop)
+        with mock.patch.object(self.hub, "task_lever", side_effect=AssertionError("no lever")), \
+                mock.patch.object(self.hub, "request_next", side_effect=AssertionError("no append")), \
+                mock.patch.object(self.hub.runs, "start", side_effect=AssertionError("no worker")):
+            code, body = self.hub.replay_supervisor({"task": tid, "wake": 1})
+        self.assertEqual(code, 200, body)
+        self.assertTrue(body["no_dispatch"])
+        self.assertEqual(body["original"]["prompt_hash"], "abc123")
+        self.assertEqual(body["fresh"]["prompt_hash"], supervisor.prompt_hash(captured["prompt"]))
+        self.assertTrue(body["fresh"]["check"]["ok"])
+        self.assertEqual((self.folder / "tasks" / tid / "task.json").read_bytes(), before)
+        records = usage.load_supervisor(self.folder)["records"]
+        self.assertTrue(any(r.get("kind") == "replay" for r in records.values()))
+        self.assertNotIn(tid, self.hub.supervising)
+
+    def test_replay_refuses_off_paused_busy_unknown_and_bad_input(self):
+        tid = self.replay_task()
+        self.hub.tasks[tid]["supervisor"]["mode"] = "off"
+        self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": 1})[0], 409)
+        self.hub.tasks[tid]["supervisor"]["mode"] = "suggest"
+        self.hub.tasks[tid]["supervisor"]["paused"] = True
+        self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": 1})[0], 409)
+        self.hub.tasks[tid]["supervisor"]["paused"] = False
+        self.hub.wakes[tid] = {"due": 0.0, "triggers": [], "events": [], "n": 1}
+        self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": 1})[0], 409)
+        self.hub.wakes.clear()
+        self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": 9})[0], 404)
+        self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": True})[0], 400)
+        self.assertEqual(self.hub.replay_supervisor({"task": "../x", "wake": 1})[0], 400)
+
+
 class SupervisedIntakeHubTest(SupervisorServerTest):
     """Plan 44 T10 (Hub level): create_task builds one manual worker and keeps the rest as proposals."""
 
@@ -1410,7 +1466,8 @@ class SupervisedIntakeHubTest(SupervisorServerTest):
 
 
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
-for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest):
+for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
+              ReplayTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name

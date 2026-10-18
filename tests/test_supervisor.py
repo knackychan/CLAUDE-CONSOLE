@@ -487,5 +487,23 @@ class AutoReasonTest(unittest.TestCase):
         self.assertEqual((p["mode"], p["retries"]), ("suggest", {2: 1}))
 
 
+class SpendViewTest(unittest.TestCase):
+    def test_spend_view_folds_settled_unknown_and_reserved(self):
+        records = {
+            "p1": {"task": "t1", "wake": 1, "day": "2026-10-18", "kind": "wake", "reserved": 0.5, "cost": 0.4,
+                   "status": "settled"},
+            "p2": {"task": "t1", "wake": 2, "day": "2026-10-18", "kind": "wake", "reserved": 0.3, "cost": 0.0,
+                   "status": "unknown"},
+            "p3": {"task": "t2", "wake": 1, "day": "2026-10-19", "kind": "replay", "reserved": 0.1, "cost": 0.0,
+                   "status": "reserved"},
+        }
+        view = supervisor.spend_view(records)
+        d18 = view["days"]["2026-10-18"]
+        self.assertEqual((d18["cost"], d18["runs"], d18["unknown"], d18["reserved"]), (0.4, 2, 1, 0.3))
+        self.assertEqual(view["days"]["2026-10-19"]["reserved"], 0.1)
+        self.assertEqual(view["tasks"]["t1"]["wakes"][1]["cost"], 0.4)
+        self.assertEqual((view["total"]["cost"], view["total"]["runs"]), (0.4, 3))
+
+
 if __name__ == "__main__":
     unittest.main()
