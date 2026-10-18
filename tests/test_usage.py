@@ -345,6 +345,14 @@ class SupervisorLedgerTest(unittest.TestCase):
             self.assertEqual(len(usage.load_supervisor(folder)["records"]), 10)
             self.assertEqual(usage.load_other(folder)["2026-10-18"]["kimi-k3"]["runs"], 10)
 
+    def test_a_replayed_identity_cannot_add_twice(self):
+        with tempfile.TemporaryDirectory() as folder:
+            usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)
+            usage.record_supervisor(folder, "p1", {"cost": 0.1})
+            self.assertEqual(usage.reserve_supervisor(folder, "p1", self.rec(), 0.5, 2.0)["status"], "duplicate")
+            self.assertEqual(usage.record_supervisor(folder, "p1", {"cost": 0.1})["status"], "settled")
+            self.assertEqual(usage.supervisor_spent(folder, task="t1"), (0.1, 0.0))
+
     def test_task_deletion_does_not_reset_the_day(self):
         with tempfile.TemporaryDirectory() as folder:
             usage.reserve_supervisor(folder, "p1", self.rec(task="gone"), 2.0, 0.5)

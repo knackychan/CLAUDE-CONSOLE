@@ -461,5 +461,31 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)["cost"], 3.0)
 
 
+
+class AutoReasonTest(unittest.TestCase):
+    def test_auto_table(self):
+        pol = dict(supervisor.policy(cfg(), {"project_dir": "D:\\work"}, 0.0), mode="auto", room=2, work_usd=0.0)
+        task = {"current": 1, "steps": [{"n": 1, "kind": "code", "state": "done"}]}
+        for kind in ("confirm", "keep", "finish", "retry"):
+            self.assertEqual(supervisor.auto_reason({"decision": kind}, task, pol), "", kind)
+        self.assertEqual(supervisor.auto_reason({"decision": "add_next_step"}, task, pol), "")
+        for kind in ("stop", "stepdone", "answer", "escalate_to_fred", "wait"):
+            self.assertTrue(supervisor.auto_reason({"decision": kind}, task, pol), kind)
+        for mode in ("off", "suggest"):
+            self.assertTrue(supervisor.auto_reason({"decision": "finish"}, task, dict(pol, mode=mode)))
+        self.assertTrue(supervisor.auto_reason({"decision": "add_next_step"}, task, dict(pol, auto_steps_left=0)))
+        self.assertTrue(supervisor.auto_reason({"decision": "add_next_step"}, task, dict(pol, room=0)))
+        self.assertTrue(supervisor.auto_reason({"decision": "retry"}, task, dict(pol, work_usd=5.0)))
+        self.assertTrue(supervisor.auto_reason({"decision": "retry"}, task, dict(pol, retries={1: 1})))
+        self.assertEqual(supervisor.auto_reason({"decision": "finish", "confidence": "high"}, task,
+                                                dict(pol, work_usd=99.0)), "")  # finishing starts nothing
+
+    def test_string_step_keys_from_task_json_are_valid(self):
+        task = {"project_dir": "D:\\work", "supervisor": dict(supervisor.initial(cfg(), "D:\\work", 0.0),
+                                                              retries={"2": 1})}
+        p = supervisor.policy(cfg(), task, 0.0)
+        self.assertEqual((p["mode"], p["retries"]), ("suggest", {2: 1}))
+
+
 if __name__ == "__main__":
     unittest.main()

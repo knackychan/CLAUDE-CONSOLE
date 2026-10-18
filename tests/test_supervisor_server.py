@@ -668,6 +668,7 @@ class DispatchTest(WakeTest):
         self.assertEqual(seen[mine]["note"], "name the failing line")
 
     def test_automatic_dispatch_is_not_active_yet(self):
+        self.hub.sup_auto = False  # the Task 6 checkpoint: Task 8 is what turns automatic dispatch on
         tid = self.stuck_task()
         self.hub.tasks[tid]["supervisor"]["mode"] = "auto"
         self.pending(tid, dict(decision="retry", note="n", reason="r", confidence="high", for_fred=""),
@@ -929,6 +930,225 @@ class ApprovalTest(DispatchTest):
         self.assertEqual(len(self.calls), 1)  # no retry of its consumed event
         self.assertAlmostEqual(self.hub.tasks[tid]["supervisor"]["usd"], 0.003)
         self.assertEqual(usage.load_supervisor(self.folder)["records"][supervisor.request_id(tid, 1)]["cost"], 0.003)
+
+
+
+class AutonomyTest(DispatchTest):
+    """Plan 44 T8: auto mode dispatches only its table, within the step, retry and money limits."""
+
+    def auto(self, tid):
+        self.hub.tasks[tid]["supervisor"]["mode"] = "auto"
+        tasks.save(self.folder, self.hub.tasks[tid])
+
+    def run_wake(self, tid, decision):
+        self.answer = dict(decision=dict(decision), cost=0.001, model="haiku", turns=2, error="")
+        self.hub._sup_hook(self.hub.tasks[tid])
+        self.tick(self.now + 100.0)
+        self.drain()
+
+    def test_only_auto_mode_dispatches_eligible_action(self):
+        finish = dict(decision="finish", reason="done", confidence="high", for_fred="")
+        for mode, want in (("off", None), ("suggest", "suggest"), ("auto", "done")):
+            with self.subTest(mode):
+                tid = self.supervised_task(f"20260101-000000-{ {'off': 'a0a0', 'suggest': 'a1a1', 'auto': 'a2a2'}[mode]}")
+                self.hub.tasks[tid]["supervisor"]["mode"] = mode
+                self.hub.sup_recovered = True
+                self.run_wake(tid, finish)
+                task = self.hub.tasks[tid]
+                if want == "done":
+                    self.assertEqual(task["state"], "done")
+                    self.assertIsNone(task["supervisor"]["pending"])
+                elif want == "suggest":
+                    self.assertEqual((task["state"], task["supervisor"]["pending"]["status"]), ("waiting", "suggest"))
+                else:
+                    self.assertIsNone(task["supervisor"]["pending"])
+        for d in (dict(decision="stepdone", reason="r", confidence="high", for_fred=""),
+                  dict(decision="stop", reason="r", confidence="high", for_fred="")):
+            tid = self.stuck_task("20260101-000000-b0b" + ("1" if d["decision"] == "stop" else "2"))
+            self.auto(tid)
+            self.pending(tid, d, triggers=("stalled", "stuck"))
+            with mock.patch.object(self.hub, "task_lever") as lever:
+                self.hub._sup_auto(tid, 1)
+            self.assertEqual(lever.call_count, 0, d)
+            self.assertIn("approval", self.hub.tasks[tid]["supervisor"]["pending"]["error"])
+
+    def held_add(self, tid):
+        return mock.patch.object(self.hub, "request_next", side_effect=lambda req, **kw: (
+            200, {"task": tid, "step": 2, "request_id": req["request_id"], "status": "held"}))
+
+    def test_fourth_auto_step_is_suggestion_and_human_action_resets_window(self):
+        tid = self.supervised_task()
+        self.auto(tid)
+        with mock.patch.object(self.hub, "preview_next", return_value=(200, {"revision": "r"})), self.held_add(tid):
+            for wake in (1, 2, 3, 4):
+                self.pending(tid, ADD, wake=wake)
+                self.hub._sup_auto(tid, wake)
+        sup = self.hub.tasks[tid]["supervisor"]
+        self.assertEqual(sup["auto_steps"], 3)  # held reservations count as slots
+        self.assertEqual(sup["pending"]["wake"], 4)
+        self.assertIn("approve the next", sup["pending"]["error"])
+        again = server.Hub(self.hub.cfg, self.folder, exe=self.hub.runs.exe)
+        self.assertEqual(again.tasks[tid]["supervisor"]["auto_steps"], 3)  # survives restart
+        with mock.patch.object(self.hub, "start_step"):
+            self.hub.task_lever(tid, "done", origin="supervisor")  # an internal lever resets nothing
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["auto_steps"], 3)
+        self.hub.tasks[tid].update(state="waiting", why="choose next step")
+        self.assertEqual(self.hub.task_lever(tid, "pause")[0], 200)
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["auto_steps"], 0)
+
+    def test_task_max_steps_caps_supervisor_only(self):
+        self.hub.cfg["task_max_steps"] = 1
+        tid = self.supervised_task()
+        self.auto(tid)
+        self.pending(tid, ADD)
+        with mock.patch.object(self.hub, "request_next") as request:
+            self.hub._sup_auto(tid, 1)
+        self.assertEqual(request.call_count, 0)
+        self.assertIn("task_max_steps", self.hub.tasks[tid]["supervisor"]["pending"]["error"])
+        req = {"task": tid, "source_step": 1, "source_session": "s1", "kind": "code", "instructions": "x",
+               "model": "auto", "request_id": "0d6d1f0e-0000-4000-8000-000000000002"}
+        req["revision"] = self.hub.preview_next(req)[1]["revision"]
+        with mock.patch.object(self.hub, "start_step"):
+            self.assertEqual(self.hub.request_next(req)[0], 200)  # Fred's own Add step is not capped
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
+
+    def fail_chain(self, tid):
+        task = self.hub.tasks[tid]
+        verify = tasks._blank(2, "verify", "check", checked=1)
+        verify.update(state="done", session="s2", verdict="FAIL", verdict_detail="test_a fails", dir="02-verify",
+                      model="haiku", effort="low",
+                      attempts=[{"session": "s2", "cost": 0.1, "started": 1, "ended": 2, "why": "", "final": True}])
+        code = tasks._blank(3, "code", "repair")
+        code.update(state="done", session="s3", sup_lineage=2, source_step=2, dir="03-code", model="haiku",
+                    effort="low", attempts=[{"session": "s3", "cost": 0.1, "started": 3, "ended": 4, "why": "",
+                                             "final": True}])
+        again = tasks._blank(4, "verify", "check", checked=3)
+        again.update(state="done", session="s4", verdict="FAIL", verdict_detail="test_a still fails", sup_lineage=2,
+                     source_step=3, dir="04-verify", model="haiku", effort="low",
+                     attempts=[{"session": "s4", "cost": 0.1, "started": 5, "ended": 6, "why": "", "final": True}])
+        task["steps"] += [verify, code, again]
+        task.update(current=4, last_good=4, why="VERDICT: FAIL: test_a still fails")
+        task["supervisor"]["retries"] = {2: 1}
+        tasks.save(self.folder, task)
+
+    def test_retry_allowance_and_second_fail_escalate(self):
+        self.hub.cfg["task_max_steps"] = 12
+        tid = self.supervised_task()
+        self.auto(tid)
+        self.fail_chain(tid)
+        for kind in ("code", "scout"):
+            self.pending(tid, dict(ADD, kind=kind, instructions="repair again"), triggers=("fail",))
+            with mock.patch.object(self.hub, "request_next") as request:
+                self.hub._sup_auto(tid, 1)
+            self.assertEqual(request.call_count, 0, kind)
+            error = self.hub.tasks[tid]["supervisor"]["pending"]["error"]
+            self.assertIn("test_a fails", error)
+            self.assertIn("test_a still fails", error)
+        # direct Retry: one supervisor retry per step on top of the chain's own
+        stuck = self.stuck_task("20260101-000000-aaa1")
+        self.auto(stuck)
+        retry = dict(decision="retry", note="name the failing line", reason="r", confidence="high", for_fred="")
+        self.pending(stuck, retry, triggers=("stuck",))
+        with mock.patch.object(self.hub, "task_lever", return_value=(200, {"task": stuck})) as lever:
+            self.hub._sup_auto(stuck, 1)
+        self.assertEqual(lever.call_count, 1)
+        self.assertEqual(supervisor.policy(self.hub.cfg, self.hub.tasks[stuck], 0.0)["retries"], {1: 1})
+        self.pending(stuck, retry, triggers=("stuck",), wake=2)
+        with mock.patch.object(self.hub, "task_lever") as lever:
+            self.hub._sup_auto(stuck, 2)
+        self.assertEqual(lever.call_count, 0)
+        reloaded = server.Hub(self.hub.cfg, self.folder, exe=self.hub.runs.exe)
+        self.assertEqual(supervisor.policy(self.hub.cfg, reloaded.tasks[stuck], 0.0)["mode"], "auto")  # JSON keys
+
+    def test_work_cost_includes_attempts_live_updates_and_confirmed_chain(self):
+        tid = self.supervised_task()
+        self.auto(tid)
+        task = self.hub.tasks[tid]
+        epoch = task["supervisor"]["epoch"]
+        task["steps"][0]["attempts"] = [
+            {"session": "a", "cost": 2.0, "final": True, "sup": {"wake": 1, "epoch": epoch, "cost_at_start": 0.0}},
+            {"session": "b", "cost": 9.0, "final": True, "sup": {"wake": 0, "epoch": epoch - 1, "cost_at_start": 0}},
+            {"session": "c", "cost": 0.0, "final": False, "sup": {"wake": 2, "epoch": epoch, "cost_at_start": 0.0}}]
+        with mock.patch.object(self.hub, "session", return_value={"cost": 3.5}):
+            self.assertEqual(self.hub._sup_work(task), 5.5)  # live cost counted, an older window's not
+            self.pending(tid, ADD)
+            with mock.patch.object(self.hub, "request_next") as request:
+                self.hub._sup_auto(tid, 1)
+            self.assertEqual(request.call_count, 0)
+            self.assertIn("work cap", task["supervisor"]["pending"]["error"])
+        # a supervisor-caused continuation stops launching at the cap; an ordinary chain does not
+        auto = self.supervised_task("20260101-000000-aaa2")
+        t = self.hub.tasks[auto]
+        t.update(progression=None, owner="service", state="running", why="")
+        t["steps"].append(tasks._blank(2, "code", "next"))
+        t["steps"][0]["attempts"][0]["sup"] = {"wake": 1, "epoch": t["supervisor"]["epoch"], "cost_at_start": 0.0}
+        t["steps"][0]["attempts"][0]["cost"] = 6.0
+        t["sup_cause"] = {"wake": 1, "epoch": t["supervisor"]["epoch"]}
+        with mock.patch.object(self.hub.runs, "start") as start:
+            self.hub.start_step(t, 2)
+        self.assertEqual(start.call_count, 0)
+        self.assertIn("work cap", t["why"])
+        t.update(state="running", owner="service", why="")
+        t["steps"][1]["state"] = "planned"
+        with mock.patch.object(self.hub.runs, "start", return_value="sid-1") as start:
+            self.hub.start_step(t, 2)  # no supervisor cause: the chain runs as before
+        self.assertEqual(start.call_count, 1)
+
+    def test_task_day_zero_and_inflight_money_caps(self):
+        self.hub.cfg["supervisor_task_usd"] = 0
+        tid = self.supervised_task()
+        self.hub._sup_hook(self.hub.tasks[tid])
+        self.tick(30.0)
+        self.drain()
+        self.assertEqual(self.calls, [])
+        self.assertIn("cap", [r for r in supervisor.read_log(self.folder, tid) if r.get("phase") == "result"][-1]["error"])
+        # day cap across tasks, with an in-flight reservation and a full overrun recorded
+        self.hub.cfg.update(supervisor_task_usd=0.5, supervisor_day_usd=0.6, supervisor_parallel=2)
+        a, b = self.supervised_task("20260101-000000-bbb1"), self.supervised_task("20260101-000000-bbb2")
+        self.gate.clear()
+        self.answer = dict(decision=dict(WAIT), cost=0.9, model="haiku", turns=2, error="")  # an overrun
+        self.hub._sup_hook(self.hub.tasks[a])
+        self.hub._sup_hook(self.hub.tasks[b])
+        self.tick(100.0)
+        self.assertEqual(len(self.calls), 2)
+        self.assertAlmostEqual(self.calls[0]["max_cost"] + self.calls[1]["max_cost"], 0.6)  # never the same balance
+        self.gate.set()
+        self.drain()
+        records = usage.load_supervisor(self.folder)["records"]
+        self.assertEqual(records[supervisor.request_id(a, 1)]["cost"], 0.9)  # recorded in full
+        c = self.supervised_task("20260101-000000-bbb3")
+        self.hub._sup_hook(self.hub.tasks[c])
+        self.tick(300.0)
+        self.drain()
+        self.assertEqual(len(self.calls), 2)  # the day is spent: no next call
+
+    def test_failed_pass_spend_and_ledger_survive_restart_delete_and_corruption(self):
+        tid = self.supervised_task()
+        self.answer = dict(decision=None, cost=0.02, model="haiku", turns=6, error="the pass failed: error_max_turns")
+        with mock.patch.object(usage, "record_supervisor", return_value={"status": "error", "error": "disk"}):
+            self.hub._sup_hook(self.hub.tasks[tid])
+            self.tick(30.0)
+            self.drain()
+            other = self.supervised_task("20260101-000000-ccc1")
+            self.hub._sup_hook(self.hub.tasks[other])
+            self.tick(100.0)
+            self.drain()
+        self.assertEqual(len(self.calls), 1)  # an unsettled spend blocks the next launch
+        self.tick(101.0)  # the ledger takes it now, and the blocked wake may run
+        self.drain()
+        self.assertEqual(self.hub.sup_unsettled, {})
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(usage.load_supervisor(self.folder)["records"][supervisor.request_id(tid, 1)]["cost"], 0.02)
+        # a corrupt ledger refuses admission and is never overwritten
+        path = self.folder / usage.DAYS_FILE
+        path.write_text("{bad", encoding="utf-8")
+        third = self.supervised_task("20260101-000000-ccc2")
+        self.hub._sup_hook(self.hub.tasks[third])
+        self.tick(500.0)
+        self.drain()
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn(third, self.hub.wakes)  # retained behind the visible hold, not spent
+        self.assertEqual(path.read_text(encoding="utf-8"), "{bad")
 
 
 if __name__ == "__main__":

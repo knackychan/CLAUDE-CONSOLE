@@ -100,7 +100,8 @@ class Hub:
         self.sup_clock = time.monotonic  # the debounce clock (tests pass their own)
         self.sup_recovered = False  # R1: the first advance scans the saved boundaries once
         self.sup_threads = []  # the bounded pass threads (tests join them)
-        self.sup_auto = False  # plan 44 Task 8 turns automatic dispatch on; until then every dispatch is an Approve
+        self.sup_auto = True  # plan 44 Task 8: auto mode may dispatch its allowed table by itself
+        self.sup_unsettled = {}  # pass id -> reported cost a ledger write refused: no launch until it settles
         self.probing = threading.Thread(target=self.probe, name="probe", daemon=True)
         self.probing.start()
 
@@ -1518,6 +1519,11 @@ class Hub:
         with self.tlock:
             if not self.sup_recovered:
                 self._sup_recover(now)
+            for pid, cost in list(self.sup_unsettled.items()):
+                if usage.record_supervisor(self.folder, pid, {"cost": cost}).get("status") != "error":
+                    self.sup_unsettled.pop(pid, None)
+            if self.sup_unsettled:
+                return started  # an unsettled spend blocks every new pass until the ledger takes it
             self._sup_drain_held()
             for tid, entry in sorted(self.wakes.items(), key=lambda kv: (kv[1]["due"], kv[0])):
                 if entry["due"] > now or tid in self.supervising:
@@ -1649,7 +1655,9 @@ class Hub:
         with self.tlock:
             if self.supervising.get(task_id, {}).get("wake") == wake:
                 self.supervising.pop(task_id, None)
-            usage.record_supervisor(self.folder, snapshot["pass"], {"cost": cost})
+            settled = usage.record_supervisor(self.folder, snapshot["pass"], {"cost": cost})
+            if settled.get("status") == "error":  # retried each tick; no launch while it waits
+                self.sup_unsettled[snapshot["pass"]] = cost
             task = self.tasks.get(task_id)
             if task is None:
                 return  # deleted while the pass ran: the ledger keeps the spend, the task is not recreated
@@ -1678,6 +1686,8 @@ class Hub:
             text = {"wait": "wait", "no-decision": f"no decision ({why})"}.get(status, f"{status}: {redact.clip(why or (decision or {}).get('decision', ''), 120)}")
             self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
                                  "to": task["state"], "why": f"supervisor: {text}", "session": ""}])
+            if status == "suggest":
+                self._sup_auto(task_id, wake)
 
     def _sup_judge(self, task: dict, snapshot: dict, result: dict) -> tuple:
         """(status, why, effective decision) of one result against the live task: no-decision, wait, escalate,
@@ -1766,8 +1776,17 @@ class Hub:
                 return 409, {"error": "a question waits for Fred"}
             if kind not in self._SUP_LEVER and kind != "add_next_step":
                 return 409, {"error": f"{kind} is never dispatched"}
-            if by != "fred" and (kind in ("stepdone", "stop") or pol["mode"] != "auto" or not self.sup_auto):
-                return 409, {"error": f"{kind} needs Fred's approval"}
+            if by != "fred":
+                if not self.sup_auto:
+                    return 409, {"error": f"{kind} needs Fred's approval"}
+                reason = supervisor.auto_reason(decision, task, self._sup_auto_policy(task, pol, decision))
+                if reason:
+                    pending.update(error=reason)
+                    try:
+                        self._commit(task)
+                    except OSError:
+                        pass
+                    return 409, {"error": reason}
             cs = tasks.current_step(task)
             retries_left = max(0, pol["settings"]["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
             ok, why = supervisor.check(decision, task, self.task_levers(task_id) or {}, self.next_sources(task),
@@ -1785,13 +1804,27 @@ class Hub:
                 intent = {"call": "request_next", "request_id": supervisor.request_id(task_id, wake), "source_step": n}
             else:
                 intent = {"call": "task_lever", "lever": self._SUP_LEVER[kind]}
+            sup = task["supervisor"]
+            before = copy.deepcopy(sup)
+            spent = dict(pol["retries"])  # int step keys, however task.json spelled them
+            if kind == "retry" and cs:  # the allowance is spent at intent, even if the outcome is uncertain
+                spent[cs["n"]] = spent.get(cs["n"], 0) + 1
+            if kind == "add_next_step":
+                lineage = supervisor.fail_lineage(task, tasks.step(task, req["source_step"]))
+                if lineage is not None and decision["kind"] == "code":  # a repair spends its FAIL lineage's retry
+                    spent[lineage] = spent.get(lineage, 0) + 1
+                intent["lineage"] = lineage
+            sup["retries"] = spent
+            task["sup_cause"] = {"wake": wake, "epoch": sup["epoch"]}
             try:
                 self._sup_record(task_id, {"wake": wake, "phase": "dispatching", "status": "dispatching",
                                            "dispatch": intent, "by": by, "events": pending.get("events") or []})
                 pending.update(status="dispatching", by=by, dispatch=intent)
                 tasks.save(self.folder, task)
             except OSError as exc:
-                pending.update(status="suggest", dispatch=None)
+                task["supervisor"] = before
+                before["pending"] = dict(pending, status="suggest", dispatch=None)
+                task.pop("sup_cause", None)
                 return 500, {"error": f"the intent was not saved, nothing started: {exc}"}
             try:
                 if kind == "add_next_step":
@@ -1809,6 +1842,19 @@ class Hub:
                 code, body, status = 500, {"error": f"uncertain: {redact.clip(str(exc), 200)}"}, "uncertain"
             task = self.tasks.get(task_id) or task  # request_next replaces the task dict
             sup = task.setdefault("supervisor", sup)
+            if kind == "add_next_step" and isinstance((body or {}).get("step"), int):
+                step = next((x for x in task["steps"] if x["n"] == body["step"]), None)
+                if step is not None:
+                    src = tasks.step(task, req["source_step"])
+                    lineage = intent.get("lineage")
+                    if lineage is None:
+                        lineage = src.get("sup_lineage") if isinstance(src.get("sup_lineage"), int) else None
+                    if lineage is not None:
+                        step["sup_lineage"] = lineage  # its verify inherits it from this source
+                if by == "auto":
+                    sup["auto_steps"] = (sup.get("auto_steps") or 0) + 1  # a slot at reservation, held or failed too
+            if task["state"] not in ("running", "planned"):
+                task.pop("sup_cause", None)  # nothing continues from this dispatch
             body = {k: v for k, v in (body or {}).items() if k in ("task", "step", "request_id", "status", "state",
                                                                    "error")}
             try:
@@ -1847,6 +1893,7 @@ class Hub:
             sup = task["supervisor"] = supervisor.initial(self.cfg, task["project_dir"], now)
         sup["epoch"] = (sup.get("epoch") if isinstance(sup.get("epoch"), int) else 0) + 1
         sup.update(auto_steps=0, retries={}, work_usd=0.0, since_fred=now)
+        task.pop("sup_cause", None)
         if action == "pause":
             sup["paused"] = True
         elif action == "resume":
@@ -1985,6 +2032,41 @@ class Hub:
                 "queued": task["id"] in self.wakes, "active": task["id"] in self.supervising,
                 "pending": card, "audit": audit}
 
+    def _sup_work(self, task: dict) -> float:
+        """The current window's supervisor-caused work cost (live costs included), saved as the work_usd projection."""
+        sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+
+        def live(sid):
+            row = self.session(sid)
+            return row.get("cost") if row else None
+        spent = supervisor.work_cost(task, sup.get("epoch"), live)
+        if isinstance(task.get("supervisor"), dict):
+            task["supervisor"]["work_usd"] = spent
+        return spent
+
+    def _sup_auto_policy(self, task: dict, pol: dict, decision: dict) -> dict:
+        """supervisor.policy plus the live facts auto_reason needs: work spent, the room left and the add's source."""
+        cs = tasks.current_step(task)
+        max_steps = self.cfg["task_max_steps"]
+        room = 0
+        source = None
+        if decision.get("decision") == "add_next_step":
+            n = decision.get("source_step", task.get("current"))
+            source = next((x for x in task["steps"] if x["n"] == n), None)
+            room = min(tasks.room_after(task, n, max_steps), max_steps - len(task["steps"])) if source else 0
+        return dict(pol, work_usd=self._sup_work(task), room=room, source=source,
+                    current=cs["n"] if cs else 0)
+
+    def _sup_auto(self, task_id: str, wake: int) -> None:
+        """Auto mode: dispatch a fresh suggestion by itself when auto_reason allows it; else it stays a suggestion
+        with the reason shown."""
+        task = self.tasks.get(task_id)
+        if task is None or not self.sup_auto:
+            return
+        if supervisor.policy(self.cfg, task, time.time())["mode"] != "auto":
+            return
+        self._supervisor_dispatch(task_id, wake, "auto")
+
     def _sup_drain_held(self) -> None:
         """A decision held by guidance: once the queue is empty, unchanged evidence and epoch make it a suggestion
         again; a change supersedes it with one fresh debounced wake that keeps its triggers. Never replays guidance."""
@@ -1997,6 +2079,7 @@ class Hub:
             if supervisor.revision(self.folder, task) == pending.get("revision") and pol["epoch"] == pending.get("epoch"):
                 pending.update(status="suggest", error="")
                 self._commit(task)
+                self._sup_auto(task["id"], pending["wake"])
                 continue
             sup["pending"] = None
             try:
@@ -2566,6 +2649,18 @@ class Hub:
         if tier == "fable" and not task["fable_ok"]:  # a hard-only fable rung of the think tier bills credits too
             tasks._task_to(task, "waiting", "confirm Fable", now, s, lines)
             return self._commit(task, lines)
+        cause = task.get("sup_cause") if isinstance(task.get("sup_cause"), dict) else None
+        if cause and cause.get("epoch") == (task.get("supervisor") or {}).get("epoch"):
+            limit = supervisor.policy(self.cfg, task, now)["settings"]["supervisor_work_usd"]
+            spent = self._sup_work(task)
+            if spent >= limit:  # plan 44: a supervisor-caused continuation stops launching at the work cap
+                task.pop("sup_cause", None)
+                tasks._task_to(task, "waiting", f"supervisor work cap reached (${spent:.2f} of ${limit:g})", now, s, lines)
+                task["owner"] = "fred"
+                return self._commit(task, lines)
+        elif cause:
+            task.pop("sup_cause", None)  # an older window's cause never charges this one
+            cause = None
         hname, model_name = claude_cli.split_rung(model)
         notes = list(route["notes"])
         if hname != "claude":
@@ -2691,6 +2786,8 @@ class Hub:
             return self._commit(task, lines)
         lines = tasks.start_step(task, n, sid, dict(route, model=model),
                                  (self.runs.meta(sid) or {}).get("start_commit", ""), now)
+        if cause:  # plan 44: this attempt is supervisor-caused work of that window
+            s["attempts"][-1]["sup"] = {"wake": cause.get("wake"), "epoch": cause.get("epoch"), "cost_at_start": 0.0}
         s["tier"], s["harness"] = tier, hname
         if message:
             message.update(status="dispatched", session=sid, dispatched=time.time())

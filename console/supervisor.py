@@ -131,6 +131,8 @@ def policy(cfg: dict, task: dict, now: float) -> dict:
             raw_retries = {}
         for k, v in raw_retries.items():
             n = _whole(v)
+            if isinstance(k, str) and k.isdigit():  # task.json spells the step numbers as strings
+                k = int(k)
             if not isinstance(k, int) or isinstance(k, bool) or k < 1 or n is None:
                 errors.append("supervisor retries invalid")
                 retries = {}
@@ -625,3 +627,73 @@ def run(cfg: dict, exe: list, task: dict, prompt: str, model: str, max_cost: flo
         return out
     out["decision"] = fields
     return out
+
+
+# -- autonomy (Task 8) -------------------------------------------------------------------------------------
+
+AUTO_KINDS = ("add_next_step", "confirm", "keep", "retry", "finish")  # stop/stepdone are Fred's in every mode
+
+
+def work_cost(task: dict, epoch: int, live=lambda sid: None) -> float:
+    """The supervisor-caused worker cost of the current human window: every attempt attributed to a supervisor
+    dispatch of `epoch`, at its saved cost or, while it runs, its live cost (`live(session)`). A projection of the
+    step data, never a second ledger; another epoch's late cost never leaks into this window."""
+    total = 0.0
+    for s in task.get("steps") or []:
+        for a in s.get("attempts") or []:
+            cause = a.get("sup") if isinstance(a.get("sup"), dict) else None
+            if not cause or cause.get("epoch") != epoch:
+                continue
+            cost = a.get("cost") or 0
+            if not a.get("final") and a.get("session"):
+                now = live(a["session"])
+                cost = now if isinstance(now, (int, float)) and not isinstance(now, bool) and now > cost else cost
+            total += float(cost or 0)
+    return round(total, 6)
+
+
+def fail_lineage(task: dict, source: dict):
+    """The FAIL lineage a repair from `source` belongs to: the saved lineage of a supervisor-made step, else the
+    number of a verify that answered FAIL; None when the source is no FAIL (nor descends from one)."""
+    if isinstance(source.get("sup_lineage"), int) and not isinstance(source.get("sup_lineage"), bool):
+        return source["sup_lineage"]
+    if source.get("kind") == "verify" and source.get("verdict") == "FAIL":
+        return source["n"]
+    return None
+
+
+def lineage_fails(task: dict, lineage: int) -> list:
+    """The FAIL details of the verifies in one lineage, oldest first."""
+    return [f"step {s['n']:02d}: {s.get('verdict_detail') or 'FAIL'}" for s in task.get("steps") or []
+            if s.get("kind") == "verify" and s.get("verdict") == "FAIL"
+            and (s["n"] == lineage or s.get("sup_lineage") == lineage)]
+
+
+def auto_reason(decision: dict, task: dict, policy: dict) -> str:
+    """"" only when the task's auto policy may execute this already-checked decision by itself; otherwise why it
+    stays a suggestion. Never widens check() or a live gate; confidence and replan_auto grant nothing. `policy` is
+    supervisor.policy() plus the Hub's live facts: room (steps the supervisor may still append), work_usd (current
+    window) and the source step of an add."""
+    kind = decision.get("decision")
+    if policy.get("mode") != "auto":
+        return f"the supervisor mode is {policy.get('mode', 'off')}"
+    if kind not in AUTO_KINDS:
+        return f"{kind} needs Fred's approval"
+    settings = policy.get("settings") or {}
+    work_left = settings.get("supervisor_work_usd", 0) - (policy.get("work_usd") or 0)
+    if kind in ("add_next_step", "retry", "confirm", "keep") and work_left <= 0:
+        return f"supervisor work cap reached (${settings.get('supervisor_work_usd', 0):g} since Fred acted)"
+    if kind == "add_next_step":
+        if policy.get("auto_steps_left", 0) <= 0:
+            return f"{settings.get('supervisor_max_auto_steps', 0)} supervisor steps since Fred acted: approve the next"
+        if policy.get("room", 0) <= 0:
+            return "task_max_steps reached: only Fred adds more steps"
+        source = policy.get("source") or {}
+        lineage = fail_lineage(task, source) if source else None
+        if lineage is not None and (policy.get("retries") or {}).get(lineage, 0) >= settings.get("supervisor_max_retries", 0):
+            return "the repair already failed its verify: " + "; ".join(lineage_fails(task, lineage))
+    if kind == "retry":
+        cs = tasks.current_step(task) if task.get("current") else None
+        if cs and (policy.get("retries") or {}).get(cs["n"], 0) >= settings.get("supervisor_max_retries", 0):
+            return "the supervisor retry of this step is used"
+    return ""
