@@ -711,6 +711,21 @@ class Hub:
         return out
 
     def pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = (), auto: int = 0) -> tuple:
+        """Plan 44: _pull, plus Fred's human-act bookkeeping on the task whose step runs in `sid` (never for the
+        automatic step, an external session or a refused action)."""
+        status, body = self._pull(sid, lever, text, confirm, files, auto)
+        if status == 200 and not auto:
+            with self.tlock:
+                task = next((t for t in self.tasks.values() if any(x.get("session") == sid for x in t["steps"])), None)
+                if task is not None:
+                    self._supervisor_fred(task, time.time(), "session")
+                    try:
+                        self._commit(task)
+                    except OSError:
+                        pass
+        return status, body
+
+    def _pull(self, sid, lever: str, text: str = "", confirm: bool = False, files: list = (), auto: int = 0) -> tuple:
         """Continue (also STOP answers and Resume), Verify, Handoff, Escalate: a new turn of a window
         run, or a window copy (fork) of a VS Code / terminal chat, which stays as it is. De-escalate starts
         no turn: the next one runs on the task's starting route. Returns (status, body); a click and the
@@ -1015,6 +1030,9 @@ class Hub:
             if task.get("progression") == "manual" and owner == "fred" and cs and cs["state"] == "done" \
                     and state == "waiting":
                 resume = "choose a next step or finish the task"
+            if self._sup_boundary(task):  # plan 44 R2: Pause/Resume of a supervised manual boundary is the bit
+                paused = (task.get("supervisor") or {}).get("paused") is True
+                pause, resume = ("already paused", "") if paused else ("", "not paused")
             unhanded = bool(state == "handed" and not task.get("handoff_note") and cs and cs["state"] == "failed")
             retry = base or ("still working: wait until it stops" if live else
                              "" if state in ("stuck", "stopped") or unhanded else f"task is {state}")  # plan 40: 99bd
@@ -1140,10 +1158,12 @@ class Hub:
                     message.update(status="dismissed" if message["status"] == "uncertain" else "cancelled")
                     if message["status"] == "cancelled":
                         message["error"] = ""
+                    self._supervisor_fred(task, time.time(), "message")
                     self._commit(task)
                     return 200, {"message": message}
                 if action == "dispatch" and message["status"] == "queued":
                     message["confirm"] = body.get("confirm") is True
+                    self._supervisor_fred(task, time.time(), "message")
                     self._guidance_tick(task)
                     return 200, {"message": message}
                 return 409, {"error": "message cannot be changed in this state"}
@@ -1173,6 +1193,7 @@ class Hub:
                     tasks.message_files(self.folder, task, message, files)
                 updated = copy.deepcopy(task)
                 updated.setdefault("messages", []).append(message)
+                self._supervisor_fred(updated, time.time(), "message")
                 self._commit(updated)
             except OSError as exc:
                 return 500, {"error": f"Message was not saved: {exc}"}
@@ -1516,11 +1537,14 @@ class Hub:
             self.wakes.pop(tid, None)
             return False
         pol = supervisor.policy(self.cfg, task, time.time())
-        if pol["mode"] == "off" or supervisor.boundary(task, tasks.read_chain(self.folder, task, 50)) is None:
+        if pol["mode"] == "off":
             self.wakes.pop(tid, None)
             return False
         if pol["paused"] or tasks.pending_messages(task) or task.get("briefing") or tid in self.briefing:
-            return False  # retained until the existing path resolves it
+            return False  # retained until the existing path resolves it (a Pause defers, Resume lets it drain)
+        if supervisor.boundary(task, tasks.read_chain(self.folder, task, 50)) is None:
+            self.wakes.pop(tid, None)  # superseded: the task moved on
+            return False
         base = self._base(task)
         if base:
             self._sup_terminal(task, entry, base)
@@ -1557,6 +1581,7 @@ class Hub:
         if isinstance(old, dict) and old.get("status") in ("suggest", "held", "escalate", "refused"):
             sup["pending"] = None  # superseded by this newer boundary
         sup["wakes"] = wake
+        sup.pop("reject_note", None)  # Fred's rejection note rides in this wake's digest once
         try:
             tasks.save(self.folder, task)
         except OSError:
@@ -1712,6 +1737,8 @@ class Hub:
                 return 404, {"error": "unknown task"}
             done = self._sup_outcome(task_id, wake)
             if done is not None:
+                if done.get("action", "approve") != "approve":
+                    return 409, {"error": "this suggestion was already " + done.get("status", "handled")}
                 return done.get("code", 200), dict(done.get("body") or {}, repeated=True)
             sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
             pending = sup.get("pending")
@@ -1748,6 +1775,9 @@ class Hub:
                                         "retries_left": retries_left})
             if not ok:
                 return self._sup_refuse(task, pending, why)
+            if by == "fred":  # the Approve itself is Fred's act: reset the window, keep this very decision
+                self._supervisor_fred(task, time.time(), "approve", keep=pending)
+                pending["epoch"] = task["supervisor"]["epoch"]
             if kind == "add_next_step":
                 n = decision.get("source_step", task["current"])
                 req = {"task": task_id, "source_step": n, "source_session": tasks.step(task, n)["session"],
@@ -1783,7 +1813,8 @@ class Hub:
                                                                    "error")}
             try:
                 self._sup_record(task_id, {"wake": wake, "phase": "outcome", "status": status, "code": code,
-                                           "body": body, "by": by, "events": pending.get("events") or []})
+                                           "body": body, "by": by, "action": "approve",
+                                           "events": pending.get("events") or []})
             except OSError:
                 pass  # the dispatching record stays: a restart shows it uncertain, never replays it
             held = status == "dispatched" and body.get("status") == "held"
@@ -1798,6 +1829,161 @@ class Hub:
             except OSError:
                 pass
             return code, body
+
+    def _sup_boundary(self, task: dict) -> bool:
+        """R2: a manual boundary whose supervisor policy is valid and on; its Pause/Resume is the explicit bit. With
+        the supervisor off the baseline gates stand (nothing would read the bit)."""
+        if not tasks.manual_boundary(task):
+            return False
+        pol = supervisor.policy(self.cfg, task, time.time())
+        return not pol["reason"] and pol["mode"] != "off"
+
+    def _supervisor_fred(self, task: dict, now: float, action: str, keep=None) -> None:
+        """A new, accepted human act on `task` (called inside its transaction, before the save): the epoch moves on,
+        the automatic window (auto steps, retries, work cost) restarts, lifetime wakes/spend stay and older pending
+        advice is superseded. Emits no wake. Pause/Resume set the explicit bit; Stop also drops queued wakes."""
+        sup = task.get("supervisor")
+        if not isinstance(sup, dict):
+            sup = task["supervisor"] = supervisor.initial(self.cfg, task["project_dir"], now)
+        sup["epoch"] = (sup.get("epoch") if isinstance(sup.get("epoch"), int) else 0) + 1
+        sup.update(auto_steps=0, retries={}, work_usd=0.0, since_fred=now)
+        if action == "pause":
+            sup["paused"] = True
+        elif action == "resume":
+            sup["paused"] = False
+        if action == "stop":
+            self.wakes.pop(task["id"], None)
+        pending = sup.get("pending")
+        if isinstance(pending, dict) and pending is not keep and pending.get("status") in ("suggest", "held"):
+            sup["pending"] = None
+            try:
+                self._sup_record(task["id"], {"wake": pending.get("wake"), "phase": "outcome", "status": "superseded",
+                                              "events": pending.get("events") or [], "by": "fred", "action": action})
+            except OSError:
+                pass
+
+    def supervisor_action(self, body: dict) -> tuple:
+        """POST /api/task/supervisor: {task, mode} or {task, wake, action: approve|reject, note?}. A mode change is
+        Fred's act and never calls the model; Approve dispatches the saved decision only; Reject keeps its note for
+        the next real wake. Returns (status, body)."""
+        if not isinstance(body, dict):
+            return 400, {"error": "expected a JSON object"}
+        keys = set(body)
+        if keys == {"task", "mode"}:
+            if body["mode"] not in supervisor.MODES:
+                return 400, {"error": "mode must be off, suggest or auto"}
+        elif keys in ({"task", "wake", "action"}, {"task", "wake", "action", "note"}):
+            wake = body["wake"]
+            if isinstance(wake, bool) or not isinstance(wake, int) or wake < 1:
+                return 400, {"error": "wake must be a positive whole number"}
+            if body["action"] not in ("approve", "reject"):
+                return 400, {"error": "action must be approve or reject"}
+            note = body.get("note", "")
+            if not isinstance(note, str) or len(note) > supervisor.NOTE_MAX:
+                return 400, {"error": "note must be text of at most 2000 characters"}
+            if "note" in body and body["action"] != "reject":
+                return 400, {"error": "only a rejection carries a note"}
+        else:
+            return 400, {"error": "send {task, mode} or {task, wake, action}"}
+        tid = body["task"]
+        with self.tlock:
+            task = self.tasks.get(tid) if isinstance(tid, str) and tasks.safe_id(tid) else None
+            if task is None:
+                return 404, {"error": "unknown task"}
+            if "mode" in body:
+                return self._sup_mode(task, body["mode"])
+            if body["action"] == "approve":
+                return self._supervisor_dispatch(tid, body["wake"], "fred")
+            return self._sup_reject(task, body["wake"], body.get("note", "").strip())
+
+    def _sup_mode(self, task: dict, mode: str) -> tuple:
+        now = time.time()
+        before = copy.deepcopy(task.get("supervisor")) if isinstance(task.get("supervisor"), dict) else None
+        sup = task.get("supervisor")
+        if not isinstance(sup, dict):
+            sup = task["supervisor"] = supervisor.initial(self.cfg, task["project_dir"], now)
+        old = sup.get("mode")
+        sup["mode"] = mode
+        self._supervisor_fred(task, now, "mode")
+        if mode == "off":
+            self.wakes.pop(task["id"], None)
+            pending = sup.get("pending")
+            if isinstance(pending, dict) and pending.get("status") in ("suggest", "held", "escalate", "refused"):
+                sup["pending"] = None
+        line = {"ts": now, "step": task.get("current") or 0, "from": task["state"], "to": task["state"], "session": "",
+                "why": f"supervisor mode: {old} -> {mode} by Fred"}
+        try:
+            self._commit(task, [line])
+        except OSError as exc:
+            if before is None:
+                task.pop("supervisor", None)
+            else:
+                task["supervisor"] = before
+            return 500, {"error": f"the mode was not saved: {exc}"}
+        return 200, {"task": task["id"], "mode": mode}
+
+    def _sup_reject(self, task: dict, wake: int, note: str) -> tuple:
+        done = self._sup_outcome(task["id"], wake)
+        if done is not None:
+            if done.get("action") == "reject":
+                return 200, dict(done.get("body") or {}, repeated=True)
+            return 409, {"error": "this suggestion was already " + done.get("status", "handled")}
+        sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+        pending = sup.get("pending")
+        if not isinstance(pending, dict) or pending.get("wake") != wake:
+            return 409, {"error": "this suggestion was superseded"}
+        status = "dismissed" if pending.get("status") == "uncertain" else "rejected"
+        body = {"task": task["id"], "wake": wake, "status": status}
+        try:
+            self._sup_record(task["id"], {"wake": wake, "phase": "outcome", "status": status, "action": "reject",
+                                          "code": 200, "body": body, "note": note, "by": "fred",
+                                          "events": pending.get("events") or []})
+        except OSError as exc:
+            return 500, {"error": f"the rejection was not saved: {exc}"}
+        sup["pending"] = None
+        if note:
+            sup["reject_note"] = redact.clip(note, supervisor.NOTE_MAX)
+        try:
+            self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
+                                 "to": task["state"], "session": "", "why": f"supervisor: {status} wake {wake} by Fred"}])
+        except OSError:
+            pass
+        return 200, body
+
+    def supervisor_view(self, task: dict) -> dict:
+        """GET /api/task `supervisor`: mode, counters, caps and hold reason, the pending card and the last ten audit
+        entries (masked as written). A read: nothing changes."""
+        pol = supervisor.policy(self.cfg, task, time.time())
+        sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+        settings = pol["settings"]
+        spent, active = usage.supervisor_spent(self.folder, task=task["id"])
+        ledger = usage.load_supervisor(self.folder)
+        pending = sup.get("pending") if isinstance(sup.get("pending"), dict) else None
+        card = None
+        if pending:
+            decision = pending.get("decision") or {}
+            status = pending.get("status")
+            card = {"wake": pending.get("wake"), "decision": decision, "status": status,
+                    "reason": decision.get("reason", ""), "error": pending.get("error", ""),
+                    "can_approve": status == "suggest" and decision.get("decision") in
+                    ("add_next_step", "confirm", "keep", "retry", "stepdone", "stop", "finish"),
+                    "can_reject": status in supervisor.VISIBLE + ("uncertain",)}
+        try:
+            records = supervisor.read_log(self.folder, task["id"])
+        except ValueError:
+            records = []
+        audit = [{"ts": r.get("ts"), "wake": r.get("wake"), "phase": r.get("phase"), "status": r.get("status", ""),
+                  "decision": (r.get("decision") or {}).get("decision", "") if isinstance(r.get("decision"), dict) else "",
+                  "cost": r.get("cost"), "error": redact.clip(redact.mask(str(r.get("error") or "")), 200)}
+                 for r in records[-10:]]
+        hold = pol["reason"] or ledger["error"] or (
+            "supervisor: task cap reached" if spent >= settings["supervisor_task_usd"] else "")
+        return {"mode": pol["mode"], "reason": pol["reason"], "paused": pol["paused"], "wakes": sup.get("wakes", 0),
+                "usd": pol["usd"], "work_usd": pol["work_usd"], "epoch": pol["epoch"], "hold": hold,
+                "caps": {"auto_steps_left": pol["auto_steps_left"], "work_usd_left": pol["work_usd_left"],
+                         "task_usd_left": round(max(0.0, settings["supervisor_task_usd"] - spent - active), 4)},
+                "queued": task["id"] in self.wakes, "active": task["id"] in self.supervising,
+                "pending": card, "audit": audit}
 
     def _sup_drain_held(self) -> None:
         """A decision held by guidance: once the queue is empty, unchanged evidence and epoch make it a suggestion
@@ -1996,6 +2182,8 @@ class Hub:
             step["attempts"] = []
             # the reservation waits until the launch records a session, so the hub loop cannot start it too
             updated.update(state="waiting", owner="fred", why=f"starting step {step['n']:02d}")
+            if origin == "fred":
+                self._supervisor_fred(updated, now, "add_next")
             try:
                 tasks.write_step_file(self.folder, updated, step, "received-handoff.md", current[1]["text"])
                 tasks.write_step_file(self.folder, updated, step, "source-reply.md", current[1]["source_reply"])
@@ -2151,11 +2339,15 @@ class Hub:
             try:
                 if not create:
                     paths.write_text_atomic(tasks.folder(self.folder, tid) / "task-handoff.md", text)
-                    return 200, {"task": tid, "file": "task-handoff.md"}
+                    return 200, {"task": tid, "file": "task-handoff.md"}  # Save writes this file only (no epoch)
                 new = self._follow_up(task, follow, request, note, text, material)
                 with self.lock:
                     self.tasks[follow] = new
                 status, data = self._link_handoff(task, follow, text)
+                if status == 200:
+                    live = self.tasks.get(tid) or task
+                    self._supervisor_fred(live, time.time(), "handoff")
+                    self._commit(live)
             except OSError as exc:
                 return 409, {"error": f"The handoff could not be saved ({exc.strerror or exc}). Try again; the task is unchanged."}
             self.poll_once()
@@ -2191,6 +2383,7 @@ class Hub:
         steps = tasks.plan_steps([{"kind": "code", "goal": note or HANDOFF_GOAL}], 1)[:1]  # no verify: manual progression
         new = tasks.new_task(task["project_dir"], task["project"], "Continue: " + task["title"][:70], task.get("goal", ""),
                              steps, task["type"], task["demand"], "", task["effort"], time.time(), id_=follow)
+        new["supervisor"] = supervisor.initial(self.cfg, task["project_dir"], time.time())  # plan 44
         new.update(owner="fred", progression="manual", handoff_from=task["id"],
                    handoff_request={"request_id": request, "source": task["id"],
                                     "material": self._handoff_material_hash(material)})
@@ -2245,6 +2438,7 @@ class Hub:
             task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], planned,
                                   (card.get("route") or {}).get("type") or "", card.get("demand") or {},
                                   prep.summary(card), effort, time.time(), id_=self._free_id(card["id"]))
+            task["supervisor"] = supervisor.initial(self.cfg, folder, time.time())  # plan 44: the policy snapshot
             self._prep_files(task, card, planned[0]["goal"])
             tasks.save(self.folder, task)
             with self.lock:
@@ -2289,6 +2483,7 @@ class Hub:
                                   ((card or {}).get("route") or {}).get("type") or "", (card or {}).get("demand") or {},
                                   prep.summary(card), "auto", now, id_=self._free_id(card["id"]) if card else "")
             task.update(state="running", owner="window", current=1, chat=True)
+            task["supervisor"] = supervisor.initial(self.cfg, project_dir, now)  # plan 44: a chat never wakes
             self._prep_files(task, card, f"One chat on {rung}/{effort}.")
             got = ([f"{prep.DIR}/prompt.md (the goal, as sent)", f"{prep.DIR}/handoff.md (not sent: the chat runs the "
                     "prompt alone)"] if card else ["prompt.md (as typed; Prep skipped)"])
@@ -2998,6 +3193,12 @@ class Hub:
             task, cs = self.tasks[task_id], tasks.current_step(self.tasks[task_id])
             line = self._gap_decision(task, cs, text)
         status, body = self.pull(cs["session"], "continue", text)  # the task goes running in _ended, as any answer
+        if status == 200:
+            with self.tlock:
+                live = self.tasks.get(task_id)
+                if live:
+                    self._supervisor_fred(live, time.time(), "answer")
+                    self._commit(live)
         return status, dict(body, task=task_id, line=line) if status == 200 else body
 
     def _gap_decision(self, task: dict, cs: dict, text: str) -> str:
@@ -3034,6 +3235,7 @@ class Hub:
             rel = plan.write(self.folder, task, text, part)
             task["plan"].update(words=plan.words(found), kb=plan.kb(found))
             now = time.time()
+            self._supervisor_fred(task, now, "edit_plan")
             self._commit(task, [tasks._line(now, cs, task["state"], task["state"],
                                             "plan edited by Fred" + (f": part {part}" if part else ""))]
                          + [x for x in [self._mirror(task, cs, now)] if x])
@@ -3075,10 +3277,15 @@ class Hub:
                 self.runs.stop(cs["session"])
             note = note.strip()[:NOTE_MAX] if lever == "retry" and isinstance(note, str) else ""
             closed = cs if lever == "stepdone" else None
+            supervised = lever in ("pause", "resume") and self._sup_boundary(task)
+            if supervised and not isinstance(task.get("supervisor"), dict):  # a legacy policy, resolved here
+                task["supervisor"] = supervisor.initial(self.cfg, task["project_dir"], now)
             ok, why, lines = tasks.fred(task, lever, now, next_n=(self._next_step(task) or {}).get("n", 0), note=note,
-                                        model=model if lever == "retry" else None)
+                                        model=model if lever == "retry" else None, supervised=supervised)
             if not ok:
                 return 409, {"error": why}
+            if origin == "fred":
+                self._supervisor_fred(task, now, lever)
             if chat_route:
                 cs["manual_route"] = chat_route
             if closed:
@@ -3181,12 +3388,18 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
     handing = t["state"] == "handed" and not noted and r is not None and r["state"] in BUSY  # the skill writes it
     group = ("needs" if t["state"] in ("waiting", "stuck") or asks or hand_off or noted else
              "working" if t["state"] in ("planned", "running") or handing else "done")
+    sup = t.get("supervisor") if isinstance(t.get("supervisor"), dict) else {}
+    pending = sup.get("pending") if isinstance(sup.get("pending"), dict) else None
+    attention = bool(pending and pending.get("status") in ("suggest", "held", "escalate", "refused", "uncertain"))
+    if attention:  # plan 44: a suggestion, escalation or uncertain dispatch needs Fred, even on a done task
+        group = "needs"
     if t.get("chat") and r is not None:  # plan 30: a chat task sits where its session would (needs, replied, working)
         group = r["group"] if r["group"] in ("needs", "replied", "working") else "working" if r["group"] == "empty" else "done"  # stale, verified, idle: its turn is over
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
             "label": tasks.label(t["id"]), "slug": t.get("slug") or "", "chat": bool(t.get("chat")),
             "prep": prep_row(t),  # plan 30: step 0
             "group": group, "asks": asks, "hand_off": hand_off,
+            "supervisor": {"mode": sup.get("mode", ""), "attention": attention, "wake": sup.get("wakes", 0)},
             "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
             "why": t["why"], "updated": t["updated"], "effort": t["effort"],
             "cost": round(sum(tasks.step_cost(s) for s in t["steps"]), 4),
@@ -3329,6 +3542,7 @@ class Handler(BaseHTTPRequestHandler):
         routes["/api/task/answer"], routes["/api/task/plan"] = self._task_answer, self._task_plan
         routes["/api/task/next/preview"], routes["/api/task/next"] = self._task_next_preview, self._task_next
         routes["/api/task/message"] = self._task_message
+        routes["/api/task/supervisor"] = self._task_supervisor
         routes["/api/task/handoff/preview"], routes["/api/task/handoff"] = self._task_handoff_preview, self._task_handoff
         for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
@@ -3714,6 +3928,10 @@ class Handler(BaseHTTPRequestHandler):
         status, data = self.hub.request_next(body)
         return self._json(data, status)
 
+    def _task_supervisor(self, body):
+        status, data = self.hub.supervisor_action(body)
+        return self._json(data, status)
+
     def _task_handoff_preview(self, body):
         status, data = self.hub.task_handoff(body, preview=True)
         return self._json(data, status)
@@ -3738,6 +3956,7 @@ class Handler(BaseHTTPRequestHandler):
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
                            "handoff": tasks.read_handoff(self.hub.folder, task),
+                           "supervisor": self.hub.supervisor_view(task),  # plan 44 backend: the read projection
                            "handoff_available": self.hub.handoff_available(task),  # plan 44: the whole-task handoff
                            "handoff_document": self.hub._handoff_text(task, "task-handoff.md"),
                            "handoff_context": self.hub._handoff_text(task, "inherited-handoff.md"),

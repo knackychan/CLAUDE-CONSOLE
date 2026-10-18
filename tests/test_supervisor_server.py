@@ -470,6 +470,7 @@ class DispatchTest(WakeTest):
         task["steps"][0]["attempts"][-1]["why"] = "it hit the turn cap (30 turns)"
         task.update(state="stuck", owner="fred", why="it hit the turn cap (30 turns) (after one retry)")
         tasks.save(self.folder, task)
+        tasks.log(self.folder, tid, [tasks._line(110.0, task["steps"][0], "task:running", "task:stuck", task["why"])])
         return tid
 
     def test_dispatch_uses_existing_preview_revision_and_uuid(self):
@@ -674,6 +675,260 @@ class DispatchTest(WakeTest):
         with mock.patch.object(self.hub, "task_lever") as lever:
             self.assertEqual(self.hub._supervisor_dispatch(tid, 1, "auto")[0], 409)
         self.assertEqual(lever.call_count, 0)
+
+
+
+class ApprovalTest(DispatchTest):
+    """Plan 44 T7: mode/Approve/Reject API, read projections, human-action bookkeeping and the R2 Pause/Resume fix."""
+
+    def http(self):
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), type("H", (server.Handler,), {"hub": self.hub}))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        self.port = httpd.server_address[1]
+
+    def post(self, path, body, headers=None):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        sent = {"Host": f"127.0.0.1:{self.port}", "X-CC": "1", "Content-Type": "application/json"}
+        sent.update(headers or {})
+        conn.request("POST", path, body=json.dumps(body).encode("utf-8"), headers={k: v for k, v in sent.items() if v})
+        resp = conn.getresponse()
+        raw = resp.read()
+        conn.close()
+        try:
+            return resp.status, json.loads(raw or b"null")
+        except ValueError:
+            return resp.status, raw
+
+    def test_mode_endpoint_validation_guards_and_persistence(self):
+        self.http()
+        tid = self.supervised_task()
+        self.assertEqual(self.post("/api/task/supervisor", {"task": tid, "mode": "off"}, {"X-CC": ""})[0], 403)
+        self.assertEqual(self.post("/api/task/supervisor", {"task": tid, "mode": "off"}, {"Host": "evil.com"})[0], 403)
+        for bad in ({"task": tid, "mode": "loud"}, {"task": tid}, {"task": tid, "mode": "off", "wake": 1},
+                    {"task": tid, "wake": True, "action": "approve"}, {"task": tid, "wake": 0, "action": "approve"},
+                    {"task": tid, "wake": 1, "action": "rerun"}, {"task": tid, "wake": 1, "action": "reject", "note": 3},
+                    {"task": tid, "wake": 1, "action": "reject", "note": "x" * 2001}, {"task": tid, "mode": "off", "x": 1}):
+            self.assertEqual(self.post("/api/task/supervisor", bad)[0], 400, bad)
+        self.assertEqual(self.post("/api/task/supervisor", {"task": "20260101-000000-9999", "mode": "off"})[0], 404)
+        with mock.patch.object(tasks, "save", side_effect=OSError("disk")):
+            self.assertEqual(self.post("/api/task/supervisor", {"task": tid, "mode": "auto"})[0], 500)
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["mode"], "suggest")
+        self.assertEqual(self.post("/api/task/supervisor", {"task": tid, "mode": "auto"})[0], 200)
+        self.assertEqual(self.calls, [])  # a mode POST never calls the model
+        again = server.Hub(self.hub.cfg, self.folder, exe=self.hub.runs.exe)
+        self.assertEqual(again.tasks[tid]["supervisor"]["mode"], "auto")
+        self.assertIn("supervisor mode", tasks.read_chain(self.folder, again.tasks[tid])[-1]["why"])
+        # off cancels queued wakes and pending executable intent
+        self.pending(tid, ADD)
+        self.hub.wakes[tid] = {"due": 5.0, "triggers": ["choose_next"], "events": ["x"], "n": 1}
+        self.assertEqual(self.post("/api/task/supervisor", {"task": tid, "mode": "off"})[0], 200)
+        self.assertNotIn(tid, self.hub.wakes)
+        self.assertIsNone(self.hub.tasks[tid]["supervisor"]["pending"])
+
+    def test_suggest_does_nothing_until_approve_and_duplicate_approve_is_safe(self):
+        tid = self.stuck_task()
+        self.answer = dict(decision=dict(decision="retry", note="fix the line", reason="r", confidence="high",
+                                         for_fred=""), cost=0.001, model="sonnet", turns=2, error="")
+        self.hub._sup_hook(self.hub.tasks[tid])
+        with mock.patch.object(self.hub, "task_lever", wraps=self.hub.task_lever) as lever, \
+                mock.patch.object(self.hub, "start_step") as start:
+            for at in range(0, 300, 10):
+                self.tick(float(at))
+            self.drain()
+            self.assertEqual((lever.call_count, start.call_count), (0, 0))
+            self.assertEqual(self.hub.tasks[tid]["supervisor"]["pending"]["status"], "suggest")
+            body = {"task": tid, "wake": 1, "action": "approve"}
+            threads = [threading.Thread(target=self.hub.supervisor_action, args=(dict(body),)) for _ in range(3)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(10)
+            code, again = self.hub.supervisor_action(dict(body))
+        self.assertEqual(code, 200)
+        self.assertTrue(again.get("repeated"))
+        self.assertEqual(lever.call_count, 1)
+        self.assertEqual(self.hub.supervisor_action({"task": tid, "wake": 1, "action": "reject"})[0], 409)  # conflict
+
+    def test_stale_reject_uncertain_and_forbidden_approval(self):
+        self.hub.sup_recovered = True  # the fixture's boundary is represented by its saved pending card
+        tid = self.supervised_task()
+        self.pending(tid, ADD, wake=2)
+        self.assertEqual(self.hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})[0], 409)
+        code, _ = self.hub.supervisor_action({"task": tid, "wake": 2, "action": "reject", "note": "verify later"})
+        self.assertEqual(code, 200)
+        sup = self.hub.tasks[tid]["supervisor"]
+        self.assertEqual((sup["pending"], sup["reject_note"]), (None, "verify later"))
+        self.assertEqual(self.hub.supervisor_action({"task": tid, "wake": 2, "action": "reject"})[0], 200)  # saved
+        for at in range(0, 300, 10):
+            self.tick(float(at))
+        self.drain()
+        self.assertEqual(self.calls, [])  # a rejection never calls the model at once
+        # the rejection note reaches the next real wake's digest
+        tasks.log(self.folder, tid, [tasks._line(500.0, self.hub.tasks[tid]["steps"][0], "task:stuck",
+                                                 "task:waiting", "choose next step")])
+        self.hub._sup_hook(self.hub.tasks[tid])
+        self.tick(600.0)
+        self.drain()
+        self.assertIn("verify later", self.calls[0]["prompt"])
+        # uncertain: dismissal acknowledges without replay
+        other = self.stuck_task("20260101-000000-4444")
+        self.pending(other, dict(decision="retry", note="n", reason="r", confidence="high", for_fred=""),
+                     status="uncertain")
+        with mock.patch.object(self.hub, "task_lever") as lever:
+            self.assertEqual(self.hub.supervisor_action({"task": other, "wake": 1, "action": "approve"})[0], 409)
+            self.assertEqual(self.hub.supervisor_action({"task": other, "wake": 1, "action": "reject"})[0], 200)
+        self.assertEqual(lever.call_count, 0)
+        # answer / Fable / pace are never approvable
+        for why, decision in (("choose next step", dict(decision="answer", text="yes", reason="r",
+                                                         confidence="high", for_fred="")),
+                              ("confirm Fable", dict(decision="confirm", reason="r", confidence="high", for_fred="")),
+                              ("step 02 opus over its pace", dict(decision="confirm", reason="r", confidence="high",
+                                                                   for_fred=""))):
+            t = self.supervised_task("20260101-000000-5555")
+            self.hub.tasks[t]["why"] = why
+            self.pending(t, decision)
+            with mock.patch.object(self.hub, "task_lever") as lever:
+                self.assertEqual(self.hub.supervisor_action({"task": t, "wake": 1, "action": "approve"})[0], 409)
+            self.assertEqual(lever.call_count, 0)
+
+    def test_pending_attention_is_projected_without_state_change(self):
+        tid = self.supervised_task()
+        task = self.hub.tasks[tid]
+        task.update(state="done", owner="fred", why="")
+        self.pending(tid, dict(decision="escalate_to_fred", reason="r", confidence="low", for_fred="Anything left?"),
+                     status="escalate")
+        for i in range(12):
+            supervisor.append_log(self.folder, tid, {"ts": float(i), "wake": 1, "phase": "result", "status": "wait",
+                                                     "error": "token sk-secret12345678"})
+        view = self.hub.supervisor_view(task)
+        self.assertEqual(view["pending"]["status"], "escalate")
+        self.assertFalse(view["pending"]["can_approve"])
+        self.assertTrue(view["pending"]["can_reject"])
+        self.assertEqual(len(view["audit"]), 10)
+        self.assertNotIn("sk-secret12345678", json.dumps(view))
+        row = server.task_row(task)
+        self.assertEqual((row["group"], row["supervisor"]["attention"]), ("needs", True))
+        self.assertEqual((task["state"], task["why"]), ("done", ""))  # nothing pretends to be a transition
+        self.http()
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        conn.request("GET", f"/api/task?id={tid}", headers={"Host": f"127.0.0.1:{self.port}"})
+        got = json.loads(conn.getresponse().read())
+        conn.close()
+        self.assertEqual(got["supervisor"]["pending"]["wake"], 1)
+
+    def test_only_new_successful_fred_actions_reset_epoch(self):
+        def epoch(tid):
+            return self.hub.tasks[tid]["supervisor"]["epoch"]
+        tid = self.supervised_task()
+        sup = self.hub.tasks[tid]["supervisor"]
+        sup.update(auto_steps=2, retries={1: 1}, usd=0.2, wakes=5, work_usd=1.5)
+        self.assertEqual(self.hub.task_lever(tid, "pause")[0], 200)
+        self.assertEqual(epoch(tid), 1)
+        sup = self.hub.tasks[tid]["supervisor"]
+        self.assertEqual((sup["auto_steps"], sup["retries"], sup["work_usd"], sup["usd"], sup["wakes"]),
+                         (0, {}, 0.0, 0.2, 5))
+        self.assertEqual(self.hub.task_lever(tid, "pause")[0], 409)  # duplicate: refused, no reset
+        self.assertEqual(epoch(tid), 1)
+        self.assertEqual(self.hub.task_lever(tid, "retry")[0], 409)  # refused
+        self.assertEqual(epoch(tid), 1)
+        self.assertEqual(self.hub.task_lever(tid, "resume")[0], 200)
+        self.assertEqual(epoch(tid), 2)
+        self.hub.preview_next({"task": tid, "source_step": 1, "source_session": "s1", "kind": "code",
+                               "instructions": "x", "model": "auto"})  # a preview resets nothing
+        self.assertEqual(epoch(tid), 2)
+        with mock.patch.object(self.hub, "start_step"):
+            self.assertEqual(self.hub.task_lever(tid, "done", origin="supervisor")[0], 200)
+        self.assertEqual(epoch(tid), 2)  # an internal origin never counts as Fred
+        # request_next reservation counts once; its duplicate does not
+        other = self.supervised_task("20260101-000000-6666")
+        req = {"task": other, "source_step": 1, "source_session": "s1", "kind": "code", "instructions": "x",
+               "model": "auto", "request_id": "0d6d1f0e-0000-4000-8000-000000000001"}
+        req["revision"] = self.hub.preview_next(req)[1]["revision"]
+        with mock.patch.object(self.hub, "start_step"):
+            self.assertEqual(self.hub.request_next(dict(req))[0], 200)
+            self.assertEqual(epoch(other), 1)
+            self.hub.request_next(dict(req))
+        self.assertEqual(epoch(other), 1)
+        # new tasks carry a policy snapshot
+        self.assertIn("supervisor", self.hub.tasks[other])
+
+    def test_pause_holds_supervisor_but_manual_boundary_does_not(self):
+        tid = self.supervised_task()
+        task = self.hub.tasks[tid]
+        self.assertEqual(self.hub.task_levers(tid)["pause"], "")  # a manual boundary is not a Pause
+        self.hub._sup_hook(task)
+        self.assertEqual(self.hub.task_lever(tid, "pause")[0], 200)
+        for at in range(0, 300, 10):
+            self.tick(float(at))
+        self.assertEqual(self.calls, [])
+        again = server.Hub(self.hub.cfg, self.folder, exe=self.hub.runs.exe)
+        self.assertTrue(again.tasks[tid]["supervisor"]["paused"])
+        self.assertEqual(self.hub.task_lever(tid, "resume")[0], 200)
+        self.assertEqual(self.calls, [])  # Resume makes no wake and no model call by itself
+
+    def test_manual_boundary_pause_resume_uses_shared_gates(self):
+        for i, (why, mode) in enumerate((w, m) for w in ("choose next step", "VERDICT: FAIL: test_x fails")
+                                        for m in ("suggest", "auto")):
+            if True:
+                with self.subTest(why=why, mode=mode):
+                    self.calls.clear()
+                    tid = self.supervised_task(f"20260101-00000{i}-8888")
+                    task = self.hub.tasks[tid]
+                    task["why"], task["supervisor"]["mode"] = why, mode
+                    tasks.log(self.folder, tid, [tasks._line(101.0, task["steps"][0], "task:running", "task:waiting", why)])
+                    self.hub.sup_recovered = True
+                    self.hub.wakes.clear()
+                    self.now = 0.0
+                    self.hub._sup_hook(task)
+                    self.assertEqual(self.hub.task_lever(tid, "pause")[0], 200)
+                    self.assertEqual(self.hub.task_levers(tid)["pause"], "already paused")
+                    self.tick(100.0)
+                    self.assertEqual(self.calls, [])
+                    with mock.patch.object(self.hub, "start_step") as start:
+                        self.assertEqual(self.hub.task_lever(tid, "resume")[0], 200)
+                    self.assertEqual(start.call_count, 0)
+                    task = self.hub.tasks[tid]
+                    self.assertEqual((task["owner"], task["state"], task["why"], task["current"]),
+                                     ("fred", "waiting", why, 1))
+                    self.assertEqual(self.hub.task_lever(tid, "resume")[0], 409)  # duplicate
+                    self.tick(200.0)
+                    self.drain()
+                    self.assertEqual(len(self.calls), 1)  # the original deferred event, once
+                    self.tick(400.0)
+                    self.drain()
+                    self.assertEqual(len(self.calls), 1)
+        # an automatic task's Pause and Resume keep their behavior
+        auto = self.supervised_task("20260101-000000-7777")
+        self.hub.tasks[auto].update(progression=None, owner="service", state="running", why="")
+        self.assertEqual(self.hub.task_lever(auto, "pause")[0], 200)
+        self.assertEqual(self.hub.tasks[auto]["owner"], "fred")
+        with mock.patch.object(self.hub, "start_step"):
+            self.assertEqual(self.hub.task_lever(auto, "resume")[0], 200)
+        self.assertEqual(self.hub.tasks[auto]["owner"], "service")
+
+    def test_manual_boundary_pause_resume_during_pass_never_dispatches_old_advice(self):
+        tid = self.supervised_task()
+        self.answer = dict(decision=dict(ADD), cost=0.003, model="haiku", turns=2, error="")
+        self.gate.clear()
+        self.hub._sup_hook(self.hub.tasks[tid])
+        self.tick(30.0)
+        self.assertEqual(self.hub.task_lever(tid, "pause")[0], 200)
+        self.assertEqual(self.hub.task_lever(tid, "resume")[0], 200)
+        with mock.patch.object(self.hub, "request_next") as request:
+            self.gate.set()
+            self.drain()
+            for at in range(40, 400, 10):
+                self.tick(float(at))
+            self.drain()
+            self.assertEqual(self.hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})[0], 409)
+        self.assertEqual(request.call_count, 0)
+        self.assertEqual(len(self.calls), 1)  # no retry of its consumed event
+        self.assertAlmostEqual(self.hub.tasks[tid]["supervisor"]["usd"], 0.003)
+        self.assertEqual(usage.load_supervisor(self.folder)["records"][supervisor.request_id(tid, 1)]["cost"], 0.003)
 
 
 if __name__ == "__main__":

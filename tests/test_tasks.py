@@ -843,6 +843,23 @@ class ChainTest(unittest.TestCase):
             tasks.clear(home, task, keep_last=True)
             self.assertEqual(path.read_bytes(), b'{"wake": 1, "phase": "result", "cost": 0.01}\n')
 
+    def test_confirm_manual_plan_returns_to_choose_next(self):
+        task = make(("design",))  # plan 44 T7: a manual design's plan hold goes back to the boundary
+        task["progression"] = "manual"
+        s = task["steps"][0]
+        s.update(state="done", session="s1")
+        task.update(state="waiting", owner="fred", why="plan 30 KB, over 24", current=1, last_good=1,
+                    plan={"from": 1, "dir": "01-design", "parts": []})
+        ok, _, lines = tasks.fred(task, "confirm", NOW)
+        self.assertTrue(ok)
+        self.assertEqual((task["state"], task["why"], task["owner"], len(task["steps"])),
+                         ("waiting", "choose next step", "fred", 1))
+        auto = make(("design", "code"))
+        auto["steps"][0].update(state="done", session="s1")
+        auto.update(state="waiting", owner="service", why="plan ready: confirm", current=1, last_good=1)
+        self.assertTrue(tasks.fred(auto, "confirm", NOW)[0])
+        self.assertEqual(auto["state"], "running")  # automatic confirmation unchanged
+
     def test_prune_keeps_everything_at_zero_days(self):
         self.assertEqual(paths.DEFAULTS["task_retention_days"], 0)  # plan 28 (D9)
         with tempfile.TemporaryDirectory() as home:

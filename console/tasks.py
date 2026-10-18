@@ -724,13 +724,30 @@ def held(task: dict) -> bool:
     return task["state"] == "waiting" and task["why"].endswith(" over its pace")
 
 
-def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", model=None):
+def manual_boundary(task: dict) -> bool:
+    """Plan 44 (R2): a manual task at its choose-next or FAIL boundary: owner fred, current step done, waiting."""
+    s = current_step(task) if task.get("current") else None
+    why = task.get("why", "")
+    return bool(task.get("progression") == "manual" and task.get("owner") == "fred" and task.get("state") == "waiting"
+                and s and s["state"] == "done" and (why == "choose next step" or why.startswith("VERDICT: FAIL")))
+
+
+def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", model=None, supervised: bool = False):
     """Fred's levers on the task state. (True, "", chain lines) when it applies, else (False, why, []).
     Confirm is the Fable confirm, or Run anyway for a budget hold of step `next_n` (that step only). Continue is
     Fred's Continue in the session of a stopped task's current step: the task runs on in that session. Handoff is
     Fred's Hand off in the current step's chat: the task is handed over and nothing more starts. Done is Fred's
     Mark done on a task that waits, is stuck, stopped or handed over."""
     state, s, lines = task["state"], current_step(task), []
+    if supervised and lever in ("pause", "resume") and manual_boundary(task):  # plan 44 R2: the explicit bit
+        sup = task["supervisor"]
+        if (sup.get("paused") is True) == (lever == "pause"):
+            return False, "already paused" if lever == "pause" else "not paused", []
+        sup["paused"] = lever == "pause"
+        task["updated"] = now
+        lines.append(_line(now, s, "task:" + state, "task:" + state, ("paused" if lever == "pause" else "resumed")
+                           + " by Fred"))
+        return True, "", lines
     if lever == "stop":
         if state in ("done", "stopped"):
             return False, f"task is {state}", []
@@ -813,6 +830,7 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
             return False, "no plan change waits", []
         lines += replan.keep(task, now)
         _task_to(task, "running", "", now, s, lines)
+        _manual_back(task, s, now, lines)
     elif lever == "redo":  # Redo design: the design step plans again with the question; done steps stay done
         design = next((x for x in task["steps"] if x["kind"] == "design"), None)
         waits = state == "waiting" and (task["why"].startswith("asks: Plan gap:") or task["why"].startswith("plan "))
@@ -846,9 +864,18 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
         else:
             return False, "nothing to confirm", []
         _task_to(task, "running", "", now, s, lines)
+        _manual_back(task, s, now, lines)
     else:
         return False, f"unknown lever: {lever}", []
     return True, "", lines
+
+
+def _manual_back(task: dict, s, now: float, lines: list) -> None:
+    """Plan 44 T7: a manual task whose plan hold Fred confirmed (or kept) has no planned tail to run: a done
+    current step returns to the choose-next boundary, owner fred. Automatic tasks run on as before."""
+    if task.get("progression") == "manual" and s and s["state"] == "done":
+        _task_to(task, "waiting", "choose next step", now, s, lines)
+        task["owner"] = "fred"
 
 
 # -- files ------------------------------------------------------------------------------------------------
