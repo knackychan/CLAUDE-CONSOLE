@@ -293,12 +293,27 @@ class Hub:
         name = claude_cli.split_rung(rung)[0]
         return f"{name}: could not write in this step; the retry uses another harness" if name in (s.get("avoid") or ()) else ""
 
-    def limited(self, rung: str) -> str:
+    def limit_key(self, rung: str) -> str:
+        """The limits.json key that keeps `rung` out now: its provider or the rung itself (plan 45), "" when none."""
         now = time.time()
         self.limits = {key: hit for key, hit in self.limits.items() if float(hit.get("until") or 0) > now}
-        provider = limits.provider(rung)
-        hit = self.limits.get(provider)
-        return f"{provider}: {hit['why']}, until {limits.clock(hit['until'])}" if hit else ""
+        return next((k for k in (limits.provider(rung), rung) if k in self.limits), "") if isinstance(rung, str) else ""
+
+    def limited(self, rung: str) -> str:
+        key = self.limit_key(rung)
+        hit = self.limits.get(key)
+        return f"{key}: {hit['why']}, until {limits.clock(hit['until'])}" if hit else ""
+
+    def clear_limit(self, key: str) -> bool:
+        """Plan 45 D3: Fred says the provider or model is back; False when there is no such entry."""
+        with self.lock:
+            if self.limits.pop(key, None) is None:
+                return False
+            try:
+                limits.save(self.folder, self.limits)
+            except OSError:
+                pass
+        return True
 
     def poll_once(self) -> int:
         with self.lock:  # request threads call this too, right after they add a line
@@ -868,7 +883,7 @@ class Hub:
         """/api/config `tiers`: every rung of each tier as config.json lists it, with its rank, model key, whether it
         is hard only, and why it cannot run now ("" when it can). The window hides a rung with a reason."""
         return {tier: [{"rung": r, "effort": e, "rank": fills.rank_of(r, self.cfg), "key": fills.model_key(r, self.cfg),
-                        "hard": fills.hard_only(r, tier, self.cfg), "why": self.rung_ok(r)}
+                        "hard": fills.hard_only(r, tier, self.cfg), "why": self.rung_ok(r), "limit": self.limit_key(r)}
                        for r, e in fills.tier_rungs(self.cfg, tier)] for tier in tasks.TIERS}
 
     def last_reply(self, sid: str) -> str:
@@ -1567,6 +1582,9 @@ class Hub:
             return False
         if pol["paused"] or tasks.pending_messages(task) or task.get("briefing") or tid in self.briefing:
             return False  # retained until the existing path resolves it (a Pause defers, Resume lets it drain)
+        held = (task.get("supervisor") or {}).get("pending")
+        if isinstance(held, dict) and held.get("status") in ("uncertain", "dispatching"):
+            return False  # plan 44 T12: an uncertain dispatch waits for Fred's dismissal; no pass overwrites it
         special = set(entry["triggers"]) & {"stalled", "stalled_stop"}
         if special:
             if not self._sup_special_ok(task, entry):
@@ -3173,7 +3191,7 @@ class Hub:
             cs["avoid"] = sorted(set(cs.get("avoid") or ()) | {claude_cli.split_rung(cs["model"])[0]})
         hit = summary.get("limit")
         if hit:
-            provider = limits.provider(cs["model"])
+            provider = limits.key(cs["model"], hit)
             self.limits[provider] = {"until": limits.until(hit, now, self.cfg["limit_cooldown_s"]),
                                      "why": hit["why"]}
             try:
@@ -3888,7 +3906,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/open_folder": lambda body: self._allow(body, sessions_only=False),
                   "/api/done": self._done, "/api/task": self._task_new, "/api/review": self._review,
                   "/api/config/models": self._config_models, "/api/setting": self._setting,
-                  "/api/harness": self._harness, "/api/models/reload": self._models_reload,
+                  "/api/harness": self._harness, "/api/models/reload": self._models_reload, "/api/limits/clear": self._limits_clear,
                   "/api/models/open": self._models_open, "/api/kind": self._kind_save,
                   "/api/tasks/delete": self._tasks_delete, "/api/task/folder": self._task_folder}
         for lever in ("continue", "verify", "handoff", "escalate"):
@@ -4026,6 +4044,12 @@ class Handler(BaseHTTPRequestHandler):
     def _models_reload(self, body):
         self.hub.reload_models(force=True)
         return self._json({"models_file": self.hub.models_file(), "harnesses": self.hub.harnesses()})
+
+    def _limits_clear(self, body):
+        """Plan 45 D3: drop one usage-limit entry; the answer is the config, so the Tiers page shows the rungs again."""
+        if not self.hub.clear_limit(str(body.get("key") or "")):
+            return self._error(404, "no such limit")
+        return self._json(self._config())
 
     def _models_open(self, body):
         """Open models.json in Fred's editor: the one fixed path, nothing from the caller."""

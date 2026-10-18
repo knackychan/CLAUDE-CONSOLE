@@ -2337,6 +2337,15 @@ function whyHidden(rung) {
   for (const rows of Object.values(cfg.tiers || {})) { const x = rows.find((r) => r.rung === rung); if (x) return x.why; }
   return "";
 }
+function limitOf(rung) {
+  for (const rows of Object.values(cfg.tiers || {})) { const x = rows.find((r) => r.rung === rung); if (x) return x.limit || ""; }
+  return "";
+}
+function clearBtn(key) { return `<button class="rs" data-mclear="${esc(key)}" title="The limit is over: route ${esc(key)} again; the next run finds a real limit again">clear</button>`; }
+async function clearLimit(key) {  // only cfg is replaced: unsaved tier edits stay
+  try { cfg = await api("/api/limits/clear", { key }); mmsg = ""; } catch (e) { mmsg = e.message; }
+  renderModels();
+}
 function cardHead(id, name, fact, help) {
   const open = mqOpen.has(id);
   return `<div class="ph"><span class="nm">${esc(name)}</span><button class="q" data-q="${esc(id)}" aria-expanded="${open}" aria-label="What is ${esc(name)}?" title="${esc(help)}">?</button><span class="m">${fact}</span></div><p class="qh"${open ? "" : " hidden"}>${esc(help)}</p>`;
@@ -2419,11 +2428,12 @@ function tierCard(tier) {
       ${effSel(r.effort, m, `data-meff="${tier}:${i}"`)}<button class="x" data-mrm="${tier}:${i}" aria-label="Remove ${esc(m)}" title="Remove from ${tier}">&#10005;</button></div>`;
   }).join("");
   const open = mqOpen.has("h" + tier);  // plan 27 B6: the hidden rungs listed on demand, each with its remove button (a model gone from models.json blocks its tier's Save)
-  const hid = hidden.length ? `<div class="rhid" title="Turn the CLI on in Settings and its models come back">${hidden.length} hidden · ${esc(whyHidden(hidden[0].rung))} · <button class="rs" data-q="h${tier}" aria-expanded="${open}">${open ? "hide" : "show"}</button></div>` : "";
+  const lim = hidden.length ? limitOf(hidden[0].rung) : "";  // plan 45 D3: Fred clears a limit the service still holds
+  const hid = hidden.length ? `<div class="rhid" title="Turn the CLI on in Settings and its models come back">${hidden.length} hidden · ${esc(whyHidden(hidden[0].rung))}${lim ? ` · ${clearBtn(lim)}` : ""} · <button class="rs" data-q="h${tier}" aria-expanded="${open}">${open ? "hide" : "show"}</button></div>` : "";
   const gone = rows.map((r, i) => {
     if (!open || !whyHidden(r.rung)) return "";
-    const m = r.rung.includes(":") ? r.rung.slice(r.rung.indexOf(":") + 1) : r.rung;
-    return `<div class="rhid one"><span class="nm">${esc(modelText(r.rung))} · ${esc(whyHidden(r.rung))}</span><button class="x" data-mrm="${tier}:${i}" aria-label="Remove ${esc(m)}" title="Remove from ${tier}">&#10005;</button></div>`;
+    const m = r.rung.includes(":") ? r.rung.slice(r.rung.indexOf(":") + 1) : r.rung, k = limitOf(r.rung);
+    return `<div class="rhid one"><span class="nm">${esc(modelText(r.rung))} · ${esc(whyHidden(r.rung))}</span>${k ? clearBtn(k) : ""}<button class="x" data-mrm="${tier}:${i}" aria-label="Remove ${esc(m)}" title="Remove from ${tier}">&#10005;</button></div>`;
   }).join("");
   const add = addOptions(tier);
   return `<div class="pcard">${cardHead("t" + tier, KCARD[tier][0], `${n} ${n === 1 ? "rung" : "rungs"}`, KCARD[tier][3])}${body}${hid}${gone}
@@ -2563,6 +2573,8 @@ $("mscroll").addEventListener("input", (e) => { if (e.target.id === "mrole" && m
 $("mscroll").addEventListener("click", (e) => {
   const r = e.target.closest("[data-mrole],[data-mroleact]");
   if (r) { if (!r.disabled) roleAct(r.dataset.mrole || "", r.dataset.mrole ? "open" : r.dataset.mroleact); return; }
+  const c = e.target.closest("[data-mclear]");
+  if (c) { clearLimit(c.dataset.mclear); return; }
   const t = e.target.closest("[data-q],[data-mreset],[data-mrm],[data-mbool]");
   if (!t) return;
   if (t.dataset.q) { if (!mqOpen.delete(t.dataset.q)) mqOpen.add(t.dataset.q); }

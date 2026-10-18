@@ -414,6 +414,12 @@ class OpenCodeTest(unittest.TestCase):
         rejected["rate_limit_info"]["status"] = "allowed"
         self.assertIsNone(claude_adapter.summary([rejected])["limit"])
 
+    def test_claude_credits_required_limits_the_model_only(self):  # plan 45 D1 (session 14763dcd)
+        event = {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 1793491200,
+                 "overageDisabledReason": "org_level_disabled", "errorCode": "credits_required"}}
+        self.assertEqual(claude_adapter.summary([event])["limit"],
+                         {"why": "credits required", "until": 1793491200, "window_s": None, "model": True})
+
     def test_terminal_command(self):
         self.assertEqual(opencode.terminal_command(["opencode"], "ses_1", "glm-5.3", "high"),
                          ["opencode", "-s", "ses_1", "-m", "glm-5.3"])

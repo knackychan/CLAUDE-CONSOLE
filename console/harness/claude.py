@@ -52,7 +52,9 @@ def summary(lines: list) -> dict:
                 hit = {"why": text[:160], "until": None, "window_s": limits.window_s(text)}
         elif d.get("type") == "rate_limit_event":
             info = d.get("rate_limit_info") or {}
-            if info.get("status") == "rejected":
+            if info.get("status") == "rejected" and info.get("errorCode") == "credits_required":  # plan 45: this model only
+                hit = {"why": "credits required", "until": info.get("resetsAt"), "window_s": None, "model": True}
+            elif info.get("status") == "rejected":
                 name = str(info.get("rateLimitType") or "usage").replace("_", " ")
                 hit = {"why": f"{name} limit", "until": info.get("resetsAt"), "window_s": None}
     result = result or {}

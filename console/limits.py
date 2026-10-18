@@ -19,6 +19,11 @@ def provider(rung: str) -> str:
     return name
 
 
+def key(rung: str, hit: dict) -> str:
+    """The limits.json key of a hit: the rung itself when only that model is refused (plan 45), else its provider."""
+    return rung if hit.get("model") else provider(rung)
+
+
 def window_s(text: str):
     for pattern, seconds in WINDOWS:
         m = re.search(pattern, text or "", re.I)
@@ -50,5 +55,8 @@ def save(folder, data: dict) -> None:
     tmp.replace(path)
 
 
-def clock(ts: float) -> str:
-    return time.strftime("%H:%M", time.localtime(ts))
+def clock(ts: float, now: float = None) -> str:
+    """HH:MM when `ts` is today, else with the day (plan 45: "until 08:00" read as this morning)."""
+    day = time.localtime(time.time() if now is None else now)[:3]
+    at = time.localtime(ts)
+    return time.strftime("%H:%M" if at[:3] == day else "%a %d %b %H:%M", at)

@@ -341,6 +341,16 @@ class NextStepUITest(unittest.TestCase):
             self.assertIn(text, html)
         self.assertNotIn("kimi-k3", html)
 
+    def test_tier_card_offers_clear_on_a_limited_rung(self):
+        """Plan 45 D3: the hidden line and a limited hidden row carry a clear link with the limit's key."""
+        cfg = {"models": ["opus"], "ladder": {}, "harnesses": {}, "efforts": ["high"],
+               "tiers": {"think": [{"rung": "fable", "rank": "fable", "why": "fable: credits required, until 08:00", "limit": "fable"},
+                                   {"rung": "opus", "rank": "opus", "why": "", "limit": ""}], "write": [], "read": []}}
+        setup = (f"cfg = {json.dumps(cfg)}; medit = {{tiers: {{think: [{{rung: 'fable'}}, {{rung: 'opus'}}]}}}}; ")
+        html = render(setup + "tierCard('think')")
+        self.assertEqual(html.count('data-mclear="fable"'), 1)
+        self.assertEqual(render(setup + "mqOpen.add('hthink'); tierCard('think')").count('data-mclear="fable"'), 2)
+
     def test_handed_box_offers_retry_when_the_service_allows_it(self):
         """Plan 40 Task 5: a handed task with no note and a failed step shows the retry form and the failed-run line."""
         cfg = {"models": ["opus"], "ladder": {"opus": ["opus"]}, "tiers": {"think": [], "write": [], "read": []}}

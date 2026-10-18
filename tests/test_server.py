@@ -15,7 +15,7 @@ from urllib.parse import quote
 from pathlib import Path
 from unittest import mock
 
-from console import attach, brief, claude_cli, events, guard, levers, paths, server, tasks, usage
+from console import attach, brief, claude_cli, events, guard, levers, limits, paths, server, tasks, usage
 from console.harness import codex as codex_adapter
 
 
@@ -2690,6 +2690,27 @@ class HarnessServerTest(TaskServerTest):
         tiers = self.call("/api/config")[1]["tiers"]
         row = next(r for r in tiers["think"] if r["rung"] == "opencode:opencode-go/kimi-k3")
         self.assertIn("5 hour limit", row["why"])
+
+    def test_model_limit_refuses_that_rung_only(self):  # plan 45 D1
+        self.hub.limits["fable"] = {"until": time.time() + 60, "why": "credits required"}
+        self.assertIn("fable: credits required, until ", self.hub.rung_ok("fable"))
+        self.assertEqual(self.hub.rung_ok("opus"), "")
+
+    def test_config_tiers_carry_the_limit_key(self):  # plan 45 D3
+        self.hub.cfg["tiers"]["think"] = ["fable", "opus"]
+        self.hub.limits["claude"] = {"until": time.time() + 60, "why": "usage limit"}
+        rows = self.call("/api/config")[1]["tiers"]["think"]
+        self.assertEqual({r["rung"]: r["limit"] for r in rows}, {"fable": "claude", "opus": "claude"})
+
+    def test_clear_limit_drops_the_entry_and_the_file(self):  # plan 45 D3
+        self.hub.limits = {"claude": {"until": time.time() + 60, "why": "usage limit"}}
+        limits.save(self.hub.folder, self.hub.limits)
+        status, data = self.call("/api/limits/clear", {"key": "claude"})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(self.hub.rung_ok("opus"), "")
+        self.assertEqual(limits.read(self.hub.folder), {})
+        self.assertTrue(all(r["limit"] == "" for r in data["tiers"]["think"]))
+        self.assertEqual(self.call("/api/limits/clear", {"key": "claude"})[0], 404)
 
     def test_auto_chat_keeps_fable_explicit_and_refuses_an_empty_pool(self):
         card = self.prep_card("THINK about the design")
