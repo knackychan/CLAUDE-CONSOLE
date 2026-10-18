@@ -3,6 +3,7 @@ step's raw note, plus the brief before it, into what the next step needs, under 
 decides nothing: code puts the Goal and the Troubleshooting back whole, checks its answer, cuts findings first, and
 falls back to fixed cuts, so a failed pass never stops the chain."""
 import json
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -241,12 +242,26 @@ def as_is(cfg: dict, prev_brief: str, raw: str) -> str:
     return text if words(text) <= cfg["brief_max_words"] else ""
 
 
+def _budget_arg(max_cost: float) -> str:
+    """--max-budget-usd's value, rounded down to a millionth so a tiny remaining allowance is never raised."""
+    text = f"{math.floor(max_cost * 1_000_000) / 1_000_000:.6f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
 def _ask(cfg: dict, exe: list, project_dir: str, prompt: str, schema: dict = BRIEF_SCHEMA, info: dict = None,
-         model: str = ""):
+         model: str = "", *, max_cost: float = 0.0, safe_mode: bool = False):
     """One `claude -p` pass on `model` (default brief_model) with no tools, the answer shaped by `schema`; (answer
-    dict, cost) or BriefError with the reason. `info`, when given, gets the pass's `turns`. The replan and the
-    whole-task handoff passes use it too."""
+    dict, cost) or BriefError with the reason. `info`, when given, gets the pass's `turns` and its reported `cost`
+    (None when unknown, set before any failure is raised so a paid failure keeps its cost). The replan and the
+    whole-task handoff passes use it too. Plan 44: a positive `max_cost` adds --max-budget-usd; `safe_mode` (the
+    supervisor only) adds --safe-mode and denies every MCP tool, so no CLAUDE.md, memory or plugin rides along."""
     cmd = claude_cli.brief_command(exe, model or cfg["brief_model"], schema)
+    if max_cost and max_cost > 0:
+        cmd += ["--max-budget-usd", _budget_arg(max_cost)]
+    if safe_mode:
+        cmd += ["--safe-mode", "--disallowedTools", "mcp__*"]
+    if info is not None:
+        info["cost"] = None
     try:
         out = subprocess.run(cmd, cwd=project_dir, input=prompt.encode("utf-8"), capture_output=True,
                              timeout=cfg["brief_timeout_s"], env=claude_cli.child_env(),
@@ -254,6 +269,8 @@ def _ask(cfg: dict, exe: list, project_dir: str, prompt: str, schema: dict = BRI
     except subprocess.TimeoutExpired:
         raise BriefError(f"the brief took longer than {cfg['brief_timeout_s']} s")
     except OSError as exc:
+        if info is not None:
+            info["cost"] = 0.0  # it never started: nothing was paid
         raise BriefError(f"cannot start claude: {exc}")
     stdout = out.stdout.decode("utf-8", "replace")
     try:
@@ -262,11 +279,17 @@ def _ask(cfg: dict, exe: list, project_dir: str, prompt: str, schema: dict = BRI
         raise BriefError("the brief returned no JSON: " + redact.clip(stdout, 120))
     if not isinstance(data, dict):
         raise BriefError("the brief returned no JSON object")
+    cost = data.get("total_cost_usd")
+    known = isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost) and cost >= 0
+    if info is not None:
+        info["cost"] = float(cost) if known else None
     if data.get("is_error"):
         detail = data.get("subtype") or data.get("terminal_reason") or "no reason given"
         raise BriefError("the brief failed: " + redact.clip(str(detail), 200))
     if info is not None:
         info["turns"] = int(data.get("num_turns") or 0)
+    if out.returncode:
+        raise BriefError(f"claude exited with code {out.returncode}")
     fields = data.get("structured_output")
     if not isinstance(fields, dict):
         raise BriefError("the brief returned no structured output")

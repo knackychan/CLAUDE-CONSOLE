@@ -8,8 +8,9 @@ import math
 import os
 import re
 import uuid
+from string import Template
 
-from . import plan, redact, tasks
+from . import compact, kinds, plan, redact, tasks
 
 MODES = ("off", "suggest", "auto")
 
@@ -454,34 +455,46 @@ def _text(value, limit: int, blank_ok: bool = False) -> bool:
     return isinstance(value, str) and len(value) <= limit and (blank_ok or bool(value.strip()))
 
 
-def check(decision, task: dict, levers: dict, sources: dict, policy: dict) -> tuple:
-    """(ok, why) for one model decision against the live gates: shape first, then the action's own rule. Pure: no
-    files, no mutation. `policy` carries triggers, owned source steps and retries_left; it can only narrow what the
-    supplied levers/sources allow, never override a refusal. Confidence grants nothing."""
+def shape(decision) -> str:
+    """"" when `decision` has the schema's shape (fields, types, enums, sizes, per-decision fields), else why. The
+    runner rejects a bad shape; check() adds the live gates."""
     if not isinstance(decision, dict):
-        return False, "decision is not an object"
+        return "decision is not an object"
     for key in decision:
         if key not in SCHEMA["properties"]:
-            return False, f"unknown field {key}"
+            return f"unknown field {key}"
     for key in SCHEMA["required"]:
         if not isinstance(decision.get(key), str):
-            return False, f"{key} is missing or not text"
+            return f"{key} is missing or not text"
     kind = decision["decision"]
     if kind not in DECISIONS:
-        return False, "unknown decision"
+        return "unknown decision"
     if not _text(decision["reason"], REASON_MAX):
-        return False, "reason must be 1 to 1000 characters"
+        return "reason must be 1 to 1000 characters"
     if decision["confidence"] not in CONFIDENCE:
-        return False, "confidence must be low, medium or high"
+        return "confidence must be low, medium or high"
     if not _text(decision["for_fred"], FOR_FRED_MAX, blank_ok=True):
-        return False, "for_fred is over 400 characters"
+        return "for_fred is over 400 characters"
     for key, typ in _OPTIONAL.items():
         if key in decision:
             value = decision[key]
             if not isinstance(value, typ) or isinstance(value, bool):
-                return False, f"{key} has the wrong type"
+                return f"{key} has the wrong type"
             if key not in _FIELDS.get(kind, ()):
-                return False, f"{key} is not a field of {kind}"
+                return f"{key} is not a field of {kind}"
+    if "text" in decision and len(decision["text"]) > TEXT_MAX:
+        return "text is over 400 characters"
+    return ""
+
+
+def check(decision, task: dict, levers: dict, sources: dict, policy: dict) -> tuple:
+    """(ok, why) for one model decision against the live gates: shape first, then the action's own rule. Pure: no
+    files, no mutation. `policy` carries triggers, owned source steps and retries_left; it can only narrow what the
+    supplied levers/sources allow, never override a refusal. Confidence grants nothing."""
+    why = shape(decision)
+    if why:
+        return False, why
+    kind = decision["decision"]
     levers, sources, policy = levers or {}, sources or {}, policy or {}
     triggers = policy.get("triggers") or []
     if kind == "answer":
@@ -526,3 +539,58 @@ def check(decision, task: dict, levers: dict, sources: dict, policy: dict) -> tu
     if lever != "":
         return False, lever or f"{kind} is off"
     return True, ""
+
+
+# -- the one bounded pass (Task 4) -------------------------------------------------------------------------
+
+SCHEMA_REMINDER = ("Answer with one JSON object that matches the given schema: decision, reason, confidence and "
+                   "for_fred, plus only the fields that decision takes. The digest follows.")
+
+
+def build_prompt(raw: str, task: dict, digest_text: str, you: str = "the user") -> str:
+    """The pass's stdin: the supervisor kind body ($you/$You filled), the schema reminder, then the digest last
+    and untouched (its dollar signs are evidence, never template slots). Built once per claim; the same string is
+    hashed and run."""
+    you = you or "the user"
+    body = Template(kinds.body_of(raw)).safe_substitute(you=you, You=you[:1].upper() + you[1:])
+    return f"{body}\n\n{SCHEMA_REMINDER}\n\n{digest_text}"
+
+
+def prompt_hash(prompt: str) -> str:
+    """R3: SHA256 of the exact UTF-8 prompt sent on stdin; no normalization, no file reads."""
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+def pass_model(settings: dict, triggers) -> str:
+    """haiku normally; the stuck model (sonnet) on a stuck or stalled wake only (D4 a). Never opus or fable."""
+    stuck = any(t in ("stuck", "stalled") for t in triggers or ())
+    return settings["supervisor_stuck_model"] if stuck else settings["supervisor_model"]
+
+
+def run(cfg: dict, exe: list, task: dict, prompt: str, model: str, max_cost: float) -> dict:
+    """Blocking; no writes, no mutation. One tool-free structured `claude -p` in the task's project folder with the
+    supervisor's timeout, `max_cost` as the CLI budget, safe mode and every MCP tool denied. Returns {decision:
+    dict|None, cost: number|None, model, turns, error}; every failure is no decision and no retry, and a paid
+    failure keeps its reported cost (None when unknown, never a free zero)."""
+    info = {"cost": None, "turns": 0}
+    out = {"decision": None, "cost": None, "model": model, "turns": 0, "error": ""}
+    if not exe:
+        out.update(cost=0.0, error="claude.exe not found")
+        return out
+    asked = dict(cfg, brief_timeout_s=cfg["supervisor_timeout_s"])
+    try:
+        fields, _ = compact._ask(asked, exe, task["project_dir"], prompt, SCHEMA, info, model=model,
+                                 max_cost=max_cost, safe_mode=True)
+    except compact.BriefError as exc:
+        out.update(cost=info.get("cost"), turns=info.get("turns", 0), error=str(exc).replace("the brief", "the pass"))
+        return out
+    except Exception as exc:  # an unexpected runner failure is still no decision
+        out.update(cost=info.get("cost"), error=f"the pass failed: {redact.clip(str(exc), 200)}")
+        return out
+    out.update(cost=info.get("cost"), turns=info.get("turns", 0))
+    why = shape(fields)
+    if why:
+        out["error"] = "no decision (" + why + ")"
+        return out
+    out["decision"] = fields
+    return out

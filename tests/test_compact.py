@@ -259,5 +259,53 @@ class BriefTest(unittest.TestCase):
                          ("code", [], 0, [], "brief is off"))
 
 
+class AskTest(unittest.TestCase):
+    """Plan 44 T4: _ask's optional supervisor arguments leave the other passes' command as it was."""
+
+    def run_ask(self, body, code=0, **kw):
+        import json
+        import subprocess
+        from unittest import mock
+        seen = []
+
+        def fake(cmd, **k):
+            seen.append((cmd, k))
+            if isinstance(body, Exception):
+                raise body
+            return subprocess.CompletedProcess(cmd, code, json.dumps(body).encode(), b"")
+        cfg, info = copy.deepcopy(paths.DEFAULTS), {}
+        with mock.patch.object(compact.subprocess, "run", side_effect=fake):
+            try:
+                got = compact._ask(cfg, FAKE, ".", "p", {"type": "object"}, info, **kw)
+            except compact.BriefError as exc:
+                got = exc
+        return got, info, seen[0]
+
+    def test_default_command_and_timeout_unchanged(self):
+        from console import claude_cli
+        ok = {"is_error": False, "total_cost_usd": 0.01, "num_turns": 2, "structured_output": {"a": 1}}
+        got, info, (cmd, kw) = self.run_ask(ok)
+        self.assertEqual(cmd, claude_cli.brief_command(FAKE, paths.DEFAULTS["brief_model"], {"type": "object"}))
+        self.assertEqual(kw["timeout"], paths.DEFAULTS["brief_timeout_s"])
+        self.assertEqual(got, ({"a": 1}, 0.01))
+        self.assertEqual(info, {"turns": 2, "cost": 0.01})
+
+    def test_info_keeps_the_reported_cost_of_a_failure(self):
+        import subprocess
+        got, info, _ = self.run_ask({"is_error": True, "subtype": "x", "total_cost_usd": 0.02})
+        self.assertIsInstance(got, compact.BriefError)
+        self.assertEqual(info["cost"], 0.02)
+        got, info, _ = self.run_ask({"is_error": False, "total_cost_usd": 0.03, "structured_output": {}}, code=2)
+        self.assertIsInstance(got, compact.BriefError)
+        self.assertEqual(info["cost"], 0.03)
+        got, info, _ = self.run_ask(subprocess.TimeoutExpired("c", 1))
+        self.assertIsNone(info["cost"])
+        got, info, _ = self.run_ask(OSError("no exe"))
+        self.assertEqual(info["cost"], 0.0)
+        got, info, (cmd, _) = self.run_ask({"is_error": False, "total_cost_usd": 0.01, "structured_output": {}},
+                                           max_cost=0.5, safe_mode=True)
+        self.assertEqual(cmd[-5:], ["--max-budget-usd", "0.5", "--safe-mode", "--disallowedTools", "mcp__*"])
+
+
 if __name__ == "__main__":
     unittest.main()

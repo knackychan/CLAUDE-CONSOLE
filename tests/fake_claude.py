@@ -7,6 +7,7 @@ Prep (--json-schema): reads the prompt on stdin, prints one result object.
   A request that starts with "Compact the handoff note" is the brief pass: it answers the brief schema
   (goal, findings, files, troubleshooting, questions, next); "LONG" in it gives 80 findings (over the word cap), "BROKEN"/"SLOW" as above.
   A request that starts with "You review the rules" is the rules review: one remove proposal and a summary.
+  A schema with a `decision` property is the supervisor pass (plan 44): see supervisor() for its SUP-* modes.
 Run (--input-format stream-json): per user message prints init / assistant / result.
   "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
   "DENY" in the message: the result carries one permission denial.
@@ -51,8 +52,38 @@ def result(sid, subtype="success", denials=()):
             "num_turns": 2, "permission_denials": list(denials), "is_error": subtype != "success"}
 
 
+def supervisor(raw):
+    """Plan 44: the supervisor pass (its schema has a `decision` property). SUP-VERIFY / SUP-CODE add a step,
+    SUP-FINISH finishes, SUP-ESCALATE escalates, SUP-BAD answers a malformed decision, SUP-ERROR an error envelope
+    that still reports its cost, SUP-EXIT a plausible decision with exit code 3; else wait."""
+    base = {"reason": "fake supervisor", "confidence": "high", "for_fred": ""}
+    if "SUP-VERIFY" in raw:
+        fields = dict(base, decision="add_next_step", kind="verify", instructions="Check the last step", model="auto")
+    elif "SUP-CODE" in raw:
+        fields = dict(base, decision="add_next_step", kind="code", instructions="Fix the failing line", model="auto")
+    elif "SUP-FINISH" in raw:
+        fields = dict(base, decision="finish")
+    elif "SUP-ESCALATE" in raw:
+        fields = dict(base, decision="escalate_to_fred", for_fred="Which file?")
+    elif "SUP-BAD" in raw:
+        fields = {"decision": "pause", "path": "C:/x"}
+    else:
+        fields = dict(base, decision="wait")
+    if "SUP-ERROR" in raw:
+        out({"type": "result", "subtype": "error_max_turns", "is_error": True, "total_cost_usd": 0.02, "num_turns": 6})
+        return 1
+    out({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.004, "num_turns": 2,
+         "result": json.dumps(fields), "structured_output": fields})
+    return 3 if "SUP-EXIT" in raw else 0
+
+
 def prep():
     raw = sys.stdin.read()
+    try:
+        if "decision" in json.loads(arg("--json-schema")).get("properties", {}):
+            return supervisor(raw)
+    except ValueError:
+        pass
     fields = {"goal": "Fix add() in calc.py", "where": "calc.py:2", "keep": "the signature",
               "done_when": "py -m unittest passes", "last_decisions": "", "question": "",
               "route": {"type": "mechanical", "reasoning": "low", "volume": "low", "model": "sonnet",

@@ -1,13 +1,16 @@
 """Plan 44 backend: the supervisor's policy, audit, digest and bounded pass (pure tests)."""
+import hashlib
 import json
 import math
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import paths, supervisor, tasks
+from console import claude_cli, compact, kinds, paths, supervisor, tasks
 
 
 def cfg(**over):
@@ -305,6 +308,157 @@ class DecisionTest(unittest.TestCase):
                                         policy={"human": True})[0], why)
         add = ok(decision="add_next_step", kind="code", instructions="x", model="auto", **high)
         self.assertFalse(self.check(add, sources={"01": "task uses automatic progression"}, policy={"human": True})[0])
+
+
+FAKE = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
+
+
+class RunnerTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = self.tmp.name
+        self.task = {"id": "20260101-000000-abcd", "project_dir": self.tmp.name, "steps": []}
+        self.cfg = cfg(supervisor_timeout_s=90)
+
+    def prompt(self, digest_text="digest SUP-VERIFY"):
+        return supervisor.build_prompt(kinds.text(self.home, "supervisor"), self.task, digest_text)
+
+    def test_one_call_has_project_cwd_timeout_and_tool_free_flags(self):
+        seen = []
+        real = subprocess.run
+
+        def spy(cmd, **kw):
+            seen.append((cmd, kw))
+            return real(cmd, **kw)
+        with mock.patch.object(compact.subprocess, "run", side_effect=spy), \
+                mock.patch("console.runs.RunManager.start", side_effect=AssertionError("no worker")):
+            got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.25)
+        self.assertEqual(len(seen), 1)
+        cmd, kw = seen[0]
+        self.assertEqual(kw["cwd"], self.tmp.name)
+        self.assertEqual(kw["timeout"], 90)
+        self.assertIs(kw["env"].__class__, dict)
+        self.assertEqual(kw["creationflags"], claude_cli.NO_WINDOW)
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "dontAsk")
+        self.assertEqual(cmd[cmd.index("--max-turns") + 1], "6")
+        self.assertEqual(cmd[cmd.index("--max-budget-usd") + 1], "0.25")
+        self.assertEqual(cmd[cmd.index("--disallowedTools") + 1], "mcp__*")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "haiku")
+        self.assertEqual(json.loads(cmd[cmd.index("--settings") + 1]), {"disableAllHooks": True})
+        self.assertEqual(json.loads(cmd[cmd.index("--json-schema") + 1]), supervisor.SCHEMA)
+        for flag in ("--safe-mode", "--disable-slash-commands", "--strict-mcp-config", "--no-session-persistence"):
+            self.assertIn(flag, cmd)
+        for flag in ("--resume", "--session-id", "--add-dir", "--bg", "--agents", "--fork-session"):
+            self.assertNotIn(flag, cmd)
+        self.assertEqual(got["decision"]["kind"], "verify")
+        self.assertEqual((got["cost"], got["model"], got["turns"], got["error"]), (0.004, "haiku", 2, ""))
+        # a tiny remaining allowance is never rounded up
+        with mock.patch.object(compact.subprocess, "run", side_effect=spy):
+            supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.0049999)
+        cmd = seen[-1][0]
+        self.assertLessEqual(float(cmd[cmd.index("--max-budget-usd") + 1]), 0.0049999)
+
+    def test_prompt_order_and_seed_override(self):
+        seed = kinds.seed_text("supervisor")
+        self.assertTrue(seed.startswith("# supervisor\n\nYou supervise one Claude Console task"))
+        self.assertLess(len(seed.split()), 600)
+        self.assertLess(len(seed.encode("utf-8")), 4500)
+        kinds.ensure(self.home)
+        (kinds.folder(self.home) / "supervisor.md").write_text("# supervisor\n\nOWN-EDIT for $You and $you.",
+                                                              encoding="utf-8")
+        text = supervisor.build_prompt(kinds.text(self.home, "supervisor"), self.task, "cost $5 and $you here",
+                                       you="Ann")
+        self.assertTrue(text.startswith("OWN-EDIT for Ann and Ann."))
+        self.assertLess(text.index("JSON"), text.index("cost $5 and $you here"))
+        self.assertTrue(text.endswith("cost $5 and $you here"))  # evidence dollar signs untouched, digest last
+        settings = supervisor.policy(cfg(), {"project_dir": "D:\\work"}, 0.0)["settings"]
+        self.assertEqual(supervisor.pass_model(settings, ["choose_next"]), "haiku")
+        self.assertEqual(supervisor.pass_model(settings, ["stuck"]), "sonnet")
+        self.assertEqual(supervisor.pass_model(settings, ["stalled"]), "sonnet")
+
+    def test_prompt_fingerprint_matches_executed_bytes(self):
+        captured = []
+
+        def fake(cmd, **kw):
+            captured.append(kw["input"])
+            body = {"type": "result", "is_error": False, "total_cost_usd": 0.001, "num_turns": 2,
+                    "structured_output": {"decision": "wait", "reason": "r", "confidence": "low", "for_fred": ""}}
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(body).encode(), b"")
+        prompt = self.prompt("\u6f22\u5b57 $5 digest")
+        with mock.patch.object(compact.subprocess, "run", side_effect=fake):
+            supervisor.run(self.cfg, FAKE, self.task, prompt, "haiku", 0.5)
+        self.assertEqual(supervisor.prompt_hash(prompt), hashlib.sha256(captured[0]).hexdigest())
+        # a kind-only edit changes the fingerprint, not the evidence revision
+        task = evidence_task(self.home)
+        rev = supervisor.revision(self.home, task)
+        before = supervisor.prompt_hash(supervisor.build_prompt(kinds.text(self.home, "supervisor"), task, "d"))
+        kinds.ensure(self.home)
+        (kinds.folder(self.home) / "supervisor.md").write_text("# supervisor\n\nEdited.", encoding="utf-8")
+        after = supervisor.prompt_hash(supervisor.build_prompt(kinds.text(self.home, "supervisor"), task, "d"))
+        self.assertNotEqual(before, after)
+        self.assertEqual(supervisor.revision(self.home, task), rev)
+        # the claimed prompt is what runs, whatever the kind file says later
+        with mock.patch.object(compact.subprocess, "run", side_effect=fake):
+            supervisor.run(self.cfg, FAKE, self.task, prompt, "haiku", 0.5)
+        self.assertEqual(captured[-1], prompt.encode("utf-8"))
+
+    def test_failures_have_no_decision_and_no_retry(self):
+        def envelope(body, code=0):
+            return lambda cmd, **kw: subprocess.CompletedProcess(cmd, code, body.encode(), b"")
+        good = json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.01, "num_turns": 2,
+                           "structured_output": {"decision": "wait", "reason": "r", "confidence": "low",
+                                                 "for_fred": ""}})
+        cases = {
+            "missing": None,
+            "oserror": mock.Mock(side_effect=OSError("nope")),
+            "timeout": mock.Mock(side_effect=subprocess.TimeoutExpired("claude", 90)),
+            "nonjson": envelope("not json"),
+            "nonobject": envelope("[1]"),
+            "exit": envelope(good, 3),
+            "is_error": envelope(json.dumps({"is_error": True, "subtype": "x", "total_cost_usd": 0.02})),
+            "nostructured": envelope(json.dumps({"is_error": False, "total_cost_usd": 0.01})),
+            "malformed": envelope(json.dumps({"is_error": False, "total_cost_usd": 0.01,
+                                              "structured_output": {"decision": "pause"}})),
+            "crash": mock.Mock(side_effect=RuntimeError("boom")),
+        }
+        for name, effect in cases.items():
+            with self.subTest(name):
+                calls = mock.Mock(side_effect=effect) if callable(effect) and not isinstance(effect, mock.Mock) \
+                    else effect
+                if name == "missing":
+                    got = supervisor.run(self.cfg, [], self.task, self.prompt(), "haiku", 0.5)
+                else:
+                    with mock.patch.object(compact.subprocess, "run", calls):
+                        got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)
+                    self.assertEqual(calls.call_count, 1)
+                self.assertIsNone(got["decision"])
+                self.assertTrue(got["error"])
+        with mock.patch.object(compact.subprocess, "run", mock.Mock(side_effect=subprocess.TimeoutExpired("c", 9))):
+            self.assertIsNone(supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)["cost"])
+        with mock.patch.object(compact.subprocess, "run", mock.Mock(side_effect=OSError("x"))):
+            self.assertEqual(supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)["cost"], 0.0)
+        self.assertEqual(supervisor.run(self.cfg, FAKE, self.task, self.prompt("SUP-EXIT"), "haiku", 0.5)["cost"],
+                         0.004)
+
+    def test_invalid_decision_keeps_reported_cost(self):
+        got = supervisor.run(self.cfg, FAKE, self.task, self.prompt("SUP-BAD"), "haiku", 0.5)
+        self.assertEqual((got["decision"], got["cost"]), (None, 0.004))
+        got = supervisor.run(self.cfg, FAKE, self.task, self.prompt("SUP-ERROR"), "haiku", 0.5)
+        self.assertEqual((got["decision"], got["cost"]), (None, 0.02))
+        for bad in (-1.0, float("nan"), "0.1", None):
+            body = json.dumps({"is_error": False, "total_cost_usd": bad, "num_turns": 2,
+                               "structured_output": {"decision": "wait", "reason": "r", "confidence": "low",
+                                                     "for_fred": ""}})
+            with mock.patch.object(compact.subprocess, "run",
+                                   lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, body.encode(), b"")):
+                self.assertIsNone(supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)["cost"])
+        body = json.dumps({"is_error": False, "total_cost_usd": 3.0, "num_turns": 2,
+                           "structured_output": {"decision": "wait", "reason": "r", "confidence": "low", "for_fred": ""}})
+        with mock.patch.object(compact.subprocess, "run",
+                               lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, body.encode(), b"")):
+            self.assertEqual(supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)["cost"], 3.0)
 
 
 if __name__ == "__main__":
