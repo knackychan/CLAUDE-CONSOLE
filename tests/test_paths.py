@@ -46,6 +46,20 @@ class PlanKeysTest(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"design_max_turns": 40, "user_name": ""})
 
 
+    def test_supervisor_defaults_and_reading_writes_nothing(self):
+        cfg = paths.load_config()
+        for key in ("supervisor_mode", "supervisor_projects", "supervisor_model", "supervisor_stuck_model",
+                    "supervisor_debounce_s", "supervisor_parallel", "supervisor_timeout_s", "supervisor_stall_s",
+                    "supervisor_max_auto_steps", "supervisor_max_retries", "supervisor_work_usd",
+                    "supervisor_task_usd", "supervisor_day_usd"):
+            self.assertIn(key, cfg, key)
+        self.assertEqual(cfg["supervisor_mode"], "suggest")
+        self.assertEqual((cfg["supervisor_model"], cfg["supervisor_stuck_model"]), ("haiku", "sonnet"))
+        self.assertEqual((cfg["supervisor_projects"], cfg["supervisor_debounce_s"], cfg["supervisor_parallel"]),
+                         ({}, 20, 1))
+        self.assertEqual(list(Path(self.tmp).iterdir()), [])  # a plain read writes no CLI settings or task folders
+
+
 class ConfigWriteTest(unittest.TestCase):
     """Plan 27 (K1): every read-modify-write of config.json holds paths.CONFIG_LOCK and its own temp file."""
 

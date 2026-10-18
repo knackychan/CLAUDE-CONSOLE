@@ -1,12 +1,13 @@
 """Plan 26: the Models and tuning page's settings and the check of one Save (console/tuning.py)."""
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from console import paths, tuning
 
-CFG = dict(paths.DEFAULTS, models={
+CFG = dict(paths.DEFAULTS, projects=["D:/work", "C:/other"], models={
     "codex": {"gpt-6-astra": "opus", "gpt-6.1-sol": "sonnet", "gpt-6-luna": "haiku"},
     "opencode": {"opencode-go/kimi-k3": "opus", "opencode-go/deepseek-v4.1-flash": "haiku"},
     "cmd": {"deepseek/deepseek-v4.1-flash": "haiku"}})
@@ -33,7 +34,11 @@ class ViewTest(unittest.TestCase):
             "brief_max_words", "brief_timeout_s", "gauge_red_tokens", "gauge_yellow_tokens", "balance_margin",
             "cache_bonus", "budget_warn_at", "daily_budget_usd", "allowances", "plan_max_kb", "plan_max_parts",
             "plan_hold", "replan_auto", "prep_model", "brief_model", "review_model", "default_model", "kinds", "tiers",
-            "user_name"})
+            "user_name",
+            "supervisor_mode", "supervisor_projects", "supervisor_model", "supervisor_stuck_model",
+            "supervisor_debounce_s", "supervisor_parallel", "supervisor_timeout_s", "supervisor_stall_s",
+            "supervisor_max_auto_steps", "supervisor_max_retries", "supervisor_work_usd", "supervisor_task_usd",
+            "supervisor_day_usd"})
 
 
 class NumbersTest(unittest.TestCase):
@@ -131,6 +136,63 @@ class TiersTest(unittest.TestCase):
         self.assertEqual(check(tiers={"write": [{"rung": "sonnet", "effort": "max!"}]})[1],
                          {"tiers": "write 1: effort: auto or low, medium, high, xhigh, max"})
         self.assertEqual(check(tiers={"write": ["opus", "cmd:deepseek/deepseek-v4.1-flash"]})[1], {})  # D1 a, hard only
+
+
+class SupervisorTuningTest(unittest.TestCase):
+    def norm(self, path):
+        return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+    def test_supervisor_mode_and_projects_round_trip(self):
+        clean, errors = check(supervisor_mode="auto", supervisor_projects={"D:/work": "auto"})
+        self.assertEqual(errors, {})
+        self.assertEqual(clean, {"supervisor_mode": "auto", "supervisor_projects": {self.norm("D:/work"): "auto"}})
+        self.assertEqual(check(supervisor_projects={"C:/other": "off"})[1], {})
+        self.assertEqual(check(supervisor_projects={})[1], {})
+        self.assertEqual(check(supervisor_mode="off")[1], {})
+        self.assertEqual(check(supervisor_mode="turbo")[1], {"supervisor_mode": "off, suggest or auto"})
+        self.assertEqual(check(supervisor_projects={"C:/nope": "auto"})[1],
+                         {"supervisor_projects": "not a project listed in config.json: C:/nope"})
+        self.assertEqual(check(supervisor_projects={"D:/work": "turbo"})[1],
+                         {"supervisor_projects": "D:/work: off, suggest or auto"})
+        self.assertEqual(check(supervisor_projects={"D:/work": "auto", "d:\\WORK": "off"})[1],
+                         {"supervisor_projects": "d:\\WORK: listed twice"})
+        self.assertEqual(check(supervisor_projects=[])[1],
+                         {"supervisor_projects": "an object: project path -> off, suggest or auto"})
+
+    def test_supervisor_models_refuse_external_and_higher_tiers(self):
+        self.assertEqual(check(supervisor_model="haiku")[1], {})
+        self.assertEqual(check(supervisor_stuck_model="sonnet")[1], {})
+        self.assertEqual(check(supervisor_model="sonnet")[1], {"supervisor_model": "haiku only"})
+        self.assertEqual(check(supervisor_model="opus")[1], {"supervisor_model": "haiku only"})
+        self.assertEqual(check(supervisor_model="fable")[1], {"supervisor_model": "haiku only"})
+        self.assertEqual(check(supervisor_model="codex:gpt-6-luna")[1], {"supervisor_model": "haiku only"})
+        self.assertEqual(check(supervisor_stuck_model="haiku")[1], {"supervisor_stuck_model": "sonnet only"})
+        self.assertEqual(check(supervisor_stuck_model="opus")[1], {"supervisor_stuck_model": "sonnet only"})
+
+    def test_supervisor_numeric_bounds_and_zero(self):
+        good = dict(supervisor_debounce_s=0, supervisor_parallel=4, supervisor_timeout_s=600,
+                    supervisor_stall_s=7200, supervisor_max_auto_steps=0, supervisor_max_retries=0,
+                    supervisor_work_usd=0, supervisor_task_usd=0, supervisor_day_usd=0)
+        clean, errors = check(**good)
+        self.assertEqual(errors, {})
+        self.assertEqual(clean, good)
+        for key, value in (("supervisor_debounce_s", 301), ("supervisor_parallel", 5),
+                           ("supervisor_timeout_s", 9), ("supervisor_stall_s", 599),
+                           ("supervisor_max_auto_steps", 13), ("supervisor_max_retries", 2),
+                           ("supervisor_work_usd", 51), ("supervisor_task_usd", 11),
+                           ("supervisor_day_usd", 101), ("supervisor_work_usd", float("nan")),
+                           ("supervisor_parallel", 1.5)):
+            self.assertIn(key, check(**{key: value})[1], (key, value))
+
+    def test_mode_map_stay_out_of_legacy_numeric_view(self):
+        self.assertIn("supervisor_mode", tuning.KEYS)
+        self.assertIn("supervisor_projects", tuning.KEYS)
+        view = tuning.view(CFG)
+        self.assertNotIn("supervisor_mode", view)
+        self.assertNotIn("supervisor_projects", view)
+        for unit in (t["unit"] for t in view.values()):
+            self.assertIn(unit, ("bool", "rung", "text", "steps", "s", "turns", "kb", "parts", "words", "tokens", "usd", "share"))
+        self.assertEqual(check(task_max_steps=8)[1], {})  # unrelated number saves remain valid
 
 
 class SetConfigTest(unittest.TestCase):

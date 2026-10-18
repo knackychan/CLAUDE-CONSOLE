@@ -1,6 +1,7 @@
 """The Models and tuning page's settings (plan 26): which config.json keys the page may change, their ranges, and
 the check of one Save. Pure: no files, no threads, no HTTP; the service writes what `validate` keeps."""
 import math
+import os
 import re
 
 from . import claude_cli, fills, paths, tasks
@@ -31,8 +32,22 @@ TUNING = {
     "brief_model": ("passes", "rung", None, None),
     "review_model": ("passes", "rung", None, None),
     "default_model": ("passes", "rung", None, None),
+    # plan 44: the supervisor's own numeric/rung settings (mode and map are enum/map, in KEYS but not TUNING)
+    "supervisor_debounce_s": ("supervisor", "s", 0, 300),
+    "supervisor_parallel": ("supervisor", "steps", 1, 4),
+    "supervisor_timeout_s": ("supervisor", "s", 10, 600),
+    "supervisor_stall_s": ("supervisor", "s", 600, 7200),
+    "supervisor_max_auto_steps": ("supervisor", "steps", 0, 12),
+    "supervisor_max_retries": ("supervisor", "steps", 0, 1),
+    "supervisor_work_usd": ("supervisor", "usd", 0, 50),
+    "supervisor_task_usd": ("supervisor", "usd", 0, 10),
+    "supervisor_day_usd": ("supervisor", "usd", 0, 100),
+    "supervisor_model": ("supervisor", "rung", None, None),
+    "supervisor_stuck_model": ("supervisor", "rung", None, None),
 }
-KEYS = tuple(TUNING) + ("kinds", "tiers")  # the whitelist of POST /api/config/models
+KEYS = tuple(TUNING) + ("kinds", "tiers", "supervisor_mode", "supervisor_projects")  # the whitelist of POST /api/config/models
+SUPERVISOR_MODES = ("off", "suggest", "auto")
+SUPERVISOR_MODELS = {"supervisor_model": "haiku", "supervisor_stuck_model": "sonnet"}  # never opus/fable/external
 WHOLE = frozenset({"steps", "s", "turns", "kb", "parts", "words", "tokens"})
 CLAUDE_ONLY = frozenset({"prep_model", "brief_model", "review_model"})  # their passes run on the Claude CLI
 WINDOWS = ("day_usd", "week_usd", "month_usd")
@@ -156,6 +171,27 @@ def _tiers(value, cfg: dict) -> tuple:
     return clean, ""
 
 
+def _supervisor_projects(value, cfg) -> tuple:
+    """The supervisor_projects map: normalized configured-project path -> off|suggest|auto. Replaces the map on save;
+    an unknown project, an invalid mode or a normalized duplicate key is refused (nothing is written)."""
+    if not isinstance(value, dict):
+        return None, "an object: project path -> off, suggest or auto"
+    clean, seen = {}, {}
+    for key, mode in value.items():
+        if not isinstance(key, str) or not key:
+            return None, "a project path"
+        norm = os.path.normcase(os.path.normpath(os.path.abspath(key)))
+        if norm in seen:
+            return None, f"{key}: listed twice"
+        if not any(tasks.same_dir(key, p) for p in (cfg.get("projects") or [])):
+            return None, f"not a project listed in config.json: {key}"
+        if mode not in SUPERVISOR_MODES:
+            return None, f"{key}: off, suggest or auto"
+        seen[norm] = True
+        clean[norm] = mode
+    return clean, ""
+
+
 def validate(changes, cfg: dict) -> tuple:
     """One Save of the page: (clean, errors). `clean` holds every change that passed, normalized (a tier's bare rung
     string becomes {"rung", "effort": "auto"}, a kind left on auto and auto is dropped); `errors` maps a key to the
@@ -173,6 +209,10 @@ def validate(changes, cfg: dict) -> tuple:
             value, why = _tiers(value, cfg)
         elif key == "allowances":
             value, why = _allowances(value)
+        elif key == "supervisor_mode":
+            why = "" if value in SUPERVISOR_MODES else "off, suggest or auto"
+        elif key == "supervisor_projects":
+            value, why = _supervisor_projects(value, cfg)
         else:
             group, unit, low, high = TUNING[key]
             if unit == "bool":
@@ -182,9 +222,12 @@ def validate(changes, cfg: dict) -> tuple:
                     else f"text of at most {high} characters"
                 value = " ".join(value.split()) if not why else value
             elif unit == "rung":
-                why = _rung(value, cfg)
-                if not why and key in CLAUDE_ONLY and fills.split_rung(value)[0] != "claude":
-                    why = "a Claude model: this pass runs on the Claude CLI"
+                if key in SUPERVISOR_MODELS:  # plan 44: the supervisor pass is fixed to one Claude alias
+                    why = "" if value == SUPERVISOR_MODELS[key] else f"{SUPERVISOR_MODELS[key]} only"
+                else:
+                    why = _rung(value, cfg)
+                    if not why and key in CLAUDE_ONLY and fills.split_rung(value)[0] != "claude":
+                        why = "a Claude model: this pass runs on the Claude CLI"
             else:
                 why = _number(value, unit, low, high)
                 if not why and unit in WHOLE:

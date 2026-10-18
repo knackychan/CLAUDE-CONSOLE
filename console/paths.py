@@ -91,6 +91,21 @@ DEFAULTS = {
     "handoff_model": "haiku",
     "handoff_max_words": 800,
     "handoff_timeout_s": 90,
+    # plan 44: the event-driven supervisor's own policy (backend). Numeric/rung keys ride the Models page whitelist;
+    # supervisor_mode and supervisor_projects are enum/map, validated separately and never shown as numeric tuning.
+    "supervisor_mode": "suggest",  # off, suggest or auto
+    "supervisor_projects": {},  # normalized configured-project path -> off|suggest|auto
+    "supervisor_model": "haiku",  # the Claude alias only: a supervisor pass never runs on opus/fable
+    "supervisor_stuck_model": "sonnet",  # one sonnet pass on a stuck/stalled wake
+    "supervisor_debounce_s": 20,
+    "supervisor_parallel": 1,
+    "supervisor_timeout_s": 90,
+    "supervisor_stall_s": 1800,
+    "supervisor_max_auto_steps": 3,
+    "supervisor_max_retries": 1,
+    "supervisor_work_usd": 5,
+    "supervisor_task_usd": 0.50,
+    "supervisor_day_usd": 2,
     # USD per million tokens, API list prices (claude-api skill, 2026-10-06); fast mode costs 2x.
     # Haiku's higher price for prompts over 100K tokens is left out.
     "prices": {
