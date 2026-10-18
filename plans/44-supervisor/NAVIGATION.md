@@ -1,6 +1,9 @@
 # Task navigation and handoff redesign
 
-Date: 2026-10-17. Status: implemented 2026-10-17 (the navigation slice, [navigation/](navigation/README.md) Tasks 1-4); the plan 44 supervisor backend is not shipped.
+Date: 2026-10-17. Status: implemented 2026-10-17 (the navigation slice, [navigation/](navigation/README.md) Tasks 1-5); the plan 44 supervisor backend is not shipped.
+Review follow-up: the six implementation gaps are fixed in [Task 5: review fixes](navigation/05-review-fixes.md)
+(Resume, handoff recovery/revisions, chat handoff, replan approval and latest results). Real-provider handoff
+delivery and the native window remain open live checks.
 Companion to [supervisor brainstorm 44](BRAINSTORM.md). This records Fred's navigation
 request after the supervisor decisions. It changes the presentation proposed in section 10,
 not the supervisor's authority, budgets, wake rules or guidance ordering.

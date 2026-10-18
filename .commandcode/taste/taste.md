@@ -1,0 +1,7 @@
+- Prefers test-first development: write failing regression tests, confirm they fail, then implement. Confidence: 0.9
+- Makes the smallest complete fix and reuses existing helpers and gates over writing new code. Confidence: 0.9
+- Reads the governing docs (CLAUDE.md, PLAN.md, task README and the task file) before editing. Confidence: 0.9
+- Keeps changes scoped to the task; avoids implementing unrelated improvements or out-of-scope backends. Confidence: 0.9
+- Preserves existing uncommitted documentation changes rather than discarding or overwriting them. Confidence: 0.85
+- Records actual results in plans and indexes, and keeps unperformed checks explicitly open rather than claiming them done. Confidence: 0.9
+- Closes work with a structured summary: fixes made, tests run, remaining limitations, and unresolved findings. Confidence: 0.9

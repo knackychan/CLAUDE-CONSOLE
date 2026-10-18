@@ -3660,7 +3660,7 @@ function taskButtons(t, d) {  // plan 44 nav T2: two prominent actions + More; e
   const queued = (t.messages || []).some((m) => m.status === "queued"), turnOver = t.chat && cs && chatReplied(cs);
   const p = [];
   if (cs && cs.state === "running" && lv.stop === "" && (!turnOver || queued)) p.push(`<button class="btn sm stop" data-tact="stop" data-tid="${tid}" title="Interrupts the run; the task stops">Stop</button>`);
-  else if ((t.state === "paused" || followUp) && lv.resume === "") p.push(`<button class="btn sm go" data-tact="resume" data-tid="${tid}">${followUp ? "Start task" : "Resume"}</button>`);
+  else if (lv.resume === "") p.push(`<button class="btn sm go" data-tact="resume" data-tid="${tid}">${followUp ? "Start task" : "Resume"}</button>`);
   else if (cs && cs.state === "failed" && lv.retry === "" && !(boardPick === "t" && taskView === "overview")) p.push(`<button class="btn sm go" data-tact="retry" data-tid="${tid}" title="Runs this step again on the model the service picks">Retry</button>`);
   if (sl && sl.continue === "" && srow && srow.window && srow.state === "interrupted") p.push(`<button class="btn sm go" data-tact="chatresume" data-tid="${tid}">Resume</button>`);
   if (lv.add_next === "") p.push(`<button class="btn sm go" data-tact="nextopen" data-tid="${tid}" data-n="${n}" title="A fresh session in this task, in the same folder, with step ${two(n)}'s handover">Add step</button>`);
@@ -3702,10 +3702,12 @@ function attentionArea(t, d, row) {
   let out = "";
   if (row.asks && !gap) {
     out += `<div class="askbox"><span class="st y">${sprite("waiting")}Asks you <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span><div class="q">${esc(row.asks)}</div></div>`;
-  } else if (gap || replan) {
-    const q = gap ? String(row.asks || row.why || "").replace(/^(asks: )?Plan gap:\s*/, "") : t.why;
-    out += `<div class="askbox"><span class="st y">${sprite("waiting")}${gap ? "Plan gap" : "Replanned"} <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span>
+  } else if (gap) {
+    const q = String(row.asks || row.why || "").replace(/^(asks: )?Plan gap:\s*/, "");
+    out += `<div class="askbox"><span class="st y">${sprite("waiting")}Plan gap <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span>
       <div class="q">${esc(q)}</div><div class="lr">${cur ? `<button class="btn" data-bpick="s${cur.n}" data-btask="${tid}">Open step ${cur.n}</button>` : ""}</div></div>`;
+  } else if (replan && cur) {
+    out += replanBox(t, cur, d, row);
   } else if (t.state === "handed" && cur && !t.handoff_to) {  // a task handed to a follow-up task has the link row, not Start next task
     out += handedBox(d, t, cur, taskShown(row));
   } else if (["waiting", "stuck", "stopped"].includes(t.state) && (t.why || (cur && cur.state === "failed"))) {
@@ -3747,9 +3749,13 @@ function overviewBody(t, d, row) {
   const nxt = cur && t.steps.find((x) => x.n === cur.n + 1);
   const progress = cur ? `<div class="blk"><span class="lbl">Current progress</span>
     <button class="olink" data-bpick="s${cur.n}" data-btask="${tid}">Step ${two(cur.n)} ${esc(cur.kind)} · ${esc(stepShown(t, cur, row))}${nxt ? ` · next ${two(nxt.n)} ${esc(nxt.kind)}` : " · last step"}</button></div>` : "";
-  const last = latestStep(t), note = last ? (d.notes || {})[String(last.n)] || "" : "";
-  const latest = note && last && last.state !== "planned" && last.state !== "running"
-    ? fold(`Latest result · step ${two(last.n)} ${esc(last.kind)}`, `${wc(note)} w`, `<div class="hb">${headingBlock(handoffSections(note))}</div>`, { key: "latest" }) : "";
+  const src = (t.steps || []).filter((s) => (d.notes || {})[String(s.n)] && s.state !== "planned" && s.state !== "running")
+    .reduce((a, x) => (!a || x.n > a.n ? x : a), null);
+  const srcNote = src ? (d.notes || {})[String(src.n)] || "" : "";
+  const failed = src && (src.state === "failed" || src.verdict === "FAIL");
+  const latest = srcNote && src
+    ? fold(`Latest result · step ${two(src.n)} ${esc(src.kind)}${failed ? " · failed" : ""}`, `${wc(srcNote)} w`,
+           `<div class="hb">${headingBlock(handoffSections(srcNote))}</div>`, { key: "latest" }) : "";
   return `${links.length ? `<div class="m hlinks">${links.join(" · ")}</div>` : ""}
     <div class="blk"><span class="lbl">Goal</span><pre class="text goal">${esc(t.goal)}</pre></div>
     ${handoffForm(t)}

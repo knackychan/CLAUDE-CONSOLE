@@ -7,6 +7,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
+from console import tasks
 from tests.test_server import TaskServerTest
 
 
@@ -90,6 +91,81 @@ def main():
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (width, color)
                     assert page.locator('.task-composer').bounding_box()['y'] >= 0
 
+            # Resume: the button follows the service lever, not a task state named "paused".
+            paused = fixture.make_task(words="HANDOFF-OK SLOW")
+            psid = fixture.hub.tasks[paused]["steps"][0]["session"]
+            assert fixture.call("/api/task/pause", {"task": paused})[0] == 200
+            fixture.hub.runs.live[psid].stdin.close()
+            fixture.until(paused, lambda t: t["steps"][0]["state"] == "done", "paused step ended")
+            page.evaluate("id => openTask(id)", paused)
+            page.wait_for_function("id => document.querySelector('#b-tcont')?.dataset.tid === id", arg=paused)
+            page.get_by_role("button", name="Resume", exact=True).wait_for()
+            page.get_by_role("button", name="Resume", exact=True).click()
+            page.wait_for_function("id => snap.tasks.find(t => t.id === id)?.current === 2", arg=paused)
+
+            # Chat-task handoff: a saved plain reply, no HANDOFF block, still hands off through More.
+            chat_step = tasks.chat_step(1, "answer it", "fake-chat", "haiku", "low", time.time())
+            chat = tasks.new_task(str(fixture.project), "proj", "Ask", "answer it", [chat_step], "normal", {}, "",
+                                  "auto", time.time())
+            chat.update(state="done", owner="fred", current=1, chat=True)
+            chat_step.update(state="done", ended=time.time(), turns=1, filed=time.time())
+            tasks.write_step_file(fixture.folder, chat, chat_step, "notes.md", "saved chat answer")
+            with fixture.hub.tlock:
+                fixture.hub.tasks[chat["id"]] = chat
+                fixture.hub._commit(chat)
+            page.wait_for_function("id => snap.tasks.some(t => t.id === id)", arg=chat["id"])
+            page.evaluate("id => openTask(id)", chat["id"])
+            page.wait_for_function("id => document.querySelector('#b-tcont')?.dataset.tid === id", arg=chat["id"])
+            page.locator("details.action-more summary").click()
+            page.get_by_role("button", name="Hand off task", exact=True).click()
+            page.locator('[data-tact="handoffpreview"]').click()
+            page.wait_for_function("id => handoffDraft[id]?.preview", arg=chat["id"])
+            page.get_by_role("button", name="Save document", exact=True).click()
+            page.wait_for_function("id => handoffDraft[id]?.saved", arg=chat["id"])
+            page.get_by_role("button", name="Create follow-up task", exact=True).click()
+            page.wait_for_function("id => boardTask && boardTask !== id", arg=chat["id"])
+            follow = fixture.hub.tasks[chat["id"]]["handoff_to"]
+            assert follow in fixture.hub.tasks
+
+            # Replan approval lives on Overview, not only the step page.
+            replan = tasks.new_task(str(fixture.project), "proj", "Replan", "goal",
+                                    tasks.plan_steps([{"kind": "scout", "goal": "look"}], 6), "normal", {}, "",
+                                    "auto", time.time())
+            replan["steps"][0].update(state="done", model="haiku", effort="low", session="s1", ended=time.time())
+            replan_step = tasks._blank(2, "replan", "replan")
+            replan_step.update(state="waiting", session="s2")
+            replan["steps"].append(replan_step)
+            replan.update(state="waiting", why="replanned: 1 steps added", owner="fred", current=2,
+                          replan={"before": [{"kind": "scout", "goal": "look"}],
+                                  "after": [{"kind": "scout", "goal": "look"}, {"kind": "search", "goal": "search first"}],
+                                  "added": [1], "dropped": []})
+            with fixture.hub.tlock:
+                fixture.hub.tasks[replan["id"]] = replan
+                fixture.hub._commit(replan)
+            page.wait_for_function("id => snap.tasks.some(t => t.id === id)", arg=replan["id"])
+            page.evaluate("id => openTask(id)", replan["id"])
+            page.wait_for_function("id => document.querySelector('#b-tcont')?.dataset.tid === id", arg=replan["id"])
+            assert page.get_by_role("button", name="Confirm plan", exact=True).count() == 1
+            assert page.get_by_role("button", name="Keep old plan", exact=True).count() == 1
+
+            # Latest result ignores later planned/running steps.
+            latest = tasks.new_task(str(fixture.project), "proj", "Latest", "goal",
+                                    tasks.plan_steps([{"kind": "scout", "goal": "done work"}], 6), "normal", {}, "",
+                                    "auto", time.time())
+            latest["steps"][0].update(state="done", model="haiku", effort="low", session="s1", ended=time.time())
+            latest["steps"].append(tasks._blank(2, "code", "planned later"))
+            latest.update(state="waiting", owner="fred", current=1)
+            tasks.write_note(fixture.folder, latest, latest["steps"][0], (
+                "## Goal\ng\n## Findings\nfound\n## Files touched\n- x\n"
+                "## Troubleshooting\n- none\n## Open questions\n- none\n## Next\nn"))
+            with fixture.hub.tlock:
+                fixture.hub.tasks[latest["id"]] = latest
+                fixture.hub._commit(latest)
+            page.wait_for_function("id => snap.tasks.some(t => t.id === id)", arg=latest["id"])
+            page.evaluate("id => openTask(id)", latest["id"])
+            page.wait_for_function("id => document.querySelector('#b-tcont')?.dataset.tid === id", arg=latest["id"])
+            assert page.get_by_text("Latest result · step 01 scout", exact=False).count() == 1
+
             question = fixture.make_task(words="HANDOFF-OK", steps=[{"kind": "scout", "goal": "look STOP-ASK"},
                                                                      {"kind": "code", "goal": "write SLOW"}])
             fixture.until(question, lambda t: t['state'] == 'waiting', 'question waits')
@@ -114,7 +190,7 @@ def main():
             page.wait_for_function("boardData?.data?.task?.messages?.[0]?.status === 'dispatched'")
             assert not failures, failures
             browser.close()
-        print("Task chat browser checks passed: queued correction, progression, drafts, attachments, selection, tabs, history, question, explicit retry after a cap; 900/400/340 px, dark/light, reduced motion.")
+        print("Task chat browser checks passed: queued correction, progression, drafts, attachments, selection, tabs, history, question, explicit retry after a cap, Resume, chat-task handoff preview/save/create, replan approval, latest result; 900/400/340 px, dark/light, reduced motion.")
     finally:
         stop.set()
         if worker.is_alive():

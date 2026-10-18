@@ -905,6 +905,47 @@ class TaskOverviewTest(unittest.TestCase):
         paused = render(self.setup + "row.paused_after = 1; d.levers = {resume: ''}; taskView = 'overview'; inspTask(t, d, row)")
         self.assertIn("Nothing starts until you Resume", paused)
 
+    def test_resume_renders_from_the_lever_after_a_pause(self):
+        paused = ("t.state = 'waiting'; t.owner = 'fred'; row.state = 'waiting'; row.paused_after = 1; "
+                  "d.levers = {resume: '', stop: 'task is waiting'}; taskButtons(t, d)")
+        html = render(self.setup + paused)
+        self.assertEqual(html.count('data-tact="resume"'), 1)
+        self.assertIn(">Resume<", html)
+        self.assertNotIn("Start task", html)
+        boundary = render(self.setup + "t.state = 'waiting'; t.owner = 'fred'; "
+                          "d.levers = {resume: 'choose a next step or finish the task'}; taskButtons(t, d)")
+        self.assertNotIn('data-tact="resume"', boundary)
+        follow = render(self.setup + "t.state = 'planned'; t.handoff_from = 'src'; "
+                        "t.steps = [{n: 1, kind: 'code', state: 'planned', goal: 'x'}]; "
+                        "d.levers = {resume: ''}; taskButtons(t, d)")
+        self.assertIn("Start task", follow)
+
+    def test_replan_approval_renders_on_overview(self):
+        expr = self.setup + """t.state = 'waiting'; t.why = 'replanned: 1 steps added';
+          t.steps = [{n: 1, kind: 'scout', state: 'done', goal: 'g1'}, {n: 2, kind: 'replan', state: 'waiting', goal: 'replan'}];
+          t.current = 2; row.state = 'waiting';
+          t.replan = {before: [{kind: 'scout', goal: 'g1'}], after: [{kind: 'scout', goal: 'g1'}, {kind: 'search', goal: 'g2'}], added: [1], dropped: []};
+          d.levers = {confirm: '', keep: '', stop: 'task is waiting'};
+          d.replan_note = '## Why\\na search step is needed first';
+          taskView = 'overview'; inspTask(t, d, row)"""
+        html = render(expr)
+        self.assertEqual(html.count("Confirm plan"), 1)
+        self.assertEqual(html.count("Keep old plan"), 1)
+        self.assertIn("search", html)
+        self.assertNotIn("Open step 2", html)
+
+    def test_latest_result_skips_planned_and_running_steps(self):
+        html = render(self.setup + "taskView = 'overview'; overviewBody(t, d, row)")
+        self.assertIn("Latest result · step 01 chat", html)
+        no_note = render(self.setup + "d.notes = {}; taskView = 'overview'; overviewBody(t, d, row)")
+        self.assertNotIn("Latest result", no_note)
+        failed = render(self.setup + """t.steps = [{n: 1, kind: 'code', state: 'done', goal: 'older'},
+          {n: 2, kind: 'test', state: 'failed', goal: 'newer'}]; t.current = 2;
+          d.notes = {'1': 'HANDOFF\\n## Goal\\nolder\\n## Next\\nn\\nEND HANDOFF', '2': 'HANDOFF\\n## Goal\\nnewer\\n## Next\\nn\\nEND HANDOFF'};
+          taskView = 'overview'; overviewBody(t, d, row)""")
+        self.assertIn("Latest result · step 02 test", failed)
+        self.assertIn("failed", failed)
+
     def test_verify_is_inside_add_step_not_standalone(self):
         html = render(self.setup + "taskButtons(t, d)")
         self.assertEqual(html.count('data-tact="nextopen"'), 1)

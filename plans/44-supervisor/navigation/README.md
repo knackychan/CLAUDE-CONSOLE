@@ -21,10 +21,16 @@ first, supervisor UI when its backend lands.
 | 2 | [02-overview-actions.md](02-overview-actions.md) | The Overview (Goal / attention / progress / composer) with Steps and Files views; one action area (two prominent + More); green Mark done; Accept step result; Verify inside Add step; remove Brief a new task, Verify in a new task, duplicate Continue/Verify/Mark done, and the Delegate hint | 1 |
 | 3 | [03-handoff.md](03-handoff.md) | Whole-task handoff: a code-built digest, one cheap haiku pass over it, Save document and Create follow-up task, the `handed` state and `handoff_to` / `handoff_from` links, the More > Hand off task flow | 1, 2 |
 | 4 | [04-tests-close.md](04-tests-close.md) | Reconcile web/task/server tests, the browser fixture check, PLAN.md and plan indexes, Fred's live check | 1, 2, 3 |
+| 5 | [05-review-fixes.md](05-review-fixes.md) | Fix six review findings in Resume, handoff recovery/revisions, chat handoff, replan approval and latest results | done 2026-10-17 |
 
 Each task ends with its own commit.
 
-**Start state.** The working tree holds an interrupted navigation/handoff attempt: uncommitted edits in
+**Current state (2026-10-17):** Tasks 1-5 shipped; Task 5 fixed the six review gaps (Resume, handoff
+recovery/revisions, chat handoff, replan approval and latest results). Start from current code; do not reset
+it using the historical notes below. Real-provider handoff delivery and the native window remain open live
+checks; the plan 44 supervisor backend stays unshipped.
+
+**Historical start state for Tasks 1-4.** The working tree held an interrupted navigation/handoff attempt: uncommitted edits in
 `web/app.js`, `web/style.css`, `console/server.py`, `console/tasks.py`, `tests/test_web.py` (12 web test
 failures). Those edits are **superseded**; reset those files to HEAD before Task 1 and build from this plan.
 Two edits are independent and kept: the backtick-fence fix in `console/tasks.py` (`step_prompt`, the

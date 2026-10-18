@@ -1561,9 +1561,7 @@ class Hub:
 
     def handoff_available(self, task: dict) -> str:
         """Plan 44: why the whole-task handoff is off ("" = allowed). The one gate: GET /api/task shows it and the
-        preview, Save and Create ask it again under tlock."""
-        if task.get("chat"):
-            return "A chat task hands off through its session."
+        preview, Save and Create ask it again under tlock. A chat task uses its saved files like any other task."""
         if tasks.pending_messages(task):
             return "Resolve pending guidance before handing off this task."
         if any(self.runs.is_live(sid) for sid in tasks.sessions_of(task)):
@@ -1582,16 +1580,55 @@ class Hub:
             return ""
 
     def _handoff_material(self, task: dict, note: str) -> str:
-        """What a previewed handoff stands on: the task's moving parts (never its costs), the saved notes, briefs and
-        facts the digest reads, and the note. Save and Create refuse a revision whose material is no longer the
-        task's. A Save does not change it, so Save then Create works on one preview."""
-        steps = [(s["n"], s["kind"], s["state"], s["session"], s["verdict"], s["retries"], s["handoff"],
-                  len(tasks.attempts(s))) for s in task["steps"]]
-        documents = [(tasks.read_note(self.folder, task, s["n"]), tasks.read_brief(self.folder, task, s["n"]),
-                      tasks.read_facts(self.folder, task, s["n"])) for s in task["steps"]]
-        return json.dumps([task["id"], task["state"], task["why"], task["owner"], task["current"], task["last_good"],
-                           task.get("handoff_to") or "", [(m["id"], m["status"]) for m in task.get("messages", [])],
-                           steps, documents, note], ensure_ascii=False)
+        """Everything a previewed handoff stands on: the task's moving parts (never its costs), the saved prompt,
+        plan, notes, briefs, facts, final replies, verdicts, questions and the chain tail. Every document is present
+        as its text or "" so a file appearing or disappearing changes the revision. Save and Create refuse a revision
+        whose material is no longer the task's; a Save does not change it, so Save then Create works on one preview."""
+        steps = []
+        for s in sorted(task["steps"], key=lambda x: x["n"]):
+            steps.append({"n": s.get("n"), "kind": s.get("kind"), "goal": s.get("goal") or "",
+                          "state": s.get("state"), "session": s.get("session"), "model": s.get("model"),
+                          "effort": s.get("effort"), "pick": s.get("pick"), "verdict": s.get("verdict"),
+                          "verdict_detail": s.get("verdict_detail"), "retries": s.get("retries"),
+                          "handoff": s.get("handoff"), "hard": bool(s.get("hard")), "part": s.get("part") or 0,
+                          "checked": s.get("checked") or 0,
+                          "attempts": [{"session": a.get("session"), "started": a.get("started"),
+                                        "ended": a.get("ended"), "why": a.get("why"), "final": a.get("final")}
+                                       for a in tasks.attempts(s)],
+                          "filed": s.get("filed"), "turns": s.get("turns"), "dir": s.get("dir")})
+        parts = (task.get("plan") or {}).get("parts") or []
+        per_step, briefs = {}, {}
+        for s in sorted(task["steps"], key=lambda x: x["n"]):
+            n, note_text = s["n"], tasks.read_note(self.folder, task, s["n"])
+            brief = tasks.read_brief(self.folder, task, n)
+            per_step[n] = {"note": note_text, "brief": brief, "facts": tasks.read_facts(self.folder, task, n),
+                           "notes": tasks.read_step_file(self.folder, task, s, "notes.md"),
+                           "verdict": tasks.read_step_file(self.folder, task, s, "verdict.md")}
+            briefs[n] = brief or note_text
+        return json.dumps({
+            "task": {"id": task.get("id"), "title": task.get("title"), "goal": task.get("goal"),
+                     "project": task.get("project"), "project_dir": task.get("project_dir"),
+                     "type": task.get("type"), "demand": task.get("demand"), "effort": task.get("effort"),
+                     "state": task.get("state"), "why": task.get("why"), "owner": task.get("owner"),
+                     "current": task.get("current"), "last_good": task.get("last_good"),
+                     "handoff_to": task.get("handoff_to") or "", "handoff_from": task.get("handoff_from") or "",
+                     "handoff_note": task.get("handoff_note") or "", "progression": task.get("progression"),
+                     "chat": bool(task.get("chat")), "plan": task.get("plan") or {}},
+            "messages": [(m.get("id"), m.get("status")) for m in task.get("messages", [])],
+            "steps": steps,
+            "prompt": self._handoff_text(task, "prompt.md"),
+            "plan_index": plan.read(self.folder, task),
+            "plan_parts": {p.get("n"): plan.read_part(self.folder, task, p.get("n"))
+                           for p in sorted(parts, key=lambda x: x.get("n") or 0)},
+            "per_step": per_step,
+            "questions": tasks.open_questions(task, briefs),
+            "chain": tasks.read_chain(self.folder, task, 10),
+            "note": note,
+        }, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def _handoff_material_hash(material: str) -> str:
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _handoff_revision(material: str, text: str) -> str:
@@ -1635,27 +1672,26 @@ class Hub:
                 return 404, {"error": "unknown task"}
             follow = hashlib.sha256(f"{tid}:{request}".encode("utf-8")).hexdigest()[:20]
             known = self.tasks.get(follow) if create else None
-            if known is not None:  # a repeated request returns its follow-up whatever the source state is now
-                if known.get("handoff_request") != {"request_id": request, "source": tid}:
+            if known is not None:
+                req = known.get("handoff_request") or {}
+                if req.get("source") != tid or req.get("request_id") != request:
                     return 409, {"error": "request_id was already used with different content"}
-                if task.get("handoff_to") != follow:  # a crash between the two writes: finish the link
-                    try:
-                        return self._link_handoff(task, follow, self._handoff_text(known, "inherited-handoff.md"))
-                    except OSError as exc:
-                        return 409, {"error": f"The handoff could not be saved ({exc.strerror or exc}). Try again; the task is unchanged."}
-                return 200, {"task": follow, "source": tid}
+                if task.get("handoff_to") == follow:  # the request already completed: replay its success unchanged
+                    return 200, {"task": follow, "source": tid}
+                return self._recover_handoff(task, known, follow, note)  # an incomplete link is revalidated before any write
             why = self.handoff_available(task)
             if why:
                 return 409, {"error": why}
             revision = body.get("revision")
             text = self.handoffs.get(revision) if isinstance(revision, str) else None
-            if text is None or revision != self._handoff_revision(self._handoff_material(task, note), text):
+            material = self._handoff_material(task, note)
+            if text is None or revision != self._handoff_revision(material, text):
                 return 409, {"error": HANDOFF_CHANGED}
             try:
                 if not create:
                     paths.write_text_atomic(tasks.folder(self.folder, tid) / "task-handoff.md", text)
                     return 200, {"task": tid, "file": "task-handoff.md"}
-                new = self._follow_up(task, follow, request, note, text)
+                new = self._follow_up(task, follow, request, note, text, material)
                 with self.lock:
                     self.tasks[follow] = new
                 status, data = self._link_handoff(task, follow, text)
@@ -1664,14 +1700,39 @@ class Hub:
             self.poll_once()
             return status, data
 
-    def _follow_up(self, task: dict, follow: str, request: str, note: str, text: str) -> dict:
+    def _recover_handoff(self, task: dict, known: dict, follow: str, note: str) -> tuple:
+        """Finish a Create whose destination was saved but whose source link was not (a crash between the two writes).
+        Rechecks the gates and the source material before any write; the destination is never replaced or launched."""
+        why = self.handoff_available(task)
+        if why:
+            return 409, {"error": why}
+        text = self._handoff_text(known, "inherited-handoff.md")
+        if not text:
+            return 409, {"error": f"The follow-up task {follow} has no inherited handoff; it cannot be recovered. "
+                                  "Inspect or delete that draft and hand the task off again."}
+        if tasks.check_handoff(text):
+            return 409, {"error": f"The follow-up task {follow} has an unreadable inherited handoff; it cannot be recovered. "
+                                  "Inspect or delete that draft and hand the task off again."}
+        saved = (known.get("handoff_request") or {}).get("material")
+        if not saved:
+            return 409, {"error": f"The follow-up task {follow} predates handoff recovery; it cannot be completed safely. "
+                                  "Inspect or delete that draft and hand the task off again."}
+        if self._handoff_material_hash(self._handoff_material(task, note)) != saved:
+            return 409, {"error": HANDOFF_CHANGED}
+        try:
+            return self._link_handoff(task, follow, text)
+        except OSError as exc:
+            return 409, {"error": f"The handoff could not be saved ({exc.strerror or exc}). Try again; the task is unchanged."}
+
+    def _follow_up(self, task: dict, follow: str, request: str, note: str, text: str, material: str) -> dict:
         """The linked follow-up draft: one first code step, planned, owned by Fred, with the summary and the evidence
         copied into its folder. task.json is written last, so the draft is visible only once its files are durable."""
         steps = tasks.plan_steps([{"kind": "code", "goal": note or HANDOFF_GOAL}], 1)[:1]  # no verify: manual progression
         new = tasks.new_task(task["project_dir"], task["project"], "Continue: " + task["title"][:70], task.get("goal", ""),
                              steps, task["type"], task["demand"], "", task["effort"], time.time(), id_=follow)
         new.update(owner="fred", progression="manual", handoff_from=task["id"],
-                   handoff_request={"request_id": request, "source": task["id"]})
+                   handoff_request={"request_id": request, "source": task["id"],
+                                    "material": self._handoff_material_hash(material)})
         src, dest = tasks.folder(self.folder, task["id"]), tasks.folder(self.folder, follow)
         paths.write_text_atomic(dest / "inherited-handoff.md", text)
         evidence = ["prompt.md"]

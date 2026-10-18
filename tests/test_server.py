@@ -1,5 +1,6 @@
 import base64
 import copy
+import hashlib
 import http.client
 import json
 import os
@@ -3473,6 +3474,7 @@ class HandoffServerTest(TaskServerTest):
         task.update(state=state, why="stopped by Fred", owner="fred", current=3, last_good=2)
         tasks.save(self.folder, task)
         tasks.write_note(self.folder, task, task["steps"][0], self.NOTE)
+        tasks.save(self.folder, task)  # task.json stays in step with the saved note (its handoff field)
         with self.hub.tlock:
             self.hub.tasks[task["id"]] = task
         return task["id"]
@@ -3507,7 +3509,7 @@ class HandoffServerTest(TaskServerTest):
         self.assertEqual(self.hub.handoff_available(task), "This task already has a follow-up task.")
         del task["handoff_to"]
         task["chat"] = True
-        self.assertIn("chat", self.hub.handoff_available(task))
+        self.assertEqual(self.hub.handoff_available(task), "")  # a chat task hands off through its saved files too
 
     def test_preview_runs_the_pass_and_changes_nothing(self):
         tid = self.stopped()
@@ -3670,6 +3672,154 @@ class HandoffServerTest(TaskServerTest):
         self.assertIn("Try again", data["error"])
         self.assertEqual(self.hub.tasks[tid]["state"], "stopped")
         self.commit(tid, pv, create=False)  # the same revision still saves
+
+    def partial(self, request="a" * 32):
+        """A Create that saved its destination but failed before linking the source (a crash between the two writes)."""
+        tid = self.stopped()
+        pv = self.preview(tid)
+        follow = hashlib.sha256(f"{tid}:{request}".encode()).hexdigest()[:20]
+        with mock.patch.object(self.hub, "_link_handoff", side_effect=PermissionError(13, "in use")):
+            data = self.commit(tid, pv, create=True, request=request, expect=409)
+        self.assertIn("Try again", data["error"])
+        return tid, pv, follow
+
+    def test_partial_create_recovers_after_a_restart(self):
+        tid, pv, follow = self.partial()
+        self.assertIn(follow, self.hub.tasks)
+        self.assertNotIn("handoff_to", self.hub.tasks[tid])
+        self.assertEqual(self.hub.tasks[tid]["state"], "stopped")
+        self.hub.tasks = tasks.load_all(self.folder)  # a restart: saved tasks only, no preview cache
+        self.hub.handoffs.clear()
+        data = self.commit(tid, {"revision": "0" * 64}, create=True, request="a" * 32)
+        self.assertEqual(data, {"task": follow, "source": tid})
+        self.assertEqual((self.hub.tasks[tid]["state"], self.hub.tasks[tid]["handoff_to"]), ("handed", follow))
+        self.assertEqual(len([c for c in self.chain(tid) if c.get("why") == f"follow-up task: {follow}"]), 1)
+        self.assertEqual(sorted(p.name for p in (self.folder / "tasks").iterdir()), sorted([tid, follow]))
+        self.assertEqual(self.hub.runs.live, {})
+
+    def test_partial_create_refused_with_pending_guidance(self):
+        tid, pv, follow = self.partial()
+        self.hub.tasks[tid]["messages"] = [{"id": "m" * 16, "status": "queued"}]
+        data = self.commit(tid, pv, create=True, request="a" * 32, expect=409)
+        self.assertEqual(data["error"], "Resolve pending guidance before handing off this task.")
+        self.assertNotIn("handoff_to", self.hub.tasks[tid])
+
+    def test_partial_create_refused_with_a_live_worker(self):
+        tid, pv, follow = self.partial()
+        with mock.patch.object(self.hub.runs, "is_live", return_value=True):
+            data = self.commit(tid, pv, create=True, request="a" * 32, expect=409)
+        self.assertEqual(data["error"], "Wait for the current run to finish, or stop it first.")
+        self.assertNotIn("handoff_to", self.hub.tasks[tid])
+
+    def test_partial_create_refused_when_the_source_changed(self):
+        tid, pv, follow = self.partial()
+        self.hub.tasks[tid]["why"] = "changed since the preview"
+        data = self.commit(tid, pv, create=True, request="a" * 32, expect=409)
+        self.assertEqual(data["error"], "The task changed. Refresh the handoff preview before saving.")
+        self.assertNotIn("handoff_to", self.hub.tasks[tid])
+
+    def test_partial_create_refused_with_different_instructions(self):
+        tid, pv, follow = self.partial()
+        data = self.commit(tid, {"revision": "0" * 64}, create=True, request="a" * 32,
+                           note="different instructions", expect=409)
+        self.assertEqual(data["error"], "The task changed. Refresh the handoff preview before saving.")
+        self.assertNotIn("handoff_to", self.hub.tasks[tid])
+
+    def test_partial_create_refused_without_the_inherited_summary(self):
+        tid, pv, follow = self.partial()
+        (self.folder_of(follow) / "inherited-handoff.md").unlink()
+        data = self.commit(tid, pv, create=True, request="a" * 32, expect=409)
+        self.assertIn("no inherited handoff", data["error"])
+        self.assertIn(follow, data["error"])
+        self.assertNotIn("handoff_to", self.hub.tasks[tid])
+
+    def test_partial_create_refused_when_linked_elsewhere(self):
+        tid, pv, follow = self.partial()
+        self.hub.tasks[tid]["handoff_to"] = "f" * 20
+        data = self.commit(tid, pv, create=True, request="a" * 32, expect=409)
+        self.assertEqual(data["error"], "This task already has a follow-up task.")
+        self.assertNotEqual(self.hub.tasks[tid]["handoff_to"], follow)
+
+    def test_partial_create_refused_on_an_older_draft_without_a_hash(self):
+        tid, pv, follow = self.partial()
+        del self.hub.tasks[follow]["handoff_request"]["material"]
+        tasks.save(self.folder, self.hub.tasks[follow])
+        data = self.commit(tid, pv, create=True, request="a" * 32, expect=409)
+        self.assertIn("predates handoff recovery", data["error"])
+        self.assertNotIn("handoff_to", self.hub.tasks[tid])
+
+    def test_a_plan_edit_invalidates_a_preview(self):
+        from console import plan
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting" and t["why"] == "plan ready: confirm",
+                          "the plan waits")
+        pv = self.preview(tid)
+        index = plan.read(self.folder, task)
+        status, data = self.call("/api/task/plan", {"task": tid, "text": index + "\n", "part": 0})
+        self.assertEqual(status, 200, data)
+        data = self.commit(tid, pv, create=False, expect=409)
+        self.assertEqual(data["error"], "The task changed. Refresh the handoff preview before saving.")
+        self.assertFalse((self.folder_of(tid) / "task-handoff.md").exists())
+
+    def test_handoff_material_covers_every_saved_input(self):
+        tid = self.stopped()
+        task = self.hub.tasks[tid]
+        base = self.hub._handoff_material(task, "note")
+        tasks.write_step_file(self.folder, task, task["steps"][0], "notes.md", "final reply one")
+        self.assertNotEqual(self.hub._handoff_material(task, "note"), base)
+        base = self.hub._handoff_material(task, "note")
+        tasks.write_step_file(self.folder, task, task["steps"][2], "verdict.md", "PASS detail")
+        self.assertNotEqual(self.hub._handoff_material(task, "note"), base)
+        base = self.hub._handoff_material(task, "note")
+        (self.folder_of(tid) / "prompt.md").write_text("typed prompt", encoding="utf-8")
+        self.assertNotEqual(self.hub._handoff_material(task, "note"), base)
+        base = self.hub._handoff_material(task, "note")
+        task["steps"][0]["cost"] = 9.99  # a cost-only update is still no change
+        self.assertEqual(self.hub._handoff_material(task, "note"), base)
+
+    def chat_handoff(self, reply="no handoff here", block=False):
+        """A one-step chat task whose turn is filed, with no HANDOFF block (a saved plain reply)."""
+        s = tasks.chat_step(1, "answer the question", "fake-chat", "haiku", "low", time.time())
+        task = tasks.new_task(str(self.project), "proj", "Ask", "What is the answer?", [s], "normal", {}, "",
+                              "auto", time.time())
+        task.update(state="done", owner="fred", current=1, chat=True)
+        s.update(state="done", ended=time.time(), turns=1, filed=time.time())
+        tasks.save(self.folder, task)
+        if block:
+            tasks.write_note(self.folder, task, s, self.NOTE)
+        else:
+            tasks.write_step_file(self.folder, task, s, "notes.md", reply)
+        with self.hub.tlock:
+            self.hub.tasks[task["id"]] = task
+        return task["id"]
+
+    def test_a_chat_task_hands_off_through_the_saved_reply(self):
+        tid = self.chat_handoff(reply="no handoff here")
+        self.assertEqual(self.hub.handoff_available(self.hub.tasks[tid]), "")
+        pv = self.preview(tid, note="")
+        self.assertEqual(tasks.check_handoff(pv["text"]), "")
+        data = self.commit(tid, pv, create=True, request="1" * 32, note="")
+        follow = data["task"]
+        self.assertEqual((self.hub.tasks[tid]["state"], self.hub.tasks[tid]["handoff_to"]), ("done", follow))
+        copied = self.folder_of(follow) / "handoff-source" / "01-chat" / "notes.md"
+        self.assertIn("no handoff here", copied.read_text(encoding="utf-8"))
+        self.assertEqual([s["state"] for s in self.hub.tasks[follow]["steps"]], ["planned"])
+        self.assertEqual(self.hub.runs.live, {})
+
+    def test_a_chat_handoff_fallback_carries_the_saved_reply(self):
+        tid = self.chat_handoff(reply="no handoff here")
+        pv = self.preview(tid, note="BROKEN")
+        self.assertIn("no handoff here", pv["text"])
+
+    def test_a_chat_handoff_is_refused_while_live_or_queued(self):
+        tid = self.chat_handoff()
+        with mock.patch.object(self.hub.runs, "is_live", return_value=True):
+            status, data = self.call("/api/task/handoff/preview", {"task": tid, "note": ""})
+        self.assertEqual((status, data["error"]), (409, "Wait for the current run to finish, or stop it first."))
+        self.hub.tasks[tid]["messages"] = [{"id": "m" * 16, "status": "queued"}]
+        status, data = self.call("/api/task/handoff/preview", {"task": tid, "note": ""})
+        self.assertEqual((status, data["error"]), (409, "Resolve pending guidance before handing off this task."))
 
 
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
