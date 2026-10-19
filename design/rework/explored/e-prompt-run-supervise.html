@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; }</style>
+<title>Prompt, Run, Supervise</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Plan 48 proposal (explored, not a target until Fred moves it to locked/): the Board cut to three moments.
+   Tokens, type and cell motif are the locked Console Cells / Cells Board ones; no new colour. Every figure is sample data. */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --edge: rgb(255 255 255 / 6%); --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a; --wip: #7aa7ff; --me: #c4a7ff; --ai: #7aa7ff; --on-you: #1a0d00; --on-ok: #04180e;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --me: #6a48c9; --ai: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --edge: rgb(0 0 0 / 8%); --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --wip: #2f5fc4; --me: #6a48c9; --ai: #2f5fc4; --on-you: #fff7f0; --on-ok: #f2fff8;
+  --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 28px 16px 48px; }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 22px; }
+header h1 { font: 700 34px/1 var(--dot); margin: 0 0 8px; letter-spacing: .02em; }
+header p { margin: 0; color: var(--mut); max-width: 72ch; text-wrap: pretty; }
+header p + p { margin-top: 6px; }
+.views { display: flex; gap: 4px; flex-wrap: wrap; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; min-height: 36px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+.views .grp { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); align-self: center; padding: 0 6px 0 2px; }
+button:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.stage { display: grid; gap: 12px; overflow-x: auto; }
+.cap { font-size: 12.5px; color: var(--mut); max-width: 900px; margin: 0; text-wrap: pretty; }
+.cap b { color: var(--ink); font-weight: 600; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mut { color: var(--mut); }
+.lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.lbl.y { color: var(--you); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px 36px; margin-top: 16px; }
+.notes section { min-width: 0; }
+.notes section.full { grid-column: 1 / -1; }
+.notes h3 { font: 600 15px var(--ui); margin: 0 0 8px; }
+.notes p, .notes li { font-size: 13px; color: var(--mut); text-wrap: pretty; }
+.notes p { margin: 0 0 8px; }
+.notes ul { margin: 0; padding-left: 18px; }
+.notes li { margin-bottom: 5px; }
+.notes b { color: var(--ink); font-weight: 600; }
+.notes code { font: 11.5px var(--mono); color: var(--ink); }
+.notes table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.notes th, .notes td { text-align: left; padding: 4px 8px 4px 0; vertical-align: top; border-top: 1px solid var(--line); color: var(--mut); }
+.notes th { color: var(--ink); font-weight: 600; border-top: 0; }
+.notes td:first-child { color: var(--ink); }
+
+/* cells and status sprites (the still frame of each; plan 21) */
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); }
+.cells i.y { background: var(--you); }
+.cells i.r { background: var(--bad); }
+.cells i.g { background: var(--ok); }
+.cells i.q { background: var(--mut); }
+.cells i.l2 { background: color-mix(in srgb, var(--ink) 48%, var(--off)); }
+.cells i.l3 { background: color-mix(in srgb, var(--ink) 74%, var(--off)); }
+@media (prefers-reduced-motion: no-preference) { .cells i.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+@keyframes blink { 50% { background: var(--off); } }
+.spr { display: inline-grid; margin-right: 6px; flex: none; vertical-align: middle; }
+.spr .cells { grid-template-columns: repeat(5, 3px); }
+.spr.g3 .cells { grid-template-columns: repeat(3, 5px); gap: 2px; }
+.st { font: 600 11px var(--mono); white-space: nowrap; letter-spacing: .02em; text-transform: uppercase; display: inline-flex; align-items: center; }
+.st.y { color: var(--you); } .st.r { color: var(--bad); } .st.g { color: var(--ok); } .st.n { color: var(--ink); } .st.q { color: var(--mut); }
+
+/* shared controls */
+.lr { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.you { background: var(--you); border-color: var(--you); color: var(--on-you); }
+.btn.stop { color: var(--bad); }
+.btn.sm { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+.say { font: 11px var(--mono); color: var(--mut); overflow-wrap: anywhere; }
+.kbd { font: 11px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.link { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; background: none; border: 0; padding: 0; font: inherit; }
+.askbox { padding: 10px; border-radius: 8px; background: color-mix(in srgb, var(--you) 9%, var(--win)); border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); display: grid; gap: 6px; }
+.askbox.r { background: color-mix(in srgb, var(--bad) 9%, var(--win)); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.askbox.quiet { background: var(--raise); border-color: transparent; }
+.askbox .q { font: 600 14px/1.4 var(--ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea.in { width: 100%; resize: none; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+
+/* the window: 400 compact, 900 as the Board; a CSS container like the app */
+.win { width: min(400px, 100%); height: 660px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; position: relative; }
+.win.wide { width: 900px; min-width: 700px; }
+.top { height: 36px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 0 10px; border-bottom: 1px solid var(--line); user-select: none; }
+.top .sp { flex: 1; align-self: stretch; }
+.grip { color: var(--mut); letter-spacing: -2px; font-size: 12px; }
+.scope { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 170px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 600 12px var(--mono); cursor: pointer; }
+.scope .car { color: var(--mut); font-size: 10px; }
+.needs { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); background: transparent; border-radius: 4px; padding: 1px 7px; cursor: pointer; white-space: nowrap; flex: none; }
+.rb { width: 34px; height: 36px; border: 0; background: transparent; color: var(--mut); cursor: pointer; font: 14px var(--ui); display: grid; place-items: center; flex: none; }
+.rb:hover { background: var(--raise); color: var(--ink); }
+.board { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.win.wide .board { grid-template-columns: 330px minmax(0, 1fr); }
+.win.wide .list { border-right: 1px solid var(--line); }
+.list, .open { min-height: 0; display: flex; flex-direction: column; min-width: 0; }
+.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
+
+/* moment 3: the list, one status line per task */
+.sec { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 12px 4px; }
+.sec:first-child { padding-top: 10px; }
+.tr { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 1px 6px; align-items: center; width: calc(100% - 12px); margin: 0 6px 4px; padding: 7px 8px; border-radius: 8px; border: 1px solid transparent; background: var(--raise); color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
+.tr:hover { border-color: var(--line); }
+.tr.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 7%, var(--raise)); }
+.tr.r { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.tr.done { background: transparent; padding-block: 3px; }
+.tr.done .t { font-weight: 400; color: var(--mut); }
+.tr.picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+.tr .mk { grid-row: span 2; align-self: start; padding-top: 3px; }
+.tr .mk .spr { margin: 0; }
+.tr .t { font: 600 13px var(--ui); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr .c { font: 11px var(--mono); color: var(--mut); white-space: nowrap; text-align: right; }
+.tr .s { grid-column: 2 / -1; font: 11.5px var(--mono); color: var(--mut); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr .s .y { color: var(--you); } .tr .s .r { color: var(--bad); } .tr .s .g { color: var(--ok); } .tr .s .n { color: var(--ink); }
+.compose { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+.compose textarea { width: 100%; resize: none; min-height: 34px; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid transparent; border-radius: 6px; padding: 7px 9px; }
+.compose .say { font: 12px var(--ui); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-height: 24px; }
+.compose .say .hint { margin-left: auto; font: 11px var(--mono); white-space: nowrap; display: inline-flex; gap: 4px; align-items: center; }
+.tgt { display: inline-flex; align-items: center; gap: 5px; height: 24px; font: 600 11px var(--mono); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 5px; padding: 0 7px; cursor: pointer; }
+.tgt .car { color: var(--mut); font-size: 9px; }
+
+/* the opened task */
+.ohead { flex: none; padding: 12px 14px 10px; display: grid; gap: 4px; border-bottom: 1px solid var(--line); }
+.ohead .ln1 { display: flex; gap: 10px; align-items: center; }
+.ohead h2 { font: 600 16px/1.3 var(--ui); margin: 0; flex: 1; min-width: 0; text-wrap: balance; overflow-wrap: anywhere; }
+.ohead .meta { display: flex; gap: 12px; flex-wrap: wrap; font: 11.5px var(--mono); color: var(--mut); }
+.ohead .meta b { color: var(--ink); font-weight: 400; }
+.ohead .back { display: none; }
+.win:not(.wide) .ohead .back { display: inline-flex; }
+.obody { display: grid; gap: 16px; padding: 12px 14px 16px; align-content: start; grid-template-columns: minmax(0, 1fr); }
+.blk { display: grid; gap: 6px; min-width: 0; }
+.blk .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.blk .hd .m { color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the step route: one row per step; proposed steps (supervisor.proposed) dim, with no rung yet */
+.route { display: grid; }
+.rt { display: grid; grid-template-columns: 22px 22px minmax(0, 1fr) auto 44px; gap: 2px 8px; align-items: center; padding: 6px 4px; border-top: 1px solid var(--line); border-radius: 0; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; color: var(--ink); text-align: left; font: inherit; cursor: pointer; width: 100%; }
+.rt:first-child { border-top: 0; }
+.rt:hover { background: var(--raise); }
+.rt .n { font: 11px var(--mono); color: var(--mut); }
+.rt .k { font: 600 12.5px var(--ui); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rt .k .m { font-weight: 400; color: var(--mut); font-size: 11px; margin-left: 6px; }
+.rt .r { font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.rt .c { font: 11px var(--mono); text-align: right; }
+.rt.cur { box-shadow: inset 2px 0 0 var(--ink); }
+.rt.pl .k, .rt.pl .c { color: var(--mut); font-weight: 400; }
+.rt .g2 { grid-column: 3 / -1; font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rt .g2 .r { color: var(--bad); } .rt .g2 .g { color: var(--ok); }
+/* the context gauge: 30 cells of 10K in two rows of 15; the second row is the hand-off zone (BRAINSTORM 7.5) */
+.gauge { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+.gauge .cells { grid-template-columns: repeat(15, minmax(0, 14px)); }
+.gauge b { font: 500 12px var(--mono); }
+.gauge .sub { grid-column: 1 / -1; font: 10.5px var(--mono); color: var(--mut); }
+/* the supervisor's last decision */
+.dec { display: grid; gap: 6px; }
+.dec .who { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.dec .act { font: 600 13.5px/1.4 var(--ui); }
+.dec .why { font-size: 12.5px; color: var(--mut); }
+.dec .fine { font: 10.5px var(--mono); color: var(--mut); }
+.dec .noteb { display: grid; gap: 4px; }
+/* the docked bar: one message box, then the task's two buttons and the menu */
+.obar { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; }
+.obar label { font: 11px var(--mono); color: var(--mut); }
+.obar .say { min-height: 16px; }
+.obar .lr .sp { flex: 1; }
+.more { position: relative; }
+.menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 5; width: 250px; background: var(--win); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 24px 60px rgb(0 0 0 / 45%); padding: 4px 0; display: grid; }
+.menu .grp { padding: 8px 12px 2px; }
+.menu button { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 6px 12px; border: 0; background: transparent; color: var(--ink); font: 13px var(--ui); text-align: left; cursor: pointer; }
+.menu button:hover { background: var(--raise); }
+.menu button .m { color: var(--mut); font-size: 11px; }
+.menu button.stop { color: var(--bad); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 4px 12px 6px; }
+.seg button { width: auto; padding: 2px 10px; font: 11px var(--mono); color: var(--mut); border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { color: var(--win); background: var(--ink); }
+/* the Prep card: scope note, steps, one Start */
+.pnote { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; color: var(--mut); }
+.tag { flex: none; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; font: 400 10.5px var(--mono); color: var(--mut); white-space: nowrap; }
+.tag.y { color: var(--you); border-color: color-mix(in srgb, var(--you) 45%, transparent); }
+.steps { display: grid; }
+.sp1 { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 8px; padding: 7px 4px; border-top: 1px solid var(--line); }
+.sp1:first-child { border-top: 0; }
+.sp1 .n { font: 11px var(--mono); color: var(--mut); padding-top: 2px; }
+.sp1 .g { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.sp1 .k { font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.sp1.fixed .g { color: var(--mut); font-size: 12px; }
+.empty { display: grid; gap: 10px; justify-items: start; padding: 24px 14px; }
+.empty .cells { grid-template-columns: repeat(15, 10px); }
+.empty p { margin: 0; color: var(--mut); font-size: 13px; max-width: 40ch; }
+.loading { display: inline-flex; gap: 8px; align-items: center; font: 12px var(--mono); color: var(--mut); }
+.loading .cells { grid-template-columns: repeat(6, 6px); }
+@container (max-width: 372px) {
+  .top .grip { display: none; }
+  .rt { grid-template-columns: 22px 22px minmax(0, 1fr) 44px; }
+  .rt .r { display: none; }
+}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Prompt, Run, Supervise</h1>
+  <p>Plan 48 proposal, explored (not a target): the Board cut to three moments. Type and press Enter; the card shows its scope, its steps and one Start; the supervisor decides between steps; the list gives one status line per task and everything else sits behind opening it.</p>
+  <p>Tokens, type and cells are the locked Console Cells ones; no new colour. Every task, figure and model below is sample data.</p>
+</header>
+
+<div class="views" role="group" aria-label="Mock view">
+  <span class="grp">Moments</span>
+  <button data-v="main" aria-pressed="true">1 Main</button>
+  <button data-v="prep" aria-pressed="false">1 Prep running</button>
+  <button data-v="card" aria-pressed="false">1 Card ready</button>
+  <button data-v="run" aria-pressed="false">2 Running</button>
+  <button data-v="suggest" aria-pressed="false">3 Suggestion</button>
+  <button data-v="gate" aria-pressed="false">3 Fable confirm</button>
+  <button data-v="failed" aria-pressed="false">3 Failed</button>
+  <button data-v="menu" aria-pressed="false">Task menu</button>
+  <span class="grp">Width</span>
+  <button data-w="900" aria-pressed="true">900 Board</button>
+  <button data-w="400" aria-pressed="false">400 compact</button>
+</div>
+
+<div class="stage">
+  <p class="cap" id="cap"></p>
+  <div class="win wide" id="win">
+    <div class="top">
+      <span class="grip">&#8942;&#8942;</span>
+      <button class="scope" title="Project (Ctrl+P)"><span>All projects</span><span class="car">&#9662;</span></button>
+      <button class="needs" id="needs">2 need you</button>
+      <span class="sp"></span>
+      <button class="rb" title="Fold to the pill" aria-label="Fold">&#8963;</button>
+      <button class="rb" aria-label="Close">&#10005;</button>
+    </div>
+    <div class="board">
+      <div class="list" id="list">
+        <div class="scroll" id="rows"></div>
+        <div class="compose">
+          <textarea rows="2" placeholder="New task in CLAUDE CONSOLE" aria-label="New task" id="box"></textarea>
+          <div class="say"><span>in</span><button class="tgt">CLAUDE CONSOLE<span class="car">&#9662;</span></button>
+            <button class="btn sm">Attach</button><span class="hint"><span class="kbd">Enter</span>prep and plan</span></div>
+        </div>
+      </div>
+      <div class="open" id="open"></div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <section>
+    <h3>Moment 1: Prompt</h3>
+    <p><b>Enter</b> sends the prompt; Prep and the planner (plan 47) run with no button and the row says so. When the card is ready its row turns orange with <b>Ready: Start</b>; opening it shows the planner's scope note, the steps and one <b>Start</b>. The enhanced prompt, the route and per-step pickers stay behind <b>Edit steps</b>, never required.</p>
+    <p>Start posts <code>POST /api/task</code> with <code>supervised: true</code>. A card with no steps (Prep reads it as a chat) starts one session through the existing <code>/api/run</code>.</p>
+  </section>
+  <section>
+    <h3>Moment 2: Run supervised</h3>
+    <p>The first step runs; later steps wait as <b>proposed</b> rows. At each boundary the supervisor (plan 44) wakes once, decides, and in suggest mode leaves one card with <b>Approve</b> and <b>Reject</b>. Approve dispatches the saved decision only.</p>
+    <p>The one message box is the way to say what comes next: while a step runs it queues guidance for that step (plan 42); at a boundary or on a done task it becomes the supervisor's instruction for the next step.</p>
+  </section>
+  <section>
+    <h3>Moment 3: Supervise</h3>
+    <p>The list has three groups: <b>Needs you</b>, <b>Running</b>, <b>Done</b>. One row per task: mark, title, cost, and one status line (running with its step, needs you with the question or the suggestion, done, failed with why). Steps no longer unfold in the list.</p>
+    <p>Opening a task shows the step route, the current step's context gauge and the supervisor's last decision. A step row opens its existing inspector (Chat, Received, Handoff, Route, Plan, Files).</p>
+  </section>
+  <section>
+    <h3>What left the screen</h3>
+    <ul>
+      <li>Continue, Verify, Handoff, Escalate and Retry as buttons: the message box or the supervisor carries them; Retry on a model is in the menu.</li>
+      <li>Add next step and choose next step: the message box; the exact-model form stays in the menu.</li>
+      <li>Hand off task, Finish task, Models and tuning: the task menu.</li>
+      <li>The calendar, the effort slider, Run raw and Review rules: the menu or a key (D4).</li>
+    </ul>
+  </section>
+  <section class="full">
+    <h3>Decision rules shown here (recommendations, Fred decides in plan 48)</h3>
+    <table>
+      <tr><th>#</th><th>Question</th><th>Shown as</th></tr>
+      <tr><td>D1</td><td>Supervised by default</td><td>Every Start is supervised; the mode comes from config (suggest); the menu changes it per task</td></tr>
+      <tr><td>D2</td><td>Start when the supervisor is off or Fred is blocked</td><td>Off: the listed steps run as a scripted chain. Fable: Start asks twice. Pace or limit: the task starts held and its row needs you</td></tr>
+      <tr><td>D3</td><td>Message box and Add next step</td><td>The box replaces it on screen; the exact-model form stays in the menu</td></tr>
+      <tr><td>D4</td><td>Raw path</td><td>Ctrl+Enter only, a hint in the composer; no Run raw button</td></tr>
+      <tr><td>D6</td><td>Authority of a next-step message</td><td>Your message is the approval for the one step the supervisor adds from it</td></tr>
+    </table>
+  </section>
+</div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const px = (tone, ...rows) => rows.join("").split("").map((c) => (c === "x" ? tone : ""));
+const SPR = {
+  running: { g3: true, cells: ["l3", "l2", "f", "f", "l3", "l2", "l2", "f", ""] },
+  waiting: { cells: px("y", ".xxx.", "x...x", "...x.", ".....", "..x..") },
+  stuck: { cells: px("r", "x...x", ".x.x.", "..x..", ".x.x.", "x...x") },
+  done: { cells: px("g", ".....", "....x", "...x.", "x.x..", ".x...") },
+  planned: { cells: Array.from({ length: 25 }, (_, k) => (k === 12 ? "l2" : "")) },
+};
+const cells = (list) => list.map((c) => `<i${c ? ` class="${c}"` : ""}></i>`).join("");
+const spr = (name) => { const s = SPR[name]; return `<span class="spr${s.g3 ? " g3" : ""}" aria-hidden="true"><span class="cells">${cells(s.cells)}</span></span>`; };
+
+// sample tasks: [id, mark, title, cost, status html, tone, group]
+const TASKS = {
+  sup: ["sup", "waiting", "Board simplification: one status line per task", "0.84", '<span class="y">needs you</span> · supervisor suggests: add 03 verify', "y", "needs"],
+  fable: ["fable", "waiting", "Design the skill library registry", "0.12", '<span class="y">needs you</span> · confirm Fable 1 on 01 design', "y", "needs"],
+  run: ["run", "running", "Planner pass: narrow trigger to medium and high", "0.47", '<span class="n">running</span> · 02 code · sonnet 5.5 medium · 4m', "", "work"],
+  prep: ["prep", "running", "Fix the 340 px overflow on the Models page", "0.02", '<span class="n">preparing</span> · Haiku reads, then the planner checks the scope', "", "work"],
+  card: ["card", "waiting", "Fix the 340 px overflow on the Models page", "0.09", '<span class="y">ready</span> · 3 steps · Start', "y", "needs"],
+  failed: ["failed", "stuck", "Codex write check on CONTENT MANAGER", "1.06", '<span class="r">failed</span> · 02 code: no HANDOFF block · supervisor suggests Retry', "r", "needs"],
+  done1: ["done1", "done", "Limits: clear link on the Tiers page", "1.42", '<span class="g">done</span> · 4 steps · 11:40', "", "done"],
+  done2: ["done2", "done", "Usage: reset day when not today", "0.38", '<span class="g">done</span> · 2 steps · 09:12', "", "done"],
+};
+const VIEW = {
+  main: { rows: ["sup", "fable", "run", "done1", "done2"], open: "", needs: 2,
+    cap: "<b>Main.</b> The prompt box, one row per task with its status colour and one status line, and the needs-you count on top. Nothing else: the calendar, the effort slider and the settings are behind the menu." },
+  prep: { rows: ["sup", "fable", "prep", "run", "done1"], open: "prep", needs: 2,
+    cap: "<b>Prompt sent.</b> Enter empties the box and the task row appears at once. Prep and the planner run with no button; the row says what is happening." },
+  card: { rows: ["card", "sup", "fable", "run", "done1"], open: "card", needs: 3,
+    cap: "<b>Card ready.</b> The planner's scope note, the step list and one Start. Edit steps opens today's editors (prompt, kinds, models); nothing there is required before Start." },
+  run: { rows: ["sup", "fable", "run", "done1"], open: "run", needs: 2,
+    cap: "<b>Running supervised.</b> The route shows the step that runs and the proposed steps after it; the gauge is the running step's context; the last decision is the supervisor's, here an automatic one. Stop and Pause are the two buttons; the box queues guidance for this turn." },
+  suggest: { rows: ["sup", "fable", "run", "done1"], open: "sup", needs: 2,
+    cap: "<b>A suggestion waits.</b> Suggest mode: the supervisor proposes the next step and nothing runs until Approve. Reject takes an optional note for the next wake. Typing in the box instead tells the supervisor what to do next." },
+  gate: { rows: ["fable", "sup", "run", "done1"], open: "fable", needs: 2,
+    cap: "<b>A gate only Fred opens.</b> Fable confirmation, a pace hold and a question are never the supervisor's: the row says what is asked and the opened task shows that one button." },
+  failed: { rows: ["failed", "sup", "run", "done1"], open: "failed", needs: 2,
+    cap: "<b>Failed.</b> The row says why. The supervisor's stuck wake suggests a Retry; Approve runs it. A Retry on a model you pick is in the menu." },
+  menu: { rows: ["sup", "fable", "run", "done1"], open: "run", needs: 2, menu: true,
+    cap: "<b>The task menu.</b> Everything that is not a moment: hand off, finish, add a step on an exact model, retry on a model, the supervisor's mode for this task, the folder, delete, and the pages (Models and tuning, Usage)." },
+};
+let view = "main", width = "900", closed = false;
+
+function rowsHtml(v) {
+  const g = { needs: [], work: [], done: [] };
+  for (const id of v.rows) g[TASKS[id][6]].push(TASKS[id]);
+  const row = ([id, mk, title, cost, status, tone, grp]) => `<button class="tr${tone ? " " + tone : ""}${grp === "done" ? " done" : ""}${v.open === id ? " picked" : ""}" data-open="${id}">
+    <span class="mk">${spr(mk)}</span><span class="t">${title}</span><span class="c">${cost}</span><span class="s">${status}</span></button>`;
+  const sec = (cls, name, list) => list.length ? `<div class="sec"><span class="lbl ${cls}">${name} · ${list.length}</span></div>${list.map(row).join("")}` : "";
+  return sec("y", "Needs you", g.needs) + sec("", "Running", g.work) + sec("", "Done today", g.done);
+}
+
+function gauge(k, tone) {  // 30 cells of 10K, the second row the hand-off zone
+  return Array.from({ length: 30 }, (_, i) => (i < k ? (i >= 15 ? "y" : "f") + (i === k - 1 && tone === "live" ? " live" : "") : ""));
+}
+const routeRow = (n, mk, kind, rung, cost, o = {}) => `<button class="rt${o.cur ? " cur" : ""}${o.pl ? " pl" : ""}">${spr(mk)}<span class="n">${n}</span>
+  <span class="k">${kind}${o.goal ? `<span class="m">${o.goal}</span>` : ""}</span><span class="r">${rung}</span><span class="c">${cost}</span>${o.sub ? `<span class="g2">${o.sub}</span>` : ""}</button>`;
+
+function head(title, word, tone, mark, meta) {
+  return `<div class="ohead"><div class="ln1"><button class="rb back" data-open="" aria-label="Back to the list">&#8592;</button><span class="st ${tone}">${spr(mark)}${word}</span><h2>${title}</h2></div>
+    <div class="meta">${meta}</div></div>`;
+}
+function bar(o) {
+  const menu = o.menu ? `<div class="menu" role="menu">
+      <span class="grp lbl">This task</span>
+      <button>Hand off task<span class="m">preview first</span></button>
+      <button>Finish task<span class="m">history stays</span></button>
+      <button>Add step on a model<span class="m">kind, model</span></button>
+      <button>Retry on a model<span class="m">when failed</span></button>
+      <span class="grp lbl">Supervisor for this task</span>
+      <span class="seg"><button aria-pressed="false">off</button><button aria-pressed="true">suggest</button><button aria-pressed="false">auto</button></span>
+      <hr><button>Open task folder</button><button class="stop">Delete task</button>
+      <hr><span class="grp lbl">Pages</span>
+      <button>Models and tuning<span class="m">&#8250;</span></button><button>Usage<span class="m">$4.81 today &#8250;</span></button>
+    </div>` : "";
+  return `<div class="obar">
+    <label for="msg">${o.label}</label>
+    <textarea class="in" id="msg" rows="2" placeholder="${o.ph}"></textarea>
+    <div class="say">${o.say}</div>
+    <div class="lr"><button class="btn go sm">${o.send || "Send"}</button><button class="btn sm">Attach</button><span class="sp"></span>${o.buttons || ""}
+      <span class="more"><button class="btn sm" aria-haspopup="menu" aria-expanded="${!!o.menu}" title="Hand off, finish, retry on a model, mode, folder, pages">&#8943;</button>${menu}</span></div></div>`;
+}
+
+function openHtml(v) {
+  const id = v.open;
+  if (!id) return `<div class="empty"><div class="cells">${cells(Array(30).fill(""))}</div><p>Open a task to see its route, its context and the supervisor's last decision.</p></div>`;
+  if (id === "prep") return head("Fix the 340 px overflow on the Models page", "Preparing", "n", "running", "<span>CLAUDE CONSOLE</span><span>task 1019-7c2e</span>")
+    + `<div class="scroll"><div class="obody"><span class="loading"><span class="cells">${cells(["f live", "", "", "", "", ""])}</span>Haiku is reading CLAUDE CONSOLE, then opus checks the scope</span>
+      <p class="say">Nothing to press: the card opens here when it is ready. The box below already takes a note for the first step.</p></div></div>`
+    + bar({ label: "Message task before its first step", ph: "Saved for the first step", say: "Saved for the first step. Sending does not start the task." });
+  if (id === "card") return head("Fix the 340 px overflow on the Models page", "Ready", "y", "waiting", "<span>CLAUDE CONSOLE</span><span>prep + planner <b>$0.09</b></span><span>task 1019-7c2e</span>")
+    + `<div class="scroll"><div class="obody">
+      <div class="blk"><span class="lbl">Scope</span><div class="pnote"><span class="tag">ok</span><span>One CSS rule and its test; the Models page grid is the only place that overflows.</span></div></div>
+      <div class="blk"><div class="hd"><span class="lbl">Steps · 3</span><button class="link m">Edit steps</button></div><div class="steps">
+        <div class="sp1"><span class="n">01</span><span class="g">Find the rule that keeps .krow wider than 340 px</span><span class="k">scout</span></div>
+        <div class="sp1"><span class="n">02</span><span class="g">Wrap .krow at the 372 px container and add the web test</span><span class="k">code</span></div>
+        <div class="sp1 fixed"><span class="n">03</span><span class="g">verify, added after the last editing step</span><span class="k">verify</span></div></div></div>
+      <div class="lr"><button class="btn go">Start</button><span class="say">supervised · suggest · runs in CLAUDE CONSOLE</span></div>
+    </div></div>`
+    + bar({ label: "Message task before its first step", ph: "Saved for the first step", say: "Saved for the first step. Sending does not start the task.", buttons: "" });
+  if (id === "run") return head("Planner pass: narrow trigger to medium and high", "Running", "n", "running", "<span>CLAUDE CONSOLE</span><span>cost <b>0.47</b></span><span>supervised · auto</span><span>task 1019-a3f2</span>")
+    + `<div class="scroll"><div class="obody">
+      <div class="blk"><div class="hd"><span class="lbl">Route · 4 steps</span><span class="m">2 proposed</span></div><div class="route">
+        ${routeRow("01", "done", "scout", "haiku 4.5", "0.06", { sub: '<span class="g">done</span> · 1.2K w handed on' })}
+        ${routeRow("02", "running", "code", "sonnet 5.5 medium", "0.41", { cur: true, sub: "writing · 4m 12s" })}
+        ${routeRow("03", "planned", "verify", "proposed", "", { pl: true })}
+        ${routeRow("04", "planned", "code", "proposed", "", { pl: true })}</div></div>
+      <div class="blk"><div class="hd"><span class="lbl">Context · 02 code</span><span class="m">1 cell = 10K</span></div>
+        <div class="gauge"><span class="cells">${cells(gauge(9, "live"))}</span><b>92K</b><span class="sub">0 · 150K hand off soon · 300K hand off</span></div></div>
+      <div class="blk"><span class="lbl">Supervisor · last decision</span><div class="askbox quiet dec">
+        <div class="who"><span class="st n">wake 2</span><span class="fine">14:02 · dispatched by auto · haiku $0.004</span></div>
+        <div class="act">Added 02 code from 01's handover</div>
+        <div class="why">The scout found the one trigger in prep.run_prep; the change fits one code step.</div></div></div>
+    </div></div>`
+    + bar({ label: "Message current step 02: code", ph: "Correction or extra information for step 02", say: "Queued for the end of this turn.", menu: v.menu,
+      buttons: '<button class="btn sm stop">Stop</button><button class="btn sm">Pause</button>' });
+  if (id === "sup") return head("Board simplification: one status line per task", "Needs you", "y", "waiting", "<span>CLAUDE CONSOLE</span><span>cost <b>0.84</b></span><span>supervised · suggest</span><span>task 1019-5b10</span>")
+    + `<div class="scroll"><div class="obody">
+      <div class="blk"><span class="lbl y">Supervisor suggests</span><div class="askbox dec">
+        <div class="who"><span class="st y">wake 3</span><span class="fine">15:20 · haiku $0.003 · nothing runs until you approve</span></div>
+        <div class="act">Add 03 verify on sonnet from 02's handover</div>
+        <div class="why">02 changed app.js and style.css and ran the web tests; a verify checks the 340 px case it did not test.</div>
+        <div class="lr"><button class="btn you sm">Approve</button><button class="btn sm">Reject</button><span class="say">Reject takes a note for the next wake</span></div></div></div>
+      <div class="blk"><div class="hd"><span class="lbl">Route · 2 steps done</span><span class="m">1 proposed</span></div><div class="route">
+        ${routeRow("01", "done", "design", "opus 5.5 high", "0.52", { sub: '<span class="g">done</span> · plan.md 2.1K w' })}
+        ${routeRow("02", "done", "code", "sonnet 5.5 medium", "0.32", { cur: true, sub: '<span class="g">done</span> · 3 files +118 -40 · 214 OK' })}
+        ${routeRow("03", "planned", "verify", "suggested", "", { pl: true })}</div></div>
+      <div class="blk"><div class="hd"><span class="lbl">Context · 02 code</span><span class="m">ended</span></div>
+        <div class="gauge"><span class="cells">${cells(gauge(17))}</span><b>171K</b><span class="sub">past 150K: the next step starts fresh from the handover</span></div></div>
+    </div></div>`
+    + bar({ label: "Tell the supervisor what to do next", ph: "For example: verify only the 340 px case, then finish", say: "Your message goes to the next wake; the step it adds from your words runs without Approve.", send: "Send" });
+  if (id === "fable") return head("Design the skill library registry", "Needs you", "y", "waiting", "<span>CLAUDE CONSOLE</span><span>cost <b>0.12</b></span><span>supervised · suggest</span><span>task 1019-e41d</span>")
+    + `<div class="scroll"><div class="obody">
+      <div class="askbox"><span class="st y">${spr("waiting")}Confirm</span><div class="q">01 design is set to Fable 1, which may bill usage credits on this plan.</div>
+        <div class="lr"><button class="btn you sm">Confirm Fable 1</button><span class="say">Only you open this gate; the supervisor never does</span></div></div>
+      <div class="blk"><div class="hd"><span class="lbl">Route · 3 steps</span><span class="m">held before 01</span></div><div class="route">
+        ${routeRow("01", "waiting", "design", "fable 1 high", "", { cur: true, sub: '<span class="y">held</span> · waits for your confirm' })}
+        ${routeRow("02", "planned", "code", "proposed", "", { pl: true })}
+        ${routeRow("03", "planned", "verify", "proposed", "", { pl: true })}</div></div>
+      <div class="blk"><span class="lbl">Supervisor · last decision</span><p class="say">No wake yet: it decides after 01 ends.</p></div>
+    </div></div>`
+    + bar({ label: "Message task before its first step", ph: "Saved for the first step", say: "Saved for the first step. Sending does not start the task." });
+  return head("Codex write check on CONTENT MANAGER", "Failed", "r", "stuck", "<span>CONTENT MANAGER</span><span>cost <b>1.06</b></span><span>supervised · suggest</span><span>task 1017-2d28</span>")
+    + `<div class="scroll"><div class="obody">
+      <div class="blk"><span class="lbl y">Supervisor suggests</span><div class="askbox dec">
+        <div class="who"><span class="st y">wake 2</span><span class="fine">10:41 · sonnet $0.011 (stuck wake) · nothing runs until you approve</span></div>
+        <div class="act">Retry 02 code on sonnet 5.5</div>
+        <div class="why">02 ended without END HANDOFF twice on codex; the writes landed, the reply was cut. A Claude rung writes the block.</div>
+        <div class="lr"><button class="btn you sm">Approve</button><button class="btn sm">Reject</button></div></div></div>
+      <div class="blk"><div class="hd"><span class="lbl">Route · 3 steps</span><span class="m">1 failed</span></div><div class="route">
+        ${routeRow("01", "done", "scout", "haiku 4.5", "0.05", { sub: '<span class="g">done</span>' })}
+        ${routeRow("02", "stuck", "code", "codex gpt-6.1-sol medium", "1.01", { cur: true, sub: '<span class="r">failed</span> · no HANDOFF block · try 2' })}
+        ${routeRow("03", "planned", "verify", "proposed", "", { pl: true })}</div></div>
+    </div></div>`
+    + bar({ label: "Message current step 02: code", ph: "Saved guidance for the retry", say: "Saved guidance. Approve the Retry or use Retry on a model to deliver it." });
+}
+
+function draw() {
+  const v = closed ? { ...VIEW[view], open: "" } : VIEW[view];
+  $("win").classList.toggle("wide", width === "900");
+  $("cap").innerHTML = v.cap;
+  $("needs").textContent = `${v.needs} need you`;
+  $("rows").innerHTML = rowsHtml(v);
+  const compactOpen = width === "400" && v.open;
+  $("list").hidden = !!compactOpen;
+  $("open").hidden = width === "400" && !v.open;
+  $("open").innerHTML = openHtml(v);
+  document.querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === view));
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.w === width));
+}
+document.addEventListener("click", (e) => {
+  const v = e.target.closest("[data-v]"), w = e.target.closest("[data-w]"), o = e.target.closest("[data-open]");
+  if (v) { view = v.dataset.v; closed = false; draw(); }
+  if (w) { width = w.dataset.w; draw(); }
+  if (o) {
+    const id = o.dataset.open, hit = Object.entries(VIEW).find(([, x]) => x.open === id);
+    if (!id) { closed = true; draw(); return; }
+    if (hit) { view = hit[0]; closed = false; draw(); }
+  }
+});
+draw();
+</script>
+</html>

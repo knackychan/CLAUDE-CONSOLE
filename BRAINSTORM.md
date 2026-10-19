@@ -50,6 +50,7 @@ No cloud, no network calls of its own.
 | D13 | Usage page (2026-10-11) | Locked: `design/rework/locked/usage.html` (section 7.5): estimated cost and tokens per day, week and month from every transcript, a calendar of days and columns of cells over time; history kept in `~/.claude/console/usage-days.json` |
 | D14 | Tray (2026-10-11) | A2: the service lives in a tray icon process (ctypes, no new package); the pywebview window is a child process that exists only while open, so a hidden console costs about 39 MB instead of about 329 (`plans/12-tray.md`) |
 | D15 | Name and logo (2026-10-11) | Name: ContextCompanion, temporary (Fred), harness-neutral; only the shown name changes (`window.TITLE`, page title), ids and folders stay. Logo: a 3 x 3 board of cells, a lit route to an orange signal cell (`design/logo/`, `console/icon.py`, `plans/14-logo.md`) |
+| D16 | Board simplification (2026-10-19) | Prompt, Run supervised, Supervise (section 7.6, `plans/48-three-moments.md`): Start is supervised by default, one message box carries what comes next, per-step levers leave the screen, Hand off / Finish / Models sit behind one menu. Mock explored, not yet locked |
 
 ## 4. Architecture
 
@@ -254,6 +255,56 @@ thing on the right. Two zones: what Fred acts on stays in sight, how and why sit
 Decisions ID-1 to ID-9 are in the doc's section 12; ID-5 was refused (a handoff shows no cells for its
 words, the count is a figure in the inspector only).
 
+### 7.6 Board simplification: Prompt, Run supervised, Supervise (decided by Fred, 2026-10-19)
+
+Plan 48. Mock: `design/rework/explored/e-prompt-run-supervise.html` (explored; Fred promotes it to `locked/`).
+The Board grew one control per plan (17, 25, 36, 39, 40, 41, 42, 44): a task page today carries about 35
+controls and the step levers repeat on three surfaces. With the plan 44 supervisor deciding between steps and the
+plan 47 planner writing the step list, Fred's part shrinks to three moments.
+
+1. **Prompt.** Type, Enter. Prep, the planner and the step list happen with no button; the task row says
+   `preparing`. When the card is ready the row turns orange (`ready · N steps · Start`) and the card shows only
+   the planner's scope note, the step list and one **Start**. Edit steps (the enhanced prompt, kinds, models,
+   effort) stays one click away and is never required. Ctrl+Enter is the raw path (D4).
+2. **Run supervised.** Start posts `POST /api/task` with `supervised: true` (D1). The first step runs; the rest
+   wait as the supervisor's proposed steps; at each boundary the supervisor wakes once and decides (suggest:
+   Approve / Reject; auto: within its caps).
+3. **Supervise.** One list, three groups (Needs you, Running, Done), one row per task: mark, title, cost and one
+   status line (`running · 02 code · sonnet 5.5`, `needs you · <question or suggestion>`, `done · 4 steps`,
+   `failed · <why>`). The header keeps the project picker and the "N need you" count. Opening a task shows the
+   step route (done, running, proposed), the current step's context gauge (30 cells) and the supervisor's last
+   decision with Approve / Reject on a pending suggestion; the bar holds the one message box, Stop, Pause and one
+   menu. A step row opens the existing step inspector (Chat, Received, Handoff, Route, Plan, Files).
+
+The message box is the one way to say what comes next. While a step runs it queues guidance for that step
+(plan 42, unchanged). At a supervised boundary or on a finished supervised task it becomes the supervisor's
+instruction for the next step: the service saves it, wakes the supervisor once, and the step the supervisor adds
+from it starts with Fred's words as its instructions (D6).
+
+Controls today (`web/app.js`, 2026-10-19 at `850767e`) and where each goes:
+
+| View | Keep in sight | Behind a menu | Removed |
+|---|---|---|---|
+| Header | project picker, N need you, window buttons | Usage, Models and tuning, Measure, Select done tasks, Show empty chats (one header menu) | |
+| Calendar strip | | the Usage page (its calendar) | 14 day cells, week nav, over-pace toggle, day inspector |
+| List | one row per task or chat, Done day and Older folds | label copy (on the opened task's head, and C) | step sub-rows under each task, 00 prep rows, Replied and Idle as own groups (they join Running) |
+| Composer | prompt box, project chip, Attach, Enter hint | effort slider (Edit steps on the card) | |
+| Prep card | scope note, step list, Start | Edit steps (enhanced prompt, kind / model / remove / + step, effort), Edit prompt, Drop, Review rules | Run, Run raw, Run as task, the one-session model and effort pickers (D4) |
+| Opened task | route, gauge, last decision, Approve, Reject, Stop, Pause or Resume, the gate's one button (confirm plan, Run anyway, Confirm Fable, Dismiss an uncertain send), message box with Send and Attach | Hand off task, Finish task, Add step on a model (plan 36 form), Retry on a model (plan 40 form), Accept step result, Redo design, Open in terminal, Review rules, supervisor mode for this task, Open task folder, Delete task, Models and tuning, Usage | Overview / Steps / Files tabs (the route is the steps; Files in the folder), Add step and Mark done as buttons, Continue, Verify, Handoff, Escalate, Retry as buttons, Use message in Add step |
+| Step inspector | its tabs and contents, the same bar | Add step from here (the step's menu) | Go to step NN, the dock's second action row |
+| Session page (outside chats) | unchanged | | |
+
+Decisions (Fred took the recommended option on each, 2026-10-19):
+
+| # | Question | Decision |
+|---|---|---|
+| D1 | Supervised by default | Yes. Every Start is supervised; the mode comes from `supervisor_mode` / `supervisor_projects` (suggest today); the task menu changes it per task (`POST /api/task/supervisor {task, mode}`). |
+| D2 | Start when the supervisor is off or Fred is blocked | Never wait. Effective mode off: Start posts `supervised: false` and the listed steps run as the scripted chain, said under Start. Fable on a step: Start asks twice. Pace or limit: the task starts held and its row needs Fred with the one button. Pending guidance, Pause and an uncertain dispatch exist only on a started task: its row names them and the opened task shows the one control that clears them. A card with no steps starts one session through `/api/run`. |
+| D3 | Message box and Add next step | The box replaces it on screen; the plan 36 form stays in the task menu as Add step on a model (mode off, exact-model picks); Add step from here moves to the step's menu. |
+| D4 | Raw path | Ctrl+Enter only, a hint beside Enter; the card loses Run raw and Run (one session) with its pickers. |
+| D5 | Non-goals | None crossed: no daemon, scheduler, task graph, docking or new endpoint. Orchestration D-1 now reads: the scripted chain stays for mode off; supervised tasks decide between steps with plan 44's bounded pass; still no resident agent. |
+| D6 | Authority of a next-step message | Fred's message approves the one `add_next_step` the supervisor returns for that wake (all live gates rechecked, instructions are his words, logged `by fred (message)`); any other decision it returns still waits for Approve. |
+
 ## 8. Error handling
 
 - **Crash / shutdown during a run**: transcripts are written line by line, edits stay on disk, only
@@ -334,3 +385,6 @@ words, the count is a figure in the inspector only).
   D-8): the scripted chain stays, no orchestrator agent; harness adapters (Codex, OpenCode, Command Code) with a
   per-harness switch; tiers think / write / read with rungs on any harness and usage fills per model; a six-heading
   handoff block; a `replan` step kind; the Cells Board expanded view. Sub-plans 5, 18, 23, 24, 25.
+- 2026-10-19 - Board simplification with Fred (section 7.6, D16): three moments (Prompt, Run supervised,
+  Supervise), supervised by default, one message box for what comes next, the rest behind one menu. Mock in
+  `design/rework/explored/e-prompt-run-supervise.html`; sub-plan 48.
