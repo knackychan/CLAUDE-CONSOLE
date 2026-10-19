@@ -1463,7 +1463,7 @@ class RecoveryBoxTest(unittest.TestCase):
         self.assertIn("finished; no handoff was saved.", bare)
         accepted = render(self.setup + "d.recovery.done.how = 'accepted'; attentionArea(t, d, row)")
         self.assertIn("was accepted by you as it was on disk.", accepted)
-        long = render(self.setup + "d.recovery.cut.why = '<b>' + 'x'.repeat(400); attentionArea(t, d, row)")
+        long = render(self.setup + "d.recovery.cut.cause = 'failed'; d.recovery.cut.why = '<b>' + 'x'.repeat(400); attentionArea(t, d, row)")
         self.assertIn("&lt;b&gt;", long)  # esc(): a reason is text
         self.assertEqual(render(self.setup + "d.recovery = null; t.state = 'running'; t.why = ''; t.steps[1].state = 'running'; attentionArea(t, d, row)"), "")
 

@@ -3700,10 +3700,40 @@ function questionsFold(d) {  // plan 48: one closed fold, open questions first
   return fold("Questions", `${open.length} open · ${qs.length - open.length} closed`, `<div class="oq">${[...open, ...qs.filter((q) => q.closed)].map(qrow).join("")}</div>`,
     { key: "tquestions", tone: open.length ? "y" : "" });
 }
+const CUT_TEXT = { interrupted: "was interrupted: the run ended without a result (a restart or a crash).", stopped: "was stopped.",
+  unknown: "did not finish; the cause is not recorded." };
+function recoveryBox(t, d) {  // plan 48 section 7: what definitely finished, what was cut, what Fred can do; saved fields only, no button
+  const r = d.recovery, lv = d.levers || {}, tid = esc(t.id), sup = d.supervisor;
+  const dispatch = sup && sup.mode !== "off" && sup.pending && sup.pending.status === "uncertain" ? sup.pending : null;
+  const unsure = (t.messages || []).filter((m) => m.status === "uncertain");
+  if (!r && !dispatch && !unsure.length) return "";
+  const link = (n, kind) => `<button class="olink" data-bpick="s${n}" data-btask="${tid}">Step ${two(n)} ${esc(kind)}</button>`;
+  const lines = [], acts = [];
+  if (r) {
+    const dn = r.done, c = r.cut, o = r.orphan;
+    lines.push(!dn ? "No completed step recorded." : dn.how === "accepted" ? `${link(dn.step, dn.kind)} was accepted by you as it was on disk.`
+      : dn.verdict ? `${link(dn.step, dn.kind)} finished: VERDICT ${esc(dn.verdict)}.`
+      : `${link(dn.step, dn.kind)} finished${dn.handoff ? " with a saved handoff." : "; no handoff was saved."}`);
+    if (c) {
+      lines.push(`${link(c.step, c.kind)}, attempt ${c.attempt}, ${CUT_TEXT[c.cause] || `failed: ${esc(String(c.why || "no reason recorded").replace(/\.$/, ""))}.`}`);
+      lines.push("Its file edits or other actions may already have happened. Nothing is undone, and a retry starts the step again in a new session, not at its last tool call.");
+    }
+    if (dn && dn.facts) lines.push(`Git and test facts are as recorded when step ${two(dn.step)} ended, not a fresh check.`);
+    if (o) lines.push(esc(`Step ${two(o.step)}'s run from an earlier service is still running; nothing else runs on this step until it ends.`));
+    if (c && lv.retry === "") acts.push(esc(`Retry on a model (task menu) runs step ${two(c.step)} again; attempt ${c.attempt}'s edits stay.`));
+    if (c && lv.stepdone === "") acts.push(`Accept step result (task menu) marks step ${two(c.step)} done with the files as they are now.`);
+    if ((c || o) && lv.resume === "") acts.push("Resume lets the service go on.");
+    if (o && lv.stop === "") acts.push("Stop (bar) ends that run.");
+    if (c && !acts.length) acts.push(`No recovery action is open: ${esc(String(lv.retry || "the service offers none").replace(/\.$/, ""))}.`);
+  }
+  if (dispatch) lines.push(esc(`The supervisor's wake ${dispatch.wake} dispatch has an unknown outcome (card below). It is never replayed; Dismiss does not mean it failed.`));
+  for (const m of unsure) lines.push(`Your message to step ${two(m.target.step)} has an unknown delivery (message box). It is never replayed; Dismiss does not mean it was not delivered.`);
+  return `<div class="askbox recovery" role="group" aria-label="Recovery"><span class="lbl">Recovery</span>${lines.map((l) => `<p class="rl">${l}</p>`).join("")}${acts.length ? `<ul class="ra">${acts.map((a) => `<li>${a}</li>`).join("")}</ul>` : ""}</div>`;
+}
 function attentionArea(t, d, row) {  // plan 48: the gate's one button; Retry on a model is in the menu, a question is answered in the box
   const lv = d.levers || {}, tid = esc(t.id), cur = t.steps.find((x) => x.n === t.current);
   const gap = /^(asks: )?Plan gap:/.test(row.asks || row.why || ""), replan = (t.why || "").startsWith("replanned:");
-  let out = "";
+  let out = recoveryBox(t, d);  // plan 48 section 7: above the gate
   if (row.asks && !gap) {
     out += `<div class="askbox"><span class="st y">${sprite("waiting")}Asks you <span class="lc">· step ${cur ? two(cur.n) : ""}</span></span><div class="q">${esc(row.asks)}</div></div>`;
   } else if (gap) {

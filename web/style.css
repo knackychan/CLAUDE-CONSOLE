@@ -984,6 +984,11 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .pre.text.goal, pre.text.goal { max-height: 8em; }
 .task-attention { display: grid; gap: 8px; }
 .task-attention .askbox { margin: 0; }
+/* plan 48 section 7: the recovery box, facts in text, the open levers named as a quiet list */
+.askbox.recovery { background: var(--raise); border-color: var(--line); gap: 4px; min-width: 0; }
+.askbox.recovery .rl { margin: 0; font: 13px/1.45 var(--ui); overflow-wrap: anywhere; }
+.askbox.recovery .rl .olink { font: inherit; white-space: normal; }
+.askbox.recovery .ra { margin: 2px 0 0; padding-left: 16px; color: var(--mut); font: 12px/1.45 var(--ui); overflow-wrap: anywhere; }
 /* plan 48 3.4: the opened task. The supervisor's card, the route's proposed rows, the context gauge, the task menu */
 .sup-card .askbox { margin: 0; }
 .askbox.quiet { background: transparent; border-color: var(--line); }
