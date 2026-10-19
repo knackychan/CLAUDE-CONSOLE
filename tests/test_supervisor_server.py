@@ -1808,6 +1808,9 @@ class LifecycleAcceptanceTest(test_server.TaskServerTest):
         self.assertEqual(sum(r.get("cost") or 0 for r in records if r.get("phase") == "result"), 0.012)
         whys = [line["why"] for line in tasks.read_chain(self.folder, task)]
         self.assertEqual(sum(1 for w in whys if w.startswith("supervisor: dispatched")), 3)
+        self.assertNotIn("marked done by Fred", whys)  # the supervisor's Finish is labeled as its own
+        self.assertIn("marked done by the supervisor", whys)
+        self.assertEqual(task["why"], "marked done by the supervisor")
         ledger = usage.load_supervisor(self.folder)["records"]
         for wake in (1, 2, 3):
             self.assertEqual(ledger[supervisor.request_id(tid, wake)]["cost"], 0.004)

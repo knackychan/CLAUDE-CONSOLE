@@ -309,7 +309,8 @@ and the prompt_hash of the executed prompt; chain.jsonl suggest/dispatched lines
 received-handoff.md for steps 02 and 03; three settled ledger records. Code review: dispatch ends only in
 `request_next` or `task_lever(origin="supervisor")`; admission, judge, dispatch, drain and replay all check pending
 guidance; no `runs.start`/`runs.stop` in supervisor code; the only thread is one bounded pass per admitted wake;
-supervisor.jsonl is written only under the data home. Observation, not changed: a supervisor Finish logs the
-done transition as "marked done by Fred" before its own "supervisor: dispatched finish ... by fred" line.
+supervisor.jsonl is written only under the data home. Follow-up fix: a lever the supervisor dispatches
+(Finish, Retry, Confirm, Keep, Mark step done, Stop) is logged "by the supervisor", not "by Fred"; the
+"supervisor: dispatched ... by fred|auto" line after it still names who approved.
 
 Remaining: Board/Prep/Models/Usage UI for these routes, the skill library (D14-D18), and Fred's live check (12.4).

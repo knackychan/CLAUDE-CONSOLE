@@ -3657,6 +3657,10 @@ class Hub:
             if origin == "fred":
                 self._supervisor_fred(task, now, lever)
             if chat_route:
+            else:  # plan 44: the supervisor's dispatch is not logged as Fred's own act
+                for line in lines:
+                    line["why"] = line["why"].replace(" by Fred", " by the supervisor")
+                task["why"] = task["why"].replace(" by Fred", " by the supervisor")
                 cs["manual_route"] = chat_route
             if closed:
                 self._accept_step(task, closed)
