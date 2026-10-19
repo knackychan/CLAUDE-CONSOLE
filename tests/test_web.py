@@ -105,7 +105,7 @@ class ChatCopyTest(unittest.TestCase):
         self.assertLess(session, inspector)
 
     def test_standalone_chat_is_one_row_that_opens_its_page(self):
-        setup = """snap = {now: 100}; page = 'board'; openId = ''; sessionView = 'chat';
+        setup = """snap = {now: 100}; page = 'board'; openId = '';
           s = {id: 's', title: 'Fix the run', state: 'replied', group: 'replied', last_ts: 40,
                symbol: 'R', project: 'Console', model: 'sonnet', harness: 'claude', text: 'Replied',
                effort: 'medium', spent: 1, spent_exact: true, ctx_tokens: 0, prep: ''}; """
@@ -632,6 +632,24 @@ class UnifiedTaskChatTest(unittest.TestCase):
         self.assertTrue(result['same'])
         for text in ('Queued', 'Outcome unknown', 'Cancel guidance', 'Dismiss after checking conversation', '&lt;correction&gt;'):
             self.assertIn(text, result['html'])
+
+    def test_failed_next_message_offers_resend_into_the_box(self):  # plan 48 D11
+        result = render(self.setup + """(async () => {
+          t.messages = [{id: 'n', mode: 'next', status: 'failed', target: {step: 1, attempt: 1}, text: 'verify 340 px',
+                         error: 'The supervisor chose to wait and added no step. Resend to ask again.'},
+            {id: 'g', status: 'failed', target: {step: 1, attempt: 1}, text: 'guidance'}];
+          const html = taskMessages(t, d);
+          boardData = {data: {task: t}}; actRedraw = () => {};
+          let calls = []; api = async (p, b) => {calls.push([p, b]); return {};};
+          await taskAct('resendmessage', {dataset: {tid: 't', mid: 'n'}});
+          return {html, calls, text: taskDraftFor(t).text};
+        })()""")
+        self.assertEqual(result['html'].count('data-tact="resendmessage"'), 1)
+        self.assertIn('data-tact="resendmessage" data-tid="t" data-mid="n"', result['html'])
+        self.assertIn('Resend to ask again', result['html'])
+        self.assertEqual(result['calls'], [['/api/task/message', {'task': 't', 'request_id': 'n', 'action': 'cancel',
+                                                                  'confirm': False}]])
+        self.assertEqual(result['text'], 'verify 340 px')
 
     def test_text_draft_is_restored_without_putting_attachment_bytes_in_preferences(self):
         result = render(self.setup + """(() => {

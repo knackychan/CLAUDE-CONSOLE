@@ -1129,8 +1129,10 @@ class Hub:
     def message_availability(self, task: dict) -> dict:
         target = tasks.message_target(task)
         if self._next_ok(task):  # plan 48: the box tells the supervisor what comes next
+            paused = supervisor.policy(self.cfg, task, time.time())["paused"]  # D13: accepted, read after Resume
             return {"target": target, "mode": "next", "reason": self._base(task), "cold": None, "attachments": False,
-                    "timing": "Goes to the supervisor. The step it adds from your words starts without Approve."}
+                    "timing": ("Waits for Resume, then goes to the supervisor." if paused else "Goes to the supervisor.")
+                    + " The step it adds from your words starts without Approve."}
         cs = tasks.step(task, target["step"])
         off, mode, timing = self._base(task), "queued", "Queued for the end of this turn"
         gone = ("Supervisor off. Use Add step on a model in the task menu."
@@ -1220,6 +1222,9 @@ class Hub:
                 return 400, {"error": "The supervisor reads text only. Remove the files."}
             if nxt and len(payload["text"]) > tasks.STEP_GOAL_MAX:
                 return 400, {"error": f"A next-step message must contain 1 to {tasks.STEP_GOAL_MAX} characters."}
+            if nxt and len("\n\n".join([m["text"] for m in self._next_open(task)] + [payload["text"]])) > tasks.STEP_GOAL_MAX:
+                return 400, {"error": f"With your earlier message this is over {tasks.STEP_GOAL_MAX} characters; "
+                                      "they become one step. Shorten it."}  # D12
             if files and not available["attachments"]:
                 return 400, {"error": "This harness cannot receive attachments. Remove the files or Retry on Claude."}
             if available["cold"] and body.get("confirm") is not True:
@@ -1761,11 +1766,31 @@ class Hub:
                                "decision": decision, "revision": snapshot["revision"], "epoch": snapshot["epoch"],
                                "status": status, "error": why, "by": "", "dispatch": None} if visible else None)
             text = {"wait": "wait", "no-decision": f"no decision ({why})"}.get(status, f"{status}: {redact.clip(why or (decision or {}).get('decision', ''), 120)}")
+            if "message" in snapshot["triggers"]:  # plan 48 D11: words that added no step come back to Fred
+                if tasks.next_messages(task):  # he wrote again during the pass: one step from all of them, next wake
+                    for m in task.get("messages", []):
+                        if m.get("mode") == "next" and m.get("wake") == wake and m["status"] == "dispatched":
+                            m.update(status="queued")
+                            m.pop("wake", None)
+                            m.pop("dispatched", None)
+                elif status in ("wait", "no-decision", "stale", "refused"):
+                    self._sup_unsent(task, wake, {"wait": "The supervisor chose to wait and added no step.",
+                                                  "stale": "The task changed while the supervisor read it."}.get(
+                        status, f"The supervisor added no step ({redact.clip(why, 120)}).") + " Resend to ask again.")
             self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
                                  "to": task["state"], "why": f"supervisor: {text}", "session": ""}])
             if status == "suggest":
                 if "message" in snapshot["triggers"] and (decision or {}).get("decision") == "add_next_step":
-                    self._supervisor_dispatch(task_id, wake, "message")  # plan 48 D6: Fred's words authorize this one
+                    code, body = self._supervisor_dispatch(task_id, wake, "message")  # D6: his words authorize it
+                    live = self.tasks.get(task_id)
+                    left = ((live or {}).get("supervisor") or {}).get("pending") or {}
+                    if code != 200 and live and left.get("wake") == wake and left.get("status") in ("refused", "stale"):
+                        self._sup_unsent(live, wake, f"The step was not added ({redact.clip(body.get('error', ''), 120)})."
+                                                     " Resend to ask again.")
+                        try:
+                            self._commit(live)
+                        except OSError:
+                            pass
                 else:
                     self._sup_auto(task_id, wake)
 
@@ -1882,10 +1907,11 @@ class Hub:
             if kind == "add_next_step":
                 n = decision.get("source_step", task["current"])
                 said = "\n\n".join(m["text"] for m in task.get("messages", [])
-                                   if m.get("mode") == "next" and m.get("wake") == wake)  # his words, verbatim
+                                   if m.get("mode") == "next" and m.get("wake") == wake
+                                   and m["status"] == "dispatched")  # his words, verbatim
                 req = {"task": task_id, "source_step": n, "source_session": tasks.step(task, n)["session"],
-                       "kind": decision["kind"], "instructions": (said if by == "message" else "") or
-                       decision["instructions"].strip(), "model": "auto"}
+                       "kind": decision["kind"], "instructions": said or decision["instructions"].strip(),
+                       "model": "auto"}  # D11: a held card's Approve also carries his words
                 intent = {"call": "request_next", "request_id": supervisor.request_id(task_id, wake), "source_step": n}
             else:
                 intent = {"call": "task_lever", "lever": self._SUP_LEVER[kind]}
@@ -1986,6 +2012,19 @@ class Hub:
         pol = supervisor.policy(self.cfg, task, time.time())
         return task["state"] == "done" and not pol["reason"] and pol["mode"] != "off"
 
+    def _next_open(self, task: dict) -> list:
+        """Plan 48: the next-step messages not yet turned into a step: queued, or claimed by the pass running now."""
+        live = self.supervising.get(task["id"], {}).get("wake")
+        return [m for m in task.get("messages", []) if m.get("mode") == "next" and (
+            m["status"] == "queued" or m["status"] == "dispatched" and live is not None and m.get("wake") == live)]
+
+    def _sup_unsent(self, task: dict, wake: int, why: str) -> None:
+        """Plan 48 D11: a message wake that added no step hands Fred's words back (failed, with Resend); never
+        replayed."""
+        for m in task.get("messages", []):
+            if m.get("mode") == "next" and m.get("wake") == wake and m["status"] == "dispatched":
+                m.update(status="failed", error=why)
+
     def _supervisor_fred(self, task: dict, now: float, action: str, keep=None) -> None:
         """A new, accepted human act on `task` (called inside its transaction, before the save): the epoch moves on,
         the automatic window (auto steps, retries, work cost) restarts, lifetime wakes/spend stay and older pending
@@ -2002,9 +2041,10 @@ class Hub:
             sup["paused"] = False
         if action == "stop":
             self.wakes.pop(task["id"], None)
-        if action in ("stop", "done"):  # plan 48: a queued next-step message dies with the stop or the finish
-            for m in tasks.next_messages(task):
-                m.update(status="cancelled", error="the task was stopped" if action == "stop" else "the task was finished")
+        gone = {"stop": "the task was stopped", "done": "the task was finished", "handoff": "the task was handed off"}
+        if action in ("stop", "done", "handoff", "retry", "confirm", "keep", "stepdone", "add_next"):
+            for m in self._next_open(task):  # plan 48 D15: Fred moved the task himself; his earlier words are dropped
+                m.update(status="cancelled", error=gone.get(action, "you moved the task yourself"))
         pending = sup.get("pending")
         if isinstance(pending, dict) and pending is not keep and pending.get("status") in ("suggest", "held"):
             sup["pending"] = None
@@ -3719,6 +3759,8 @@ class Hub:
             self._commit(task, lines)
             if lever in ("stepdone", "confirm", "keep") and tasks.manual_boundary(task):
                 self._sup_hook(task)  # plan 44: a manual boundary Fred's act produced wakes once
+            elif lever == "resume" and tasks.next_messages(task):
+                self._sup_hook(task)  # plan 48 D13: a message saved while paused (even across a restart) goes now
             if closed and task.get("briefing"):
                 self.start_brief(task, closed["n"])
             if lever in ("retry", "confirm", "redo", "keep", "stepdone"):

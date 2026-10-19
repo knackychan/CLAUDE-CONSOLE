@@ -1930,6 +1930,69 @@ class NextMessageTest(DispatchTest):
         self.assertIn(other, self.hub.wakes)
         self.assertEqual(self.hub.tasks[other]["messages"][0]["status"], "queued")  # not claimed, not lost
 
+    def test_wait_hands_the_words_back(self):  # D11
+        tid = self.at_boundary()
+        self.say(tid)
+        self.run_wake()
+        message = self.hub.tasks[tid]["messages"][0]
+        self.assertEqual(message["status"], "failed")
+        self.assertIn("Resend", message["error"])
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 1)
+
+    def test_refused_dispatch_hands_the_words_back(self):  # D11
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
+        self.say(tid)
+        with mock.patch.object(self.hub, "request_next", return_value=(409, {"error": "the source moved"})):
+            self.run_wake()
+        message = self.hub.tasks[tid]["messages"][0]
+        self.assertEqual(message["status"], "failed")
+        self.assertIn("the source moved", message["error"])
+
+    def test_message_during_a_pass_joins_the_next_step(self):  # D11, D12
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
+        self.say(tid)
+        self.gate.clear()
+        self.tick(30.0)  # the pass claims the first message and blocks
+        self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "dispatched")
+        self.assertEqual(self.say(tid, "and the 400 px case", rid="b" * 32)["status"], "queued")
+        with mock.patch.object(self.hub, "request_next", wraps=self.hub.request_next) as request:
+            self.drain()  # stale: the first message goes back to queued
+            self.assertEqual(request.call_count, 0)
+            self.assertEqual([m["status"] for m in self.hub.tasks[tid]["messages"]], ["queued", "queued"])
+            self.run_wake(300.0)
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[0]["instructions"], self.TEXT + "\n\nand the 400 px case")
+        self.assertEqual([m["status"] for m in self.hub.tasks[tid]["messages"]], ["dispatched", "dispatched"])
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
+
+    def test_joined_text_over_the_limit_is_refused(self):  # D12
+        tid = self.at_boundary()
+        self.say(tid, "x" * 600)
+        code, body = self.hub.task_message({"task": tid, "text": "y" * 500, "request_id": "b" * 32,
+                                            "target": tasks.message_target(self.hub.tasks[tid])})
+        self.assertEqual(code, 400, body)
+        self.assertIn("one step", body["error"])
+
+    def test_held_card_approve_uses_his_words(self):  # D11
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(ADD, instructions="the model's own words"), cost=0.001, model="haiku",
+                           turns=2, error="")
+        self.say(tid)
+        self.gate.clear()
+        self.tick(30.0)
+        task = self.hub.tasks[tid]
+        task["messages"].append({"id": "g", "status": "queued", "mode": "queued", "text": "guidance"})
+        self.drain()
+        self.assertEqual(task["supervisor"]["pending"]["status"], "held")
+        task["messages"][-1]["status"] = "cancelled"
+        with mock.patch.object(self.hub, "request_next", return_value=(200, {"task": tid, "step": 2})) as request:
+            code, body = self.hub.supervisor_action({"task": tid, "wake": task["supervisor"]["pending"]["wake"],
+                                                     "action": "approve"})
+        self.assertEqual(code, 200, body)
+        self.assertEqual(request.call_args.args[0]["instructions"], self.TEXT)
+
     def test_stop_between_message_and_claim_sends_nothing(self):
         tid = self.at_boundary()
         self.say(tid)

@@ -42,6 +42,21 @@ Defaults written in (change before building if wrong):
 - D10 Escalate and Verify have no entry on a task: Retry on a model and Add step on a model cover them. The
   session page of an outside chat keeps its levers (plan 03, plan 37 forks).
 
+Review of steps 1 to 4 (Fred, 2026-10-19):
+
+- D11 A message wake that adds no step (wait, no-decision, stale, refused, or a message dispatch the gates refuse)
+  hands Fred's words back: the claimed messages become `failed` with the reason, and the message list shows them
+  with Resend (the text back in the box) and Cancel. Never replayed. When Fred wrote again during the pass, the
+  claimed messages go back to `queued` and join the new one in the follow-up wake. A held card's Approve uses his
+  words as the instructions.
+- D12 Two or more messages before a claim become one step, joined by a blank line; the box refuses a message that
+  would take the joined text (queued plus those claimed by a running pass) over 1000 characters.
+- D13 Paused at a boundary, the box still accepts a next-step message and says it waits for Resume.
+- D14 The prep record and overview views of an outside chat's session page are dropped (`sessionView`); the page
+  shows the chat and its levers only.
+- D15 Retry, Confirm, Keep, Accept (stepdone), Add step on a model and Hand off cancel a queued next-step message,
+  as Stop and Finish do, and also cancel one a running pass has claimed.
+
 No new endpoint. Routes used: `GET /api/task` (route, gauge, `supervisor`, `message`, levers), `POST /api/task`
 (Start, with `supervised`), `POST /api/task/supervisor` (Approve, Reject, mode), `POST /api/task/message` (the box,
 new `next` mode), `POST /api/continue` (chat tasks, unchanged), `POST /api/task/done` (Finish task),
@@ -77,7 +92,7 @@ field on `task_row`.
   (`clear`) returns before it and removes the folder with the message.
 - `Hub._sup_admit(tid, entry)`: when the claim is saved and `"message" in entry["triggers"]`, mark the task's
   queued next messages `dispatched` (delivered to the supervisor) in the same `tasks.save`. A pass that then
-  fails leaves them dispatched: never replayed (plan 42 rule); Fred sends again.
+  adds no step marks them `failed` (D11): never replayed (plan 42 rule); Fred uses Resend.
 - `Hub._sup_snapshot`: `context["fred_next"]` = the texts of the messages claimed by this wake, joined by a blank
   line (empty otherwise).
 - `Hub._supervisor_done`: after `status == "suggest"`, when `"message" in snapshot["triggers"]` and the decision is

@@ -336,7 +336,37 @@ class TaskMessageTest(_TaskServerTest):
             self.assertEqual(self.hub._supervisor_tick(), [tid])
             for t in list(self.hub.sup_threads):
                 t.join(10)
-        self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "dispatched")
+        self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "failed")  # D11: a wait hands it back
+
+    def test_paused_boundary_accepts_and_waits_for_resume(self):  # D13
+        tid = self.boundary_task()
+        self.hub.tasks[tid]["supervisor"]["paused"] = True
+        got = self.hub.message_availability(self.hub.tasks[tid])
+        self.assertEqual((got["mode"], got["reason"]), ("next", ""))
+        self.assertTrue(got["timing"].startswith("Waits for Resume"), got["timing"])
+        self.assertEqual(self.message(tid)[0], 200)
+        self.hub.wakes.pop(tid, None)  # as after a restart while paused: the scan finds nothing
+        code, body = self.hub.task_lever(tid, "resume")
+        self.assertEqual(code, 200, body)
+        self.assertEqual(self.hub.wakes[tid]["triggers"], ["message"])
+
+    def test_fred_moving_the_task_cancels_next_messages(self):  # D15
+        for n, action in enumerate(("retry", "confirm", "keep", "stepdone", "add_next", "handoff"), start=1):
+            with self.subTest(action=action):
+                tid = self.boundary_task(n=n)
+                self.assertEqual(self.message(tid)[0], 200)
+                claimed = {"id": "c" * 32, "mode": "next", "status": "dispatched", "wake": 7, "text": "t"}
+                self.hub.tasks[tid]["messages"].append(claimed)
+                self.hub.supervising[tid] = {"wake": 7}
+                with self.hub.tlock:
+                    self.hub._supervisor_fred(self.hub.tasks[tid], time.time(), action)
+                self.hub.supervising.pop(tid)
+                self.assertEqual([m["status"] for m in self.hub.tasks[tid]["messages"]], ["cancelled", "cancelled"])
+        tid = self.boundary_task(n=7)
+        self.assertEqual(self.message(tid)[0], 200)
+        with self.hub.tlock:
+            self.hub._supervisor_fred(self.hub.tasks[tid], time.time(), "pause")
+        self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "queued")  # Pause keeps it
 
     def test_next_message_refuses_files_and_long_text(self):
         tid = self.boundary_task()

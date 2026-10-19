@@ -76,7 +76,6 @@ let live = false;
 let form = "open";       // open | pill
 let page = "board";      // board | session | usage | models (plan 30: the Board is the one view)
 let openId = null;
-let sessionView = "chat"; // task head, prep record, or the chat step
 let backTo = null;       // {page: "board"} or {page: "session", id}: where the session page's back arrow returns
 const foldLabel = new Map(); // plan 23: fold label -> open, kept across redraws (Handoff, its headings, Facts, Window runs); closed on openTask
 let settingBusy = false; // POST /api/setting in flight (the Window runs switch)
@@ -500,7 +499,7 @@ function showPage(name) {
   render();
 }
 
-async function openSession(id, list = "chat", view = "chat") {
+async function openSession(id, list = "chat") {
   if (form === "pill") await setForm("open");
   const task = taskOfSession(id);
   if (task) {
@@ -511,7 +510,6 @@ async function openSession(id, list = "chat", view = "chat") {
   if (owned?.task && snap.older) { olderOpen = true; return goChat(owned.task, owned.step, id); }
   if (id !== openId) att.answer = att.fu = [];  // files were for the other session's boxes
   openId = id;
-  sessionView = view;
   tab = list;
   tlMin = -1;
   const s = current();
@@ -626,11 +624,9 @@ function sessionRow(s) {  // one row that opens the session page
     <div class="l2"><span class="why${wt ? " " + wt : ""}" title="${esc(text)}">${esc(text)}</span><span class="cost">${spentText(s)}</span></div></div></div>`;
 }
 function sessionHead(s) {
-  const prepOn = sessionView === "prep", overview = sessionView === "task", tn = prepOn ? (s.prep ? "g" : "q") : tone(s);
-  const mark = prepOn ? sprite(s.prep ? "done" : "stopped") : sessionMark(s, s.symbol, tn);
-  const word = prepOn ? (s.prep ? "Done" : "Not recorded") : label(s);
-  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${mark}${esc(word)}</span><h2>${overview ? esc(s.title) : prepOn ? "00 prep" : "01 chat"}</h2></div>
-    <div class="meta"><span>${esc(s.project)}</span>${prepOn ? (s.prep ? `<span>${esc(s.prep_model || "model not recorded")}</span><span>cost <b>${money(s.prep_cost)}</b></span>` : "") : `<span>${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span><span>cost <b>${spentText(s)}</b></span>`}</div></div>`;
+  const tn = tone(s);
+  return `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sessionMark(s, s.symbol, tn)}${esc(label(s))}</span><h2>01 chat</h2></div>
+    <div class="meta"><span>${esc(s.project)}</span><span>${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span><span>cost <b>${spentText(s)}</b></span></div></div>`;
 }
 
 function quietHtml(s, showProject) {
@@ -1387,14 +1383,8 @@ function renderSession() {
     setHtml($("levers"), "");
     return;
   }
-  const prepOn = sessionView === "prep", overview = sessionView === "task";
-  $("proc").hidden = prepOn || overview;
-  setHtml($("sbody"), sessionHead(s) + (prepOn
-    ? `<div class="ipane"><p class="note m">${s.prep ? `Prep ${esc(s.prep)} · ${esc(s.prep_model || "model not recorded")} · ${s.prep_turns || 0} turns · cost ${money(s.prep_cost)}` : "No Console Prep was recorded for this chat. It started outside the Console task flow."}</p></div>`
-    : overview ? `<div class="ipane"><p class="note">${esc(s.title)}</p><p class="note m">1 chat step · ${esc(s.project)} · ${esc(s.source)}</p></div>`
-    : `${noteLine(s)}${askBlock(s)}`));
-  if (!prepOn && !overview) renderProc(s).catch(() => {});
-  else ++procSeq;
+  setHtml($("sbody"), sessionHead(s) + noteLine(s) + askBlock(s));
+  renderProc(s).catch(() => {});
   renderLevers(s).catch(() => {});
 }
 
@@ -1841,6 +1831,17 @@ function actMsg() { return $("b-msg"); }  // where a failed lever says why
 function actRedraw() { boardData = null; renderBoard(); }
 async function taskAct(name, button) {
   const id = button.dataset.tid || boardTask;
+  if (name === "resendmessage") {  // plan 48 D11: his words back in the box; Enter sends them as a new message
+    const t = boardData?.data?.task, m = (t?.messages || []).find((x) => x.id === button.dataset.mid);
+    if (!t || !m) return;
+    const draft = taskDraftFor(t), box = $("b-tcont");
+    draft.text = draft.text.trim() ? draft.text + "\n\n" + m.text : m.text;
+    draft.start = draft.end = draft.text.length;
+    draft.request = null;
+    saveTaskDraft(t.id);
+    if (box?.dataset.tid === t.id) box.value = draft.text;
+    name = "cancelmessage";
+  }
   if (["cancelmessage", "dispatchmessage"].includes(name)) {
     button.disabled = true;
     try {
@@ -1877,7 +1878,7 @@ async function taskAct(name, button) {
   if (name === "canceldone") { doneConfirm = ""; renderBoard(); return; }
   if (name === "confirmdone") { doneConfirm = ""; name = "done"; }
   if (!id) return;
-  const carry = name === "retry" && (boardData?.data?.task?.messages || []).some(m => ["queued", "failed"].includes(m.status));
+  const carry = name === "retry" && (boardData?.data?.task?.messages || []).some(m => m.mode !== "next" && ["queued", "failed"].includes(m.status));
   const arm = carry ? "Retry and carry queued guidance? Click again" : { stop: "Stop the task? Click again", clear: "Delete the task folder? Click again",
     handoff: "Hand off ends the task? Click again",
     stepdone: "Accept this step's incomplete result? Click again" }[name];
@@ -3429,7 +3430,7 @@ function saveTaskDraft(tid) {
 function taskMessages(t, d) {  // pending guidance only: a dispatched message is in the chat, a cancelled one is gone
   const pending = (t.messages || []).filter(m => !["dispatched", "cancelled"].includes(m.status));
   return `<ul class="task-messages" aria-label="Pending guidance">${pending.map(m => `<li class="task-message ${m.status}" role="status">
-<span class="lbl">${esc({queued: "Queued", failed: "Failed", uncertain: "Outcome unknown", dispatching: "Sending"}[m.status] || m.status)}</span><span class="t" title="${esc(m.text)}">${esc(m.text)}${m.files?.length ? ` <span class="mut">+${m.files.length} file${m.files.length > 1 ? "s" : ""}</span>` : ""}</span><span class="mut">s${two(m.target.step)}${m.target.attempt > 1 ? "." + m.target.attempt : ""}</span>${["queued", "failed", "uncertain"].includes(m.status) ? `<button class="btn sm" data-tact="cancelmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}" title="${m.status === "uncertain" ? "Dismiss after checking conversation" : "Cancel guidance"}">${m.status === "uncertain" ? "Dismiss" : "Cancel"}</button>` : ""}${m.status === "queued" && m.error?.startsWith("Cold cache") ? `<button class="btn sm" data-tact="dispatchmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}">Send ~$${money(d.message?.cold?.cost)}</button>` : ""}${m.error ? `<span class="e">${esc(m.error)}</span>` : ""}</li>`).join("")}</ul>`;
+<span class="lbl">${esc({queued: "Queued", failed: "Failed", uncertain: "Outcome unknown", dispatching: "Sending"}[m.status] || m.status)}</span><span class="t" title="${esc(m.text)}">${esc(m.text)}${m.files?.length ? ` <span class="mut">+${m.files.length} file${m.files.length > 1 ? "s" : ""}</span>` : ""}</span><span class="mut">s${two(m.target.step)}${m.target.attempt > 1 ? "." + m.target.attempt : ""}</span>${["queued", "failed", "uncertain"].includes(m.status) ? `<button class="btn sm" data-tact="cancelmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}" title="${m.status === "uncertain" ? "Dismiss after checking conversation" : "Cancel guidance"}">${m.status === "uncertain" ? "Dismiss" : "Cancel"}</button>` : ""}${m.mode === "next" && m.status === "failed" ? `<button class="btn sm" data-tact="resendmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}" title="Puts these words back in the box">Resend</button>` : ""}${m.status === "queued" && m.error?.startsWith("Cold cache") ? `<button class="btn sm" data-tact="dispatchmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}">Send ~$${money(d.message?.cold?.cost)}</button>` : ""}${m.error ? `<span class="e">${esc(m.error)}</span>` : ""}</li>`).join("")}</ul>`;
 }
 function taskMessageState(t, d) {
   const cur = (t.steps || []).find((x) => x.n === t.current) || t.steps?.[0], lv = d.step_levers || {};
@@ -3905,7 +3906,7 @@ document.addEventListener("click", async (e) => {
   else if (t.dataset.prep) prepJob(t.dataset.prep, t.dataset.pdo);
   else if (t.dataset.go) go(t.dataset.go, t);
   else if (t.dataset.do) unblock(t);
-  else if (t.dataset.open) openSession(t.dataset.open, "chat", t.dataset.sview || "chat");
+  else if (t.dataset.open) openSession(t.dataset.open, "chat");
   else if (t.dataset.tab) { tab = t.dataset.tab; const s = current(); if (s) renderProc(s).catch(() => {}); }
   else if (t.dataset.min !== undefined) { tlMin = tlBase() + Number(t.dataset.min); const s = current(); if (s) renderProc(s).catch(() => {}); }
   else if (t.dataset.act) act(t.dataset.act, t);
