@@ -104,23 +104,20 @@ class ChatCopyTest(unittest.TestCase):
         self.assertLess(right, session)
         self.assertLess(session, inspector)
 
-    def test_standalone_chat_has_task_prep_and_chat_rows(self):
-        setup = """snap = {now: 100}; page = 'session'; openId = 's'; sessionView = 'chat';
-          s = {id: 's', title: 'Fix the run', state: 'replied', group: 'replied',
-               symbol: 'R', project: 'Console', model: 'sonnet', harness: 'claude',
-               effort: 'medium', cost: 1, ctx_tokens: 0, prep: ''}; """
-        html = render(setup + "sessionTree(s)")
-        for view in ('task', 'prep', 'chat'):
-            self.assertIn('data-sview="' + view + '"', html)
-        self.assertIn('not recorded', html)
-        self.assertIn('class="v-sr picked"', html)
-        self.assertIn('<b>chat</b>', html)
-        recorded = render(setup + "s.prep = 'p'; s.prep_model = 'haiku'; s.prep_cost = 0.01; sessionTree(s)")
-        self.assertNotIn('not recorded', recorded)
-        self.assertIn('haiku', recorded)
-
-    def test_chat_task_expands_like_other_running_tasks(self):
-        self.assertTrue(render("boardTask = ''; taskOpen({id: 't', chat: true, state: 'running', group: 'working'})"))
+    def test_standalone_chat_is_one_row_that_opens_its_page(self):
+        setup = """snap = {now: 100}; page = 'board'; openId = ''; sessionView = 'chat';
+          s = {id: 's', title: 'Fix the run', state: 'replied', group: 'replied', last_ts: 40,
+               symbol: 'R', project: 'Console', model: 'sonnet', harness: 'claude', text: 'Replied',
+               effort: 'medium', spent: 1, spent_exact: true, ctx_tokens: 0, prep: ''}; """
+        html = render(setup + "sessionRow(s)")
+        self.assertEqual(html.count('data-open="s"'), 1)
+        self.assertNotIn("data-sview", html)  # no prep or chat sub-rows in the list
+        self.assertNotIn("v-sr", html)
+        self.assertIn("replied · 1m", html)
+        idle = render(setup + "s.group = 'working'; s.state = 'idle'; sessionLine(s)")
+        self.assertEqual(idle, ["idle", ""])
+        busy = render(setup + "s.group = 'working'; s.state = 'running'; s.route = 'auto'; sessionLine(s)")
+        self.assertTrue(busy[0].startswith("running · "))
 
     def test_board_chat_shows_the_answer_prompt_for_a_question(self):
         setup = "snap = {sessions: [{id: 's', state: 'stop', run_live: false, stop_question: 'Shall I fix it?'}], tasks: []}; boardChat = {sid: 's', chat: {items: [], source: 'window'}};"
@@ -1114,9 +1111,9 @@ class HandoffFormTest(unittest.TestCase):
         self.assertEqual(render("taskShown({state: 'handed', handoff_note: 'steps/01-handoff.md'})"), "handed")
         self.assertEqual(render("taskShown({state: 'handed', group: 'working'})"), "handing")
         self.assertEqual(render("TASK_WORD.handed_to[0]"), "Handed off")
-        why = render(self.setup + "snap.now = 100; headWhy({state: 'handed', handoff_note: 'task-handoff.md', handoff_to: 'f1', group: 'done', steps: []})")
+        why = render(self.setup + "snap.now = 100; statusLine({state: 'handed', handoff_note: 'task-handoff.md', handoff_to: 'f1', group: 'done', updated: 90, steps: []})")
         self.assertEqual(why[0], "handed off to follow-up")
-        old = render(self.setup + "headWhy({state: 'handed', handoff_note: 'steps/01-handoff.md', group: 'needs', steps: []})")
+        old = render(self.setup + "statusLine({state: 'handed', handoff_note: 'steps/01-handoff.md', group: 'needs', updated: 90, steps: []})")
         self.assertEqual(old[0], "handed off · Start next task")
         html = render(self.setup + "t.state = 'handed'; t.handoff_note = 'task-handoff.md'; t.handoff_to = 'f1'; row.state = 'handed'; row.handoff_note = 'task-handoff.md'; row.handoff_to = 'f1'; d.handoff = 'old note'; inspTask(t, d, row)")
         self.assertNotIn("Start next task", html)
@@ -1140,6 +1137,78 @@ class HandoffFormTest(unittest.TestCase):
           return called;
         })()""")
         self.assertFalse(result)
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class BoardListTest(unittest.TestCase):
+    """Plan 48 moment 3: one list, three groups, one row and one status line per task; the header keeps one menu."""
+    setup = """snap = {now: 1000, sessions: [], tasks: [], preps: [], versions: {}, projects: [], counts: {needs: 0}, older: 0};
+      scope = ''; boardTask = ''; boardPick = ''; page = 'board'; selecting = ''; emptyOpen = false; olderOpen = false;
+      const tk0 = {id: '20261019-100000-aaaa', title: 'Fix the overflow', project: 'Console', project_dir: 'repo', effort: 'auto',
+        state: 'running', group: 'working', owner: 'service', current: 2, count: 3, cost: 0.5, updated: 940, why: '', asks: '',
+        hand_off: '', chat: false, supervisor: {mode: 'suggest', attention: false, say: ''}, steps: [
+        {n: 1, kind: 'scout', state: 'done', model: 'haiku', effort: 'low', harness: 'claude', cost: 0.1},
+        {n: 2, kind: 'code', state: 'running', model: 'sonnet', effort: 'high', harness: 'claude', cost: 0.2},
+        {n: 3, kind: 'verify', state: 'planned', model: '', effort: '', harness: '', cost: 0}]};
+      const mkt = (o) => Object.assign({}, tk0, o, {supervisor: Object.assign({}, tk0.supervisor, o.supervisor || {})}); """
+
+    def test_list_row_is_one_status_line(self):
+        cases = {
+            "running": ("tk0", "running · 02 code", ""),
+            "asks": ("mkt({id: 'a1', state: 'waiting', group: 'needs', owner: 'fred', asks: 'Which database?'})", "needs you · Which database?", "y"),
+            "say": ("mkt({id: 'a2', state: 'waiting', group: 'needs', owner: 'fred', why: 'choose next step', "
+                    "supervisor: {attention: true, say: 'add_next_step: verify the 340 px case'}})",
+                    "needs you · add_next_step: verify the 340 px case", "y"),
+            "waits": ("mkt({id: 'a3', state: 'waiting', group: 'needs', owner: 'fred', why: 'confirm Fable'})", "needs you · confirm Fable", "y"),
+            "failed": ("mkt({id: 'a4', state: 'stuck', group: 'needs', owner: 'fred', why: 'no HANDOFF block'})", "failed · 02 code: no HANDOFF block", "r"),
+            "done": ("mkt({id: 'a5', state: 'done', group: 'done', current: 3})", "done · 3 steps · ", "g"),
+            "stopped": ("mkt({id: 'a6', state: 'stopped', group: 'done'})", "stopped", ""),
+            "replied": ("mkt({id: 'a7', chat: true, state: 'running', group: 'replied', updated: 820})", "replied · 3m", ""),
+        }
+        for name, (expr, text, tone) in cases.items():
+            with self.subTest(name):
+                line = render(self.setup + f"statusLine({expr})")
+                self.assertTrue(line[0].startswith(text), line)
+                self.assertEqual(line[1], tone, line)
+                html = render(self.setup + f"taskHtml({expr})")
+                self.assertEqual(html.count("data-bpick="), 1)
+                self.assertEqual(html.count('data-bpick="t"'), 1)
+                for gone in ("v-sr", "v-subs", "v-lab", "v-more"):  # no step rows, no label chip, no folding
+                    self.assertNotIn(gone, html)
+                self.assertIn(line[0].split(" · ")[0], html)
+
+    def test_three_groups_and_replied_chats_join_running(self):
+        html = render(self.setup + """snap.tasks = [mkt({id: 'n1', state: 'waiting', group: 'needs', asks: 'Which?'}), tk0,
+          mkt({id: 'r1', chat: true, state: 'running', group: 'replied', updated: 900}),
+          mkt({id: 'd1', state: 'done', group: 'done', updated: 990})]; chainHtml()""")
+        for label in ("Needs you · 1", "Running · 2", "Done today"):
+            self.assertIn(label, html)
+        for gone in (">Replied", ">Working", ">Idle", "Select all", 'data-sel='):
+            self.assertNotIn(gone, html)
+
+    def test_the_calendar_and_its_day_inspector_are_gone(self):
+        for name in ("renderCal", "calLoad", "calDays", "pickDay", "inspDay", "daySpend", "dayTone", "calPicked", "headWhy"):
+            self.assertEqual(render(f"typeof {name}"), "undefined", name)
+        self.assertEqual(render("typeof doneOn"), "function")  # the delete bar still needs it
+        html = APP.with_name("index.html").read_text(encoding="utf-8")
+        for gone in ('id="calh"', 'id="todaymore"', 'data-go="usage"', 'data-go="models"'):
+            self.assertNotIn(gone, html.split('<section data-page="usage"')[0], gone)
+        self.assertIn('data-go="hmenu"', html)
+        self.assertNotIn("overpace", APP.read_text(encoding="utf-8"))
+
+    def test_header_menu_holds_the_pages_measure_selection_and_empty_chats(self):
+        html = render(self.setup + "snap.sessions = [{id: 'e', group: 'empty', project_dir: 'repo'}]; headerMenu()")
+        for item in ('data-go="usage"', 'data-go="models"', 'data-go="measure"', 'data-go="selectdone"', 'data-go="empties"'):
+            self.assertIn(item, html)
+        self.assertIn("Show 1 empty chat", html)
+        self.assertNotIn("empty chat", render(self.setup + "headerMenu()"))  # none to show, no row
+        measure = render(self.setup + "renderBoard = () => {}; go('measure'); [boardPick, boardTask]")
+        self.assertEqual(measure, ["m", ""])
+        select = render(self.setup + "renderBoard = () => {}; go('selectdone'); selecting === todayKey()")
+        self.assertTrue(select)
+
+    def test_nothing_picked_shows_the_empty_line_not_measure(self):
+        self.assertIn("Open a task to see its route, its context and the supervisor's last decision", render(self.setup + "emptyPane()"))
 
 
 if __name__ == "__main__":

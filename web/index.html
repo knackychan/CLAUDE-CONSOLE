@@ -20,12 +20,9 @@
         <button id="scope" class="scope" data-pick aria-haspopup="listbox" aria-expanded="false" title="Project (Ctrl+P)"><span id="scopenm" class="nm">All projects</span><span class="car">&#9662;</span></button>
         <button id="needsbtn" class="needs" data-go="needs" title="Show what needs you, in every project" hidden></button>
         <span class="sp drag-region" title="Drag to move; double-click to fold"></span>
-        <button class="v-pg" data-go="usage" title="Usage by day, week and month">Usage</button>
-        <button class="v-pg" data-go="models" title="Models and tuning">Models</button>
+        <button id="hbtn" class="v-menu" data-go="hmenu" aria-haspopup="menu" aria-expanded="false" title="Usage, Models and tuning, Measure, Select done tasks">Menu <span class="car">&#9662;</span></button>
         <span data-winbtns></span>
       </div>
-      <div id="calh" class="v-calh"></div>
-      <div id="todaymore" class="todaymore" hidden></div>
       <div id="vboard" class="v-board">
         <div class="v-left">
           <div id="bchain" class="v-chain" aria-label="Tasks and chats"></div>
@@ -83,6 +80,7 @@
     </section>
 
     <div id="utip" class="utip" hidden></div>
+    <div id="hmenu" class="pop hmenu" role="menu" aria-label="Menu" hidden></div>
     <div id="pop" class="pop" role="dialog" aria-label="Pick a project" hidden>
       <div class="find"><input id="pfind" aria-label="Find a project" placeholder="Find a project" autocomplete="off"><span class="kbd">Esc</span></div>
       <div id="prows" class="rows" role="listbox"></div>

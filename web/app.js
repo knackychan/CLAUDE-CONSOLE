@@ -109,7 +109,7 @@ let cold = null;        // {idle_s, tokens, cost} when a lever would re-read the
 let coldTimer = null;
 let freshHandoff = false;  // Hand off after a PASS starts a new chat from a brief: it re-reads nothing
 let boardTask = "";      // the picked task ("" none: the Board picks the newest in scope)
-let boardPick = "";      // "" nothing (the Measure table), "t" the task head, "s<n>" a step, "c<n>" the connector after step n
+let boardPick = "";      // "" nothing (the empty line), "m" the Measure table, "t" the task head, "s<n>" a step, "c<n>" the connector after step n
 let taskView = "overview";  // the task head's view (overview | steps | files); only when boardPick === "t"
 let doneConfirm = "";    // the task id whose Mark-done inline confirm is armed ("" = none)
 let itab = "chat";       // the step inspector's tab (window.json board_tab)
@@ -612,17 +612,18 @@ function cardHtml(s) {
     <span class="cost">${spentText(s)}</span>${ctxMini(s)}</div>${third}</div>`;
 }
 
-function sessionTree(s) {
-  const picked = page === "session" && openId === s.id, open = picked || s.group !== "done";
-  const tn = tone(s), sid = esc(s.id);
-  const attrs = (view) => `data-open="${sid}" data-sview="${view}" tabindex="0" role="button"`;
-  const selected = (view) => picked && sessionView === view ? " picked" : "";
-  return `<div class="v-tk${picked ? " act" : ""}"><div class="v-th${selected("task")}" ${attrs("task")}>
-    <div class="l1"><span class="st ${tn}">${sessionMark(s, s.symbol, tn)}${esc(label(s))}</span><span class="t">${esc(s.title)}</span></div>
-    <div class="l2"><span class="why">${esc(s.project)} · 1 chat step</span><span class="cost">${spentText(s)}</span></div></div>
-    ${open ? `<div class="v-subs"><div class="v-sr zero${selected("prep")}" ${attrs("prep")}>
-      ${sprite(s.prep ? "done" : "stopped")}<span class="n">00</span><span class="k"><b>prep</b><span class="m">${s.prep ? esc(s.prep_model || "recorded") : "not recorded"}</span></span><span></span><span class="c">${s.prep ? money(s.prep_cost) : ""}</span></div>
-      <div class="v-sr${selected("chat")}" ${attrs("chat")}>${sessionMark(s, s.symbol, tn)}<span class="n">01</span><span class="k"><b>chat</b><span class="m">${esc(modelText(rungOf(s.harness, s.model), s.effort))}</span></span>${ctxMini(s)}<span class="c">${spentText(s)}</span></div></div>` : ""}</div>`;
+function sessionLine(s) {  // an outside chat's status line (plan 48): what it waits on, or where it is
+  if (s.group === "needs") return ["needs you · " + (s.state === "stop" ? s.stop_question : needText(s) || label(s)), tone(s)];
+  if (s.group === "replied") return [`replied · ${ago(snap.now - s.last_ts)}`, ""];
+  if (s.group === "working") return BUSY.has(s.state) ? [`running · ${routeText(s)} · ${ago(snap.now - s.last_ts)}`, ""] : ["idle", ""];
+  const [, word, tn] = stateWord(s);
+  return [`${word.toLowerCase()} · ${hhmm(s.last_ts)}`, tn === "g" || tn === "r" ? tn : ""];
+}
+function sessionRow(s) {  // one row that opens the session page
+  const picked = page === "session" && openId === s.id, tn = tone(s), [text, wt] = sessionLine(s);
+  return `<div class="v-tk${picked ? " act" : ""}"><div class="v-th${picked ? " picked" : ""}" data-open="${esc(s.id)}" tabindex="0" role="button" title="${esc(s.project)}">
+    <div class="l1"><span class="st ${tn}">${sessionMark(s, s.symbol, tn)}</span><span class="t">${esc(s.title)}</span></div>
+    <div class="l2"><span class="why${wt ? " " + wt : ""}" title="${esc(text)}">${esc(text)}</span><span class="cost">${spentText(s)}</span></div></div></div>`;
 }
 function sessionHead(s) {
   const prepOn = sessionView === "prep", overview = sessionView === "task", tn = prepOn ? (s.prep ? "g" : "q") : tone(s);
@@ -1008,6 +1009,27 @@ function openPicker(from) {
 function closePicker() {
   $("pop").hidden = true;
   $("scope").setAttribute("aria-expanded", "false");
+}
+
+// the header menu (plan 48): the pages and the Board's rare tools behind one button
+function headerMenu() {
+  const n = groups().empty.length;
+  const item = (go, text, hint = "") => `<button class="mi" role="menuitem" data-go="${go}"><span>${text}</span>${hint ? `<span class="m">${hint}</span>` : ""}</button>`;
+  return item("usage", "Usage") + item("models", "Models and tuning") + "<hr>" + item("measure", "Measure", "kinds in a project")
+    + item("selectdone", "Select done tasks", "delete their folders")
+    + (n ? item("empties", `${emptyOpen ? "Hide" : "Show"} ${n} empty ${n === 1 ? "chat" : "chats"}`) : "");
+}
+function openHmenu() {
+  if (!snap || form === "pill") return;
+  if (page !== "board") showPage("board");
+  closePicker();
+  setHtml($("hmenu"), headerMenu());
+  $("hmenu").hidden = false;
+  $("hbtn").setAttribute("aria-expanded", "true");
+}
+function closeHmenu() {
+  $("hmenu").hidden = true;
+  $("hbtn").setAttribute("aria-expanded", "false");
 }
 
 async function openFolder() {  // VS Code's Open Folder: the OS dialog picks it, then runs are allowed there
@@ -2661,9 +2683,6 @@ function foldOpen(key, dflt) { return key && key in foldState ? foldState[key] :
 function saveFolds() { saveDraft(); }  // the draft save carries folds and board_tab
 
 const DONE_STATES = new Set(["done", "stopped"]);
-let calUsage = null;     // GET /api/usage for the calendar: once at the start, then every 5 minutes
-let calAt = 0;
-let calWeeks = 0;        // the calendar's offset in weeks: 0 shows last week and this week
 let dayOpen = {};        // "YYYY-MM-DD" -> open: a Done day group opened or folded by a click (today starts open)
 let olderOpen = false;   // the Older row opened in place
 let olderRows = null;    // {n, tasks}: GET /api/tasks/older, fetched when the row opens and again when snap.older changes
@@ -2694,75 +2713,20 @@ function boardProject() {
   return t ? t.project_dir : "";
 }
 
-// the calendar header: the picked day's spend, two weeks of days Monday first (Q2 (a)), the over-pace line
-function calDays() {
-  const today = todayKey(), mon = addDays(today, -((ddate(today).getDay() + 6) % 7) - 7 + 7 * calWeeks);
-  return Array.from({ length: 14 }, (_, k) => addDays(mon, k));
-}
-function calLimit() { return snap.spend.budget > 0 ? snap.spend.budget : 15; }
-function daySpend(k) {  // today is live (the snapshot); an earlier day is the usage file's
-  if (k === todayKey()) return snap.spend.today;
-  const d = calUsage && calUsage.days && calUsage.days[k];
-  return d ? d.cost : 0;
-}
-function dayTone(c) { const L = calLimit(); return !c ? "" : c < L ? "t1" : c < 3 * L ? "t2" : c < 6 * L ? "t3" : "t4"; }
 function doneOn(k) {  // the tasks finished on day k, newest first
   return boardRows().filter((t) => taskInScope(t) && DONE_STATES.has(t.state) && dayOf(t.updated) === k).sort((a, b) => b.updated - a.updated);
 }
-function calPicked() { return boardPick[0] === "d" ? boardPick.slice(1) : todayKey(); }
-async function calLoad() {
-  if (calUsage && snap.now - calAt < 300) return;
-  calAt = snap.now;
-  try { calUsage = await api("/api/usage"); } catch (e) { calUsage = calUsage || { days: {} }; }
-  if (page === "board") renderCal();
-}
-function renderCal() {
-  const sp = snap.spend, today = todayKey(), pick = calPicked(), isToday = pick === today, cost = daySpend(pick);
-  const row = spendRow({ today: cost, budget: sp.budget }).html, n = doneOn(pick).length;
-  const sub = isToday ? `today<span class="usd">, USD</span> · <b>$${money(sp.burn)}</b>/min · ${sp.budget > 0 ? "limit " + sp.budget : "no limit"}`
-    : `${dayName(pick)}, USD · ${n} ${n === 1 ? "task" : "tasks"} done`;
-  const wd = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], days = calDays();
-  const wk = wd.concat(wd).map((w, i) => `<span class="wk${i === 7 ? " gap" : ""}${i < 7 ? " w1" : ""}">${w}</span>`).join("");
-  const cells = days.map((k, i) => {
-    const fut = k > today, c = fut ? 0 : daySpend(k), m = doneOn(k).length;
-    const cls = ["d", fut ? "fut" : dayTone(c), k === today ? "today" : "", k === pick ? "pick" : "", i === 7 ? "gap" : "", i < 7 ? "w1" : ""].filter(Boolean).join(" ");
-    const tip = fut ? dayName(k) : `${dayName(k)} · ${m} ${m === 1 ? "task" : "tasks"} done · ~$${money(c)}`;
-    return `<button class="${cls}" data-day="${k}" title="${esc(tip)}"${fut ? " disabled" : ""}><span class="dn">${ddate(k).getDate()}</span><span class="dc">${fut || !m ? "" : m}</span></button>`;
-  }).join("");
-  const fl = sp.fills || { over: [], unknown: [] }, open = !$("todaymore").hidden;
-  const over = fl.over.length ? `<button id="overpace" class="v-over" aria-expanded="${open}" title="Where today's spend went and which models are over their pace">${fl.over.length} ${fl.over.length === 1 ? "model" : "models"} over pace · fills <span class="car">&#9662;</span></button>`
-    : `<button id="overpace" class="v-over q" aria-expanded="${open}" title="Tracked usage by model and today's spend">model usage <span class="car">&#9662;</span></button>`;
-  setHtml($("calh"), `<div class="fig"><span class="big">${isToday ? "" : '<span class="est">~</span>'}${money(cost)}</span><span class="sub">${sub}</span><span class="cells row30">${row}</span></div>
-    <div class="v-cal"><button class="nav" data-cal="-1" title="The week before" aria-label="The week before">&#8249;</button><div class="days">${wk}${cells}</div>
-      <button class="nav" data-cal="1" title="The week after" aria-label="The week after"${calWeeks >= 0 ? " disabled" : ""}>&#8250;</button>
-      <div class="calk"><span>tone: the day's spend · figure: tasks done</span>${over}</div></div>`);
-  setHtml($("todaymore"), `${usageFills({ fills: fl.models || {}, warn_at: fl.warn_at })}<div class="legend"><span><i class="h"></i>estimated $${money(sp.today)} (list prices)</span>
-    ${sp.budget > 0 ? '<span><i class="mk"></i>80 % of limit</span>' : ""}</div>
-    <div class="legend"><span>1 cell = $0.50</span>${sp.models.map(([m, f]) => `<span>${esc(m)} ${f < 0.01 ? "&lt;1" : Math.round(f * 100)} %</span>`).join("")}
-    ${sp.runs ? `<span>window runs ${sp.runs}</span>` : ""}
-    ${snap.writers.map((w) => `<span>2 writers: ${esc(baseName(w.project_dir))}</span>`).join("")}</div>
-    ${fl.unknown.length ? `<div class="legend">${fl.unknown.map(([k, n]) => `<span>${esc(k)}: cost unknown, ${n} ${n === 1 ? "run" : "runs"}</span>`).join("")}</div>` : ""}
-    ${fl.over.length ? `<div class="fline"><span class="m">fills · ${fl.over.map(([k, sh, w]) => `<b class="y" title="${esc(w)} window">${esc(k)} ${Math.round(sh * 100)}</b>`).join(" · ")} % of pace</span>
-      <button class="btn sm go-usage" data-go="usage">Usage &#8250;</button></div>`
-      : '<button class="btn sm go-usage" data-go="usage">Usage by day, week, month &#8250;</button>'}`);
-}
-function pickDay(k) {  // Q3 (a): the day's group opens and scrolls into view, the inspector shows the day
-  dayOpen[k] = true;
-  boardPick = "d" + k;
-  boardTask = "";
-  renderBoard().then(() => { const s = $("day-" + k); if (s) s.scrollIntoView({ block: "start", behavior: "smooth" }); });
-}
 
-// the chain: Needs you, Replied, Working, Idle, then Done by local day (D8 (a)) and the Older row
+// the chain: Needs you, Running (working, replied and idle join it, D7), then Done by local day (D8 (a)) and the Older row
 function prepRows() {  // the Prep jobs in scope, as task heads: a sent prompt is a task from the start (plan 29)
   return preps().filter((j) => !scope || sameDir(j.project_dir, scope));
 }
 function chainGroups() {
   const tk = (snap.tasks || []).filter(taskInScope), g = groups(), jobs = prepRows();
   const by = (name) => tk.filter((t) => taskGroup(t) === name).sort((a, b) => b.updated - a.updated);
+  const running = tk.filter((t) => taskGroup(t) === "work" || taskGroup(t) === "replied").sort((a, b) => b.updated - a.updated);
   return { needs: [...jobs.filter((j) => j.state !== "running"), ...by("needs")], needsS: g.needs,
-    replied: by("replied"), repliedS: g.replied,
-    work: [...jobs.filter((j) => j.state === "running"), ...by("work")], workS: g.work, idleS: g.idle,
+    work: [...jobs.filter((j) => j.state === "running"), ...running], workS: [...g.work, ...g.replied, ...g.idle],
     done: tk.filter((t) => taskGroup(t) === "done"), doneS: g.done, empty: g.empty };
 }
 function secHtml(cls, text, n, extra = "", id = "") {
@@ -2774,12 +2738,9 @@ function dayLabel(k) {
 }
 function dayGroup(k, rows, sessions) {  // one Done day: open (its rows) or folded to its label and count
   const open = k in dayOpen ? dayOpen[k] : k === todayKey(), n = rows.length + sessions.length, sel = selecting === k;
-  const hit = boardPick === "d" + k ? " hit" : "";
-  const act = rows.length && open ? (sel ? '<button class="act" data-sel="all">Select all</button><button class="act" data-sel="">Cancel</button>'
-    : `<button class="act" data-sel="${k}" title="Pick finished tasks of this day to delete their folders">Select</button>`) : "";
-  const head = `<div class="v-sec${open ? "" : " fd"}${hit}" id="day-${k}"><button class="dh" data-dayfold="${k}" aria-expanded="${open}"><span class="lbl">${dayLabel(k)} · ${n}</span>${open ? "" : '<span class="car">&#9662;</span>'}</button>${act}</div>`;
+  const head = `<div class="v-sec${open ? "" : " fd"}" id="day-${k}"><button class="dh" data-dayfold="${k}" aria-expanded="${open}"><span class="lbl">${dayLabel(k)} · ${n}</span>${open ? "" : '<span class="car">&#9662;</span>'}</button></div>`;
   if (!open) return head;
-  return head + rows.map((t) => taskHtml(t, { select: sel })).join("") + sessions.map(sessionTree).join("");
+  return head + rows.map((t) => taskHtml(t, { select: sel })).join("") + sessions.map(sessionRow).join("");
 }
 function doneDays(tasks, sessions) {  // {day: [tasks], ...} and the sessions by the day of their last event, newest day first
   const out = new Map();
@@ -2790,10 +2751,8 @@ function doneDays(tasks, sessions) {  // {day: [tasks], ...} and the sessions by
 function chainHtml() {
   const c = chainGroups(), job = (j) => (j.kind === "review" ? reviewHtml(j) : prepTaskHtml(j));
   const item = (x) => (x.steps ? taskHtml(x) : job(x));  // a Prep job has no steps and, unlike a review, no kind
-  let html = secHtml("y", "Needs you", c.needs.length + c.needsS.length, "", "needsec") + c.needs.map(item).join("") + c.needsS.map(sessionTree).join("")
-    + secHtml("", "Replied", c.replied.length + c.repliedS.length) + c.replied.map(item).join("") + c.repliedS.map(sessionTree).join("")
-    + secHtml("", "Working", c.work.length + c.workS.length) + c.work.map(item).join("") + c.workS.map(sessionTree).join("")
-    + secHtml("", "Idle", c.idleS.length) + c.idleS.map(sessionTree).join("");
+  let html = secHtml("y", "Needs you", c.needs.length + c.needsS.length, "", "needsec") + c.needs.map(item).join("") + c.needsS.map(sessionRow).join("")
+    + secHtml("", "Running", c.work.length + c.workS.length) + c.work.map(item).join("") + c.workS.map(sessionRow).join("");
   for (const [k, rows, sessions] of doneDays(c.done, c.doneS)) html += dayGroup(k, rows, sessions);
   const older = snap.older || 0;
   if (older) {
@@ -2803,8 +2762,7 @@ function chainHtml() {
       else for (const [k, rows] of doneDays(olderRows.tasks.filter(taskInScope), [])) html += dayGroup(k, rows, []);
     }
   }
-  if (c.empty.length) html += `<div class="more-done"><button class="btn sm" data-go="empties" title="Chats that loaded their rules and never got a prompt">${emptyOpen ? "Hide" : "Show"} ${c.empty.length} empty ${c.empty.length === 1 ? "chat" : "chats"}</button></div>`
-    + (emptyOpen ? c.empty.map((s) => quietHtml(s, !scope)).join("") : "");
+  if (emptyOpen && c.empty.length) html += c.empty.map((s) => quietHtml(s, !scope)).join("");  // the header menu shows or hides them
   return html || emptyBoard();
 }
 const OLDER_DAYS = 14;  // server.DONE_DAYS
@@ -2819,39 +2777,38 @@ function emptyBoard() {
     <p>No task or chat in ${esc(where)} yet. Type a task below; it shows here from the moment you send it.</p></div>`;
 }
 
-// a task: its head row, then its steps on a tree line (00 prep in violet; a fix and its re-verify one level further)
-function taskOpen(t) {  // Q4 (a): a finished task and a chat fold to their head; the picked one opens
-  if (t.id === boardTask) return true;
-  return taskGroup(t) !== "done";
-}
+// a task: one row, its status line under the title (plan 48); the steps are the opened task's route
 function labHtml(id) {
   const cp = copiedId === id;
   return `<button class="v-lab${cp ? " cp" : ""}" data-copy="${esc(id)}" title="Copy the folder name: ${esc(id)} (C)">${cp ? "copied" : esc(labelOf(id))}</button>`;
 }
-function headWhy(t) {  // the head's second line: what the task waits on, where it is, or what it was
-  const shown = taskShown(t);
-  if (t.asks) return [t.asks, "y"];
-  if (t.hand_off) return [handText(t.hand_off), "y"];
-  if (t.state === "waiting" || t.state === "stuck") return [t.why || t.state, t.state === "stuck" ? "r" : "y"];
+function statusLine(t) {  // [text, tone]: what the task waits on, where it is, or what it was
+  const shown = taskShown(t), sup = t.supervisor || {}, s = taskStep(t), age = ago(snap.now - t.updated);
+  if (t.asks) return ["needs you · " + t.asks, "y"];
+  if (t.hand_off) return ["needs you · " + handText(t.hand_off), "y"];
   if (shown === "handed") return ["handed off · Start next task", "y"];
   if (shown === "handed_to") return ["handed off to follow-up", "q"];
-  if (t.chat) return [`a chat${t.prep && t.prep.state === "skipped" ? " · Raw, prep skipped" : ""} · ${ago(snap.now - t.updated)}`, ""];
-  if (t.group !== "done") {
-    const s = taskStep(t);
-    return [s ? `step ${s.n} of ${t.count} · ${s.kind}${s.model ? " · " + modelText(rungOf(s.harness, s.model), s.effort) : ""}` : `${t.count} steps`, ""];
-  }
-  return [`${t.count} ${t.count === 1 ? "step" : "steps"} · ${hhmm(t.updated)}${t.state === "stopped" ? " · stopped" : ""}`, ""];
+  if (shown === "handing") return ["handing off", ""];
+  if (shown === "handed_no_note") return ["handed off", "q"];
+  if (sup.attention && sup.say) return ["needs you · " + sup.say, "y"];
+  if (t.state === "stuck" || (s && s.state === "failed" && t.state !== "stopped" && t.state !== "done"))
+    return [`failed · ${s ? two(s.n) + " " + s.kind + ": " : ""}${t.why || "the step did not finish"}`, "r"];
+  if (t.state === "waiting") return ["needs you · " + (t.why || "waiting"), "y"];
+  if (t.state === "stopped") return ["stopped", ""];
+  if (t.chat) return t.group === "replied" ? [`replied · ${age}`, ""] : t.group === "done" ? ["idle", ""] : [`running · chat${s && s.model ? " · " + modelText(rungOf(s.harness, s.model), s.effort) : ""} · ${age}`, ""];
+  if (t.state === "planned") return [`planned · ${t.count} ${t.count === 1 ? "step" : "steps"}`, ""];
+  if (t.state === "done") return [`done · ${t.count} ${t.count === 1 ? "step" : "steps"} · ${hhmm(t.updated)}`, "g"];
+  return [`running · ${s ? two(s.n) + " " + s.kind : t.count + " steps"}${s && s.model ? " · " + modelText(rungOf(s.harness, s.model), s.effort) : ""} · ${age}`, ""];
 }
 function taskHtml(t, o = {}) {
-  const shown = taskShown(t), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, open = taskOpen(t), done = taskGroup(t) === "done";
+  const shown = taskShown(t), tn = (TASK_WORD[shown] || TASK_WORD.running)[1], done = taskGroup(t) === "done";
   const picked = t.id === boardTask && boardPick === "t";
   const cls = ["v-tk", tn === "y" || tn === "r" ? tn : "", t.id === boardTask || t.state === "running" ? "act" : "", done ? "done" : ""].filter(Boolean).join(" ");
   const chk = o.select ? `<input type="checkbox" class="chk" data-check="${esc(t.id)}" aria-label="${esc("Select " + t.title)}"${selected.has(t.id) ? " checked" : ""}>` : "";
-  const [why, wt] = headWhy(t), pick = "t";
-  const head = `<div class="v-th${picked ? " picked" : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-bpick="${pick}" data-btask="${esc(t.id)}" tabindex="0" role="button" title="${esc(t.project)} · effort ${esc(t.effort)}">
-    <div class="l1">${chk}<span class="st ${tn}">${taskMark({ ...t, state: shown })}${done ? "" : word}</span><span class="t">${esc(t.title)}</span>${done ? "" : `<span class="age">${ago(snap.now - t.updated)}</span>`}</div>
-    <div class="l2">${labHtml(t.id)}<span class="why${wt ? " " + wt : ""}" title="${esc(why)}">${esc(why)}</span><span class="cost">${money(t.cost)}</span>${open ? "" : '<span class="v-more">&#9656;</span>'}</div></div>`;
-  return `<div class="${cls}">${head}${open ? `<div class="v-subs">${stepRows(t)}</div>` : ""}</div>`;
+  const [why, wt] = statusLine(t);
+  return `<div class="${cls}"><div class="v-th${picked ? " picked" : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-bpick="t" data-btask="${esc(t.id)}" tabindex="0" role="button" title="${esc(t.project)} · effort ${esc(t.effort)}">
+    <div class="l1">${chk}<span class="st ${tn}">${taskMark({ ...t, state: shown })}</span><span class="t">${esc(t.title)}</span></div>
+    <div class="l2"><span class="why${wt ? " " + wt : ""}" title="${esc(why)}">${esc(why)}</span><span class="cost">${money(t.cost)}</span></div></div></div>`;
 }
 function stepRows(t) {
   const steps = t.steps, picked = t.id === boardTask ? boardPick : "";
@@ -2903,19 +2860,14 @@ function prepRowHtml(t, picked) {  // step 00: the Prep card, from the task row'
   return `<div class="v-sr zero${skipped ? " skip" : ""}${picked ? " picked" : ""}" data-bpick="p" data-btask="${esc(t.id)}" tabindex="0" role="button" title="Step 00: the Prep card: the enhanced prompt, the route and what Prep read">
     ${sprite(skipped ? "stopped" : "done")}<span class="n">00</span><span class="k"><b>prep</b><span class="m">${esc(rung)}</span></span><span></span>${skipped ? '<span class="c"></span>' : `<span class="c">${money(p.cost)}</span>`}</div>`;
 }
-function prepTaskHtml(j) {  // a Prep job: running, failed, or its card waiting for Run (step 00 and the proposed steps, planned)
-  const picked = boardTask === j.id, c = j.card, steps = (c && c.steps) || [];
-  const word = j.state === "running" ? ["Prep", "n", "running"] : j.state === "failed" ? ["Failed", "r", "stuck"] : ["Waiting", "y", "waiting"];
-  const why = j.state === "running" ? [`Haiku is reading ${projectName(j.project_dir)}`, ""] : j.state === "failed" ? [j.error, "r"]
-    : [`Prep ready: ${steps.length ? `${steps.length} ${steps.length === 1 ? "step" : "steps"}` : "no steps: a chat"} · Run, Edit or Drop`, "y"];
+function prepTaskHtml(j) {  // a Prep job: one row (plan 48): preparing, failed, or its card ready for Start
+  const picked = boardTask === j.id, c = j.card, n = ((c && c.steps) || []).length;
+  const word = j.state === "running" ? ["running", "n", "", "preparing · Haiku reads, then the planner"] : j.state === "failed" ? ["stuck", "r", "r", "failed · " + j.error]
+    : ["waiting", "y", "y", `ready · ${n ? `${n} ${n === 1 ? "step" : "steps"} · Start` : "no steps: one chat · Start"}`];
   const title = (c && (c.fields.goal || c.raw)) || j.raw;
-  const head = `<div class="v-th${picked && boardPick === "t" ? " picked" : ""}" data-bpick="p" data-btask="${esc(j.id)}" tabindex="0" role="button" title="${esc(projectName(j.project_dir))}">
-    <div class="l1"><span class="st ${word[1]}">${sprite(word[2])}${word[0]}</span><span class="t">${esc(title)}</span><span class="age">${ago(snap.now - j.ts)}</span></div>
-    <div class="l2">${labHtml(j.id)}<span class="why${why[1] ? " " + why[1] : ""}" title="${esc(why[0])}">${esc(why[0])}</span><span class="cost">${c ? money(c.cost) : ""}</span></div></div>`;
-  const zero = `<div class="v-sr zero${j.state === "running" ? " cur" : j.state === "failed" ? "" : " wt"}${picked && boardPick === "p" ? " picked" : ""}" data-bpick="p" data-btask="${esc(j.id)}" tabindex="0" role="button">
-    ${sprite(word[2])}<span class="n">00</span><span class="k"><b>prep</b><span class="m">${esc(c ? `${alias(c.model || "haiku") || "haiku"} · ${c.turns} turns` : "haiku")}</span></span><span></span><span class="c">${c ? money(c.cost) : ""}</span></div>`;
-  const planned = steps.map((s, k) => `<div class="v-sr pl" data-bpick="p" data-btask="${esc(j.id)}" tabindex="-1" role="button">${sprite("planned")}<span class="n">${two(k + 1)}</span><span class="k"><b>${esc(s.kind)}</b></span><span></span><span class="c"></span></div>`).join("");
-  return `<div class="v-tk${j.state === "failed" ? " r" : j.state === "running" ? " act" : " y"}">${head}<div class="v-subs">${zero}${planned}</div></div>`;
+  return `<div class="v-tk${j.state === "failed" ? " r" : j.state === "running" ? " act" : " y"}"><div class="v-th${picked && boardPick === "p" ? " picked" : ""}" data-bpick="p" data-btask="${esc(j.id)}" tabindex="0" role="button" title="${esc(projectName(j.project_dir))}">
+    <div class="l1"><span class="st ${word[1]}">${sprite(word[0])}</span><span class="t">${esc(title)}</span></div>
+    <div class="l2"><span class="why${word[2] ? " " + word[2] : ""}" title="${esc(word[3])}">${esc(word[3])}</span><span class="cost">${c ? money(c.cost) : ""}</span></div></div></div>`;
 }
 function reviewHtml(j) {  // a rules review (plan 22): one head row; its proposals open in the inspector
   const picked = boardTask === j.id, n = j.card ? j.card.proposals.length : 0;
@@ -2925,10 +2877,8 @@ function reviewHtml(j) {  // a rules review (plan 22): one head row; its proposa
     <div class="l2"><span class="why">${esc(why)}</span><span class="cost">${j.card ? money(j.card.cost) : ""}</span></div></div></div>`;
 }
 
-// the draw: the calendar, the chain, the inspector; the composer or, while selecting, the delete bar
+// the draw: the chain, the inspector; the composer or, while selecting, the delete bar
 async function renderBoard() {
-  calLoad();
-  renderCal();
   const nb = snap.counts.needs;
   $("needsbtn").hidden = !nb;
   $("needsbtn").textContent = `${nb} ${nb === 1 ? "needs" : "need"} you`;
@@ -2965,15 +2915,15 @@ async function renderInspector(job) {
   }
   prepShown = "";
   if (job) { setHtml($("bwrap"), `<div class="binsp">${inspJob(job)}</div>`, { sel: ".binsp", reset: boardWrapKey() }); return; }
-  if (boardPick[0] === "d") { setHtml($("bwrap"), `<div class="binsp">${inspDay(boardPick.slice(1))}</div>`, { sel: ".binsp", reset: boardWrapKey() }); $("bbackwhat").textContent = dayName(boardPick.slice(1)); return; }
   if (boardPick === "x") { setHtml($("bwrap"), `<div class="binsp">${inspSelect()}</div>`, { sel: ".binsp", reset: boardWrapKey() }); $("bbackwhat").textContent = "selection"; return; }
   const row = boardRow(boardTask);
   if (!row) {
-    if (boardPick === "") await measureFetch();
+    if (boardPick === "m") await measureFetch();
     if (page !== "board" || boardTask) return;
     const project = boardProject();
-    setHtml($("bwrap"), `<div class="binsp">${project ? inspMeasure(measureData && measureData.project === project ? measureData.data : null, projectName(project))
-      : '<div class="ihead"><h2>Measure</h2></div><p class="note m">Pick a project to measure its tasks, or pick a task, a step or a day.</p>'}</div>`, { sel: ".binsp", reset: boardWrapKey() });
+    setHtml($("bwrap"), `<div class="binsp">${boardPick !== "m" ? emptyPane() : project ? inspMeasure(measureData && measureData.project === project ? measureData.data : null, projectName(project))
+      : '<div class="ihead"><h2>Measure</h2></div><p class="note m">Pick a project to measure its tasks.</p>'}</div>`, { sel: ".binsp", reset: boardWrapKey() });
+    $("bbackwhat").textContent = boardPick === "m" ? "Measure" : "";
     return;
   }
   const sig = taskRowSig(row);
@@ -3033,7 +2983,7 @@ async function measureFetch() {  // the Measure table: once a minute per project
   if (!project) { measureData = null; return; }
   if (measureData && measureData.project === project && snap.now - measureData.at < 60) return;
   const data = await api("/api/measure?project=" + encodeURIComponent(project) + "&n=10").catch(() => null);
-  if (page !== "board" || boardPick !== "") return;
+  if (page !== "board" || boardPick !== "m") return;
   measureData = { project, at: snap.now, data };
 }
 function boardInspector(row, d) {
@@ -3048,17 +2998,11 @@ function boardInspector(row, d) {
   return inspStep(t, s, d, row);
 }
 
-// the day (a calendar click) and the selection (Select on a Done day)
-function inspDay(k) {
-  const r = calUsage && calUsage.days ? calUsage.days[k] : null, rows = doneOn(k), chats = rows.filter((t) => t.chat).length;
-  const tk = (label, n) => `<span><small>${label}</small><b>${tokText(n)}</b></span>`;
-  const fams = r ? Object.entries(r.models || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).map(([f, c]) => `${esc(f)} ${r.cost ? Math.round(100 * c / r.cost) : 0}`).join(" · ") : "";
-  return `<div class="ihead"><div class="ln1"><h2>${esc(dayName(k))}${k === todayKey() ? " · today" : ""}</h2><div class="lr"><button class="btn sm" data-go="usage">Usage</button></div></div>
-    <div class="meta"><span>${rows.length} ${rows.length === 1 ? "task" : "tasks"} done</span>${chats ? `<span>${chats} ${chats === 1 ? "chat" : "chats"}</span>` : ""}<span>~<b>$${money(daySpend(k))}</b></span></div></div>
-    ${r ? `<div class="v-figs">${tk("input", r.tokens[0])}${tk("output", r.tokens[1])}${tk("cache write", r.tokens[2])}${tk("cache read", r.tokens[3])}</div>` : '<p class="note m">No Claude Code use this day in the usage file.</p>'}
-    <div class="v-dayl">${rows.map((t) => `<div class="v-dayr" data-bpick="t" data-btask="${esc(t.id)}" role="button" tabindex="0">${labHtml(t.id)}<span class="t">${esc(t.title)}</span><span class="m">${t.chat ? "chat" : t.count + " steps"} · ${hhmm(t.updated)}</span><span class="c">${money(t.cost)}</span></div>`).join("") || '<p class="note m">No task finished this day.</p>'}</div>
-    ${fams ? `<p class="v-mix">models <b>${fams} %</b></p>` : ""}`;
+function emptyPane() {  // the right pane with nothing picked (plan 48): the empty line, not Measure
+  return "<p class=\"note m\">Open a task to see its route, its context and the supervisor's last decision.</p>";
 }
+
+// the selection (Select done tasks in the header menu)
 function selRows() { return [...selected].map(boardRow).filter(Boolean); }
 function inspSelect() {
   const rows = selRows(), cost = rows.reduce((a, t) => a + (t.cost || 0), 0);
@@ -3863,6 +3807,10 @@ async function go(name, button) {
   }
   if (name === "cleardraft") { draft = ""; $("c-prompt").value = ""; draftKept = false; saveDraft(); renderCompose(); $("c-prompt").focus(); }
   if (name === "empties") { emptyOpen = !emptyOpen; render(); }
+  if (name === "hmenu") { if ($("hmenu").hidden) openHmenu(); else closeHmenu(); return; }
+  closeHmenu();
+  if (name === "measure") { boardTask = ""; boardPick = "m"; boardData = boardChat = null; selecting = ""; showPage("board"); renderBoard(); }
+  if (name === "selectdone") { dayOpen[todayKey()] = true; showPage("board"); setSelecting(todayKey()); }
   if (name === "usage") showPage("usage");
   if (name === "models") showPage("models");  // plan 26: the Settings band's Models and tuning link
   if (name === "fold") await setForm("pill");
@@ -3893,6 +3841,7 @@ async function rawRun() {
 
 document.addEventListener("click", async (e) => {
   if (!$("pop").hidden && !e.target.closest("#pop") && !e.target.closest("[data-pick]")) closePicker();
+  if (!$("hmenu").hidden && !e.target.closest("#hmenu") && !e.target.closest('[data-go="hmenu"]')) closeHmenu();
   const cb = e.target.closest("[data-turncopy]");
   if (cb) { e.stopPropagation(); copyTurn(cb); return; }
   const fb =e.target.closest("[data-fold]");  // plan 23: a fold head toggles its body and remembers it
@@ -3918,12 +3867,10 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (e.target.matches("img.thumb")) { e.target.closest(".file").classList.toggle("open"); return; }  // enlarge in place
-  const b = e.target.closest("[data-copy],[data-check],[data-day],[data-cal],[data-dayfold],[data-older],[data-sel],[data-del],[data-ptab],[data-tfile]");
+  const b = e.target.closest("[data-copy],[data-check],[data-dayfold],[data-older],[data-sel],[data-del],[data-ptab],[data-tfile]");
   if (b) {  // plan 30: the Board's own controls (a label chip and a checkbox sit inside a task head: the head is not picked)
     if (b.dataset.copy) { e.stopPropagation(); copyLabel(b.dataset.copy); }
     else if (b.dataset.check) { if (b.checked) selected.add(b.dataset.check); else selected.delete(b.dataset.check); boardPick = "x"; renderBoard(); }
-    else if (b.dataset.day) pickDay(b.dataset.day);
-    else if (b.dataset.cal) { calWeeks = Math.min(0, calWeeks + Number(b.dataset.cal)); renderCal(); }
     else if (b.dataset.dayfold) { const k = b.dataset.dayfold; dayOpen[k] = b.getAttribute("aria-expanded") !== "true"; if (!dayOpen[k] && selecting === k) setSelecting(""); else renderBoard(); }
     else if (b.dataset.older !== undefined) { olderOpen = !olderOpen; renderBoard(); }
     else if (b.dataset.sel !== undefined) setSelecting(b.dataset.sel);
@@ -3932,7 +3879,7 @@ document.addEventListener("click", async (e) => {
     else if (b.dataset.tfile) openStepFile(b);
     return;
   }
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],[data-nverify],#brief,#overpace");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],[data-nverify],#brief");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
   if (t.dataset.open || t.dataset.task) {  // a session opened from the Board returns to it, a task opened from a session too
@@ -3975,10 +3922,6 @@ document.addEventListener("click", async (e) => {
     t.querySelector(".car").textContent = briefOpen ? "▴" : "▾";
     $("more").hidden = !briefOpen;
     saveDraft();
-  } else if (t.id === "overpace") {  // plan 18: the over-pace line opens today's breakdown under the calendar
-    const open = t.getAttribute("aria-expanded") !== "true";
-    t.setAttribute("aria-expanded", String(open));
-    $("todaymore").hidden = !open;
   }
 });
 
@@ -4056,9 +3999,10 @@ document.addEventListener("keydown", (e) => {
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
   const onCtl = e.key !== "Escape" && e.target.matches('[data-page="board"] button, [data-page="board"] select');  // plan 27: Enter presses it, the arrows scroll
   if (e.key === "Escape" && nextOpen) { e.preventDefault(); cancelNextForm(); return; }  // plan 36: Escape closes only the inline form
-  if ((page === "board" || page === "session" && e.target.closest("#bchain")) && form === "open" && BOARD_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && $("pop").hidden && !inField && !onCtl && !e.target.closest(".tabs")) return boardKey(e);
+  if ((page === "board" || page === "session" && e.target.closest("#bchain")) && form === "open" && BOARD_KEYS.has(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && $("pop").hidden && $("hmenu").hidden && !inField && !onCtl && !e.target.closest(".tabs")) return boardKey(e);
   if (e.key === "Escape") {
-    if (!$("pop").hidden) closePicker();
+    if (!$("hmenu").hidden) { closeHmenu(); $("hbtn").focus(); }
+    else if (!$("pop").hidden) closePicker();
     else if (form === "pill") dismissPeek();
     else if (page === "session") goBack();
     else if (page === "usage") showPage("board");
