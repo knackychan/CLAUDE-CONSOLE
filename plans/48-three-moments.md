@@ -308,3 +308,171 @@ one project set to off runs its listed steps as a chain; the list reads at a gla
 - No automatic Prep-card Start: Start stays Fred's (BRAINSTORM D4, "always review", now one click).
 - Plan 36 Stage B (agent requests) and true mid-turn delivery (plan 42) stay open.
 - The supervisor's pass, caps and modes are plan 44's; this plan adds only the message trigger and its authority.
+
+## 7. Follow-up: recovery visibility
+
+Status: planned 2026-10-19, requested by Fred after the harness discussion. Documentation only; implement after
+the main Board work above. This extends the opened task's attention area (3.4), using plans 02 and 44's existing
+recovery and plan 42's message delivery rules. It does not change the authority of a recovery action.
+
+### Outcome
+
+After a crash or interrupted run, opening the task answers: what definitely finished, what might be unfinished,
+and what Fred can do next. Example: "Step 02 finished with a saved handoff. Step 03 was interrupted; its changes
+may already be on disk." Link each statement to the relevant step/attempt and saved evidence.
+
+### Contract
+
+- Show the last confirmed completed step and its saved handoff/result, or "No completed step recorded". A saved
+  handoff does not imply verification passed; show the recorded verification outcome separately when available.
+- Identify the interrupted step and attempt, with the recorded reason. Distinguish an interrupted worker from
+  an uncertain supervisor dispatch or message delivery. Missing evidence means unknown, never success.
+- Explain that file edits or external actions may already have happened. Recovery does not undo them or resume
+  at an exact tool call. An earlier Git/test fact is labelled as recorded evidence, not a fresh workspace check.
+- Present only recovery actions permitted by the current server levers and message/supervisor availability.
+  Reuse existing Retry, Resume, Accept step result and uncertainty-resolution handlers where applicable; name
+  the consequence of the available action. Do not invent a generic Resume button for all interruption states.
+- Uncertain dispatches and messages are never replayed automatically. Dismissing uncertainty does not assert
+  that the underlying action failed or that retrying it cannot duplicate an effect. Preserve all pending-guidance
+  resolution requirements and recheck live gates when an action is submitted.
+- Keep the recovery explanation in the existing attention area, without repeating the supervisor card or
+  composer warning. Refreshes preserve the selected attempt, drafts, focus and scroll position.
+- No new agent framework, model pass, automatic retry, rollback, tool-level checkpoint system or new endpoint.
+  Use saved task/run state, chain records, step artifacts and existing supervisor/message recovery records.
+
+### Implementation slice
+
+1. Inspect `console/runs.py::reconcile`, task restart reconciliation in `console/server.py`, plan 44 audit
+   recovery and plan 42 delivery recovery. Establish which saved fields prove completion or uncertainty before
+   defining the display data. Reuse existing GET `/api/task` fields; add a small read-only recovery summary to
+   that response only if the client would otherwise have to infer business state.
+2. Render the recovery explanation in the opened task's attention area in `web/app.js`, with artifact/attempt
+   links and existing gated actions. Follow plan 48's action hierarchy and `web/style.css` tokens.
+3. Add focused service and web tests, then the fake-provider restart check below. Record results and outstanding
+   live checks here; mark this follow-up implemented separately from the rest of plan 48.
+
+### Acceptance checks
+
+- A completed step followed by an interrupted attempt shows the completed step and the interrupted attempt
+  accurately; an interruption on the first step reports no completed step.
+- A result saved before service failure is reconciled as completed rather than presented as unfinished; a still
+  live orphan run is not offered a second writer. Missing/truncated evidence never produces a success claim.
+- Uncertain supervisor dispatch and uncertain message delivery each show their existing resolution path;
+  restart and repeated polling cause no replay, duplicate step or duplicate message.
+- Paused tasks and pending guidance retain their current gates. An action becoming unavailable between display
+  and click is refused by the service and the view refreshes with the reason.
+- In a scratch home with a fake provider, interrupt/restart around a completed step and an unfinished attempt;
+  compare the displayed summary with saved artifacts and confirm that opening the task starts no work.
+- At 900, 400 and 340 px, long interruption reasons and artifact names remain readable; keyboard actions,
+  draft/focus preservation and light/dark appearance still work.
+
+Related ideas from the discussion remain deferred: exposing each adapter's actually enforced limits, and
+auditing decision/constraint preservation across compacted handoffs. They are not part of this recovery slice.
+
+### Findings (2026-10-19, read only)
+
+Startup order (`Hub.__init__`, then `Hub.run`): `__init__` turns every task message still `dispatching` into
+`uncertain` (server.py:80, error "Service restarted during dispatch. ... it will not be replayed.") and runs
+`reconcile_supervisor` (server.py:98); `run` then calls `runs.reconcile`, `reconcile_next_steps`, and only then the
+first `poll_once` / `auto_steps` / `advance`. `runs.reconcile` runs again every tick.
+
+- `Runs.reconcile` (runs.py:373): a run of an earlier service with a result line in this turn, or a dead process, is
+  closed once with `run_ended` (`_finish`). No result line and no exit code gives `subtype: ""`, so the record says
+  `interrupted: true` (runs.py:61). A live orphan without a result is skipped: its step stays `running`, the task
+  lever `retry` is off ("task is running") and `stop` kills its tree from the meta pid (runs.py:348). So no second
+  writer is offered today.
+- The step end (`Hub._ended`, server.py:3258, then `tasks.on_step_ended`): an interrupted, stopped or failed run is
+  `ok=False`, reason "the run did not finish cleanly" (or a cap reason), written to `attempts[-1].why`. That text is
+  the same for a crash, a Stop and an error result: no saved step or attempt field says which. The cause lives only
+  in the State session row (`interrupted` / `stopped` / `failed`, from the event log) and `runs/<sid>.json`
+  `timed_out`. GET /api/task sends the session row only for the current step (`step_levers`), not per attempt.
+- After a restart, `_retry_or_stuck` still gives a step with `retries == 0` its one automatic retry (plan 17),
+  manual progression included: the first `advance` launches attempt 2 by itself. Opening the task starts nothing;
+  the restart can. Section 7 adds no retry and does not remove this one.
+- `reconcile_next_steps` (server.py:1417): a reserved step with no session goes `stuck`, why "the step did not start:
+  Retry runs it again", step `planned`, `request_status: failed`. Proven by `request_status` and the task `why`.
+- `reconcile_supervisor` (server.py:1444): a wake left `dispatching` gets a `recovered` record, outcome `uncertain`;
+  `fold_log` makes `supervisor.pending` `{status: "uncertain", decision: null}`, so after a restart the card cannot
+  say which decision it was (the `dispatching` record in `audit` has it). A wake left `claimed` gets a `recovered`
+  record, outcome `no-decision`, cost unknown, not retried; it is only an audit entry. `_sup_admit` refuses every pass
+  while pending is `uncertain` (server.py:1608) and Dismiss is the existing reject call.
+- Plan 42 delivery: `task.messages[]` with `status: "uncertain"` and `error` (restart in `__init__`, a raised
+  dispatch at server.py:1263, a raised next-step launch at server.py:3137). `taskMessages` already shows it as
+  "Outcome unknown" with Dismiss (`cancelmessage`, status `dismissed`); `pending_messages` keeps it blocking.
+- Web today: `attentionArea` shows the stuck / stopped box with `t.why` only; `supCard` shows the uncertain card with
+  Dismiss; `stepFooter` shows uncertain messages. Nothing names the last completed step or the cut attempt.
+
+Each statement and what proves it:
+
+| Statement | Saved field | Gap |
+|---|---|---|
+| Last confirmed step | `task.last_good`, that step `state: done`, `ended`; Fred's Accept adds `accepted` | none; a verify FAIL is also `last_good` (its `verdict` says FAIL) |
+| Its handoff / result | `tasks.read_note(last_good)` (note.md), `read_brief`, `read_facts` | none |
+| Verification outcome | the step's `verdict`, `verdict_detail` (verify steps only) | none: no verdict means "not verified", never PASS |
+| Interrupted step and attempt | current step `state: failed`, `attempts[-1]` (`session`, `ended`, `why`), attempt number = list length | cause (crash vs Stop vs error) not saved on the attempt |
+| Live orphan | `runs/<sid>.json` without `ended`, pid alive | not in GET /api/task |
+| Recorded vs fresh evidence | facts.md written at the step end | its time is the step's `ended`; nothing is fresh |
+| Uncertain dispatch | `supervisor.pending.status == "uncertain"`, `error`, `audit` | the decision is null after a restart |
+| Uncertain message | `messages[].status == "uncertain"`, `error`, `target` | none |
+
+### Proposal: a read-only `recovery` summary (Fred confirmed 2026-10-19)
+
+Fred's choices: the summary with the saved `cause`; the restart's one automatic retry stays and is shown through
+the attempt numbers (no behaviour change).
+
+The cut attempt's cause and a live orphan are business state the client cannot read from GET /api/task without
+inferring it, so slice 1 adds one read-only field. Uncertain dispatch and message stay where they are (supervisor
+card, composer); the summary only points at them.
+
+Saved change: `Hub._ended` writes `attempts[-1].cause` = `interrupted` | `stopped` | `failed` | `timeout` | `ok`
+from the session row and the run meta it already reads. Older attempts fall back to the session row, else
+`unknown`.
+
+GET /api/task gains `"recovery"`, `null` unless the current step is not running and its latest attempt ended with a
+cause other than `ok`, or a live orphan exists:
+
+```json
+{"done": {"step": 2, "kind": "code", "how": "finished", "verdict": "", "handoff": "02-code/note.md",
+          "facts": "02-code/facts.md", "ended": 1790000000.0},
+ "cut": {"step": 3, "kind": "code", "attempt": 2, "cause": "interrupted",
+         "why": "the run did not finish cleanly", "ended": 1790000100.0},
+ "orphan": null}
+```
+
+`done` is `null` when no step is done; `how` is `finished` or `accepted`; `orphan` is `{step, attempt}`.
+
+Display, one `askbox` in the attention area above the stuck box text, label "Recovery"; step names are buttons with
+the existing `data-bpick="sNN"` that open the step inspector:
+
+- done: "Step 02 code finished with a saved handoff." / "... finished; no handoff was saved." / "Step 02 code was
+  accepted by you as it was on disk." / with a verdict: "Step 02 verify finished: VERDICT PASS." /
+  none: "No completed step recorded."
+- cut: interrupted "Step 03 code, attempt 2, was interrupted: the run ended without a result (a restart or a
+  crash)."; stopped "... was stopped."; failed / timeout "... failed: <why>."; unknown "... did not finish; the
+  cause is not recorded."
+- always after cut: "Its file edits or other actions may already have happened. Nothing is undone, and a retry
+  starts the step again in a new session, not at its last tool call."
+- facts: "Git and test facts are as recorded when step 02 ended, not a fresh check."
+- orphan: "Step 03's run from an earlier service is still running. Stop ends it; nothing else runs on this step
+  until then."
+- uncertain dispatch (pending status): "The supervisor's wake 4 dispatch has an unknown outcome (card below). It is
+  never replayed; Dismiss does not mean it failed."
+- uncertain message: "Your message to step 03 has an unknown delivery (message box). It is never replayed; Dismiss
+  does not mean it was not delivered."
+
+Actions: no new button. One consequence line per action whose existing lever is `""`, pointing at its existing
+place: `lv.retry` "Retry on a model (task menu) runs step 03 again; attempt 2's edits stay."; `lv.stepdone` "Accept
+step result (task menu) marks step 03 done with the files as they are now."; `lv.resume` "Resume lets the service
+go on."; orphan with `lv.stop` "Stop (bar)". None open: "No recovery action is open: <lv.retry reason>." A click the
+service refuses already redraws with its error.
+
+Tests (red first):
+
+- `tests/test_task_recovery.py`: `test_cut_after_done_names_both`, `test_cut_on_first_step_has_no_done`,
+  `test_result_before_crash_is_done_not_cut`, `test_live_orphan_is_named_and_retry_stays_off`,
+  `test_cause_is_saved_on_the_attempt` (interrupted, stopped, failed), `test_missing_evidence_is_unknown`,
+  `test_get_task_is_read_only` (two GETs: task.json and chain unchanged, no run, no wake),
+  `test_restart_and_polling_replay_nothing` (an uncertain message and an uncertain dispatch survive two restarts:
+  one step, one message, no pass).
+- `tests/test_web.py`: `test_recovery_box_names_done_and_cut`, `test_recovery_box_offers_only_open_levers`,
+  `test_recovery_box_points_to_uncertain_without_repeating_it`, `test_recovery_refresh_keeps_draft_and_focus`.

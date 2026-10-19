@@ -9,6 +9,10 @@ ends with working, tested software.
 
 ## Sub-plans
 
+Planned follow-up (Fred, 2026-10-19): [plan 48, section 7](plans/48-three-moments.md#7-follow-up-recovery-visibility)
+adds recovery visibility after an interruption: last confirmed step, unfinished or uncertain work, and existing
+gated recovery actions. Documentation only; implement after plan 48's main Board work.
+
 | # | Sub-plan | State |
 |---|---|---|
 | 1 | [plans/01-watch.md](plans/01-watch.md) - hooks, service, tree, gauge, Steps, Needs you, Quiet / Stall?, 2 writers | done 2026-10-10 |
