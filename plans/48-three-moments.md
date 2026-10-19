@@ -311,8 +311,8 @@ one project set to off runs its listed steps as a chain; the list reads at a gla
 
 ## 7. Follow-up: recovery visibility
 
-Status: planned 2026-10-19, requested by Fred after the harness discussion. Documentation only; implement after
-the main Board work above. This extends the opened task's attention area (3.4), using plans 02 and 44's existing
+Status: planned 2026-10-19, requested by Fred after the harness discussion. Implemented 2026-10-19, separately
+from the rest of plan 48 (see "Results" at the end of this section); Fred's live check is open. This extends the opened task's attention area (3.4), using plans 02 and 44's existing
 recovery and plan 42's message delivery rules. It does not change the authority of a recovery action.
 
 ### Outcome
@@ -453,8 +453,8 @@ the existing `data-bpick="sNN"` that open the step inspector:
 - always after cut: "Its file edits or other actions may already have happened. Nothing is undone, and a retry
   starts the step again in a new session, not at its last tool call."
 - facts: "Git and test facts are as recorded when step 02 ended, not a fresh check."
-- orphan: "Step 03's run from an earlier service is still running. Stop ends it; nothing else runs on this step
-  until then."
+- orphan: "Step 03's run from an earlier service is still running; nothing else runs on this step until it
+  ends." (built text; Stop is named once, in the actions)
 - uncertain dispatch (pending status): "The supervisor's wake 4 dispatch has an unknown outcome (card below). It is
   never replayed; Dismiss does not mean it failed."
 - uncertain message: "Your message to step 03 has an unknown delivery (message box). It is never replayed; Dismiss
@@ -463,7 +463,7 @@ the existing `data-bpick="sNN"` that open the step inspector:
 Actions: no new button. One consequence line per action whose existing lever is `""`, pointing at its existing
 place: `lv.retry` "Retry on a model (task menu) runs step 03 again; attempt 2's edits stay."; `lv.stepdone` "Accept
 step result (task menu) marks step 03 done with the files as they are now."; `lv.resume` "Resume lets the service
-go on."; orphan with `lv.stop` "Stop (bar)". None open: "No recovery action is open: <lv.retry reason>." A click the
+go on."; orphan with `lv.stop` "Stop (bar) ends that run.". None open: "No recovery action is open: <lv.retry reason>." A click the
 service refuses already redraws with its error.
 
 Tests (red first):
@@ -476,3 +476,28 @@ Tests (red first):
   one step, one message, no pass).
 - `tests/test_web.py`: `test_recovery_box_names_done_and_cut`, `test_recovery_box_offers_only_open_levers`,
   `test_recovery_box_points_to_uncertain_without_repeating_it`, `test_recovery_refresh_keeps_draft_and_focus`.
+
+### Results (2026-10-19)
+
+Commits: findings and proposal `7694e80`, server tests red `98b1210`, server `ce7b591` (`Hub.recovery`,
+`run_cause`, `attempts[-1].cause` saved in `Hub._ended`; Fred's Stop lever saves `stopped`, a same-session
+Continue clears it), web tests red `8798ae3`, web `388f287` (`recoveryBox` at the top of `attentionArea`,
+`web/style.css` tokens only), restart check `6ef1712`.
+
+- `py -m unittest discover -s tests`: 1083 tests OK after the server step; after the web step
+  `py -m unittest tests.test_web` 98 OK (the web step touched only `web/app.js`, `web/style.css` and test_web).
+  `node --check web/app.js` clean.
+- `py -m tests.live_recovery_check [shots dir]` (scratch home, fake claude, headless Edge): PASS. A first service
+  runs a two-step task to step 02 and a one-step task; the service goes down, the step processes die, a second
+  service starts on the same data folder. Both tasks go stuck with cause `interrupted`; the box says "Step 01 scout
+  finished with a saved handoff." and "Step 02 explain, attempt 1, was interrupted ...", and "No completed step
+  recorded." for the one-step task, matching task.json and the saved handoff. Opening both tasks and 1.5 s of loop
+  passes start nothing (runs/ files, live runs and attempt counts unchanged). Enter on a step link opens the step.
+  900 / 400 / 340 px, dark and light, a 400-character reason with unbreakable artifact names: no horizontal scroll,
+  the box inside the viewport, the draft, caret and focus kept across a redraw. No page error (the browser's own
+  favicon.ico 404 is ignored).
+- Seen, not changed (not section 7): on a stuck task the composer says "Saved guidance. Use Resume or Retry
+  explicitly to deliver it." with no guidance queued, and the bar shows Resume.
+
+Still open: Fred's live check (one real interrupted step: quit the tray during a step, start it again, open the
+task). The rest of plan 48 keeps its own open checks (section 5).
