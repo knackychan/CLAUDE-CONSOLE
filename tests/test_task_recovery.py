@@ -136,6 +136,26 @@ class TaskRecoveryTest(_TaskServerTest):
         self.assertEqual({p.name: p.read_bytes() for p in folder.iterdir() if p.is_file()}, before)
         self.assertEqual(self.hub.wakes, wakes)
 
+    def test_stuck_step_session_takes_no_continue(self):
+        """A Continue in a stuck step's session would run a turn the task never sees; Retry is the way back."""
+        task = self.cut_task([{"kind": "scout", "goal": "look around SLOW"}])
+        sid = task["steps"][0]["session"]
+        self.assertIn("Retry", self.call(f"/api/levers?session={sid}")[1]["continue"])
+        self.assertEqual(self.task(task["id"])[1]["step_levers"]["continue"],
+                         "the step is stuck: Retry on a model in the task menu")
+        with mock.patch.object(self.hub.runs, "start", side_effect=AssertionError("no run")):
+            self.assertEqual(self.call("/api/continue", {"session": sid, "text": "go on"})[0], 409)
+
+    def test_saved_guidance_timing_names_the_way_it_is_delivered(self):
+        task = self.cut_task([{"kind": "scout", "goal": "look around SLOW"}])
+        self.assertEqual(self.task(task["id"])[1]["message"]["timing"],
+                         "Sending saves this guidance; nothing runs. Retry asks whether to carry it into the next run.")
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look around SLOW"}])
+        self.until(tid, lambda t: t["steps"][0]["session"] and t["steps"][0]["state"] == "running", "it runs")
+        self.assertEqual(self.call("/api/task/pause", {"task": tid})[0], 200)
+        self.assertEqual(self.task(tid)[1]["message"]["timing"],
+                         "Sending saves this guidance; it is delivered after you Resume.")
+
     def test_restart_and_polling_replay_nothing(self):
         task = self.cut_task([LOOK, {"kind": "explain", "goal": "say what you saw SLOW"}])
         tid = task["id"]
