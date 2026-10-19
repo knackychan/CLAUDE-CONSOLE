@@ -1099,6 +1099,13 @@ function floorText(kind, noun) {  // a routing miss of this kind (Escalate wrote
   return f ? `Floor from Escalate${f.date ? " (" + f.date + ")" : ""}: ${kind} ${noun} start at ${f.route}, above their rule; a model you pick here holds.` : "";
 }
 
+function plannerLine(p) {  // plan 47: one muted line above the steps; the scope word is a tag only when it is not ok
+  if (!p) return "";
+  if (p.error) return `<div class="m mut pnote"><span class="tag">planner</span><span class="r">${esc(p.error)}</span> Prep's own steps stand; add a design step by hand on a hard task.</div>`;
+  const tag = p.scope && p.scope !== "ok" ? `<span class="tag">${esc(p.scope.replace("_", " "))}</span>` : "";
+  return p.note || tag ? `<div class="m mut pnote">${tag}${esc(p.note || "")}</div>` : "";
+}
+
 function showPrep() {
   const f = card.fields, steps = card.steps || [];
   $("bbackwhat").textContent = "00 prep · " + projectName(card.project_dir);
@@ -1116,12 +1123,13 @@ function showPrep() {
       ${floorText(card.route.type, "runs") ? `<div class="m mut">${esc(floorText(card.route.type, "runs"))}</div>` : ""}
       <div class="lr"><button class="btn sm" data-pact="review" title="Haiku reads this project's CLAUDE.md and rules files, the routing misses and the lessons, and proposes what to cut or add. Nothing is written.">Review rules</button></div></div>
     <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
+      ${plannerLine(card.planner)}
       <div id="p-steps">${steps.map(stepRowHtml).join("") || '<p class="m mut" data-nosteps>Prep proposed no steps. Add steps to run this as a task.</p>'}</div>
       <div class="m mut">Run as task: each step's model comes from its kind (auto) or the model you pick on its row, not from the Run route above. A verify step runs one model above the step it checks.</div>
       <div id="p-floors" class="m mut"></div>
       <div id="p-fable" class="say" hidden>${esc(fableName())} may bill usage credits on this plan; it asks you to confirm before it runs</div>
       <div class="m mut">${esc(effortText())}</div></div>
-    <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns</div>`;
+    <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns${card.planner && card.planner.turns ? ` · planner ${esc(card.planner.model || "")} ${card.planner.turns} turns` : ""}</div>`;
   $("pbar").innerHTML = `<div class="m runs-in">Runs in <b>${esc(projectName(card.project_dir))}</b></div><div class="lr">
     <select id="p-model" aria-label="Model" title="Model for Run (one session)">${modelOptions("", true)}</select>
     <select id="p-effort" aria-label="Effort" title="Effort for Run (one session)">${options(cfg.efforts, effortPick !== "auto" ? effortPick : card.route.effort)}</select>
@@ -2255,7 +2263,8 @@ let medit = null;          // the working copy: {values: {key: value}, kinds: {k
 let mmsg = "";             // the last Save's refusal, shown in the levers row
 let mbusy = false;         // a Save is on its way
 const mqOpen = new Set();  // the cards whose ? line is open
-const PASSES = [["prep_model", "Prep", "enhances the prompt, plans the steps"], ["brief_model", "Handoff pass", "compacts a step's handoff"],
+const PASSES = [["prep_model", "Prep", "enhances the prompt, proposes the steps"], ["planner_model", "Planner", "reviews the card's scope, writes its steps"],
+  ["brief_model", "Handoff pass", "compacts a step's handoff"],
   ["review_model", "Rules review", "read only"], ["default_model", "Run default", "the tier for raw Auto runs"]];
 const TUNE = {  // key -> [label, unit word, scale from the config value to the shown one]; the service sends value, default, range
   user_name: ["Your name", "", 1],
@@ -2451,7 +2460,7 @@ function tiersTab() {
   };
   return `<p class="hint">Each step takes the emptiest model of its tier, so the load spreads from the first step; the order breaks ties and is used while usage is unknown. Drag to reorder. Models of a CLI that is off or not found are hidden; one line says how many. The models come from models.json (Settings, Harnesses, Open).</p>
     ${["think", "write", "read"].map(tierCard).join("")}
-    <div class="pcard">${cardHead("tpasses", "Console's own passes", "not steps", "Jobs the console runs for itself, not task steps: Prep enhances your prompt and plans the steps, the handoff pass compacts what a step hands to the next, the rules review checks CLAUDE.md, Run default is the composer's plain Run.")}${PASSES.map(pass).join("")}</div>`;
+    <div class="pcard">${cardHead("tpasses", "Console's own passes", "not steps", "Jobs the console runs for itself, not task steps: Prep enhances your prompt and proposes the steps, the planner checks the scope and writes the step list, the handoff pass compacts what a step hands to the next, the rules review checks CLAUDE.md, Run default is the composer's plain Run.")}${PASSES.map(pass).join("")}</div>`;
 }
 
 // Tuning: the numbers; a value off its default has the blue edge and a reset; out of range turns red and blocks Save

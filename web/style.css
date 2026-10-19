@@ -473,6 +473,8 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 
 /* Prep page */
 .prep-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pnote { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; margin: 2px 0 6px; }  /* plan 47: the planner's line */
+.pnote .tag { flex: none; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; font: 400 10.5px var(--mono); color: var(--mut); white-space: nowrap; }
 .prep-row select, #pbar select { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 4px; font: 12px var(--mono); }
 .prep-row select, .srow select { max-width: 100%; }
 /* the step list of Run as task: kind, model and remove on one line, the goal under them */
