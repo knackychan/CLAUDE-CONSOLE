@@ -636,6 +636,9 @@ def run(cfg: dict, exe: list, task: dict, prompt: str, model: str, max_cost: flo
         out.update(cost=info.get("cost"), error=f"the pass failed: {redact.clip(str(exc), 200)}")
         return out
     out.update(cost=info.get("cost"), turns=info.get("turns", 0))
+    if isinstance(fields, dict):  # the flat schema cannot tie optional fields to a decision: drop another's
+        own = _FIELDS.get(fields.get("decision"), ())
+        fields = {k: v for k, v in fields.items() if k not in _OPTIONAL or k in own}
     why = shape(fields)
     if why:
         out["error"] = "no decision (" + why + ")"

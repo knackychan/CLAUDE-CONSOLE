@@ -482,6 +482,24 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(supervisor.run(self.cfg, FAKE, self.task, self.prompt("SUP-EXIT"), "haiku", 0.5)["cost"],
                          0.004)
 
+    def test_fields_of_another_decision_are_dropped(self):
+        # the flat schema lets the model fill every optional field; one that belongs to another decision is dropped,
+        # an unknown field is still refused (live: add_next_step came back with "text", 2026-10-20)
+        def answer(fields):
+            body = {"type": "result", "is_error": False, "total_cost_usd": 0.002, "num_turns": 2,
+                    "structured_output": fields}
+            return lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, json.dumps(body).encode(), b"")
+        base = {"decision": "add_next_step", "reason": "r", "confidence": "high", "for_fred": "", "kind": "code",
+                "instructions": "Add the button", "model": "auto"}
+        with mock.patch.object(compact.subprocess, "run", side_effect=answer(dict(base, text="", note="x"))):
+            got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)
+        self.assertEqual(got["error"], "")
+        self.assertEqual(got["decision"], base)
+        with mock.patch.object(compact.subprocess, "run", side_effect=answer(dict(base, path="C:/x"))):
+            got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)
+        self.assertIsNone(got["decision"])
+        self.assertIn("unknown field path", got["error"])
+
     def test_invalid_decision_keeps_reported_cost(self):
         got = supervisor.run(self.cfg, FAKE, self.task, self.prompt("SUP-BAD"), "haiku", 0.5)
         self.assertEqual((got["decision"], got["cost"]), (None, 0.004))
