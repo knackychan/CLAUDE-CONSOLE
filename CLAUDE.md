@@ -36,6 +36,20 @@ from GET /api/task `message`. Guidance is persisted before acknowledgement and d
 progression. Stop keeps the queue; Retry carries it only with an explicit choice; actions that strand it require
 resolution. Uncertain dispatches are never replayed automatically. Standalone sessions retain POST /api/continue.
 
+Plan 44 supervisor backend (shipped 2026-10-19; its UI and skill library are not): an eligible task transition
+(manual choose-next or FAIL, stuck, plan hold, automatic done after its brief, a 30-minute Claude stall) wakes
+Hub.wakes, debounced and coalesced by original chain event id; each admitted wake runs one bounded tool-free pass
+(supervisor.run through compact._ask), never a session, worker, scheduler or resident agent. Its JSON is untrusted
+(supervisor.check); Hub._supervisor_dispatch alone acts on it, only through request_next or task_lever with origin
+supervisor, after every live gate, writing the dispatching intent before the effect and the outcome after. Default
+suggest; auto needs Fred's per-task, project or global setting and stays inside its caps. Pending guidance, Pause,
+off, questions, Fable/pace and an uncertain dispatch block every pass and dispatch; uncertain is never replayed and
+waits for Fred's dismissal. Audit: tasks/<id>/supervisor.jsonl (append only, masked); spend: the supervisor records
+in usage-days.json. Routes: POST /api/task/supervisor ({task, mode} or {task, wake, action: approve|reject, note?}),
+POST /api/task/supervisor/replay ({task, wake}, accounting only, never dispatches; CLI `py -m console
+--supervisor-replay TASK WAKE`), POST /api/task with `supervised: true`, and the `supervisor` fields of GET
+/api/task and /api/usage. Contract: plans/44-supervisor/README.md.
+
 ## Commands
 
 ```bat

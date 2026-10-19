@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from console import paths, server, supervisor, tasks, usage
+from tests import test_server
 
 
 class SupervisorServerTest(unittest.TestCase):
@@ -1465,93 +1466,357 @@ class SupervisedIntakeHubTest(SupervisorServerTest):
         self.assertEqual(task["goal"], "Fix add()")
 
 
-class AcceptanceTest(WakeTest):
-    """Plan 44 T12: cross-feature safety cases that close the backend."""
+class AcceptanceTest(AutonomyTest):
+    """Plan 44 T12: cross-feature safety cases that close the backend (fake runner, fake clock, fresh Hubs)."""
 
-    def test_supervised_manual_lifecycle_end_to_end(self):
+    def join(self, hub):
+        for t in list(hub.sup_threads):
+            t.join(10)
+
+    def test_debounce_duplicates_and_idle_advances_make_one_pass(self):
         tid = self.supervised_task()
-        task = self.hub.tasks[tid]
-        tasks.write_note(self.folder, task, task["steps"][0],
-                         "## Goal\ngoal\n## Findings\n- found\n## Files touched\n- (none)\n"
-                         "## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\n- code")
-        self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
-        self.hub._sup_hook(task)
-        self.tick(30.0)
-        self.drain()
-        pending = self.hub.tasks[tid]["supervisor"]["pending"]
-        self.assertEqual(pending["decision"]["decision"], "add_next_step")
-        with mock.patch.object(self.hub, "request_next", wraps=self.hub.request_next) as rn:
-            code, body = self.hub._supervisor_dispatch(tid, 1, "fred")
-        self.assertEqual(code, 200, body)
-        self.assertEqual(rn.call_count, 1)
-        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
-        self.assertIsNone(self.hub.tasks[tid]["supervisor"]["pending"])
-        self.assertNotIn(tid, self.hub.supervising)
+        a, b = self.line(tid), self.line(tid, "plan ready: confirm", 101.0)
+        self.hub.wake_supervisor(self.hub.tasks[tid], "choose_next", a, now=0.0)
+        self.hub.wake_supervisor(self.hub.tasks[tid], "hold", b, now=10.0)
+        for at, line in ((15.0, a), (25.0, b), (29.0, a)):
+            self.hub.wake_supervisor(self.hub.tasks[tid], "choose_next", line, now=at)
+        self.assertEqual((self.hub.wakes[tid]["due"], self.hub.wakes[tid]["n"]), (30.0, 2))  # duplicates: no re-arm
+        for i in range(100):  # the hub loop's real entry point, idle after the one pass
+            self.now = 29.0 + i
+            self.hub.advance()
+            self.join(self.hub)
+        self.assertEqual(len(self.calls), 1)
+        claim = self.claims(tid)
+        self.assertEqual(len(claim), 1)
+        self.assertEqual(claim[0]["triggers"], ["choose_next", "hold"])
+        self.assertEqual(claim[0]["events"], [supervisor.event_id(a), supervisor.event_id(b)])
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["wakes"], 1)
+        self.assertNotIn(tid, self.hub.wakes)
 
     def test_crash_at_each_dispatch_boundary_has_at_most_one_effect(self):
-        names = ("after_claim", "after_result", "after_intent", "after_reservation", "after_worker")
-        for i, name in enumerate(names, 1):
+        """A crash at each point, then a fresh Hub from the saved files and explicit advances (twice restarted).
+        The effects are worker launches, levers and appended steps; a saved intent is never replayed."""
+        starts = []
+
+        def start(*args, **kwargs):
+            starts.append(kwargs.get("title") or "")
+            return f"sid-crash-{len(starts)}"
+        expect = {  # name -> (model calls after the restart, steps after, pending status after, launches)
+            "before_claim": (1, 2, None, 1),
+            "after_claim": (0, 1, None, 0),
+            "after_result": (0, 1, "suggest", 0),
+            "after_intent": (0, 1, "uncertain", 0),
+            "after_reservation": (0, 2, "uncertain", 0),
+            "after_worker": (0, 2, "uncertain", 0),
+        }
+        for i, (name, (calls, steps, status, launches)) in enumerate(expect.items(), 1):
             with self.subTest(name=name):
-                tid = self.supervised_task(f"20260101-0000{i}-aaaa")
+                self.calls.clear()
+                starts.clear()
+                self.answer = dict(decision=dict(ADD), cost=0.002, model="haiku", turns=2, error="")
+                tid = self.supervised_task(f"20260101-00000{i}-c0c0")
+                self.auto(tid)  # the adversarial mode: a replayed decision would dispatch by itself
                 task = self.hub.tasks[tid]
-                if name == "after_claim":
-                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "claimed",
-                                                             "events": ["e1"]})
-                elif name == "after_result":
-                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "claimed",
-                                                             "events": ["e1"]})
-                    supervisor.append_log(self.folder, tid, {"ts": 2.0, "wake": 1, "phase": "result", "cost": 0.01,
-                                                             "status": "wait", "decision": dict(WAIT)})
-                elif name == "after_intent":
-                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "dispatching",
+                event = supervisor.boundary(task, tasks.read_chain(self.folder, task))["event"]
+                pid = supervisor.request_id(tid, 1)
+                claim = {"ts": 1.0, "wake": 1, "phase": "claimed", "events": [event], "triggers": ["choose_next"],
+                         "day": "2026-10-19", "reserved": 0.5, "pass": pid}
+                result = {"ts": 2.0, "wake": 1, "phase": "result", "events": [event], "cost": 0.002,
+                          "status": "suggest", "decision": dict(ADD), "error": "", "epoch": 0,
+                          "revision": supervisor.revision(self.folder, task)}
+                intent = {"call": "request_next", "request_id": pid, "source_step": 1}
+                if name == "before_claim":
+                    self.hub._sup_hook(task)  # queued in memory only, inside the debounce
+                else:
+                    usage.reserve_supervisor(self.folder, pid, {"task": tid, "wake": 1, "day": "2026-10-19"},
+                                             0.5, 2.0)
+                    supervisor.append_log(self.folder, tid, claim)
+                if name in ("after_result", "after_intent", "after_reservation", "after_worker"):
+                    supervisor.append_log(self.folder, tid, result)
+                    usage.record_supervisor(self.folder, pid, {"cost": 0.002})
+                if name == "after_intent":  # a lever intent: Finish
+                    supervisor.append_log(self.folder, tid, {"ts": 3.0, "wake": 1, "phase": "dispatching",
+                                                             "status": "dispatching", "by": "auto", "events": [event],
                                                              "dispatch": {"call": "task_lever", "lever": "done"}})
-                elif name == "after_reservation":
-                    task["steps"][0].update(state="planned", request_status="starting", request_id="r1",
-                                            source_step=0, session="")
-                    task.update(state="waiting", owner="fred", why="starting step 01")
-                    tasks.save(self.folder, task)
-                    supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "dispatching",
-                                                             "dispatch": {"call": "request_next", "request_id": "r1",
-                                                                          "step": 1}})
-                elif name == "after_worker":
-                    task["steps"][0].update(state="running", request_status="running", request_id="r1", session="s9")
-                    task.update(state="running", owner="service", why="")
-                    tasks.save(self.folder, task)
-                hub = server.Hub(self.hub.cfg, self.folder, exe=self.hub.runs.exe)
-                hub.user_home = self.hub.user_home
-                with mock.patch.object(hub, "task_lever", wraps=hub.task_lever) as lever, \
-                        mock.patch.object(hub, "request_next", wraps=hub.request_next) as rn, \
-                        mock.patch.object(hub.runs, "start", side_effect=AssertionError("no direct start")) as start:
-                    hub.reconcile_supervisor()
-                    hub.reconcile_next_steps()
-                self.assertEqual((lever.call_count, rn.call_count, start.call_count), (0, 0, 0), name)
+                if name in ("after_reservation", "after_worker"):
+                    supervisor.append_log(self.folder, tid, {"ts": 3.0, "wake": 1, "phase": "dispatching",
+                                                             "status": "dispatching", "by": "auto", "events": [event],
+                                                             "dispatch": intent})
+                    step = tasks._blank(2, "verify", "Check step 01 against the goal", checked=1)
+                    step.update(request_id=pid, request_status="starting", source_step=1, source_session="s1")
+                    if name == "after_worker":
+                        step.update(state="running", session="s-worker", started=4.0,
+                                    attempts=[{"session": "s-worker", "cost": 0.0, "started": 4.0, "ended": None,
+                                               "why": "", "final": False}])
+                        task.update(state="running", owner="service", why="", current=2)
+                    else:
+                        task.update(state="waiting", owner="fred", why="starting step 02", current=2)
+                    task["steps"].append(step)
+                tasks.save(self.folder, task)
+                with mock.patch.object(server.runs.RunManager, "start", side_effect=start), \
+                        mock.patch.object(server.Hub, "task_lever", side_effect=AssertionError("no lever replay")):
+                    for again in range(2):  # restart twice: recovery is idempotent
+                        hub = self.restarted()
+                        for k in range(4):
+                            self.now = 1000.0 * (again + 1) + 100.0 * k
+                            hub.advance()
+                            self.join(hub)
+                        hub.reconcile_next_steps()
+                mine = [c for c in self.calls if c["task"] == tid]
+                self.assertEqual(len(mine), calls, name)
+                saved = tasks.load(self.folder, tid)
+                self.assertEqual(len(saved["steps"]), steps, name)
+                self.assertEqual(len(starts), launches, name)
+                pending = saved["supervisor"]["pending"]
+                self.assertEqual(pending and pending["status"], status, name)
+                records = supervisor.read_log(self.folder, tid)
+                self.assertLessEqual(sum(1 for r in records if r.get("phase") == "dispatching"), 1, name)
+                self.assertEqual(sum(1 for r in records if r.get("phase") == "claimed"), 1, name)
+                self.assertEqual(sum(1 for r in records if r.get("phase") == "recovered"),
+                                 1 if name in ("after_claim", "after_intent", "after_reservation", "after_worker") else 0,
+                                 name)
+                if name == "after_claim":
+                    self.assertEqual(usage.load_supervisor(self.folder)["records"][pid]["status"], "unknown")
+                if name == "after_reservation":
+                    self.assertEqual((saved["state"], saved["steps"][1]["request_status"]), ("stuck", "failed"))
+                    # the recovery's stuck boundary waits behind the uncertain card; Fred's dismissal releases it once
+                    self.assertIn(tid, hub.wakes)
+                    self.answer = dict(decision=dict(WAIT), cost=0.001, model="sonnet", turns=2, error="")
+                    self.assertEqual(hub.supervisor_action({"task": tid, "wake": 1, "action": "reject"})[0], 200)
+                    for k in range(4):
+                        self.now += 100.0
+                        hub.advance()
+                        self.join(hub)
+                    self.assertEqual(len([c for c in self.calls if c["task"] == tid]), 1)
+                    self.assertEqual(len(tasks.load(self.folder, tid)["steps"]), 2)
+                if name == "after_worker":
+                    self.assertEqual(saved["steps"][1]["request_status"], "running")
 
     def test_all_pending_guidance_states_block_all_supervisor_actions(self):
-        tid = self.supervised_task()
-        task = self.hub.tasks[tid]
-        for status in ("queued", "dispatching", "uncertain", "failed"):
+        for i, status in enumerate(("queued", "dispatching", "uncertain", "failed")):
             with self.subTest(status=status):
-                task["messages"] = [{"id": "m", "status": status}]
+                self.calls.clear()
+                tid = self.supervised_task(f"20260101-00000{i}-9a9a")
+                self.auto(tid)
+                task = self.hub.tasks[tid]
+                message = {"id": f"{i}" * 16, "status": status}
+                task["messages"] = [message]
+                self.hub.sup_recovered = True
                 self.hub.wakes.clear()
-                self.hub.supervising.clear()
-                self.hub._sup_hook(task)
-                self.tick(100.0)
-                self.assertEqual(self.calls, [])
-                task["supervisor"]["pending"] = {"wake": 1, "events": ["e"], "triggers": ["choose_next"],
-                                                 "decision": dict(ADD),
-                                                 "revision": supervisor.revision(self.folder, task),
-                                                 "epoch": 0, "status": "suggest", "error": "", "by": "",
-                                                 "dispatch": None}
-                tasks.save(self.folder, task)
-                self.assertEqual(self.hub._supervisor_dispatch(tid, 1, "fred")[0], 409)
-                self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": 1})[0], 409)
-        task.pop("messages", None)
-        self.hub.wakes.clear()
+                self.now = 0.0
+                with mock.patch.object(self.hub, "request_next") as request, \
+                        mock.patch.object(self.hub, "preview_next") as preview, \
+                        mock.patch.object(self.hub, "task_lever") as lever:
+                    # before the wake: no pass, the event is retained
+                    self.hub._sup_hook(task)
+                    for at in range(0, 300, 20):
+                        self.tick(float(at))
+                    self.assertEqual(self.calls, [])
+                    self.assertIn(tid, self.hub.wakes)
+                    # a saved suggestion: no Approve, no automatic dispatch, no replay
+                    self.pending(tid, ADD)
+                    self.assertEqual(self.hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})[0], 409)
+                    self.hub._sup_auto(tid, 1)
+                    self.assertEqual(self.hub.replay_supervisor({"task": tid, "wake": 1})[0], 409)
+                    self.assertEqual(task["supervisor"]["pending"]["status"], "held")
+                    # guidance that arrives during a pass holds its result, audited, never dispatched
+                    task.pop("messages")
+                    task["supervisor"]["pending"] = None
+                    task["supervisor"]["wakes"] = 1
+                    tasks.save(self.folder, task)
+                    self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
+                    self.gate.clear()
+                    self.now = 400.0
+                    self.assertEqual(self.hub._supervisor_tick(), [tid])
+                    task["messages"] = [message]
+                    self.gate.set()
+                    self.drain()
+                    self.assertEqual(task["supervisor"]["pending"]["status"], "held")
+                    result = [r for r in supervisor.read_log(self.folder, tid) if r.get("phase") == "result"][-1]
+                    self.assertEqual((result["status"], result["error"]), ("held", "held: pending guidance"))
+                    for at in range(400, 800, 20):
+                        self.tick(float(at))
+                    self.drain()
+                    self.assertEqual((request.call_count, preview.call_count, lever.call_count), (0, 0, 0))
+                    self.assertEqual(len(self.calls), 1)
+                    self.assertEqual(task["messages"], [message])  # the supervisor never replays guidance
+                    # the guidance resolves with changed evidence: the held advice is superseded, one fresh wake
+                    message["status"] = "dispatched"
+                    tasks.write_step_file(self.folder, task, task["steps"][0], "facts.md", "guidance changed this")
+                    self.answer = dict(decision=dict(WAIT), cost=0.001, model="haiku", turns=2, error="")
+                    for at in range(800, 1000, 5):
+                        self.tick(float(at))
+                    self.drain()
+                    self.assertEqual(len(self.calls), 2)
+                    self.assertIsNone(task["supervisor"]["pending"])
+                    self.assertEqual((request.call_count, preview.call_count, lever.call_count), (0, 0, 0))
+                self.answer = dict(decision=dict(WAIT), cost=0.001, model="haiku", turns=2, error="")
+
+    def test_pause_off_delete_or_evidence_edit_during_pass_never_dispatches(self):
+        changes = {
+            "pause": lambda tid: self.hub.task_lever(tid, "pause"),
+            "off": lambda tid: self.hub.supervisor_action({"task": tid, "mode": "off"}),
+            "delete": lambda tid: self.hub._drop(self.hub.tasks[tid]),
+            "evidence": lambda tid: tasks.write_step_file(self.folder, self.hub.tasks[tid],
+                                                          self.hub.tasks[tid]["steps"][0], "facts.md", "edited"),
+        }
+        self.hub.sup_recovered = True
+        for i, (name, change) in enumerate(changes.items()):
+            with self.subTest(name):
+                self.calls.clear()
+                tid = self.supervised_task(f"20260101-00000{i}-7b7b")
+                self.auto(tid)
+                self.answer = dict(decision=dict(ADD), cost=0.003, model="haiku", turns=2, error="")
+                self.gate.clear()
+                self.hub._sup_hook(self.hub.tasks[tid])
+                self.now = 1000.0 * (i + 1)
+                self.assertEqual(self.hub._supervisor_tick(), [tid])
+                with self.hub.tlock:
+                    change(tid)
+                with mock.patch.object(self.hub, "request_next") as request, \
+                        mock.patch.object(self.hub, "preview_next") as preview, \
+                        mock.patch.object(self.hub, "task_lever") as lever:
+                    self.gate.set()
+                    self.drain()
+                    for k in range(40):
+                        self.tick(self.now + 10.0)
+                    self.drain()
+                    code = self.hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})[0]
+                self.assertEqual((request.call_count, preview.call_count, lever.call_count), (0, 0, 0), name)
+                self.assertEqual(code, 404 if name == "delete" else 409, name)
+                self.assertEqual(len(self.calls), 1, name)  # its consumed event is never retried
+                self.assertEqual(usage.load_supervisor(self.folder)["records"][supervisor.request_id(tid, 1)]["cost"],
+                                 0.003, name)  # the paid pass settles in the ledger
+                self.assertNotIn(tid, self.hub.supervising)
+                if name == "delete":
+                    self.assertNotIn(tid, self.hub.tasks)
+                    self.assertFalse((self.folder / "tasks" / tid).exists())  # never recreated
+                else:
+                    self.assertAlmostEqual(self.hub.tasks[tid]["supervisor"]["usd"], 0.003)
+                    self.assertEqual(len(self.hub.tasks[tid]["steps"]), 1)
+        today = self.hub.usage_report()["supervisor"]["days"]
+        self.assertAlmostEqual(sum(d["cost"] for d in today.values()), 0.012)  # a deleted task's spend stays
+
+    def test_kind_only_edit_changes_replay_prompt_hash_not_revision(self):
+        tid = self.supervised_task()
+        self.hub._sup_hook(self.hub.tasks[tid])
+        self.tick(100.0)
+        self.drain()
+        claim = self.claims(tid)[0]
+        self.assertEqual(claim["prompt_hash"], supervisor.prompt_hash(self.calls[0]["prompt"]))
+        root = self.folder / "tasks" / tid
+        audit, saved = (root / "supervisor.jsonl").read_bytes(), (root / "task.json").read_bytes()
+        server.kinds.ensure(self.folder)
+        (server.kinds.folder(self.folder) / "supervisor.md").write_text("# supervisor\n\nEdited by Fred.",
+                                                                       encoding="utf-8")
+        code, body = self.hub.replay_supervisor({"task": tid, "wake": 1})
+        self.assertEqual(code, 200, body)
+        self.assertEqual(body["original"]["revision"], body["fresh"]["revision"])
+        self.assertEqual(body["original"]["prompt_hash"], claim["prompt_hash"])
+        self.assertNotEqual(body["fresh"]["prompt_hash"], claim["prompt_hash"])
+        self.assertEqual(body["fresh"]["prompt_hash"], supervisor.prompt_hash(self.calls[-1]["prompt"]))
+        self.assertIn("Edited by Fred.", self.calls[-1]["prompt"])
+        self.assertEqual((root / "supervisor.jsonl").read_bytes(), audit)  # the original audit is unchanged
+        self.assertEqual((root / "task.json").read_bytes(), saved)
+
+
+SCRIPT = [dict(ADD, kind="code", instructions="Fix add() as the plan says"),
+          dict(ADD, kind="verify", instructions="Check step 02 against the plan VERDICT-PASS"),
+          {"decision": "finish", "reason": "verified", "confidence": "high", "for_fred": ""}]
+
+
+class LifecycleAcceptanceTest(test_server.TaskServerTest):
+    """Plan 44 T12: the whole supervised manual task over real HTTP, with fake_claude workers and a scripted fake
+    supervisor pass (no paid provider)."""
+
+    def test_supervised_manual_lifecycle_end_to_end(self):
+        self.hub.cfg["supervisor_mode"] = "suggest"
+        self.now = 0.0
+        self.hub.sup_clock = lambda: self.now
+        prompts = []
+
+        def fake_run(cfg, exe, task, prompt, model, max_cost):
+            prompts.append(prompt)
+            return {"decision": dict(SCRIPT[len(prompts) - 1]), "cost": 0.004, "model": model, "turns": 2,
+                    "error": ""}
+        card = self.prep_card("fix add")
+        with mock.patch.object(supervisor, "run", side_effect=fake_run), \
+                mock.patch.object(self.hub.runs, "start", wraps=self.hub.runs.start) as start, \
+                mock.patch.object(self.hub, "task_lever", wraps=self.hub.task_lever) as lever:
+            status, data = self.call("/api/task", {"prep": card["id"], "prompt": f"{card['prompt']}\nHANDOFF-OK PLAN-OK",
+                                                   "steps": [{"kind": "design", "goal": "plan the fix"}],
+                                                   "effort": "auto", "supervised": True})
+            self.assertEqual(status, 200, data)
+            tid = data["task"]
+            events = []
+            for wake, (n, kind) in enumerate(((1, "design"), (2, "code"), (3, "verify")), 1):
+                task = self.until(tid, lambda t: t["state"] == "waiting" and t["owner"] == "fred" and any(
+                    s["n"] == n and s["state"] == "done" for s in t["steps"]), f"the {kind} boundary")
+                self.assertEqual((task["why"], len(task["steps"])), ("choose next step", n))
+                events.append(supervisor.boundary(task, tasks.read_chain(self.folder, task))["event"])
+                self.assertIn(tid, self.hub.wakes)
+                self.hub.advance()  # inside the debounce: nothing runs
+                self.assertEqual(len(prompts), wake - 1)
+                self.now += 100.0
+                self.hub.advance()
+                for t in list(self.hub.sup_threads):
+                    t.join(10)
+                pending = self.hub.tasks[tid]["supervisor"]["pending"]
+                self.assertEqual((pending["wake"], pending["status"]), (wake, "suggest"))
+                for _ in range(3):  # suggest mode: nothing starts until Approve
+                    self.hub.poll_once()
+                    self.hub.advance()
+                self.assertEqual((start.call_count, len(self.hub.tasks[tid]["steps"])), (wake, n))
+                self.assertNotIn(tid, self.hub.supervising)
+                status, body = self.call("/api/task/supervisor", {"task": tid, "wake": wake, "action": "approve"})
+                self.assertEqual(status, 200, body)
+                self.assertEqual(self.call("/api/task/supervisor", {"task": tid, "wake": wake,
+                                                                    "action": "approve"})[1].get("repeated"), True)
+            task = self.hub.tasks[tid]
+            self.assertEqual(task["state"], "done")  # Finish went through the shared done lever
+            self.assertEqual([c.args[1:2] for c in lever.call_args_list], [("done",)])
+            self.assertEqual(lever.call_args_list[0].kwargs.get("origin"), "supervisor")
+            self.assertEqual(start.call_count, 3)  # design, then one worker per approved add_next_step
+        # saved lineage and handovers
+        steps = task["steps"]
+        self.assertEqual([(s["kind"], s["state"]) for s in steps], [("design", "done"), ("code", "done"),
+                                                                     ("verify", "done")])
+        self.assertEqual((steps[1]["source_step"], steps[2]["source_step"], steps[2]["verdict"]), (1, 2, "PASS"))
+        self.assertTrue(task["plan"])
+        for s in steps[1:]:
+            for name in ("received-handoff.md", "received.md"):
+                self.assertTrue(tasks.read_step_file(self.folder, task, s, name), (s["n"], name))
+        sessions = [s["session"] for s in steps]
+        self.assertEqual(len(set(sessions)), 3)
+        # no persistent supervisor session, worker or thread
+        self.hub.poll_once()
+        listed = {s["id"] for s in self.hub.snapshot()["sessions"]}
+        self.assertEqual(listed, set(sessions))
+        self.assertEqual((self.hub.supervising, self.hub.wakes), ({}, {}))
+        self.assertFalse(any(t.is_alive() for t in self.hub.sup_threads))
+        # the durable artifacts tell the same story
+        sup = tasks.load(self.folder, tid)["supervisor"]
+        self.assertEqual((sup["wakes"], sup["pending"], sup["epoch"], sup["paused"]), (3, None, 3, False))
+        self.assertAlmostEqual(sup["usd"], 0.012)
+        records = supervisor.read_log(self.folder, tid)
+        for wake in (1, 2, 3):
+            mine = [r for r in records if r.get("wake") == wake]
+            self.assertEqual([r["phase"] for r in mine], ["claimed", "result", "dispatching", "outcome"], wake)
+            self.assertEqual(mine[0]["events"], [events[wake - 1]])  # the original transition's event id
+            self.assertEqual(mine[0]["prompt_hash"], supervisor.prompt_hash(prompts[wake - 1]))
+            self.assertEqual(mine[-1]["status"], "dispatched")
+        self.assertEqual(sum(r.get("cost") or 0 for r in records if r.get("phase") == "result"), 0.012)
+        whys = [line["why"] for line in tasks.read_chain(self.folder, task)]
+        self.assertEqual(sum(1 for w in whys if w.startswith("supervisor: dispatched")), 3)
+        ledger = usage.load_supervisor(self.folder)["records"]
+        for wake in (1, 2, 3):
+            self.assertEqual(ledger[supervisor.request_id(tid, wake)]["cost"], 0.004)
+        self.assertEqual(self.hub.usage_report()["supervisor"]["today"]["runs"], 3)
 
 
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
 for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
-              ReplayTest, AcceptanceTest):
+              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name

@@ -4,8 +4,11 @@
 > Master: [../../PLAN.md](../../PLAN.md). Rules: [../../CLAUDE.md](../../CLAUDE.md).
 > Shipped companion: [navigation/README.md](navigation/README.md).
 
-Status: **plan written, backend not implemented**, 2026-10-18. Inspected baseline: `654c1bd`, clean tree.
-This is a plan-only change. Execute a task only in a subsequent implementation run. The task files specify
+Status: **backend implemented** 2026-10-19: Tasks 1-11 in `51e3f1f`..`63fb141`, Task 12 acceptance in the
+`test: verify supervisor backend safety and close its plan (plan 44 backend T12)` commit (its one code fix, an
+uncertain dispatch blocks new passes until dismissed, landed in `25fe7f9`). Evidence and remaining work: section 6.
+Board/Prep/Models/Usage UI, the skill library (brainstorm section 14) and Fred's live check (Task 12.4) remain open.
+Plan written 2026-10-18 from baseline `654c1bd`. The task files specify
 files, signatures, data, tests, acceptance checks and commit boundaries; implementation is written test first.
 There is no SPEC.md, AGENTS.md or docs/superpowers tree at this baseline. Use this repository's plans layout.
 
@@ -265,3 +268,48 @@ to this one-shot pass. Recheck flags against that primary source when Task 4 is 
 
 Backend done means Tasks 1-12 accepted, default suggest, no hidden automatic process, no regression in plans
 18/24/36/40/41/42/43 or the shipped navigation/handoff. UI and skill-library work remain explicitly pending.
+
+## 6. Backend status, 2026-10-19
+
+Implemented: Tasks 1-11 (`51e3f1f`..`63fb141`) and Task 12 acceptance. Checks run for Task 12: the three 12.2
+focused commands (81 supervisor tests OK; 513 regression tests OK), `node --check web/app.js` clean, and one final
+`py -m unittest discover -s tests`: 1031 tests OK. No paid provider ran; all cases use fake_claude workers, a
+scripted fake supervisor pass, a fake debounce clock and temporary data roots.
+
+Task 12.1 matrix, by test (`tests/test_supervisor_server.py` unless named):
+
+| Case | Evidence |
+|---|---|
+| design -> suggestion -> Approve -> code -> verify PASS | `LifecycleAcceptanceTest.test_supervised_manual_lifecycle_end_to_end` (real HTTP, three workers, Finish through the done lever) |
+| debounce, duplicates, 100 idle advances | `AcceptanceTest.test_debounce_duplicates_and_idle_advances_make_one_pass`, `test_wakes_coalesce_and_rearm_once` |
+| triggers during a blocked pass | `test_events_during_active_pass_make_one_follow_up`, `test_parallel_limit_applies_across_tasks` |
+| guidance before or during a pass | `AcceptanceTest.test_all_pending_guidance_states_block_all_supervisor_actions`, `test_held_guidance_drain_revalidates_or_requeues_once` |
+| stale / repeated Approve, duplicate request id | `test_stale_reject_uncertain_and_forbidden_approval`, `test_suggest_does_nothing_until_approve_and_duplicate_approve_is_safe`, `test_dispatch_uses_existing_preview_revision_and_uuid` |
+| held Add step | `test_held_add_step_is_not_appended_or_confirmed_again` |
+| auto step and retry caps, second FAIL | `test_fourth_auto_step_is_suggestion_and_human_action_resets_window`, `test_retry_allowance_and_second_fail_escalate` |
+| work/task/day limits, deleted task | `test_task_day_zero_and_inflight_money_caps`, `test_work_cost_includes_attempts_live_updates_and_confirmed_chain`, `test_failed_pass_spend_and_ledger_survive_restart_delete_and_corruption`, `AcceptanceTest.test_pause_off_delete_or_evidence_edit_during_pass_never_dispatches` |
+| runner failures | `test_missing_exe_is_terminal_not_a_loop`, `test_model_failure_does_not_loop_and_next_transition_can_wake`, `tests.test_supervisor.RunnerTest` |
+| disk errors and restart | `AcceptanceTest.test_crash_at_each_dispatch_boundary_has_at_most_one_effect` (six crash points, two fresh Hubs, explicit advance), `test_intent_write_failure_prevents_effect`, `test_duplicate_lever_dispatch_and_outcome_failure_do_not_repeat` |
+| pause/off/delete/evidence edit during a pass | `AcceptanceTest.test_pause_off_delete_or_evidence_edit_during_pass_never_dispatches` |
+| stalled Claude step | `test_stall_threshold_and_one_wake_per_attempt`, `test_stall_stop_and_followup_retry_each_need_approve` |
+| done, no room, questions and holds | `test_done_wakes_after_final_brief_only_and_is_always_suggest`, `test_questions_fable_pace_and_guidance_do_not_wake_or_dispatch` |
+| replay | `ReplayTest`, `tests.test_supervisor_replay` |
+| R1 | `test_restart_queues_unhandled_boundary_once`, `test_restart_before_claim_recovers_manual_and_stuck`, `test_restart_before_claim_recovers_holds_and_done`, `test_restart_after_approved_stalled_stop_preserves_followup` |
+| R2 | `test_manual_boundary_pause_resume_uses_shared_gates`, `test_manual_boundary_pause_resume_during_pass_never_dispatches_old_advice`, `test_pause_holds_supervisor_but_manual_boundary_does_not` |
+| R3 | `tests.test_supervisor.RunnerTest.test_prompt_fingerprint_matches_executed_bytes`, `AcceptanceTest.test_kind_only_edit_changes_replay_prompt_hash_not_revision` |
+
+Found and fixed in Task 12: after a restart left a dispatch uncertain, a new boundary (plan 36 recovery making the
+task stuck) ran a fresh pass whose result overwrote the uncertain card, so Fred lost the dismissal and auto mode
+could act past it. `Hub._sup_admit` now retains the wake while the pending card is uncertain or dispatching; Fred's
+dismissal releases it once. The fix landed in `25fe7f9` together with plan 45's server changes.
+
+Inspected fake-lifecycle artifacts: task.json `supervisor` (wakes 3, epoch 3, usd 0.012, pending null);
+supervisor.jsonl claimed/result/dispatching/outcome per wake, claims carrying the original chain event id, epoch
+and the prompt_hash of the executed prompt; chain.jsonl suggest/dispatched lines; received.md and
+received-handoff.md for steps 02 and 03; three settled ledger records. Code review: dispatch ends only in
+`request_next` or `task_lever(origin="supervisor")`; admission, judge, dispatch, drain and replay all check pending
+guidance; no `runs.start`/`runs.stop` in supervisor code; the only thread is one bounded pass per admitted wake;
+supervisor.jsonl is written only under the data home. Observation, not changed: a supervisor Finish logs the
+done transition as "marked done by Fred" before its own "supervisor: dispatched finish ... by fred" line.
+
+Remaining: Board/Prep/Models/Usage UI for these routes, the skill library (D14-D18), and Fred's live check (12.4).

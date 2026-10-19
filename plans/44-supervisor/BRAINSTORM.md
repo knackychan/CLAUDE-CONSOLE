@@ -1,8 +1,9 @@
 # Plan 44: an event-driven supervisor for tasks and steps. Brainstorm
 
 Status: **decided** 2026-10-17 (Fred took option (a) on D1 to D17 except D15 (b), and "no limit" on D18, section 15;
-nothing is open). [Guided backend plan](README.md) written 2026-10-18, 12 test-first tasks; no backend code
-implemented. The skill library and frontend remain separate work. Design only: no code changed here.
+nothing is open). [Guided backend plan](README.md) written 2026-10-18, 12 test-first tasks; the backend is
+implemented 2026-10-19 (Tasks 1-12, fake-provider acceptance; status and evidence in README section 6). The skill
+library, the frontend and Fred's live check remain separate work. Design only: no code changed here.
 
 Context: [CLAUDE.md](../../CLAUDE.md), [BRAINSTORM.md](../../BRAINSTORM.md) (non-goals, D16),
 [2026-10-13-orchestration.md](../../design/brainstorm/2026-10-13-orchestration.md) (D-1: no orchestrator agent),

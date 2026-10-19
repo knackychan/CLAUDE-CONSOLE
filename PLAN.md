@@ -48,22 +48,22 @@ ends with working, tested software.
 | 41 | [plans/41-step-actions.md](plans/41-step-actions.md) - Stop, Retry and Mark step done on the current step: new lever `stepdone` (step done with a code-built note, the chain goes on), a chat step left running with no run can be stopped and closed (task be2f, "writing" for 42 hours), the step dock carries the three buttons | code done 2026-10-17 (791 tests OK); Fred's live check open |
 | 42 | [plans/42-unified-task-chat.md](plans/42-unified-task-chat.md) - One task conversation, shared persistent composer, remove redundant Open chat, and task guidance during work with explicit queued/live delivery | queued release implemented 2026-10-17; full run 837 tests OK, final focused run 210 OK, browser checks pass; real-provider check open |
 | 43 | [plans/43-codex-write-check.md](plans/43-codex-write-check.md) - Codex is not routed a writing step where its Windows sandbox cannot write (folder owned by another account, or `sandbox = "unelevated"`; the refusal names the fix), a turn whose writes all failed ends `error_write_denied` and the retry skips that harness (tasks a93e and 2d28) | code done 2026-10-17 (Tasks 1-4, D1-D6 as proposed; harness, tasks, server and web suites OK); Fred's live check (Task 5) open |
-| 44 | [plans/44-supervisor/README.md](plans/44-supervisor/README.md) - Supervisor backend guided plan: one bounded tool-free pass per coalesced task wake, saved suggestions and approvals, existing Hub dispatch, autonomy/spend limits, recovery, supervised intake and replay | plan written 2026-10-18, 12 test-first tasks; backend not implemented; UI and skill library separate |
+| 44 | [plans/44-supervisor/README.md](plans/44-supervisor/README.md) - Supervisor backend guided plan: one bounded tool-free pass per coalesced task wake, saved suggestions and approvals, existing Hub dispatch, autonomy/spend limits, recovery, supervised intake and replay | backend implemented 2026-10-19 (T1-T11 `51e3f1f`..`63fb141`, T12 acceptance commit; 1031 tests OK, `node --check web/app.js` clean, fake providers only); UI, skill library and Fred's live check (12.4) open |
 | 45 | [plans/45-limit-scope-and-clear.md](plans/45-limit-scope-and-clear.md) - usage limits: a Claude `credits_required` rejection (Fable with overage off) limits that rung only, not every Claude model; the reset shows its day when not today; a clear link on the Tiers page drops a limit (POST /api/limits/clear); no health probe (amends plan 40 D3 and D6) | code done 2026-10-19 (1028 tests OK); Fred's live check open |
 
 ## Supervisor and navigation design (2026-10-17)
 
 [Plan 44 supervisor brainstorm](plans/44-supervisor/BRAINSTORM.md): supervisor policy
 decisions recorded; [guided backend implementation plan](plans/44-supervisor/README.md) written
-2026-10-18 (12 test-first tasks, no backend code implemented). Its
+2026-10-18 (12 test-first tasks, backend implemented 2026-10-19). Its
 [navigation companion](plans/44-supervisor/NAVIGATION.md) is decided: task Overview as the
 default destination, fewer controls, and a whole-task handoff into a linked follow-up task.
 The navigation slice replaced plan 42's current-step landing rule when it shipped; plan 42's
 shared composer and guidance delivery guarantees remain in force. Its guided plan,
 [plans/44-supervisor/navigation/](plans/44-supervisor/navigation/README.md), is implemented
 2026-10-17 (Tasks 1-5, 910 tests OK, headless Edge pass at 900/400/340 px). The supervisor
-backend is not shipped; its guided plan is ready for a later implementation run. Board UI and the skill
-library remain separate work, explicitly parked by the backend plan.
+backend is implemented 2026-10-19 (Tasks 1-12, status and evidence in its README section 6). Board UI, the skill
+library and Fred's live check remain separate work, explicitly parked by the backend plan.
 The 2026-10-17 implementation review's six navigation/handoff gaps are fixed in
 [navigation Task 5](plans/44-supervisor/navigation/05-review-fixes.md): Resume for paused tasks,
 handoff recovery/revision validation, chat-task handoff, replan approval on Overview and the latest
@@ -292,3 +292,4 @@ is written for its recommended option (a) and the task files mark the lines anot
 - 2026-10-17 - Plan 44 navigation Task 5 placed (the six review fixes): Resume renders from `d.levers.resume === ""`; an incomplete handoff Create is revalidated under `tlock` against `handoff_available`, the saved inherited summary and a persisted `handoff_request.material` hash before linking; `_handoff_material` fingerprints goal/title/project, step goals/state/session/attempt details, questions, plan contents/parts, prompt, notes, briefs, facts, final replies, verdicts and the chain tail while still excluding cost-only updates; chat tasks hand off through their saved `notes.md`; Overview shows `replanBox` and the latest non-planned/running saved result. 910 tests OK, `node --check web/app.js` clean, the extended `tests.live_task_chat_check.py` passes (fake runners, scratch data, Edge headless). Real-provider handoff delivery and the native window stay open; the supervisor backend remains unshipped.
 
 - 2026-10-19 - Plan 45 (Fred: "all four"): the claude entry in limits.json came from one Fable run's `credits_required` rejection (session 14763dcd, resetsAt Sun 1 Nov 08:00) and hid Opus too; Tiers showed "until 08:00". `limits.key`, day-aware `limits.clock`, `Hub.limit_key` / `clear_limit`, tier rows carry `limit`, POST /api/limits/clear, Tiers clear links. 1028 tests OK, `node --check web/app.js` clean.
+- 2026-10-19 - Plan 44 supervisor backend closed (Task 12): the 12.1 acceptance matrix as tests, with the three named tests plus a real-HTTP fake-worker lifecycle (design, Approve, code, Approve, verify PASS, Approve Finish), six crash points across two fresh Hubs, guidance/pause/off/delete/evidence edits during a pass and a Hub-level R3 replay check. One fix: an uncertain dispatch now holds new passes until Fred dismisses it (it was overwritten by the next pass after a restart); it landed in 25fe7f9. 1031 tests OK, `node --check web/app.js` clean. No paid provider ran; UI, skill library and Fred's live check (12.4) open.
