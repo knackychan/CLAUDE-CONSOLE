@@ -630,7 +630,7 @@ class UnifiedTaskChatTest(unittest.TestCase):
     def test_server_modes_enable_guidance_while_busy_planned_and_paused(self):
         for state, timing in [('running', 'Queued for the end of this turn'),
                               ('planned', 'Saved for the first step. Sending does not start the task.'),
-                              ('stopped', 'Saved guidance. Use Resume or Retry explicitly to deliver it.')]:
+                              ('stopped', 'Sending saves this guidance; nothing runs. Retry asks whether to carry it into the next run.')]:
             with self.subTest(state=state):
                 html = render(self.setup + f"t.state = {json.dumps(state)}; d.message = {{mode: 'queued', reason: '', timing: {json.dumps(timing)}}}; stepFooter(t, t.steps[0], d)")
                 self.assertIn(timing, html)

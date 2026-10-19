@@ -38,9 +38,10 @@ class TaskRecoveryTest(_TaskServerTest):
                          {"step": 1, "kind": "scout", "how": "finished", "verdict": "",
                           "handoff": tasks.note_file(task, first)})
         self.assertEqual(rec["done"]["ended"], first["ended"])
-        self.assertEqual({k: rec["cut"][k] for k in ("step", "kind", "attempt", "cause", "why")},
-                         {"step": 2, "kind": "explain", "attempt": 1, "cause": "interrupted",
-                          "why": "the run did not finish cleanly"})
+        self.assertEqual({k: rec["cut"][k] for k in ("step", "kind", "attempt", "cause")},
+                         {"step": 2, "kind": "explain", "attempt": 1, "cause": "interrupted"})
+        # "(no HANDOFF block)" is added when the kill lands before the fake's first line: both are the saved why
+        self.assertTrue(rec["cut"]["why"].startswith("the run did not finish cleanly"), rec["cut"]["why"])
         self.assertIsNone(rec["orphan"])
 
     def test_cut_on_first_step_has_no_done(self):

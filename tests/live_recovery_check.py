@@ -83,6 +83,8 @@ def main():
                          "Step 02 explain, attempt 1, was interrupted: the run ended without a result",
                          "Nothing is undone", "Retry on a model (task menu) runs step 02 again"):
                 assert want in text, (want, text)
+            assert page.locator('[data-tact="chatresume"], [data-tact="resume"]').count() == 0  # stuck: Retry, never Resume
+            assert "Retry asks whether to carry it" in page.locator("#b-delivery").inner_text()
             page.locator('.askbox.recovery [data-bpick="s1"]').focus()
             page.keyboard.press("Enter")
             page.wait_for_function("boardPick === 's1'")

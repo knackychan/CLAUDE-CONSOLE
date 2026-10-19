@@ -730,6 +730,9 @@ class Hub:
             for lever in ("continue", "verify", "handoff", "escalate", "deescalate"):
                 if not (lever in ("continue", "handoff") and asked):  # answer the step's question, or hand off
                     out[lever] = base or "a task step: use the task's levers"
+        elif task and not task.get("chat") and task["state"] == "stuck" and cs and cs["session"] == session_id:
+            # plan 48 section 7: _pull resumes the task only from stopped, so a Continue here would run unseen
+            out["continue"] = base or "the step is stuck: Retry on a model in the task menu"
         if task and cs and cs["session"] == session_id and cs.get("limit"):  # plan 40: the session cannot answer
             out["handoff"] = base or "the run hit a usage limit: Retry on another model"
         task = task or self._task_of_session(session_id)
@@ -1153,7 +1156,9 @@ class Hub:
         elif task["state"] == "planned" and not cs["session"]:
             timing = "Saved for the first step. Sending does not start the task."
         elif task["state"] in ("stopped", "stuck", "handed") or task["owner"] == "fred":
-            timing = "Saved guidance. Use Resume or Retry explicitly to deliver it."
+            timing = ("Sending saves this guidance; nothing runs. Retry asks whether to carry it into the next run."
+                      if task["state"] in ("stopped", "stuck", "handed") else
+                      "Sending saves this guidance; it is delivered after you Resume.")
             if task["state"] == "waiting" and task["why"].startswith("asks: "):
                 mode = "answer"
         elif row and not row["run_live"] and not self.runs.is_live(cs["session"]) and meta.get("ended"):
