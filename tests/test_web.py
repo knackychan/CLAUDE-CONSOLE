@@ -112,7 +112,7 @@ class ChatCopyTest(unittest.TestCase):
         html = render(setup + "sessionRow(s)")
         self.assertEqual(html.count('data-open="s"'), 1)
         self.assertNotIn("data-sview", html)  # no prep or chat sub-rows in the list
-        self.assertNotIn('class="v-sr', html)
+        self.assertNotRegex(html, r'class="v-sr[ "]')
         self.assertIn("replied · 1m", html)
         # Fred 2026-10-20: a chat from outside the Console is marked with where it runs
         for src, harness, chip in (("vscode", "claude", "VS Code"), ("terminal", "claude", "terminal"), ("?", "codex", "codex")):
