@@ -58,6 +58,15 @@ Review of steps 1 to 4 (Fred, 2026-10-19):
 - D15 Retry, Confirm, Keep, Accept (stepdone), Add step on a model and Hand off cancel a queued next-step message,
   as Stop and Finish do, and also cancel one a running pass has claimed.
 
+After the first live run (Fred, 2026-10-20):
+
+- D16 A running task (not a chat) and the opened task unfold into their step rows in the list again; other rows
+  stay one status line (`taskHtml`, `ad0908b`).
+- D17 A chat from outside the Console has a dashed edge and a chip naming where it runs: VS Code, terminal,
+  desktop or its harness (`sourceChip`, `6b26b04`).
+- Fix: the supervisor dropped every wake as "text is not a field of add_next_step"; `supervisor.run` now drops an
+  optional field another decision owns before `shape` (`bfa264f`).
+
 No new endpoint. Routes used: `GET /api/task` (route, gauge, `supervisor`, `message`, levers), `POST /api/task`
 (Start, with `supervised`), `POST /api/task/supervisor` (Approve, Reject, mode), `POST /api/task/message` (the box,
 new `next` mode), `POST /api/continue` (chat tasks, unchanged), `POST /api/task/done` (Finish task),
