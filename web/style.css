@@ -850,7 +850,6 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .nform .chip { font: 10.5px var(--mono); color: var(--mut); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; }
 .nform .hb { gap: 6px; }
 .lr.sub .btn { color: var(--mut); }
-.hfoot .lr { margin-top: 2px; }
 @container (max-width: 699px) {  /* the Board's one column: Work and Model stack, the action row wraps */
   .nform .nrow { grid-template-columns: minmax(0, 1fr); }
   .nform .nrow .nl { margin-top: 6px; }
@@ -869,9 +868,6 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .oqr.closed .gl { color: var(--ok); }
 .oqr.closed span:nth-child(2) { color: var(--mut); }
 .oqr .m { color: var(--mut); white-space: nowrap; }
-.clog { display: grid; gap: 1px; }
-.clog > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; font: 11.5px/19px var(--mono); color: var(--mut); }
-.clog > div > span:last-child { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now { display: flex; gap: 8px; align-items: center; font: 11.5px var(--mono); color: var(--ink); min-width: 0; }
 .now .cells { grid-template-columns: 6px; flex: none; }
 .now > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -985,15 +981,35 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .action-list .btn { justify-content: flex-start; text-align: left; }
 .done-confirm { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .done-confirm .m { color: var(--mut); font-size: 12px; }
-.v-step { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 7px 8px; text-align: left; background: transparent; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
-.v-step:hover { border-color: var(--ink); }
-.v-step .n { font: 11px var(--mono); color: var(--mut); }
-.v-step .k { font: 600 12px var(--ui); color: var(--ink); min-width: 0; }
-.v-step .g { grid-column: 2 / -1; font: 12px/1.4 var(--ui); color: var(--mut); min-width: 0; overflow-wrap: anywhere; }
-.v-step .st { grid-column: 3; font: 11px var(--mono); }
 .pre.text.goal, pre.text.goal { max-height: 8em; }
 .task-attention { display: grid; gap: 8px; }
 .task-attention .askbox { margin: 0; }
+/* plan 48 3.4: the opened task. The supervisor's card, the route's proposed rows, the context gauge, the task menu */
+.sup-card .askbox { margin: 0; }
+.askbox.quiet { background: transparent; border-color: var(--line); }
+.dec { display: grid; gap: 6px; min-width: 0; }
+.dec .who { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.dec .act { font: 600 13.5px/1.4 var(--ui); overflow-wrap: anywhere; }
+.dec .why { font-size: 12.5px; color: var(--mut); overflow-wrap: anywhere; }
+.dec .why.r { color: var(--bad); }
+.dec .fine { font: 10.5px var(--mono); color: var(--mut); }
+.v-sr.proposed { cursor: default; }
+.v-sr.proposed:hover { background: transparent; }
+.gauge { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+.gauge .cells { grid-template-columns: repeat(15, minmax(0, 14px)); }
+.gauge b { font: 500 12px var(--mono); }
+.gauge b.y { color: var(--you); } .gauge b.r { color: var(--bad); }
+.gauge .sub { grid-column: 1 / -1; font: 10.5px var(--mono); color: var(--mut); overflow-wrap: anywhere; }
+.action-list .btn { display: flex; justify-content: space-between; gap: 8px; }
+.action-list .btn .m { color: var(--mut); font: 11px var(--mono); white-space: nowrap; }
+.action-list .btn.stop { color: var(--bad); }
+.action-list hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.action-list .grp { padding: 6px 4px 0; }
+.action-list .seg { display: inline-flex; justify-self: start; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.action-list .seg .btn { border: 0; border-radius: 0; box-shadow: none; font: 11px var(--mono); color: var(--mut); }
+.action-list .seg .btn + .btn { border-left: 1px solid var(--line); }
+.action-list .seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--win); }
+.retry-open { margin: 0; display: grid; gap: 8px; min-width: 0; }
 .hlinks { display: flex; gap: 8px; flex-wrap: wrap; }
 .hlinks .olink { white-space: nowrap; }
 /* plan 44 nav T3: the Hand off task form in the Overview, beside the next-step form's tokens */

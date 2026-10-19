@@ -103,7 +103,20 @@ def main():
             page.get_by_role("button", name="Resume", exact=True).click()
             page.wait_for_function("id => snap.tasks.find(t => t.id === id)?.current === 2", arg=paused)
 
-            # Chat-task handoff: a saved plain reply, no HANDOFF block, still hands off through More.
+            # Plan 48: the task menu's Add step on a model opens its form in the opened task; Cancel starts nothing.
+            one = fixture.make_task(steps=[{"kind": "scout", "goal": "find add() HANDOFF-OK"}])
+            fixture.until(one, lambda t: t["state"] == "done", "the one-step task ends")
+            page.evaluate("id => openTask(id)", one)
+            page.wait_for_function("id => boardData?.id === id && boardData.data.levers.add_next === ''", arg=one)
+            page.locator("details.action-more summary").click()
+            page.locator('[data-tact="nextopen"][data-at="task"]').click()
+            page.wait_for_selector("#b-ninstr")
+            assert page.evaluate("boardPick") == "t"
+            page.locator('[data-tact="nextcancel"]').click()
+            page.wait_for_function("!document.querySelector('#b-ninstr')")
+            assert len(fixture.hub.tasks[one]["steps"]) == 1
+
+            # Chat-task handoff: a saved plain reply, no HANDOFF block, still hands off through the task menu.
             chat_step = tasks.chat_step(1, "answer it", "fake-chat", "haiku", "low", time.time())
             chat = tasks.new_task(str(fixture.project), "proj", "Ask", "answer it", [chat_step], "normal", {}, "",
                                   "auto", time.time())
@@ -127,7 +140,7 @@ def main():
             follow = fixture.hub.tasks[chat["id"]]["handoff_to"]
             assert follow in fixture.hub.tasks
 
-            # Replan approval lives on Overview, not only the step page.
+            # Replan approval lives on the opened task, not only the step page.
             replan = tasks.new_task(str(fixture.project), "proj", "Replan", "goal",
                                     tasks.plan_steps([{"kind": "scout", "goal": "look"}], 6), "normal", {}, "",
                                     "auto", time.time())
@@ -148,7 +161,7 @@ def main():
             assert page.get_by_role("button", name="Confirm plan", exact=True).count() == 1
             assert page.get_by_role("button", name="Keep old plan", exact=True).count() == 1
 
-            # Latest result ignores later planned/running steps.
+            # The route lists every step, a planned one included.
             latest = tasks.new_task(str(fixture.project), "proj", "Latest", "goal",
                                     tasks.plan_steps([{"kind": "scout", "goal": "done work"}], 6), "normal", {}, "",
                                     "auto", time.time())
@@ -164,7 +177,7 @@ def main():
             page.wait_for_function("id => snap.tasks.some(t => t.id === id)", arg=latest["id"])
             page.evaluate("id => openTask(id)", latest["id"])
             page.wait_for_function("id => document.querySelector('#b-tcont')?.dataset.tid === id", arg=latest["id"])
-            assert page.get_by_text("Latest result · step 01 scout", exact=False).count() == 1
+            assert page.locator('#bwrap [data-bpick="s1"], #bwrap [data-bpick="s2"]').count() == 2
 
             question = fixture.make_task(words="HANDOFF-OK", steps=[{"kind": "scout", "goal": "look STOP-ASK"},
                                                                      {"kind": "code", "goal": "write SLOW"}])
@@ -184,13 +197,15 @@ def main():
             box.fill('guidance for explicit retry HANDOFF-OK')
             page.get_by_role('button', name='Send', exact=True).click()
             page.wait_for_function("boardData?.data?.task?.messages?.[0]?.status === 'queued'")
+            page.locator("details.action-more summary").click()  # plan 48: Retry on a model is in the task menu
+            page.locator('[data-tact="retryopen"]').click()
             retry = page.get_by_role('button', name='Retry', exact=True)
             retry.click()
             page.get_by_role('button', name='Retry and carry queued guidance? Click again', exact=True).click()
             page.wait_for_function("boardData?.data?.task?.messages?.[0]?.status === 'dispatched'")
             assert not failures, failures
             browser.close()
-        print("Task chat browser checks passed: queued correction, progression, drafts, attachments, selection, tabs, history, question, explicit retry after a cap, Resume, chat-task handoff preview/save/create, replan approval, latest result; 900/400/340 px, dark/light, reduced motion.")
+        print("Task chat browser checks passed: queued correction, progression, drafts, attachments, selection, tabs, history, question, explicit retry after a cap, Resume, chat-task handoff preview/save/create, replan approval, route and Add step on a model from the menu; 900/400/340 px, dark/light, reduced motion.")
     finally:
         stop.set()
         if worker.is_alive():
