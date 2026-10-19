@@ -181,6 +181,14 @@ class PrepTest(unittest.TestCase):
             plain = prep.run_prep(cfg, Path(tmp), tmp, "fix the add function", FAKE)
             self.assertEqual(plain["steps"], [])
 
+    def test_hard_card_gets_design_and_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = copy.deepcopy(paths.DEFAULTS)
+            card = prep.run_prep(cfg, Path(tmp), tmp, "THINK through the lock order", FAKE)
+            self.assertEqual([s["kind"] for s in card["steps"]], ["design", "code", "verify"])
+            card = prep.run_prep(cfg, Path(tmp), tmp, "THINK CHAIN fix add", FAKE)
+            self.assertEqual([s["kind"] for s in card["steps"]], ["scout", "design", "code", "verify"])
+
     def test_run_prep_routes_by_demand(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = copy.deepcopy(paths.DEFAULTS)

@@ -366,6 +366,24 @@ class ChainTest(unittest.TestCase):
         self.assertEqual(tasks.plan_steps([], 6), [])
         self.assertEqual(tasks.plan_steps("junk", 6), [])
 
+    def test_hard_steps_adds_design_and_code(self):
+        """Plan 46: a hard task (reasoning high) gets a design step and a step that edits; other tasks are unchanged."""
+        hard = {"reasoning": "high"}
+        kinds_of = lambda items: [i["kind"] for i in items]
+        self.assertEqual(kinds_of(tasks.hard_steps([], hard, 6)), ["design", "code"])
+        scout, code = {"kind": "scout", "goal": "a"}, {"kind": "code", "goal": "b"}
+        self.assertEqual(kinds_of(tasks.hard_steps([scout, code], hard, 6)), ["scout", "design", "code"])
+        self.assertEqual(kinds_of(tasks.hard_steps([{"kind": "design", "goal": "a"}], hard, 6)), ["design", "code"])
+        both = [{"kind": "design", "goal": "a"}, code]
+        self.assertEqual(tasks.hard_steps(both, hard, 6), both)
+        self.assertEqual(kinds_of(tasks.hard_steps([scout, scout, scout], hard, 2)), ["design", "code"])  # the cap keeps both
+        self.assertEqual(kinds_of(tasks.hard_steps([scout, scout], hard, 3)), ["scout", "design", "code"])
+        self.assertEqual(tasks.hard_steps([scout], {"reasoning": "low"}, 6), [scout])
+        self.assertEqual(kinds_of(tasks.hard_steps("junk", hard, 6)), ["design", "code"])
+        self.assertEqual(tasks.hard_steps("junk", {"reasoning": "low"}, 6), [])
+        steps = tasks.plan_steps(tasks.hard_steps([], hard, 6), 6)
+        self.assertEqual([s["kind"] for s in steps], ["design", "code", "verify"])
+
     def test_plan_steps_keeps_a_long_goal(self):
         goal = " ".join(["word"] * 180)  # 899 characters
         self.assertEqual(tasks.plan_steps([{"kind": "scout", "goal": goal}], 6)[0]["goal"], goal)

@@ -800,9 +800,15 @@ html:not(.native) .native-only { display: none; }
 .task-composer .history { color: var(--you); }
 .task-composer .lr { flex-wrap: wrap; }
 .task-composer .files:empty { display: none; }
-.task-messages { max-height: 120px; overflow: auto; overflow-wrap: anywhere; }
+.task-messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 96px; overflow: auto; }
 .task-messages:empty { display: none; }
-.task-message { padding: 6px 0; font: 11px/1.4 var(--mono); white-space: pre-wrap; }
+.task-message { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; padding: 4px 4px 4px 8px;
+  border: 1px solid var(--line); border-left: 2px solid var(--mut); border-radius: 4px; background: var(--raise); font: 11px/1.4 var(--mono); }
+.task-message.queued, .task-message.dispatching { border-left-color: var(--wip); }
+.task-message.failed { border-left-color: var(--bad); } .task-message.failed .lbl { color: var(--bad); }
+.task-message.uncertain { border-left-color: var(--you); } .task-message.uncertain .lbl { color: var(--you); }
+.task-message .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-message .e { flex-basis: 100%; color: var(--bad); overflow-wrap: anywhere; }
 .task-composer :is(textarea, button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .idock > .say { padding: 6px 14px; border-top: 1px solid var(--line); }
 .ipane { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }

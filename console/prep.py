@@ -124,7 +124,8 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, pre
     if (route["model"], route["effort"]) != picked:
         fields["reason"] = (f"{fields.get('reason', '')} Demand rule: {'/'.join(picked)} -> "
                             f"{route['model']}/{route['effort']}.").strip()
-    steps = tasks.plan_steps(fields.get("steps") or [], cfg["task_max_steps"])  # the only validator
+    steps = tasks.plan_steps(tasks.hard_steps(fields.get("steps") or [], {"reasoning": route["reasoning"]},
+                                              cfg["task_max_steps"]), cfg["task_max_steps"])  # the only validator
     card = {
         "id": prep_id or new_id(), "ts": time.time(), "project_dir": project_dir, "raw": raw,
         "fields": fields, "prompt": format_prompt(fields), "route": fields["route"],

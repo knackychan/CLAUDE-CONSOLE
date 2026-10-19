@@ -47,6 +47,8 @@ scout step and the writing in a later one. Kinds and their models:
 | design | architecture, a novel problem, a critical decision, deep research | opus | high |
 | replan | after a scout or a design: re-plan the steps that follow, from what it found | haiku | low |
 
+When reasoning is high, put a design step before the writing steps: the design step thinks on the top model, a code step then writes what it decided on a cheaper one. The Console adds both when you leave them out.
+
 Do not add a verify step: the Console adds one after the last step that edits.
 
 Fields: goal (one sentence), where (files and functions, short), keep (what must not break),

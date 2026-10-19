@@ -873,7 +873,7 @@ async function doRun(projectDir, prompt, model, effort, prepId, from = "", fable
     if (mine) att.compose = [];
     card = null;
     setBusy("");
-    openSession(r.session, "chat");
+    if (r.session) openSession(r.session, "chat"); else openTask(r.task);  // a hard card runs as a task (plan 46)
     return true;
   } catch (e) {
     setBusy("");
@@ -3444,12 +3444,12 @@ function stepFooter(t, s, d, row) {
     ${historical ? `<div class="say history">History: step ${two(s?.n || cur.n)}${boardHistory ? " · earlier attempt" : ""}. Messages go to the current step.</div>` : ""}
     <label for="b-tcont">${esc(destination)}</label>
     ${state.question ? `<div class="q">${esc(state.question)}</div>` : ""}
+    ${taskMessages(t, d)}
     <textarea class="in" id="b-tcont" data-tid="${tid}" data-sid="${esc(cur?.session || "")}" rows="2" aria-describedby="b-delivery" placeholder="${state.answer ? "Your answer" : "Message for the current step"}">${esc(draft.text)}</textarea>
     <ul class="files" aria-label="Attached files">${filesHtml(key)}</ul>
     <div class="say" id="b-delivery">${esc(off || d.message?.timing || (state.gap ? "Your answer joins the plan's Decisions and continues this step." : lv.fork ? "Sends in a window copy. The external session stays as it is." : "Sends to the current conversation."))}</div>
     <div class="lr"><button class="btn ${state.answer ? "you" : "go"}" data-tact="${state.answer ? "answer" : "cont"}" data-tid="${tid}"${off || draft.busy ? " disabled" : ""}>${draft.busy ? "Sending ..." : state.answer ? "Send answer" : "Send"}</button>
       <button class="btn sm" data-attach="${key}"${d.message?.attachments === false ? ' disabled title="This harness cannot receive attachments"' : ""}>Attach</button>${changed ? b("retarget", "Use current step") : ""}${t.state === "done" && d.levers?.add_next === "" ? b("messagenext", "Use message in Add step") : ""}</div>
-    ${taskMessages(t, d)}
     ${draft.error ? `<div class="say r" role="status">${esc(draft.error)}</div>` : ""}
     ${cold ? `<div class="say">Cold cache: ${kTokens(cold.tokens)} tokens, idle ${Math.round(cold.idle_s / 3600)} h. Re-read about $${money(cold.cost)}; a second click confirms.</div>` : ""}
     </div>`;
@@ -3473,13 +3473,10 @@ function saveTaskDraft(tid) {
     request: att[taskAttachKey(tid)].length ? null : d.request})); }
   catch (e) { /* storage unavailable: keep this window's draft */ }
 }
-function taskMessages(t, d) {
-  return `<div class="task-messages">${(t.messages || []).map(m => `<div class="task-message" role="status"><strong>${esc({queued: "Queued", dispatched: "Dispatched", failed: "Failed", uncertain: "Outcome unknown", dispatching: "Dispatching", cancelled: "Cancelled"}[m.status] || m.status)}</strong>
-    <span> · step ${two(m.target.step)}, attempt ${m.target.attempt}</span><div>${esc(m.text)}</div>
-    ${m.files?.length ? `<div>${m.files.map(f => esc(f.name)).join(", ")}</div>` : ""}
-    ${m.error ? `<div class="r">${esc(m.error)}</div>` : ""}
-    ${["queued", "failed", "uncertain"].includes(m.status) ? `<button class="btn sm" data-tact="cancelmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}">${m.status === "uncertain" ? "Dismiss after checking conversation" : "Cancel guidance"}</button>` : ""}
-    ${m.status === "queued" && m.error?.startsWith("Cold cache") ? `<button class="btn sm" data-tact="dispatchmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}">Confirm re-read ~$${money(d.message?.cold?.cost)} and send</button>` : ""}</div>`).join("")}</div>`;
+function taskMessages(t, d) {  // pending guidance only: a dispatched message is in the chat, a cancelled one is gone
+  const pending = (t.messages || []).filter(m => !["dispatched", "cancelled"].includes(m.status));
+  return `<ul class="task-messages" aria-label="Pending guidance">${pending.map(m => `<li class="task-message ${m.status}" role="status">
+<span class="lbl">${esc({queued: "Queued", failed: "Failed", uncertain: "Outcome unknown", dispatching: "Sending"}[m.status] || m.status)}</span><span class="t" title="${esc(m.text)}">${esc(m.text)}${m.files?.length ? ` <span class="mut">+${m.files.length} file${m.files.length > 1 ? "s" : ""}</span>` : ""}</span><span class="mut">s${two(m.target.step)}${m.target.attempt > 1 ? "." + m.target.attempt : ""}</span>${["queued", "failed", "uncertain"].includes(m.status) ? `<button class="btn sm" data-tact="cancelmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}" title="${m.status === "uncertain" ? "Dismiss after checking conversation" : "Cancel guidance"}">${m.status === "uncertain" ? "Dismiss" : "Cancel"}</button>` : ""}${m.status === "queued" && m.error?.startsWith("Cold cache") ? `<button class="btn sm" data-tact="dispatchmessage" data-tid="${esc(t.id)}" data-mid="${esc(m.id)}">Send ~$${money(d.message?.cold?.cost)}</button>` : ""}${m.error ? `<span class="e">${esc(m.error)}</span>` : ""}</li>`).join("")}</ul>`;
 }
 function taskMessageState(t, d) {
   const cur = (t.steps || []).find((x) => x.n === t.current) || t.steps?.[0], lv = d.step_levers || {};

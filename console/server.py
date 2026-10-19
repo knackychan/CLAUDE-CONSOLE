@@ -959,7 +959,8 @@ class Hub:
             prev=tasks.read_note(self.folder, task, task["last_good"]),
             budget=self.budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"], cfg=self.cfg,
             prev_rung=last["model"] if last else "", prev_age=time.time() - ended if ended else None,
-            hard=(task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard")),
+            hard=s["kind"] not in tasks.NO_HARD_KINDS  # plan 46 D4: a writer never takes an Opus-rank rung
+            and ((task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard"))),
             refuse=lambda rung: self.rung_ok(rung, s["kind"], task["project_dir"]) or self._avoided(rung, s), pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
 
     def _base(self, task: dict) -> str:
@@ -3656,11 +3657,11 @@ class Hub:
                 return 409, {"error": why}
             if origin == "fred":
                 self._supervisor_fred(task, now, lever)
-            if chat_route:
             else:  # plan 44: the supervisor's dispatch is not logged as Fred's own act
                 for line in lines:
                     line["why"] = line["why"].replace(" by Fred", " by the supervisor")
                 task["why"] = task["why"].replace(" by Fred", " by the supervisor")
+            if chat_route:
                 cs["manual_route"] = chat_route
             if closed:
                 self._accept_step(task, closed)
@@ -3989,6 +3990,15 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.hub.cfg
         card = prep.load(self.hub.folder, body.get("prep")) if body.get("prep") else None
         files = attach.parse(body.get("files")) or self.hub.prep_files((card or {}).get("id") or body.get("files_from"))
+        if card and (card.get("route") or {}).get("reasoning") == "high":
+            # plan 46 D3: a hard card is never one chat: it runs as its design -> code -> verify task (the card's
+            # steps, or the ones hard_steps adds); Raw (no card) is the way to force one model
+            steps = tasks.hard_steps([{"kind": s["kind"], "goal": s["goal"]} for s in card.get("steps") or []
+                                      if s["kind"] != "verify"], card.get("demand"), cfg["task_max_steps"])
+            try:
+                return self._json({"session": "", "task": self.hub.create_task(card, steps, "auto")})
+            except runs.RunError as exc:
+                return self._error(409, str(exc))
         auto = body.get("model") == "auto"
         model = body.get("model") or cfg["default_model"]
         balance_note = ""

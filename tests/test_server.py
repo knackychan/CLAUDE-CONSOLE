@@ -1555,6 +1555,35 @@ class TaskServerTest(RunServerTest):
         task = self.until(tid, self.at(1), "the design step starts")
         self.assertEqual((task["steps"][0]["model"], task["steps"][0]["tier"]), ("fable", "fable"))
 
+    def test_hard_card_never_runs_as_a_chat(self):
+        """Plan 46 D3: Run on a hard card starts its task (design, code, verify), even when its steps were cleared;
+        a Raw prompt (no card) still runs one chat on the model picked."""
+        card = self.prep_card("THINK fix add")
+        self.assertEqual([s["kind"] for s in card["steps"]], ["design", "code", "verify"])
+        server.prep.save(self.hub.folder, dict(card, steps=[]))
+        body = {"project_dir": str(self.project), "prompt": card["prompt"], "model": "sonnet", "effort": "low",
+                "prep": card["id"]}
+        status, data = self.call("/api/run", body)
+        self.assertEqual((status, data["session"]), (200, ""))
+        self.assertEqual([s["kind"] for s in self.hub.tasks[data["task"]]["steps"]], ["design", "code", "verify"])
+        self.assertEqual(self.call("/api/run", {"project_dir": str(self.project), "prompt": "THINK raw",
+                                                "model": "sonnet", "effort": "low"})[0], 200)
+        plain = self.prep_card("fix add")
+        server.prep.save(self.hub.folder, dict(plain, steps=[]))
+        self.assertEqual(self.call("/api/run", dict(body, prompt=plain["prompt"], prep=plain["id"]))[0], 200)
+
+    def test_code_step_of_a_hard_task_is_not_routed_to_opus(self):
+        """Plan 46 D4: a hard task's design step may take an Opus-rank rung, its code step never does."""
+        self.hub.budget = lambda: {"opus": {"share": 0.01, "binding": "day"}, "sonnet": {"share": 0.9, "binding": "day"}}
+        tid = self.make_task(text="THINK plan it", steps=[{"kind": "design", "goal": "plan it"},
+                                                          {"kind": "code", "goal": "write it"}])
+        task = self.hub.tasks[tid]
+        design, code = task["steps"][0], task["steps"][1]
+        self.assertEqual(self.hub._route_for(task, design)["model"], "opus")
+        self.assertNotEqual(self.hub._route_for(task, code)["model"], "opus")
+        code["hard"] = True  # a hard sub-plan part does not change that
+        self.assertNotEqual(self.hub._route_for(task, code)["model"], "opus")
+
     def test_budget_reads_the_usage_days(self):
         today = usage.day_of(time.time())
         self.assertEqual(self.hub.budget(), {})  # usage not read yet: the tiers' order routes
@@ -2714,9 +2743,11 @@ class HarnessServerTest(TaskServerTest):
 
     def test_auto_chat_keeps_fable_explicit_and_refuses_an_empty_pool(self):
         card = self.prep_card("THINK about the design")
+        card = dict(card, route=dict(card["route"], reasoning="medium"))  # a hard card runs as a task (plan 46)
         self.hub.cfg["tiers"]["think"] = ["fable", "opus"]
         body = {"project_dir": str(self.project), "prompt": "HANDOFF-OK", "model": "auto", "prep": card["id"]}
-        status, data = self.call("/api/run", body)
+        with mock.patch.object(server.prep, "load", return_value=card):
+            status, data = self.call("/api/run", body)
         self.assertEqual(status, 200, data)
         self.wait_idle(data["session"])
         self.assertEqual(self.hub.runs.meta(data["session"])["model"], "opus")
@@ -2727,7 +2758,7 @@ class HarnessServerTest(TaskServerTest):
     def test_auto_chat_under_a_fable_floor_balances_the_opus_pool(self):
         card = self.prep_card("THINK about the design")
         self.hub.cfg["tiers"]["think"] = ["fable", "opus"]
-        floored = dict(card, route=dict(card["route"], model="fable"))
+        floored = dict(card, route=dict(card["route"], model="fable", reasoning="medium"))  # not hard: plan 46
         with mock.patch.object(server.prep, "load", return_value=floored):
             status, data = self.call("/api/run", {"project_dir": str(self.project), "prompt": "HANDOFF-OK",
                                                   "model": "auto", "prep": card["id"]})
