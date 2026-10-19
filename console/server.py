@@ -1128,8 +1128,13 @@ class Hub:
 
     def message_availability(self, task: dict) -> dict:
         target = tasks.message_target(task)
+        if self._next_ok(task):  # plan 48: the box tells the supervisor what comes next
+            return {"target": target, "mode": "next", "reason": self._base(task), "cold": None, "attachments": False,
+                    "timing": "Goes to the supervisor. The step it adds from your words starts without Approve."}
         cs = tasks.step(task, target["step"])
         off, mode, timing = self._base(task), "queued", "Queued for the end of this turn"
+        gone = ("Supervisor off. Use Add step on a model in the task menu."
+                if supervisor.policy(self.cfg, task, time.time())["mode"] == "off" else "")
         row = self.session(cs["session"]) if cs["session"] else None
         meta = self.runs.meta(cs["session"]) or {}
         hname = meta.get("harness") or cs.get("harness") or claude_cli.split_rung(cs["model"] or cs["pick"])[0]
@@ -1140,9 +1145,9 @@ class Hub:
         if meta.get("ended") and hname != "claude" and not (harness.get(hname).RESUME and meta.get("harness_session")):
             off = off or "This conversation cannot be resumed. Stop the task and Retry explicitly."
         if task["state"] == "done":
-            off = off or "Task finished. Use Add next step to start another step."
+            off = off or gone or "Task finished. Use Add next step to start another step."
         elif cs["state"] == "done":
-            off = off or "This step finished. Select Add next step or confirm the next step; your draft is kept."
+            off = off or gone or "This step finished. Select Add next step or confirm the next step; your draft is kept."
         elif task["state"] == "planned" and not cs["session"]:
             timing = "Saved for the first step. Sending does not start the task."
         elif task["state"] in ("stopped", "stuck", "handed") or task["owner"] == "fred":
@@ -1210,23 +1215,34 @@ class Hub:
                 return 409, {"error": "The destination changed. Confirm the current step before sending.", **available}
             if available["reason"]:
                 return 409, {"error": available["reason"], **available}
+            nxt = available["mode"] == "next"
+            if nxt and files:
+                return 400, {"error": "The supervisor reads text only. Remove the files."}
+            if nxt and len(payload["text"]) > tasks.STEP_GOAL_MAX:
+                return 400, {"error": f"A next-step message must contain 1 to {tasks.STEP_GOAL_MAX} characters."}
             if files and not available["attachments"]:
                 return 400, {"error": "This harness cannot receive attachments. Remove the files or Retry on Claude."}
             if available["cold"] and body.get("confirm") is not True:
                 return 409, {"error": "Cold cache: confirm the re-read cost before sending.", **available}
+            now = time.time()
             message = {"id": request_id, "task": task["id"], **payload, "files": attach.summary(files),
-                       "hash": signature, "mode": available["mode"], "status": "queued", "created": time.time(),
+                       "hash": signature, "mode": available["mode"], "status": "queued", "created": now,
                        "confirm": body.get("confirm") is True, "error": ""}
+            line = ({"ts": now, "step": task.get("current") or 0, "from": task["state"], "to": task["state"],
+                     "session": "", "why": "fred: next-step message " + request_id[:8]} if nxt else None)
             try:
                 if files:
                     tasks.message_files(self.folder, task, message, files)
                 updated = copy.deepcopy(task)
                 updated.setdefault("messages", []).append(message)
-                self._supervisor_fred(updated, time.time(), "message")
-                self._commit(updated)
+                self._supervisor_fred(updated, now, "message")
+                self._commit(updated, [line] if line else ())
             except OSError as exc:
                 return 500, {"error": f"Message was not saved: {exc}"}
             self.tasks[task["id"]] = updated
+            if nxt:  # plan 48: one wake, never guidance for a step
+                self.wake_supervisor(updated, "message", line)
+                return 200, {"message": message}
             # Planned tasks only start through their existing start/advance action.
             if available["mode"] != "queued":
                 self._guidance_tick(updated)
@@ -1624,10 +1640,13 @@ class Hub:
             usage.record_supervisor(self.folder, pid, {"cost": 0.0})
             self._sup_terminal(task, entry, str(exc))
             return False
+        claimed = tasks.next_messages(task) if "message" in entry["triggers"] else []  # plan 48: delivered below
         claim = {"wake": wake, "phase": "claimed", "events": entry["events"], "triggers": entry["triggers"],
                  "revision": snap["revision"], "epoch": snap["epoch"], "prompt_hash": snap["prompt_hash"],
                  "model": snap["model"], "day": day, "reserved": got["reserved"], "pass": pid,
                  "context": snap["gates"]}
+        if claimed:
+            claim["messages"] = [m["id"] for m in claimed]
         try:
             self._sup_record(tid, claim)
         except OSError:
@@ -1638,9 +1657,15 @@ class Hub:
             sup["pending"] = None  # superseded by this newer boundary
         sup["wakes"] = wake
         sup.pop("reject_note", None)  # Fred's rejection note rides in this wake's digest once
+        for m in claimed:  # delivered to the supervisor; a failed pass never replays it (plan 42), Fred sends again
+            m.update(status="dispatched", wake=wake, dispatched=time.time())
         try:
             tasks.save(self.folder, task)
         except OSError:
+            for m in claimed:
+                m.update(status="queued")
+                m.pop("wake", None)
+                m.pop("dispatched", None)
             try:
                 self._sup_record(tid, {"wake": wake, "phase": "result", "events": entry["events"], "cost": 0.0,
                                        "decision": None, "status": "no-decision", "error": "task.json not saved"})
@@ -1673,7 +1698,9 @@ class Hub:
         sup = task.get("supervisor") or {}
         context = {"triggers": list(entry["triggers"]), "policy": pol, "levers": levers_now, "sources": sources,
                    "owned": self._sup_owned(task), "budget": budget, "reject_note": sup.get("reject_note") or "",
-                   "stuck": stuck, "retries_left": retries_left}
+                   "stuck": stuck, "retries_left": retries_left,
+                   "fred_next": ("\n\n".join(m["text"] for m in tasks.next_messages(task))
+                                 if "message" in entry["triggers"] else "")}
         digest_text = supervisor.digest(self.folder, task, context)
         prompt = supervisor.build_prompt(kinds.text(self.folder, "supervisor"), task, digest_text, paths.you(self.cfg))
         gates = {"levers": [k for k, v in levers_now.items() if v == "" and k not in ("route", "next_route", "cwd")],
@@ -1737,7 +1764,10 @@ class Hub:
             self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
                                  "to": task["state"], "why": f"supervisor: {text}", "session": ""}])
             if status == "suggest":
-                self._sup_auto(task_id, wake)
+                if "message" in snapshot["triggers"] and (decision or {}).get("decision") == "add_next_step":
+                    self._supervisor_dispatch(task_id, wake, "message")  # plan 48 D6: Fred's words authorize this one
+                else:
+                    self._sup_auto(task_id, wake)
 
     def _sup_judge(self, task: dict, snapshot: dict, result: dict) -> tuple:
         """(status, why, effective decision) of one result against the live task: no-decision, wait, escalate,
@@ -1826,7 +1856,9 @@ class Hub:
                 return 409, {"error": "a question waits for Fred"}
             if kind not in self._SUP_LEVER and kind != "add_next_step":
                 return 409, {"error": f"{kind} is never dispatched"}
-            if by != "fred":
+            if by == "message" and kind != "add_next_step":
+                return 409, {"error": "a next-step message authorizes only add_next_step"}
+            if by not in ("fred", "message"):  # a message is Fred's authorization: no auto slot, no auto caps
                 if not self.sup_auto:
                     return 409, {"error": f"{kind} needs Fred's approval"}
                 reason = supervisor.auto_reason(decision, task, self._sup_auto_policy(task, pol, decision))
@@ -1849,8 +1881,11 @@ class Hub:
                 pending["epoch"] = task["supervisor"]["epoch"]
             if kind == "add_next_step":
                 n = decision.get("source_step", task["current"])
+                said = "\n\n".join(m["text"] for m in task.get("messages", [])
+                                   if m.get("mode") == "next" and m.get("wake") == wake)  # his words, verbatim
                 req = {"task": task_id, "source_step": n, "source_session": tasks.step(task, n)["session"],
-                       "kind": decision["kind"], "instructions": decision["instructions"].strip(), "model": "auto"}
+                       "kind": decision["kind"], "instructions": (said if by == "message" else "") or
+                       decision["instructions"].strip(), "model": "auto"}
                 intent = {"call": "request_next", "request_id": supervisor.request_id(task_id, wake), "source_step": n}
             else:
                 intent = {"call": "task_lever", "lever": self._SUP_LEVER[kind]}
@@ -1924,10 +1959,11 @@ class Hub:
             if followup:
                 self.wake_supervisor(task, "stalled_stop", followup)
             what = (f"step {body['step']:02d}" + (" held for Fred" if held else "")) if body.get("step") else kind
+            who = "fred (message)" if by == "message" else by
             try:
                 self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
                                      "to": task["state"], "session": "",
-                                     "why": f"supervisor: {status} {kind} ({what}, wake {wake}, by {by})"}])
+                                     "why": f"supervisor: {status} {kind} ({what}, wake {wake}, by {who})"}])
             except OSError:
                 pass
             return code, body
@@ -1939,6 +1975,16 @@ class Hub:
             return False
         pol = supervisor.policy(self.cfg, task, time.time())
         return not pol["reason"] and pol["mode"] != "off"
+
+    def _next_ok(self, task: dict) -> bool:
+        """Plan 48: Fred's words can go to the supervisor as the next step: a supervised manual task at its boundary,
+        or finished with a valid policy that is on."""
+        if task.get("chat") or task.get("progression") != "manual":
+            return False
+        if self._sup_boundary(task):
+            return True
+        pol = supervisor.policy(self.cfg, task, time.time())
+        return task["state"] == "done" and not pol["reason"] and pol["mode"] != "off"
 
     def _supervisor_fred(self, task: dict, now: float, action: str, keep=None) -> None:
         """A new, accepted human act on `task` (called inside its transaction, before the save): the epoch moves on,
@@ -1956,6 +2002,9 @@ class Hub:
             sup["paused"] = False
         if action == "stop":
             self.wakes.pop(task["id"], None)
+        if action in ("stop", "done"):  # plan 48: a queued next-step message dies with the stop or the finish
+            for m in tasks.next_messages(task):
+                m.update(status="cancelled", error="the task was stopped" if action == "stop" else "the task was finished")
         pending = sup.get("pending")
         if isinstance(pending, dict) and pending is not keep and pending.get("status") in ("suggest", "held"):
             sup["pending"] = None

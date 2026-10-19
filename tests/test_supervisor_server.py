@@ -1891,6 +1891,7 @@ class NextMessageTest(DispatchTest):
         self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
         self.say(tid)
         hub = self.restarted()  # the claim never happened: R1 finds the queued message from the saved files
+        self.addCleanup(lambda: [p.kill() for p in list(hub.runs.live.values())])
         self.now = 0.0
         hub._supervisor_tick()
         self.assertEqual(hub.wakes[tid]["triggers"], ["message"])
@@ -1900,6 +1901,9 @@ class NextMessageTest(DispatchTest):
             hub._supervisor_tick()
         for t in hub.sup_threads:
             t.join(10)
+        end = time.time() + 10
+        while hub.runs.live and time.time() < end:  # tearDown removes the folder: let the started step finish first
+            time.sleep(0.05)
         self.assertEqual([c["task"] for c in self.calls], [tid])
         self.assertEqual(len(hub.tasks[tid]["steps"]), 2)
         self.assertEqual(hub.tasks[tid]["messages"][0]["status"], "dispatched")

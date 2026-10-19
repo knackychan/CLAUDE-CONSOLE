@@ -281,7 +281,7 @@ class TaskMessageTest(_TaskServerTest):
         """A supervised manual task at its choose-next boundary (or finished), saved and loaded in the hub."""
         task = tasks.new_task(str(self.project), "proj", "Sup", "goal", tasks.plan_steps(
             [{"kind": "scout", "goal": "look"}], 6), "normal", {}, "", "auto", 100.0, id_=f"20260101-00000{n}-abcd")
-        task["supervisor"] = supervisor.initial(self.hub.cfg, str(self.project), 100.0, mode)
+        task["supervisor"] = supervisor.initial(self.hub.cfg, str(self.project), 100.0, mode or "suggest")
         task["progression"] = "manual"
         s1 = task["steps"][0]
         s1.update(state="done", session="s1", ended=100.0, dir="01-scout", model="haiku", effort="low", attempts=[

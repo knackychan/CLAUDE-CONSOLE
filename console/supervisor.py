@@ -221,6 +221,11 @@ def boundary(task: dict, chain: list):
     if sup.get("paused") is True:
         return None
     cs = tasks.current_step(task) if task.get("current") else None
+    if tasks.manual_boundary(task) or (task.get("state") == "done" and task.get("progression") == "manual"):
+        for m in tasks.next_messages(task):  # plan 48: Fred's next-step message, found again after a restart
+            line = next((r for r in reversed(chain or []) if r.get("why") == "fred: next-step message " + m["id"][:8]), None)
+            if line is not None:
+                return {"trigger": "message", "line": line, "event": event_id(line)}
     why, trigger, want = task.get("why", ""), "", ""
     if task.get("state") == "stuck":
         trigger, want = "stuck", "task:stuck"
@@ -393,6 +398,8 @@ def digest(home, task: dict, context: dict) -> str:
             f"Created: {task.get('created')}; work cost ${total}; supervisor spend ${pol.get('usd', 0.0)}"]
     if context.get("reject_note"):
         head.append("Fred rejected the last suggestion: " + redact.clip(str(context["reject_note"]), NOTE_MAX))
+    if context.get("fred_next"):
+        head.append("Fred asks for the next step: " + redact.clip(str(context["fred_next"]), tasks.STEP_GOAL_MAX))
     table = ["Steps (n kind model/effort state verdict cost retries source):"]
     for s in task["steps"]:
         table.append(f"{s['n']:02d} {s['kind']} {s.get('model') or '-'}/{s.get('effort') or '-'} {s['state']} "

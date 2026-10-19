@@ -902,7 +902,14 @@ def message_target(task: dict) -> dict:
 
 
 def pending_messages(task: dict) -> list:
-    return [m for m in task.get('messages', []) if m['status'] in ('queued', 'dispatching', 'uncertain', 'failed')]
+    """Guidance that holds a pass or a lever. A next-step message (plan 48) is the supervisor's input, not guidance."""
+    return [m for m in task.get('messages', []) if m['status'] in ('queued', 'dispatching', 'uncertain', 'failed')
+            and m.get('mode') != 'next']
+
+
+def next_messages(task: dict) -> list:
+    """The queued next-step messages (plan 48), oldest first."""
+    return [m for m in task.get('messages', []) if m.get('mode') == 'next' and m['status'] == 'queued']
 
 
 def message_files(home, task: dict, message: dict, files=None) -> list:
