@@ -495,6 +495,16 @@ class RunnerTest(unittest.TestCase):
             got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)
         self.assertEqual(got["error"], "")
         self.assertEqual(got["decision"], base)
+        # model is always auto for a supervisor step: an omitted or blank one is filled in, another is kept (refused
+        # by check) (live: add_next_step came back with no model, 2026-10-20)
+        for model in (None, ""):
+            fields = dict(base, model=model) if model is not None else {k: v for k, v in base.items() if k != "model"}
+            with mock.patch.object(compact.subprocess, "run", side_effect=answer(fields)):
+                got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)
+            self.assertEqual(got["decision"], base)
+        with mock.patch.object(compact.subprocess, "run", side_effect=answer(dict(base, model="sonnet"))):
+            got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)
+        self.assertEqual(got["decision"]["model"], "sonnet")
         with mock.patch.object(compact.subprocess, "run", side_effect=answer(dict(base, path="C:/x"))):
             got = supervisor.run(self.cfg, FAKE, self.task, self.prompt(), "haiku", 0.5)
         self.assertIsNone(got["decision"])

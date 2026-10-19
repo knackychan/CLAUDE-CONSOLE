@@ -639,6 +639,8 @@ def run(cfg: dict, exe: list, task: dict, prompt: str, model: str, max_cost: flo
     if isinstance(fields, dict):  # the flat schema cannot tie optional fields to a decision: drop another's
         own = _FIELDS.get(fields.get("decision"), ())
         fields = {k: v for k, v in fields.items() if k not in _OPTIONAL or k in own}
+        if fields.get("decision") == "add_next_step" and fields.get("model") in (None, ""):
+            fields["model"] = "auto"  # the only model a supervisor step may name; another is still refused by check
     why = shape(fields)
     if why:
         out["error"] = "no decision (" + why + ")"
