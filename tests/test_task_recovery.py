@@ -110,7 +110,9 @@ class TaskRecoveryTest(_TaskServerTest):
             time.sleep(0.1)
         s = task["steps"][0]
         sid = s["session"]
-        self.hub.runs._save_meta(dict(self.hub.runs.meta(sid), ended=None))  # a run an earlier service started
+        self.hub.runs.runs.mkdir(parents=True, exist_ok=True)  # a run an earlier service started (done freed its meta)
+        self.hub.runs._save_meta({"session_id": sid, "pid": 4, "cwd": str(self.project), "offset": 0,
+                                  "model": "sonnet", "effort": "low", "started": 1000.0, "ended": None})
         s["attempts"][-1].update(ended=None, cause="")
         s.update(state="running", ended=None)
         task.update(state="running", owner="service")

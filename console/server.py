@@ -1414,6 +1414,40 @@ class Hub:
         return {f"{s['n']:02d}": self._next_source(task.get("id"), s["n"], s.get("session", ""))[1]
                 for s in task["steps"]}
 
+    def recovery(self, task: dict):
+        """Plan 48 section 7: GET /api/task `recovery`, read from saved fields only. None unless the current step's
+        latest attempt ended for any cause but ok, or a run an earlier service started is still alive on it; then
+        {done, cut, orphan}: the last confirmed step, the cut attempt and the live orphan (each None when absent)."""
+        cs = tasks.current_step(task)
+        if cs is None or not cs["session"]:
+            return None
+        tries, cut, orphan = tasks.attempts(cs), None, None
+        if cs["state"] == "running":
+            meta = self.runs.meta(cs["session"]) or {}
+            if (cs["session"] not in self.runs.live and meta and not meta.get("ended")
+                    and claude_cli.run_alive(meta.get("pid"), meta.get("started"))):
+                orphan = {"step": cs["n"], "attempt": len(tries)}
+        elif cs["state"] == "failed" and tries and tries[-1].get("ended"):
+            a = tries[-1]
+            cause = a.get("cause") or ""
+            if not cause:  # an attempt from before the cause was saved: its session row, while the log has it
+                row = self.session(a["session"])
+                cause = "unknown" if row is None or row["run_live"] else run_cause(
+                    row, self.final_message(a["session"])[1] if self.runs.meta(a["session"]) else "")
+            if cause != "ok":
+                cut = {"step": cs["n"], "kind": cs["kind"], "attempt": len(tries), "cause": cause,
+                       "why": a.get("why") or "", "ended": a["ended"]}
+        if cut is None and orphan is None:
+            return None
+        ds = next((x for x in task["steps"] if x["n"] == task["last_good"] and x["state"] == "done"), None)
+        done = None if ds is None else {
+            "step": ds["n"], "kind": ds["kind"], "how": "accepted" if ds.get("accepted") else "finished",
+            "verdict": ds.get("verdict") or "",
+            "handoff": tasks.note_file(task, ds) if tasks.read_note(self.folder, task, ds["n"]) else "",
+            "facts": tasks.facts_file(task, ds) if tasks.read_facts(self.folder, task, ds["n"]) else "",
+            "ended": ds["ended"]}
+        return {"done": done, "cut": cut, "orphan": orphan}
+
     def reconcile_next_steps(self) -> list:
         """Plan 36 (3.4): a manual step reserved before its launch whose outcome a crash left unknown, recovered at
         startup. A reserved step that recorded no session was never confirmed as launched: the task goes stuck with
@@ -3277,6 +3311,8 @@ class Hub:
         meta, _, summary = self._turn_summary(sid)
         text = summary["final"]
         subtype = "error_step_timeout" if meta.get("timed_out") else summary["subtype"]
+        if cs.get("attempts"):  # plan 48 section 7: saved, since the event log forgets the run after two days
+            cs["attempts"][-1]["cause"] = run_cause(s, subtype)
         if subtype in ("error_write_denied", "error_shell_start"):  # plan 43 (D4): the retry goes elsewhere
             cs["avoid"] = sorted(set(cs.get("avoid") or ()) | {claude_cli.split_rung(cs["model"])[0]})
         hit = summary.get("limit")
@@ -3838,6 +3874,17 @@ def prep_row(t: dict):
         return None
     return {"state": p.get("state") or "done", "model": p.get("model") or "", "turns": p.get("turns") or 0,
             "cost": p.get("cost") or 0, "steps": len(p.get("steps") or [])}
+
+
+def run_cause(row: dict, subtype: str) -> str:
+    """Plan 48 section 7: why an ended run ended, from its session row and its result subtype."""
+    if subtype == "error_step_timeout":
+        return "timeout"
+    if row["stopped"]:
+        return "stopped"
+    if row["interrupted"]:
+        return "interrupted"
+    return "ok" if subtype == "success" and not row["failed"] else "failed"
 
 
 def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
@@ -4450,6 +4497,7 @@ class Handler(BaseHTTPRequestHandler):
                            "message": self.hub.message_availability(task),
                            "next_step": self.hub.next_availability(task),
                            "sources": self.hub.next_sources(task),
+                           "recovery": self.hub.recovery(task),  # plan 48 section 7: a read, nothing starts
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),

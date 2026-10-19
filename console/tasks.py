@@ -755,6 +755,8 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
             return False, f"task is {state}", []
         if s and s["state"] == "running":
             _finish(task, s, "failed", now, lines, "stopped by Fred")
+            if s.get("attempts"):  # plan 48 section 7: Fred's Stop, never an interruption
+                s["attempts"][-1]["cause"] = "stopped"
         _task_to(task, "stopped", "stopped by Fred", now, s, lines)
         task["owner"] = "fred"
     elif lever == "pause":
@@ -811,7 +813,7 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
         lines.append(_line(now, s, "failed", "running", "continued by Fred"))
         s.update(state="running", ended=None)
         if s.get("attempts"):  # the same session: its cost is read again once the new turn ends
-            s["attempts"][-1].update(ended=None, why="", final=False)
+            s["attempts"][-1].update(ended=None, why="", final=False, cause="")
         _task_to(task, "running", "", now, s, lines)
         task["owner"] = "service"
     elif lever in ("handoff", "done"):
