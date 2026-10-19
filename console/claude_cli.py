@@ -52,6 +52,14 @@ def prep_command(exe: list, model: str, schema: dict) -> list:
                   "--output-format", "json", "--json-schema", json.dumps(schema)]
 
 
+def planner_command(exe: list, model: str, schema: dict, max_cost: float) -> list:
+    """Plan 47: Prep's command on medium effort with a turn and a spend cap; the planner reads the repo (Read, Grep,
+    Glob) to check Prep's claims and writes nothing. Hooks, MCP and skills stay off, as for Prep."""
+    cmd = prep_command(exe, model, schema)
+    cmd[cmd.index("--effort") + 1] = "medium"
+    return cmd + ["--max-turns", "12", "--max-budget-usd", str(max_cost)]
+
+
 def brief_command(exe: list, model: str, schema: dict) -> list:
     """Prep's command with no tools at all and six turns: the brief pass reads nothing and decides nothing. A
     structured answer takes 2 turns, a schema re-prompt one more each; 3 ended in error_max_turns live."""

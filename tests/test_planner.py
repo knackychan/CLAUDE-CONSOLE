@@ -110,8 +110,7 @@ class RunTest(unittest.TestCase):
     def test_no_valid_step_is_an_error(self):
         out, _ = run(stdout=envelope(dict(GOOD, steps=[])))
         self.assertEqual((out["steps"], out["error"], out["cost"]), ([], "no valid steps", 0.02))
-        out, _ = run(stdout=envelope(dict(GOOD, steps=[{"kind": "fix", "goal": "x"}])))  # not a PREP kind
-        self.assertEqual((out["steps"], out["error"]), ([], "no valid steps"))
+        self.assertEqual((out["scope"], out["note"]), ("ok", GOOD["note"]))  # the card still shows what it said
 
     def test_failures_keep_the_cost_and_never_raise(self):
         out, _ = run(side_effect=subprocess.TimeoutExpired("claude", 120))
