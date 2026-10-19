@@ -618,10 +618,16 @@ function sessionLine(s) {  // an outside chat's status line (plan 48): what it w
   const [, word, tn] = stateWord(s);
   return [`${word.toLowerCase()} · ${hhmm(s.last_ts)}`, tn === "g" || tn === "r" ? tn : ""];
 }
+const SOURCE_NAME = { vscode: "VS Code", terminal: "terminal", desktop: "desktop" };
+function sourceChip(s) {  // Fred 2026-10-20: a chat from outside the Console says where it runs; a window run says nothing
+  if (s.source === "window") return "";
+  const name = s.harness && s.harness !== "claude" ? s.harness : SOURCE_NAME[s.source] || (s.source && s.source !== "?" ? s.source : "outside");
+  return `<span class="v-src">${esc(name)}</span>`;
+}
 function sessionRow(s) {  // one row that opens the session page
-  const picked = page === "session" && openId === s.id, tn = tone(s), [text, wt] = sessionLine(s);
-  return `<div class="v-tk${picked ? " act" : ""}"><div class="v-th${picked ? " picked" : ""}" data-open="${esc(s.id)}" tabindex="0" role="button" title="${esc(s.project)}">
-    <div class="l1"><span class="st ${tn}">${sessionMark(s, s.symbol, tn)}</span><span class="t">${esc(s.title)}</span></div>
+  const picked = page === "session" && openId === s.id, tn = tone(s), [text, wt] = sessionLine(s), chip = sourceChip(s);
+  return `<div class="v-tk${chip ? " out" : ""}${picked ? " act" : ""}"><div class="v-th${picked ? " picked" : ""}" data-open="${esc(s.id)}" tabindex="0" role="button" title="${esc(s.project)}${chip ? " · a chat outside the Console" : ""}">
+    <div class="l1"><span class="st ${tn}">${sessionMark(s, s.symbol, tn)}</span><span class="t">${esc(s.title)}</span>${chip}</div>
     <div class="l2"><span class="why${wt ? " " + wt : ""}" title="${esc(text)}">${esc(text)}</span><span class="cost">${spentText(s)}</span></div></div></div>`;
 }
 function sessionHead(s) {

@@ -927,6 +927,10 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .v-th .l2 .why.y { color: var(--you); } .v-th .l2 .why.r { color: var(--bad); }
 .v-th .l2 .cost { color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .v-th .chk { width: 15px; height: 15px; margin: 0; accent-color: var(--ink); flex: none; }
+/* a chat from outside the Console: dashed edge and where it runs */
+.v-tk.out > .v-th { border-style: dashed; border-color: var(--line); }
+.v-tk.out > .v-th .t { font-weight: 500; }
+.v-src { flex: none; font: 500 10px/15px var(--mono); color: var(--mut); border: 1px dashed var(--line); border-radius: 3px; padding: 0 5px; white-space: nowrap; }
 /* the label chip: MMDD-xxxx; a click copies the task's folder name */
 .v-lab { flex: none; font: 500 10.5px/16px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; cursor: copy; white-space: nowrap; }
 .v-lab:hover { color: var(--ink); border-color: var(--ink); }
