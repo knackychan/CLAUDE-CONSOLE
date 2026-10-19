@@ -494,6 +494,18 @@ h2 { font: 600 17px/1.3 var(--ui); margin: 0; text-wrap: balance; overflow-wrap:
 .srow .rb { width: 28px; height: 28px; border-radius: 6px; }
 .srow.fixed { grid-template-columns: 22px minmax(0, 1fr); }
 .srow.fixed .mut { font-size: 12px; }
+/* plan 48: the card's read-only step rows, then one Start with its line and the card menu */
+.steps { display: grid; }
+.sp1 { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 8px; padding: 7px 4px; border-top: 1px solid var(--line); }
+.sp1:first-child { border-top: 0; }
+.sp1 .n { font: 11px var(--mono); color: var(--mut); padding-top: 2px; }
+.sp1 .g { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.sp1 .k { font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.sp1.fixed .g { color: var(--mut); font-size: 12px; }
+.pstart { position: relative; flex-wrap: nowrap; }
+.pstart .say { flex: 1; min-width: 0; }
+.pstart .action-more { flex: none; }
+.pstart .action-list { left: auto; right: 0; }
 
 /* the askboxes and the handoff chips (plan 17) */
 .stack .askbox { margin: 0; }

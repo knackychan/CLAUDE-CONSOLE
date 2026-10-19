@@ -660,11 +660,10 @@ function renderCompose() {
   else if (!runnable()) html = `<span>Runs are off in ${chipHtml}: a run would use this repo's hooks and settings without asking.</span>
     <button class="btn sm" data-go="allow">Allow runs</button>`;
   else html = `<span>in</span>${chipHtml}<button class="btn sm" data-attach="compose" title="Images, PDF or text files (or paste, or drop them on the box)">Attach</button>
-    <span class="hint"><span class="kbd">Enter</span>Prep</span>`;
+    <span class="hint"><span class="kbd">Enter</span>prep and plan · <span class="kbd">Ctrl+Enter</span>raw</span>`;
   if (draftKept && !busy) html += '<span class="m mut">Draft kept from last time</span><button class="btn sm" data-go="cleardraft">Clear</button>';
   setHtml($("c-say"), html);
   setHtml($("files-compose"), filesHtml("compose"));
-  renderEffort();
   spin();
   setHtml($("prepfail"), fail ? `<div class="card r" style="cursor:default"><div class="l1"><span class="st r">× FAILED</span><span class="t">${esc(fail.title)}</span></div>
     <div class="m mut">${esc(fail.msg)}</div>${fail.retry ? '<div class="lr"><button class="btn go sm" data-go="retry">Try again</button></div>' : ""}</div>` : "");
@@ -673,7 +672,8 @@ function renderCompose() {
 // -- effort slider (plan 17): Auto, or one level for every step of a task and for a run --------------
 function effortText() { return effortPick === "auto" ? "effort: auto (the rules pick per step)" : `effort: ${effortPick} on every step`; }
 
-function renderEffort() {
+function renderEffort() {  // the slider lives in the card's Edit steps (plan 48); no card, nothing to draw
+  if (!$("effort")) return;
   const at = EFF_LEVELS.indexOf(effortPick);
   const level = (lvl, k) => `<button role="radio" aria-checked="${at === k}" data-eff="${lvl}" tabindex="${at === k ? 0 : -1}"
     aria-label="${lvl}" title="${lvl}"><span class="cells"><i${at >= k ? ' class="f"' : ""}></i></span></button>`;
@@ -1097,19 +1097,25 @@ function stepRowHtml(st) {
     <input data-sgoal aria-label="Goal" value="${esc(st.goal)}" spellcheck="false" placeholder="Goal of this step"></div>`;
 }
 
-function stepsChanged() {  // the verify row, numbers, the Fable note and Run as task (two rows or more) follow the rows
+function stepsChanged() {  // the verify row, numbers, the Fable note, the summary and the Start line follow the rows
   const list = $("p-steps"), fixed = list && list.querySelector(".srow.fixed");
   const edits = !!list && [...list.querySelectorAll("[data-row] [data-skind]")].some((s) => (cfg.edit_kinds || []).includes(s.value));
   if (edits && !fixed) list.insertAdjacentHTML("beforeend", stepRowHtml({ kind: "verify" }));  // the service adds it after the last edit
   if (!edits && fixed) fixed.remove();
   const rows = [...document.querySelectorAll("#p-steps .srow")];
   rows.forEach((r, k) => { r.querySelector(".n").textContent = k + 1; });
-  const fable = [...document.querySelectorAll("#p-model, #p-steps [data-smodel]")].some((s) => alias(s.value) === "fable");
   const kinds = [...new Set([...rows].map((r) => (r.querySelector("[data-skind]") || { value: "verify" }).value))];
   if ($("p-floors")) $("p-floors").innerHTML = kinds.map((k) => floorText(k, "steps")).filter(Boolean).map(esc).join("<br>");
-  const note = $("p-fable"), run = document.querySelector('#pbar [data-pact="task"]');
-  if (note) note.hidden = !fable;
-  if (run) run.hidden = rows.length < 2;
+  const note = $("p-fable"), steps = stepList();
+  if (note) note.hidden = !cardFable(card, steps);
+  if ($("p-sum")) $("p-sum").innerHTML = stepSummary(steps);
+  if ($("p-start") && card) $("p-start").textContent = startLine(card, steps.length);
+}
+
+// Fable on a step row, or on the route of a card that runs as one chat: Start asks twice
+function cardFable(c, steps) {
+  if (!steps.length) return !!c && alias((c.route || {}).model) === "fable";
+  return [...document.querySelectorAll("#p-steps [data-smodel]")].some((s) => alias(s.value) === "fable");
 }
 
 function floorText(kind, noun) {  // a routing miss of this kind (Escalate wrote it) lifts its start above the rule
@@ -1124,39 +1130,60 @@ function plannerLine(p) {  // plan 47: one muted line above the steps; the scope
   return p.note || tag ? `<div class="m mut pnote">${tag}${esc(p.note || "")}</div>` : "";
 }
 
-function showPrep() {
-  const f = card.fields, steps = card.steps || [];
-  $("bbackwhat").textContent = "00 prep · " + projectName(card.project_dir);
-  $("pscroll").innerHTML = `
-    <div class="blk"><span class="lbl">Project</span><div class="proj m"><b>${esc(projectName(card.project_dir))}</b> <span class="mut">${esc(card.project_dir)}</span></div></div>
-    <div class="blk"><span class="lbl">You typed</span><div class="text">${esc(card.raw)}</div></div>
-    ${jobFiles(card.id) ? `<div class="blk"><span class="lbl">Sent with the run</span>${chatFiles(preps().find((x) => x.id === card.id).attached, "you")}</div>` : ""}
+// plan 48: the supervisor mode a Start gets, as supervisor._project_mode reads it: the project's entry, else the global mode
+function supMode(projectDir) {
+  const sc = (cfg && cfg.supervisor_config) || {};
+  const hit = Object.entries(sc.projects || {}).find(([dir, mode]) => ["off", "suggest", "auto"].includes(mode) && sameDir(dir, projectDir));
+  return hit ? hit[1] : ["off", "suggest", "auto"].includes(sc.mode) ? sc.mode : "suggest";
+}
+function cardSteps(c) { return (c.steps || []).filter((s) => s.kind !== "verify" && s.goal); }
+function startLine(c, n = cardSteps(c).length) {
+  if (!n) return "One chat: no steps were planned";
+  const mode = supMode(c.project_dir);
+  return mode === "off" ? "Supervisor off: the steps run as listed" : `supervised · ${mode} · runs in ${projectName(c.project_dir)}`;
+}
+function stepSummary(steps) {  // read-only rows: number, goal, kind; the verify row is the service's, after the last editing step
+  const rows = steps.filter((s) => s.kind !== "verify" && s.goal), edits = rows.some((s) => (cfg.edit_kinds || []).includes(s.kind));
+  if (!rows.length) return '<p class="m mut">Prep proposed no steps: Start runs one chat. Edit steps adds some.</p>';
+  const row = (n, goal, kind, cls = "") => `<div class="sp1${cls}"><span class="n">${two(n)}</span><span class="g">${esc(goal)}</span><span class="k">${esc(kind)}</span></div>`;
+  return rows.map((s, k) => row(k + 1, s.goal, s.kind)).join("") + (edits ? row(rows.length + 1, "added by the Console after the last editing step", "verify", " fixed") : "");
+}
+
+function prepHtml(c) {  // two layers: the summary and one Start; the editors behind Edit steps, always in the DOM for stepList()
+  const f = c.fields || {}, steps = c.steps || [], files = jobFiles(c.id);
+  const editors = `<div class="blk"><span class="lbl">You typed</span><div class="text">${esc(c.raw)}</div></div>
+    ${files ? `<div class="blk"><span class="lbl">Sent with the run</span>${chatFiles(preps().find((x) => x.id === c.id).attached, "you")}</div>` : ""}
     ${f.where ? `<div class="blk"><span class="lbl">Scouted</span><div class="m">${esc(f.where)}</div></div>` : ""}
     <div class="blk"><span class="lbl">Enhanced prompt (edit freely)</span>
-      <textarea id="p-prompt" class="in m" rows="9" spellcheck="false">${esc(card.prompt)}</textarea></div>
-    ${f.question ? `<div class="askbox" style="margin:0"><span class="st y">? Question</span><div class="q">${esc(f.question)}</div></div>` : ""}
-    <div class="blk"><span class="lbl">Run route (one session)</span><div class="prep-row">
-      <span class="m mut">${esc(card.route.type)} · auto balances ${esc(RANK_GROUP[card.route.model] || card.route.model)} models · the model and effort sit by the Run button</span></div>
-      ${card.reason ? `<div class="mut">${esc(card.reason)}</div>` : ""}
-      ${floorText(card.route.type, "runs") ? `<div class="m mut">${esc(floorText(card.route.type, "runs"))}</div>` : ""}
-      <div class="lr"><button class="btn sm" data-pact="review" title="Haiku reads this project's CLAUDE.md and rules files, the routing misses and the lessons, and proposes what to cut or add. Nothing is written.">Review rules</button></div></div>
+      <textarea id="p-prompt" class="in m" rows="9" spellcheck="false">${esc(c.prompt)}</textarea></div>
     <div class="blk"><div class="hd"><span class="lbl">Steps</span><button class="btn sm" data-pact="addstep">+ step</button></div>
-      ${plannerLine(card.planner)}
       <div id="p-steps">${steps.map(stepRowHtml).join("") || '<p class="m mut" data-nosteps>Prep proposed no steps. Add steps to run this as a task.</p>'}</div>
-      <div class="m mut">Run as task: each step's model comes from its kind (auto) or the model you pick on its row, not from the Run route above. A verify step runs one model above the step it checks.</div>
+      <div class="m mut">Each step's model comes from its kind (auto) or the model you pick on its row. A verify step runs one model above the step it checks.</div>
       <div id="p-floors" class="m mut"></div>
-      <div id="p-fable" class="say" hidden>${esc(fableName())} may bill usage credits on this plan; it asks you to confirm before it runs</div>
-      <div class="m mut">${esc(effortText())}</div></div>
-    <div class="m mut">Prep $${Number(card.cost).toFixed(3)} · ${card.turns} turns${card.planner && card.planner.turns ? ` · planner ${esc(card.planner.model || "")} ${card.planner.turns} turns` : ""}</div>`;
-  $("pbar").innerHTML = `<div class="m runs-in">Runs in <b>${esc(projectName(card.project_dir))}</b></div><div class="lr">
-    <select id="p-model" aria-label="Model" title="Model for Run (one session)">${modelOptions("", true)}</select>
-    <select id="p-effort" aria-label="Effort" title="Effort for Run (one session)">${options(cfg.efforts, effortPick !== "auto" ? effortPick : card.route.effort)}</select>
-    <button class="btn go" data-pact="task" hidden>Run as task</button>
-    <button class="btn go" data-pact="run">Run</button>
-    <button class="btn" data-pact="raw">Run raw</button><button class="btn" data-pact="edit">Edit</button>
-    <button class="btn" data-pact="cancel">Cancel</button></div><div id="p-msg" class="say"></div>`;
+      <div id="p-fable" class="say" hidden>${esc(fableName())} may bill usage credits on this plan; Start asks twice</div></div>
+    <div class="blk"><span class="lbl">Effort</span><div id="effort" class="effort" role="radiogroup" aria-label="Effort"></div></div>
+    <div class="m mut">Prep $${Number(c.cost).toFixed(3)} · ${c.turns} turns${c.planner && c.planner.turns ? ` · planner ${esc(c.planner.model || "")} ${c.planner.turns} turns` : ""}</div>`;
+  const scroll = `${plannerLine(c.planner)}
+    ${f.question ? `<div class="askbox" style="margin:0"><span class="st y">? Question</span><div class="q">${esc(f.question)}</div></div>` : ""}
+    <div class="blk"><span class="lbl">Steps · ${cardSteps(c).length}</span><div id="p-sum" class="steps">${stepSummary(steps)}</div></div>
+    ${fold("Edit steps", "prompt, kinds, models, effort", editors, { key: "prep.edit" })}`;
+  const bar = `<div class="lr pstart"><button class="btn go" data-pact="start">Start</button><span id="p-start" class="say">${esc(startLine(c))}</span>
+    <details class="action-more" data-key="pmenu"><summary class="btn sm" aria-label="Card menu" title="Edit prompt, drop, review rules">&#8943;</summary><div class="action-list">
+      <button class="btn sm" data-pact="edit" title="Put what you typed back in the box">Edit prompt</button>
+      <button class="btn sm" data-pact="cancel">Drop</button>
+      <button class="btn sm" data-pact="review" title="Haiku reads this project's CLAUDE.md and rules files, the routing misses and the lessons, and proposes what to cut or add. Nothing is written.">Review rules</button></div></details></div>
+    <div id="p-msg" class="say"></div>`;
+  return { scroll, bar };
+}
+
+function showPrep() {
+  const html = prepHtml(card);
+  $("bbackwhat").textContent = "00 prep · " + projectName(card.project_dir);
+  $("pscroll").innerHTML = html.scroll;
+  $("pbar").innerHTML = html.bar;
+  renderEffort();
   stepsChanged();
-  $("p-prompt").focus({ preventScroll: true });
+  document.querySelector('#pbar [data-pact="start"]').focus({ preventScroll: true });
 }
 
 const REVIEW_KIND = { remove: "Remove", demote: "Demote to a procedure", rule: "New rule", procedure: "New procedure", keep: "Keep as is" };
@@ -1191,12 +1218,19 @@ function stepList() {  // the rows as the page shows them (the order is the chai
   }).filter((s) => s.goal);
 }
 
-async function runAsTask(c, button) {
-  const steps = stepList(), msg = $("p-msg");
-  if (!steps.length) { msg.innerHTML = '<span class="r">Give at least one step a goal</span>'; return; }
+async function startCard(c, button) {  // plan 48 D1, D2: supervised unless the mode is off; no steps runs one chat
+  const steps = stepList(), msg = $("p-msg"), fable = cardFable(c, steps), prompt = $("p-prompt").value.trim();
+  if (fable && !button.dataset.armed) {  // two clicks, like a task's Stop: Fable may bill usage credits
+    button.dataset.armed = "1";
+    button.dataset.label = button.textContent;
+    button.textContent = `Confirm to use ${fableName()}`;
+    setTimeout(() => { delete button.dataset.armed; button.textContent = button.dataset.label; }, 3000);
+    return;
+  }
+  if (!steps.length) return doRun(c.project_dir, prompt, "auto", rawEffort(), c.id, "", fable);
   button.disabled = true;
   try {
-    const r = await api("/api/task", { prep: c.id, prompt: $("p-prompt").value.trim(), steps, effort: effortPick });
+    const r = await api("/api/task", { prep: c.id, prompt, steps, effort: effortPick, supervised: supMode(c.project_dir) !== "off" });
     card = null;
     openTask(r.task);
   } catch (e) {
@@ -1210,7 +1244,7 @@ function unpickPrep() {  // the Prep inspector closes: the pick goes back to not
   boardPick = "";
   prepShown = "";
 }
-async function prepAct(name, button) {  // Run drops the card's job in the service; Run raw, Edit and Cancel drop it here
+async function prepAct(name, button) {  // Start drops the card's job in the service; Edit prompt and Drop drop it here
   if (reviewCard && !card) {  // the rules review (plan 22) shares the Prep inspector
     if (name === "back") { reviewCard = null; unpickPrep(); showPage("board"); }
     if (name === "rdrop") { dropPrep(reviewCard.id); reviewCard = null; unpickPrep(); showPage("board"); }
@@ -1230,19 +1264,7 @@ async function prepAct(name, button) {  // Run drops the card's job in the servi
     goals[goals.length - 1].focus();
   }
   if (name === "rmstep") { button.closest(".srow").remove(); stepsChanged(); }
-  if (name === "task") runAsTask(c, button);
-  if (name === "run") {
-    const fable = alias($("p-model").value) === "fable";
-    if (fable && !button.dataset.armed) {  // two clicks, like a task's Stop: Fable may bill usage credits
-      button.dataset.armed = "1";
-      button.dataset.label = button.textContent;
-      button.textContent = `Confirm to use ${fableName()}`;
-      setTimeout(() => { delete button.dataset.armed; button.textContent = button.dataset.label; }, 3000);
-      return;
-    }
-    doRun(c.project_dir, $("p-prompt").value.trim(), $("p-model").value, $("p-effort").value, c.id, "", fable);
-  }
-  if (name === "raw" && await doRun(c.project_dir, c.raw, "auto", rawEffort(), "", c.id)) dropPrep(c.id);
+  if (name === "start") startCard(c, button);
   if (name === "back") { card = null; unpickPrep(); showPage("board"); }
   if (name === "edit") { card = null; unpickPrep(); const had = jobFiles(c.id); await dropPrep(c.id); putBack(c.raw); if (had) filesNotKept(); }
   if (name === "cancel") { card = null; unpickPrep(); dropPrep(c.id); showPage("board"); }
@@ -3392,18 +3414,20 @@ function stepFooter(t, s, d, row) {
   const cold = d.message ? d.message.cold : lv.cold;
   const changed = cur && draft.target !== nextKey(t, cur), off = changed ? "The destination changed. Choose Use current step before sending." : state.off;
   const historical = s && cur && s.n !== cur.n || boardHistory;
-  const destination = cur ? `Message current step ${two(cur.n)}: ${cur.kind}` : "Message task before its first step";
+  const next = d.message?.mode === "next";  // plan 48 D3: at a boundary the box tells the supervisor what to do next
+  const destination = next ? "Tell the supervisor what to do next" : cur ? `Message current step ${two(cur.n)}: ${cur.kind}` : "Message task before its first step";
+  const noFiles = next ? "The supervisor reads text only. Remove the files." : "This harness cannot receive attachments";
   const b = (name, label) => `<button class="btn sm" data-tact="${name}" data-tid="${tid}">${label}</button>`;
   return `<div class="task-composer" data-task-composer="${tid}">
     ${historical ? `<div class="say history">History: step ${two(s?.n || cur.n)}${boardHistory ? " · earlier attempt" : ""}. Messages go to the current step.</div>` : ""}
     <label for="b-tcont">${esc(destination)}</label>
     ${state.question ? `<div class="q">${esc(state.question)}</div>` : ""}
     ${taskMessages(t, d)}
-    <textarea class="in" id="b-tcont" data-tid="${tid}" data-sid="${esc(cur?.session || "")}" rows="2" aria-describedby="b-delivery" placeholder="${state.answer ? "Your answer" : "Message for the current step"}">${esc(draft.text)}</textarea>
+    <textarea class="in" id="b-tcont" data-tid="${tid}" data-sid="${esc(cur?.session || "")}" rows="2" aria-describedby="b-delivery" placeholder="${state.answer ? "Your answer" : next ? "For example: verify only the 340 px case, then finish" : "Message for the current step"}">${esc(draft.text)}</textarea>
     <ul class="files" aria-label="Attached files">${filesHtml(key)}</ul>
     <div class="say" id="b-delivery">${esc(off || d.message?.timing || (state.gap ? "Your answer joins the plan's Decisions and continues this step." : lv.fork ? "Sends in a window copy. The external session stays as it is." : "Sends to the current conversation."))}</div>
     <div class="lr"><button class="btn ${state.answer ? "you" : "go"}" data-tact="${state.answer ? "answer" : "cont"}" data-tid="${tid}"${off || draft.busy ? " disabled" : ""}>${draft.busy ? "Sending ..." : state.answer ? "Send answer" : "Send"}</button>
-      <button class="btn sm" data-attach="${key}"${d.message?.attachments === false ? ' disabled title="This harness cannot receive attachments"' : ""}>Attach</button>${changed ? b("retarget", "Use current step") : ""}${t.state === "done" && d.levers?.add_next === "" ? b("messagenext", "Use message in Add step") : ""}</div>
+      <button class="btn sm" data-attach="${key}"${d.message?.attachments === false ? ` disabled title="${noFiles}"` : ""}>Attach</button>${changed ? b("retarget", "Use current step") : ""}${!next && t.state === "done" && d.levers?.add_next === "" ? b("messagenext", "Use message in Add step") : ""}</div>
     ${draft.error ? `<div class="say r" role="status">${esc(draft.error)}</div>` : ""}
     ${cold ? `<div class="say">Cold cache: ${kTokens(cold.tokens)} tokens, idle ${Math.round(cold.idle_s / 3600)} h. Re-read about $${money(cold.cost)}; a second click confirms.</div>` : ""}
     </div>`;
@@ -3441,7 +3465,8 @@ function taskMessageState(t, d) {
   let off = lv.continue || "";
   if (d.message) {
     off = d.message.reason || "";
-    if (d.message.attachments === false && att[taskAttachKey(t.id)].length) off = "This harness cannot receive attachments. Remove the files or Retry on Claude.";
+    if (d.message.attachments === false && att[taskAttachKey(t.id)].length) off = d.message.mode === "next"
+      ? "The supervisor reads text only. Remove the files." : "This harness cannot receive attachments. Remove the files or Retry on Claude.";
     if (streamLost || taskDisconnected.has(t.id)) off = "Disconnected. Draft kept; delivery is unavailable.";
     return {off, question, answer, gap, row, cur};
   }
@@ -3851,7 +3876,7 @@ document.addEventListener("click", async (e) => {
     fb.setAttribute("aria-expanded", String(open));
     fb.nextElementSibling.hidden = !open;
     if (fb.dataset.tkey) { if (open) toolOpen.add(fb.dataset.tkey); else toolOpen.delete(fb.dataset.tkey); return; }  // a chat's tool row: not kept
-    foldLabel.set(fb.querySelector(".lbl").textContent, open);
+    foldLabel.set(fb.querySelector(".fl").textContent, open);
     if (fb.dataset.fkey) {  // plan 25: a keyed fold is remembered per window (window.json folds)
       foldState[fb.dataset.fkey] = open;
       while (Object.keys(foldState).length > 64) delete foldState[Object.keys(foldState)[0]];
@@ -3961,7 +3986,7 @@ document.addEventListener("change", (e) => {
     sel.innerHTML = modelOptions(cur, true, e.target.value);
     if (sel.value !== cur) sel.value = "";
   }
-  if (e.target.matches("#p-model, [data-smodel], [data-skind]")) stepsChanged();
+  if (e.target.matches("[data-smodel], [data-skind], [data-sgoal]")) stepsChanged();
 });
 
 $("popen").addEventListener("click", openFolder);

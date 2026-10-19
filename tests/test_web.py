@@ -1229,5 +1229,91 @@ class BoardListTest(unittest.TestCase):
         self.assertIn("Open a task to see its route, its context and the supervisor's last decision", render(self.setup + "emptyPane()"))
 
 
+@unittest.skipUnless(NODE, "Node is not installed")
+class PrepCardTest(unittest.TestCase):
+    """Plan 48 moment 1: the card reads the planner line and the steps, then one Start; the editors sit behind Edit steps."""
+    setup = """snap = {now: 1000, sessions: [], tasks: [], preps: [], versions: {}, projects: []}; foldState = {};
+      cfg = {kinds: ['scout', 'code', 'verify'], edit_kinds: ['code'], efforts: ['low', 'medium', 'high'], tiers: {}, models: [],
+        ladder: {}, kinds_tier: {}, default_effort: 'medium', supervisor_config: {mode: 'suggest', projects: {}}};
+      card = {id: 'p1', project_dir: 'repo', raw: 'fix it', prompt: 'Fix the 340 px overflow', fields: {}, cost: 0.09, turns: 3,
+        route: {type: 'code', model: 'sonnet', effort: 'medium'}, floors: {},
+        planner: {scope: 'ok', note: 'One CSS rule and its test', model: 'opus', turns: 2},
+        steps: [{kind: 'scout', goal: 'Find the rule that keeps .krow wide'}, {kind: 'code', goal: 'Wrap .krow and add the test'},
+                {kind: 'verify', goal: ''}]}; """
+
+    def test_card_has_one_start_and_edit_steps_folded(self):
+        out = render(self.setup + "prepHtml(card)")
+        bar, body = out["bar"], out["scroll"]
+        self.assertEqual(bar.count('data-pact="start"'), 1)
+        for gone in ('data-pact="run"', 'data-pact="raw"', 'data-pact="task"', 'id="p-model"', 'id="p-effort"', "Run as task"):
+            self.assertNotIn(gone, bar + body)
+        for item in ('data-pact="edit"', 'data-pact="cancel"', 'data-pact="review"'):  # the card menu
+            self.assertIn(item, bar)
+        self.assertIn("supervised · suggest · runs in", bar)
+        self.assertIn("One CSS rule and its test", body)  # the planner line
+        summary = body.split('data-fkey="prep.edit"')[0]
+        for text in ("Find the rule that keeps .krow wide", "Wrap .krow and add the test", "added by the Console after the last editing step"):
+            self.assertIn(text, summary)
+        self.assertNotIn("<select", summary)
+        fold = body.split('data-fkey="prep.edit"')[1]
+        self.assertTrue(fold.startswith(' aria-expanded="false"'), fold[:60])
+        for editor in ('id="p-prompt"', 'id="p-steps"', 'data-pact="addstep"', 'id="effort"', 'id="p-fable"'):
+            self.assertIn(editor, fold.split('class="fb"')[1])
+        say = APP.read_text(encoding="utf-8")
+        self.assertIn('<span class="kbd">Enter</span>prep and plan', say)
+        self.assertIn('<span class="kbd">Ctrl+Enter</span>raw', say)
+
+    def test_start_payload_follows_the_supervisor_mode(self):
+        run = """(async () => {
+          const els = {'p-prompt': {value: ' Fix it '}, 'p-msg': {innerHTML: ''}};
+          document = {getElementById: (id) => els[id] || {value: '', innerHTML: ''}, querySelectorAll: () => [], querySelector: () => null};
+          let calls = []; api = async (p, b) => { calls.push([p, b]); return {task: 'T1'}; };
+          doRun = async (...a) => { calls.push(['run', a]); return true; }; openTask = () => {};
+          stepList = () => CARD_STEPS; card = Object.assign({}, card, {project_dir: CARD_DIR});
+          await startCard(card, {dataset: {}, disabled: false});
+          return calls;
+        })()"""
+        steps = "[{kind: 'code', goal: 'Wrap .krow'}]"
+        for name, conf, folder, supervised in [("suggest", "{mode: 'suggest', projects: {}}", "repo", True),
+                                               ("auto", "{mode: 'auto', projects: {}}", "repo", True),
+                                               ("project off", "{mode: 'auto', projects: {'C:\\\\REPO\\\\': 'off'}}", "c:/repo", False),
+                                               ("no config", "undefined", "repo", True)]:
+            with self.subTest(name):
+                calls = render(self.setup + f"cfg.supervisor_config = {conf}; const CARD_STEPS = {steps}, CARD_DIR = {json.dumps(folder)}; " + run)
+                self.assertEqual(len(calls), 1, calls)
+                path, body = calls[0]
+                self.assertEqual(path, "/api/task")
+                self.assertEqual(body, {"prep": "p1", "prompt": "Fix it", "steps": [{"kind": "code", "goal": "Wrap .krow"}],
+                                        "effort": "auto", "supervised": supervised})
+        self.assertEqual(render(self.setup + "cfg.supervisor_config.projects = {'repo': 'off'}; startLine(card)"),
+                         "Supervisor off: the steps run as listed")
+        calls = render(self.setup + "const CARD_STEPS = [], CARD_DIR = 'repo'; " + run)  # no steps: one chat through /api/run
+        self.assertEqual(calls, [["run", ["repo", "Fix it", "auto", "medium", "p1", "", False]]])
+        self.assertEqual(render(self.setup + "startLine(Object.assign({}, card, {steps: []}))"), "One chat: no steps were planned")
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class NextMessageComposerTest(unittest.TestCase):
+    """Plan 48 D3 and D8: at a boundary the box tells the supervisor what to do next, text only."""
+    setup = UnifiedTaskChatTest.setup + """t.state = 'done'; t.steps[0].state = 'done';
+      d.message = {mode: 'next', reason: '', attachments: false,
+        timing: 'Goes to the supervisor. The step it adds from your words starts without Approve.'}; """
+
+    def test_composer_next_mode_label_and_no_attach(self):
+        html = render(self.setup + "stepFooter(t, t.steps[0], d)")
+        self.assertIn("Tell the supervisor what to do next", html)
+        self.assertIn('placeholder="For example: verify only the 340 px case, then finish"', html)
+        self.assertIn("Goes to the supervisor.", html)
+        self.assertRegex(html, r'data-attach="task:t" disabled title="The supervisor reads text only\. Remove the files\."')
+        self.assertNotIn("messagenext", html)
+        self.assertIn('data-tid="t">Send</button>', html)
+        with_files = render(self.setup + "att[taskAttachKey('t')] = [{name: 'a.png'}]; stepFooter(t, t.steps[0], d)")
+        self.assertIn("The supervisor reads text only. Remove the files.", with_files.split('id="b-delivery"')[1])
+        self.assertIn('data-tid="t" disabled>Send</button>', with_files)
+        guidance = render(UnifiedTaskChatTest.setup + "d.message = {mode: 'queued', reason: '', timing: 'Queued'}; stepFooter(t, t.steps[0], d)")
+        self.assertIn("Message current step 01: chat", guidance)
+        self.assertNotIn("Tell the supervisor", guidance)
+
+
 if __name__ == "__main__":
     unittest.main()
