@@ -1,6 +1,6 @@
 # Plan 47 - A planner pass reviews every Prep card and writes its step list
 
-Status: written 2026-10-19 from Fred's brief ("a planner that reviews the prep on Opus/Astra to be sure we aim at the
+Status: code done 2026-10-19 (steps 1-5, one commit each; 1046 tests OK), live check open. Written 2026-10-19 from Fred's brief ("a planner that reviews the prep on Opus/Astra to be sure we aim at the
 right scope"). D1-D3 are Fred's answers (2026-10-19); D4-D6 are defaults written in, change them before building if
 wrong.
 
