@@ -31,6 +31,28 @@ class GuardTest(unittest.TestCase):
         self.assertFalse(guard.post_ok({}))
 
 
+class TaskRowSayTest(unittest.TestCase):  # plan 48: the list row names what the supervisor suggests
+    def row(self, pending):
+        t = tasks.new_task("/p", "proj", "fix add()", "goal", tasks.plan_steps([{"kind": "code", "goal": "g"}], 6),
+                           "normal", {}, "", "auto", 1000.0)
+        t.update(state="waiting", owner="fred", why="choose next step", current=1)
+        t["supervisor"] = {"mode": "suggest", "wakes": 1, "pending": pending}
+        return server.task_row(t)["supervisor"]
+
+    def test_task_row_names_the_suggestion(self):
+        add = {"wake": 1, "status": "suggest", "decision": {"decision": "add_next_step", "kind": "verify",
+                                                             "reason": "verify the 340 px case"}}
+        self.assertEqual(self.row(add)["say"], "add_next_step: verify the 340 px case")
+        esc = {"wake": 1, "status": "escalate", "decision": {"decision": "escalate_to_fred", "reason": "two tests fail"}}
+        self.assertEqual(self.row(esc)["say"], "escalate_to_fred: two tests fail")
+        lost = {"wake": 1, "status": "uncertain", "decision": None, "error": "Service restarted during dispatch."}
+        self.assertEqual(self.row(lost)["say"], "uncertain: Service restarted during dispatch.")
+        long = dict(add, decision=dict(add["decision"], reason="x" * 400))
+        self.assertLessEqual(len(self.row(long)["say"]), 120)
+        for quiet in (None, {"wake": 1, "status": "dispatching", "decision": add["decision"]}):
+            self.assertEqual(self.row(quiet)["say"], "")
+
+
 class ChatTaskGroupTest(unittest.TestCase):  # plan 38 U1 (D1 b): a chat task follows its session's group
     def row(self, session_state, session_group, task_state="running"):
         t = tasks.new_task("/p", "proj", "fix add()", "goal", tasks.plan_steps([{"kind": "code", "goal": "g"}], 6),

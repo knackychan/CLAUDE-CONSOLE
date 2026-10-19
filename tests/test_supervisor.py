@@ -189,6 +189,46 @@ class DigestTest(unittest.TestCase):
                 self.assertNotIn(bad, text)
             self.assertNotIn("retry", text.split("Allowed now", 1)[1].split("\n")[1])
 
+    def test_boundary_finds_a_queued_next_message(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = evidence_task(home)
+            s = task["steps"][0]
+            chain = lambda: tasks.read_chain(home, task)
+            tasks.log(home, task["id"], [tasks._line(120.0, s, "task:running", "task:waiting", "choose next step")])
+            self.assertEqual(supervisor.boundary(task, chain())["trigger"], "choose_next")  # none without the message
+            mid = "abcdef12-0000-4000-8000-000000000000"
+            task["messages"] = [{"id": mid, "mode": "next", "status": "queued", "text": "verify only 340 px"}]
+            self.assertEqual(supervisor.boundary(task, chain())["trigger"], "choose_next")  # no chain line names it yet
+            line = {"ts": 150.0, "step": 1, "from": "waiting", "to": "waiting", "session": "",
+                    "why": "fred: next-step message abcdef12"}
+            tasks.log(home, task["id"], [line])
+            found = supervisor.boundary(task, chain())
+            self.assertEqual((found["trigger"], found["line"]["why"]), ("message", line["why"]))
+            self.assertEqual(found["event"], supervisor.event_id(found["line"]))
+            for status in ("dispatched", "cancelled"):  # claimed or cancelled: the plain boundary again
+                task["messages"][0]["status"] = status
+                self.assertEqual(supervisor.boundary(task, chain())["trigger"], "choose_next")
+            task["messages"][0].update(status="queued", mode="queued")  # guidance is not a next-step message
+            self.assertEqual(supervisor.boundary(task, chain())["trigger"], "choose_next")
+            task["messages"][0]["mode"] = "next"
+            task["supervisor"]["paused"] = True
+            self.assertIsNone(supervisor.boundary(task, chain()))
+            task["supervisor"]["paused"] = False
+            # a finished manual task
+            task.update(state="done", why="marked done by Fred", owner="fred")
+            self.assertEqual(supervisor.boundary(task, chain())["trigger"], "message")
+            task["progression"] = "automatic"
+            self.assertNotEqual((supervisor.boundary(task, chain()) or {}).get("trigger"), "message")
+
+    def test_digest_carries_fred_next(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = evidence_task(home)
+            text = supervisor.digest(home, task, context(task, triggers=["message"], fred_next="verify the 340 px case"))
+            self.assertIn("Fred asks for the next step: verify the 340 px case", text)
+            self.assertNotIn("Fred asks for the next step", supervisor.digest(home, task, context(task)))
+            long = supervisor.digest(home, task, context(task, fred_next="y" * 3000))
+            self.assertNotIn("y" * (tasks.STEP_GOAL_MAX + 1), long)
+
     def test_utf8_cap_whole_blocks_and_missing_evidence(self):
         with tempfile.TemporaryDirectory() as home:
             task = evidence_task(home)

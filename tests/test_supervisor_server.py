@@ -1817,9 +1817,127 @@ class LifecycleAcceptanceTest(test_server.TaskServerTest):
         self.assertEqual(self.hub.usage_report()["supervisor"]["today"]["runs"], 3)
 
 
+class NextMessageTest(DispatchTest):
+    """Plan 48: Fred's next-step message wakes the supervisor once and authorizes the one add_next_step it returns."""
+
+    TEXT = "verify only the 340 px case, then finish"
+
+    def at_boundary(self, tid="20260101-000000-abcd"):
+        tid = self.supervised_task(tid)
+        task = self.hub.tasks[tid]
+        tasks.write_note(self.folder, task, task["steps"][0],
+                         "## Goal\ngoal\n## Findings\n- f\n## Files touched\n- (none)\n## Troubleshooting\n- (none)\n"
+                         "## Open questions\n- (none)\n## Next\n- verify")
+        return tid
+
+    def say(self, tid, text=None, rid="a" * 32):
+        code, body = self.hub.task_message({"task": tid, "text": text or self.TEXT, "request_id": rid,
+                                            "target": tasks.message_target(self.hub.tasks[tid])})
+        self.assertEqual(code, 200, body)
+        return body["message"]
+
+    def run_wake(self, tick=30.0):
+        self.tick(tick)
+        self.drain()
+
+    def test_message_wake_adds_the_step_without_approve(self):
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(ADD, instructions="the model's own words"), cost=0.001, model="haiku",
+                           turns=2, error="")
+        self.say(tid)
+        sup = self.hub.tasks[tid]["supervisor"]
+        epoch = sup["epoch"]
+        with mock.patch.object(self.hub, "request_next", wraps=self.hub.request_next) as request:
+            self.run_wake()
+        self.assertEqual(request.call_count, 1)
+        req, kw = request.call_args.args[0], request.call_args.kwargs
+        self.assertEqual((req["instructions"], req["kind"], kw), (self.TEXT, "verify", {"origin": "supervisor"}))
+        self.assertIn(self.TEXT, self.calls[0]["prompt"])  # the pass read his words
+        task = self.hub.tasks[tid]
+        self.assertEqual(len(task["steps"]), 2)
+        self.assertEqual((task["supervisor"]["auto_steps"], task["supervisor"]["epoch"]), (0, epoch))
+        self.assertEqual(task["messages"][0]["status"], "dispatched")
+        self.assertIsNone(task["supervisor"]["pending"])
+        whys = [r["why"] for r in tasks.read_chain(self.folder, task)]
+        self.assertTrue(any(w.startswith("supervisor: dispatched add_next_step") and w.endswith("by fred (message))")
+                          for w in whys), whys)
+        outcome = [r for r in supervisor.read_log(self.folder, tid) if r.get("phase") == "outcome"]
+        self.assertEqual([r["status"] for r in outcome], ["dispatched"])
+
+    def test_message_wake_other_decision_waits(self):
+        tid = self.at_boundary()
+        self.answer = dict(decision={"decision": "finish", "reason": "verified", "confidence": "high", "for_fred": ""},
+                           cost=0.001, model="haiku", turns=2, error="")
+        self.say(tid)
+        with mock.patch.object(self.hub, "request_next") as request, mock.patch.object(self.hub, "task_lever") as lever:
+            self.run_wake()
+        self.assertEqual((request.call_count, lever.call_count), (0, 0))
+        task = self.hub.tasks[tid]
+        self.assertEqual(task["supervisor"]["pending"]["status"], "suggest")
+        self.assertEqual(task["supervisor"]["pending"]["decision"]["decision"], "finish")
+        self.assertEqual(len(task["steps"]), 1)
+
+    def test_message_supersedes_a_pending_suggestion(self):
+        tid = self.at_boundary()
+        self.pending(tid, ADD)
+        self.say(tid)
+        self.assertIsNone(self.hub.tasks[tid]["supervisor"]["pending"])
+        with mock.patch.object(self.hub, "request_next") as request:
+            code, _ = self.hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})
+        self.assertEqual((code, request.call_count), (409, 0))
+
+    def test_message_wake_recovered_once_after_restart(self):
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
+        self.say(tid)
+        hub = self.restarted()  # the claim never happened: R1 finds the queued message from the saved files
+        self.now = 0.0
+        hub._supervisor_tick()
+        self.assertEqual(hub.wakes[tid]["triggers"], ["message"])
+        for at in range(20, 300, 10):
+            self.now = float(at)
+            hub._supervisor_tick()
+            hub._supervisor_tick()
+        for t in hub.sup_threads:
+            t.join(10)
+        self.assertEqual([c["task"] for c in self.calls], [tid])
+        self.assertEqual(len(hub.tasks[tid]["steps"]), 2)
+        self.assertEqual(hub.tasks[tid]["messages"][0]["status"], "dispatched")
+
+    def test_message_wake_respects_live_gates(self):
+        # a Fable hold on the added step keeps plan 44's held path: the step is added and waits for Fred
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(ADD), cost=0.001, model="haiku", turns=2, error="")
+        self.say(tid)
+        with mock.patch.object(self.hub, "request_next", return_value=(
+                200, {"task": tid, "step": 2, "request_id": "x", "status": "held"})) as request:
+            self.run_wake()
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "dispatched")
+        # guidance queued for a running step still blocks the pass
+        other = self.at_boundary("20260101-000000-eeee")
+        self.say(other)
+        self.hub.tasks[other]["messages"].append({"id": "g", "status": "queued", "mode": "queued"})
+        before = len(self.calls)
+        for at in range(40, 400, 20):
+            self.tick(float(at))
+        self.drain()
+        self.assertEqual(len(self.calls), before)
+        self.assertIn(other, self.hub.wakes)
+        self.assertEqual(self.hub.tasks[other]["messages"][0]["status"], "queued")  # not claimed, not lost
+
+    def test_stop_between_message_and_claim_sends_nothing(self):
+        tid = self.at_boundary()
+        self.say(tid)
+        self.hub.task_lever(tid, "done")
+        self.run_wake()
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "cancelled")
+
+
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
 for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
-              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest):
+              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name

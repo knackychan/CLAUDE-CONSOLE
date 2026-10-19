@@ -1,9 +1,10 @@
 """Task guidance uses real HTTP and the fake runner; the scheduler is advanced explicitly."""
 import json
 import threading
+import time
 from unittest import mock
 
-from console import plan, server, tasks
+from console import plan, server, supervisor, tasks
 from tests.test_server import TaskServerTest as _TaskServerTest
 
 
@@ -273,6 +274,91 @@ class TaskMessageTest(_TaskServerTest):
         saved = tasks.load(self.folder, task['id'])
         self.assertEqual(saved['messages'][0]['status'], 'failed')
         self.assertIn('file missing', saved['messages'][0]['error'])
+
+    # -- plan 48: the next-step message ------------------------------------------------------------------
+
+    def boundary_task(self, n=1, done=False, mode=None):
+        """A supervised manual task at its choose-next boundary (or finished), saved and loaded in the hub."""
+        task = tasks.new_task(str(self.project), "proj", "Sup", "goal", tasks.plan_steps(
+            [{"kind": "scout", "goal": "look"}], 6), "normal", {}, "", "auto", 100.0, id_=f"20260101-00000{n}-abcd")
+        task["supervisor"] = supervisor.initial(self.hub.cfg, str(self.project), 100.0, mode)
+        task["progression"] = "manual"
+        s1 = task["steps"][0]
+        s1.update(state="done", session="s1", ended=100.0, dir="01-scout", model="haiku", effort="low", attempts=[
+            {"session": "s1", "cost": 0.1, "started": 90.0, "ended": 100.0, "why": "", "final": True}])
+        task.update(state="waiting", owner="fred", why="choose next step", current=1, last_good=1)
+        lines = [tasks._line(100.0, s1, "running", "done", ""),
+                 tasks._line(100.0, s1, "task:running", "task:waiting", "choose next step")]
+        if done:
+            task.update(state="done", why="marked done by Fred")
+            lines.append(tasks._line(101.0, s1, "task:waiting", "task:done", "marked done by Fred"))
+        tasks.save(self.folder, task)
+        tasks.log(self.folder, task["id"], lines)
+        self.hub.tasks[task["id"]] = task
+        return task["id"]
+
+    def test_boundary_message_is_next_mode(self):
+        for done in (False, True):
+            with self.subTest(done=done):
+                tid = self.boundary_task(done=done)
+                got = self.hub.message_availability(self.hub.tasks[tid])
+                self.assertEqual((got["mode"], got["reason"], got["attachments"]), ("next", "", False))
+                self.assertIn("without Approve", got["timing"])
+        for done in (False, True):
+            with self.subTest(off=done):
+                tid = self.boundary_task(n=2 + done, done=done, mode="off")
+                got = self.hub.message_availability(self.hub.tasks[tid])
+                self.assertEqual(got["reason"], "Supervisor off. Use Add step on a model in the task menu.")
+                self.assertNotEqual(got["mode"], "next")
+
+    def test_next_message_saves_wakes_once_and_holds_nothing(self):
+        tid = self.boundary_task()
+        before = len(self.chain(tid))
+        status, data = self.message(tid, "verify only the 340 px case")
+        self.assertEqual(status, 200, data)
+        self.assertEqual((data["message"]["mode"], data["message"]["status"]), ("next", "queued"))
+        self.assertEqual(tasks.load(self.folder, tid)["messages"][0]["mode"], "next")
+        lines = self.chain(tid)[before:]
+        self.assertEqual([line["why"] for line in lines], ["fred: next-step message " + "a" * 8])
+        self.assertEqual(self.hub.wakes[tid]["triggers"], ["message"])
+        events = list(self.hub.wakes[tid]["events"])
+        self.assertEqual(len(events), 1)
+        again = self.message(tid, "verify only the 340 px case")
+        self.assertEqual(again[1]["message"]["id"], "a" * 32)
+        self.assertEqual((self.hub.wakes[tid]["events"], len(self.chain(tid)) - before), (events, 1))
+        task = self.hub.tasks[tid]
+        self.assertEqual(tasks.pending_messages(task), [])  # a next-step message is not guidance
+        self.assertEqual([m["id"] for m in tasks.next_messages(task)], ["a" * 32])
+        self.hub.wakes[tid]["due"] = 0.0  # the supervisor admits the wake: nothing holds it
+        answer = {"decision": {"decision": "wait", "reason": "r", "confidence": "low", "for_fred": ""},
+                  "cost": 0.001, "model": "haiku", "turns": 1, "error": ""}
+        with mock.patch.object(supervisor, "run", return_value=answer):
+            self.assertEqual(self.hub._supervisor_tick(), [tid])
+            for t in list(self.hub.sup_threads):
+                t.join(10)
+        self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "dispatched")
+
+    def test_next_message_refuses_files_and_long_text(self):
+        tid = self.boundary_task()
+        self.assertEqual(self.message(tid, files=[{"name": "a.txt", "data": "YQ=="}])[0], 400)
+        self.assertEqual(self.message(tid, "x" * 1001)[0], 400)
+        self.assertFalse(tasks.next_messages(self.hub.tasks[tid]))
+        self.assertEqual(self.message(tid, "x" * 1000)[0], 200)
+
+    def test_stop_and_finish_cancel_a_queued_next_message(self):
+        tid = self.boundary_task()
+        self.assertEqual(self.message(tid)[0], 200)
+        code, body = self.call("/api/task/done", {"task": tid})
+        self.assertEqual(code, 200, body)  # a next-step message is not guidance: Finish is not refused for it
+        message = self.hub.tasks[tid]["messages"][0]
+        self.assertEqual((message["status"], message["error"]), ("cancelled", "the task was finished"))
+        other = self.boundary_task(n=2)
+        self.assertEqual(self.message(other)[0], 200)
+        with self.hub.tlock:
+            self.hub._supervisor_fred(self.hub.tasks[other], time.time(), "stop")
+        message = self.hub.tasks[other]["messages"][0]
+        self.assertEqual((message["status"], message["error"]), ("cancelled", "the task was stopped"))
+        self.assertNotIn(other, self.hub.wakes)
 
 
 for _name in dir(_TaskServerTest):
