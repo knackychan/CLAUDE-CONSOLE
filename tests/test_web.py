@@ -1430,5 +1430,83 @@ class OpenedTaskTest(unittest.TestCase):
         self.assertNotIn("supmode", nosup)
 
 
+@unittest.skipUnless(NODE, "Node is not installed")
+class RecoveryBoxTest(unittest.TestCase):
+    """Plan 48 section 7: the attention area says what definitely finished, what was cut and what Fred can do, from
+    GET /api/task `recovery`, levers and the uncertain records; it adds no button."""
+    setup = TaskOverviewTest.setup + """t.state = 'stuck'; t.why = 'the run did not finish cleanly (after one retry)';
+      t.current = 2; t.steps[1].state = 'failed'; t.steps[1].session = 's2';
+      d.levers = {retry: '', stepdone: '', resume: 'not paused', stop: 'task is stuck'};
+      d.recovery = {done: {step: 1, kind: 'chat', how: 'finished', verdict: '', handoff: '01-chat/handoff.md', facts: '01-chat/facts.md', ended: 50},
+        cut: {step: 2, kind: 'code', attempt: 2, cause: 'interrupted', why: 'the run did not finish cleanly', ended: 90}, orphan: null};
+      row.state = 'stuck'; """
+
+    def test_recovery_box_names_done_and_cut(self):
+        html = render(self.setup + "attentionArea(t, d, row)")
+        box = html.split('class="askbox recovery"', 1)[1]
+        self.assertIn('data-bpick="s1" data-btask="t">Step 01 chat</button> finished with a saved handoff.', box)
+        self.assertIn('data-bpick="s2" data-btask="t">Step 02 code</button>, attempt 2, was interrupted: the run ended without a result (a restart or a crash).', box)
+        self.assertIn("Its file edits or other actions may already have happened. Nothing is undone", box)
+        self.assertIn("Git and test facts are as recorded when step 01 ended, not a fresh check.", box)
+        self.assertLess(html.index("askbox recovery"), html.index("Stuck"))  # above the stuck box
+        first = render(self.setup + "d.recovery.done = null; attentionArea(t, d, row)")
+        self.assertIn("No completed step recorded.", first)
+        self.assertNotIn("not a fresh check", first)
+        for cause, text in (("stopped", "was stopped."), ("unknown", "did not finish; the cause is not recorded."),
+                            ("failed", "failed: it hit the turn cap (40 turns)."), ("timeout", "failed: it hit the turn cap (40 turns).")):
+            with self.subTest(cause=cause):
+                out = render(self.setup + f"d.recovery.cut.cause = '{cause}'; d.recovery.cut.why = 'it hit the turn cap (40 turns)'; attentionArea(t, d, row)")
+                self.assertIn("attempt 2, " + text, out)
+        verdict = render(self.setup + "d.recovery.done.verdict = 'PASS'; d.recovery.done.kind = 'verify'; attentionArea(t, d, row)")
+        self.assertIn("Step 01 verify</button> finished: VERDICT PASS.", verdict)
+        bare = render(self.setup + "d.recovery.done.handoff = ''; attentionArea(t, d, row)")
+        self.assertIn("finished; no handoff was saved.", bare)
+        accepted = render(self.setup + "d.recovery.done.how = 'accepted'; attentionArea(t, d, row)")
+        self.assertIn("was accepted by you as it was on disk.", accepted)
+        long = render(self.setup + "d.recovery.cut.why = '<b>' + 'x'.repeat(400); attentionArea(t, d, row)")
+        self.assertIn("&lt;b&gt;", long)  # esc(): a reason is text
+        self.assertEqual(render(self.setup + "d.recovery = null; t.state = 'running'; t.why = ''; t.steps[1].state = 'running'; attentionArea(t, d, row)"), "")
+
+    def test_recovery_box_offers_only_open_levers(self):
+        html = render(self.setup + "attentionArea(t, d, row)")
+        self.assertIn("Retry on a model (task menu) runs step 02 again; attempt 2&#39;s edits stay.", html)
+        self.assertIn("Accept step result (task menu) marks step 02 done with the files as they are now.", html)
+        self.assertNotIn("Resume lets", html)
+        self.assertNotIn("data-tact", html.split('class="askbox recovery"', 1)[1].split("</div>", 1)[0])  # no new button
+        none = render(self.setup + "d.levers = {retry: 'still working: wait until it stops', stepdone: 'x', resume: 'x', stop: 'x'}; attentionArea(t, d, row)")
+        self.assertIn("No recovery action is open: still working: wait until it stops.", none)
+        self.assertNotIn("Retry on a model (task menu)", none)
+        orphan = render(self.setup + """t.state = 'running'; t.why = ''; t.steps[1].state = 'running';
+          d.recovery = {done: d.recovery.done, cut: null, orphan: {step: 2, attempt: 2}};
+          d.levers = {retry: 'task is running', stepdone: 'x', resume: 'not paused', stop: ''}; attentionArea(t, d, row)""")
+        self.assertIn("Step 02&#39;s run from an earlier service is still running; nothing else runs on this step until it ends.", orphan)
+        self.assertIn("Stop (bar) ends that run.", orphan)
+        self.assertNotIn("Retry on a model (task menu)", orphan)
+        self.assertNotIn("No recovery action is open", orphan)
+
+    def test_recovery_box_points_to_uncertain_without_repeating_it(self):
+        extra = """d.supervisor = {mode: 'suggest', pending: {wake: 4, status: 'uncertain', decision: null, error: 'Service restarted during dispatch; it will not be replayed.', can_approve: false, can_reject: true}, audit: []};
+          t.messages = [{id: 'm', status: 'uncertain', text: 'carry on', target: {step: 2, attempt: 2}, error: 'Service restarted during dispatch.'}]; """
+        html = render(self.setup + extra + "attentionArea(t, d, row)")
+        self.assertIn("The supervisor&#39;s wake 4 dispatch has an unknown outcome (card below). It is never replayed; Dismiss does not mean it failed.", html)
+        self.assertIn("Your message to step 02 has an unknown delivery (message box). It is never replayed; Dismiss does not mean it was not delivered.", html)
+        self.assertNotIn("carry on", html)  # the composer shows the message
+        self.assertNotIn("Service restarted during dispatch", html)  # the card shows the error
+        self.assertNotIn("supreject", html)
+        alone = render(self.setup + extra + "d.recovery = null; t.state = 'waiting'; t.why = ''; attentionArea(t, d, row)")
+        self.assertIn("askbox recovery", alone)
+        self.assertNotIn("No completed step recorded", alone)
+        off = render(self.setup + extra + "d.supervisor.mode = 'off'; attentionArea(t, d, row)")
+        self.assertNotIn("wake 4", off)
+
+    def test_recovery_refresh_keeps_draft_and_focus(self):
+        html = render(self.setup + "taskDraftFor(t).text = 'half a thought'; inspTask(t, d, row)")
+        body = html.split('class="ipane"', 1)[1]
+        self.assertLess(body.index("askbox recovery"), body.index("Route"))
+        self.assertIn("half a thought</textarea>", html)
+        self.assertNotIn("<textarea", html.split('class="askbox recovery"', 1)[1].split("</div>", 1)[0])
+        self.assertNotIn("<input", html.split('class="askbox recovery"', 1)[1].split("</div>", 1)[0])
+
+
 if __name__ == "__main__":
     unittest.main()
