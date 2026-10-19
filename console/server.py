@@ -3817,15 +3817,20 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
     sup = t.get("supervisor") if isinstance(t.get("supervisor"), dict) else {}
     pending = sup.get("pending") if isinstance(sup.get("pending"), dict) else None
     attention = bool(pending and pending.get("status") in ("suggest", "held", "escalate", "refused", "uncertain"))
+    say = ""
     if attention:  # plan 44: a suggestion, escalation or uncertain dispatch needs Fred, even on a done task
         group = "needs"
+        decision = pending.get("decision") if isinstance(pending.get("decision"), dict) else {}  # plan 48: the row names it
+        say = redact.clip(f"{decision.get('decision') or pending['status']}: "
+                          f"{decision.get('reason') or pending.get('error') or ''}", 120)
     if t.get("chat") and r is not None:  # plan 30: a chat task sits where its session would (needs, replied, working)
         group = r["group"] if r["group"] in ("needs", "replied", "working") else "working" if r["group"] == "empty" else "done"  # stale, verified, idle: its turn is over
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
             "label": tasks.label(t["id"]), "slug": t.get("slug") or "", "chat": bool(t.get("chat")),
             "prep": prep_row(t),  # plan 30: step 0
             "group": group, "asks": asks, "hand_off": hand_off,
-            "supervisor": {"mode": sup.get("mode", ""), "attention": attention, "wake": sup.get("wakes", 0)},
+            "supervisor": {"mode": sup.get("mode", ""), "attention": attention, "wake": sup.get("wakes", 0),
+                           "say": say},
             "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
             "why": t["why"], "updated": t["updated"], "effort": t["effort"],
             "cost": round(sum(tasks.step_cost(s) for s in t["steps"]), 4),
