@@ -2848,9 +2848,10 @@ function taskHtml(t, o = {}) {
   const cls = ["v-tk", tn === "y" || tn === "r" ? tn : "", t.id === boardTask || t.state === "running" ? "act" : "", done ? "done" : ""].filter(Boolean).join(" ");
   const chk = o.select ? `<input type="checkbox" class="chk" data-check="${esc(t.id)}" aria-label="${esc("Select " + t.title)}"${selected.has(t.id) ? " checked" : ""}>` : "";
   const [why, wt] = statusLine(t);
+  const open = t.id === boardTask || (t.state === "running" && !t.chat);  // Fred 2026-10-20: running and opened tasks show their steps
   return `<div class="${cls}"><div class="v-th${picked ? " picked" : ""}${enterClass("t" + t.id, tn === "y" || tn === "r")}" data-bpick="t" data-btask="${esc(t.id)}" tabindex="0" role="button" title="${esc(t.project)} · effort ${esc(t.effort)}">
     <div class="l1">${chk}<span class="st ${tn}">${taskMark({ ...t, state: shown })}</span><span class="t">${esc(t.title)}</span></div>
-    <div class="l2"><span class="why${wt ? " " + wt : ""}" title="${esc(why)}">${esc(why)}</span><span class="cost">${money(t.cost)}</span></div></div></div>`;
+    <div class="l2"><span class="why${wt ? " " + wt : ""}" title="${esc(why)}">${esc(why)}</span><span class="cost">${money(t.cost)}</span></div></div>${open && t.steps.length ? `<div class="v-subs">${stepRows(t)}</div>` : ""}</div>`;
 }
 function stepRows(t) {
   const steps = t.steps, picked = t.id === boardTask ? boardPick : "";

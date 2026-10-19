@@ -1185,11 +1185,24 @@ class BoardListTest(unittest.TestCase):
                 self.assertTrue(line[0].startswith(text), line)
                 self.assertEqual(line[1], tone, line)
                 html = render(self.setup + f"taskHtml({expr})")
-                self.assertEqual(html.count("data-bpick="), 1)
                 self.assertEqual(html.count('data-bpick="t"'), 1)
-                for gone in ("v-sr", "v-subs", "v-lab", "v-more"):  # no step rows, no label chip, no folding
+                for gone in ("v-lab", "v-more"):  # no label chip, no folding control
                     self.assertNotIn(gone, html)
                 self.assertIn(line[0].split(" · ")[0], html)
+                # Fred 2026-10-20: a running task (not a chat) unfolds its step rows; the others stay one line
+                if name == "running":
+                    self.assertEqual(html.count('class="v-subs"'), 1)
+                    self.assertEqual(html.count('data-bpick="s'), 3)
+                else:
+                    self.assertNotIn("v-subs", html)
+                    self.assertEqual(html.count("data-bpick="), 1)
+
+    def test_the_opened_task_unfolds_its_steps_in_the_list(self):
+        html = render(self.setup + "boardTask = 'a5'; boardPick = 's2'; taskHtml(mkt({id: 'a5', state: 'done', group: 'done'}))")
+        self.assertEqual(html.count('class="v-subs"'), 1)
+        self.assertIn('picked" data-bpick="s2"', html)
+        html = render(self.setup + "taskHtml(mkt({id: 'a5', state: 'done', group: 'done'}))")
+        self.assertNotIn("v-subs", html)
 
     def test_three_groups_and_replied_chats_join_running(self):
         html = render(self.setup + """snap.tasks = [mkt({id: 'n1', state: 'waiting', group: 'needs', asks: 'Which?'}), tk0,
