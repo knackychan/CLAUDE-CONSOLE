@@ -1,6 +1,7 @@
 # Plan 48 - The Board in three moments: Prompt, Run supervised, Supervise
 
-Status: written 2026-10-19, decisions D1-D6 taken by Fred the same day (all as recommended). No code changed.
+Status: written 2026-10-19, decisions D1-D6 taken by Fred the same day (all as recommended). Steps 1 to 7 done
+2026-10-19 (section 5); the headless check and Fred's live check are open.
 Design: [BRAINSTORM 7.6](../BRAINSTORM.md) (control table, decisions). Mock:
 [design/rework/explored/e-prompt-run-supervise.html](../design/rework/explored/e-prompt-run-supervise.html), explored;
 Fred promotes it to `design/rework/locked/` before step 5 starts. Lands on plans 36, 42, 44 (backend) and 47.
@@ -269,6 +270,27 @@ BRAINSTORM.md and `web/app.js`).
 6. The opened task (3.4); update the named web tests; `tests/live_task_chat_check.py` follows the menu for Add
    step and Retry. `node --check web/app.js`, full suite.
 7. Docs (3.5).
+
+Done 2026-10-19: step 1 `6352dce`, step 2 `16e9984`, step 3 `5e28671`, step 4 `e81ccfb`, review fixes D11 to D15
+`c2c7a4e`, step 5 `ed2c218`, step 6 `a75adf5`, step 7 the docs commit after it. The mock stayed in `explored/`;
+steps 5 and 6 were built against it.
+
+Step 6 choices made without a plan decision (Fred confirms or changes them):
+
+- Forms opened from the task menu (Hand off, Add step on a model, Retry on a model) render at the top of the task
+  body, above the attention area and the supervisor card.
+- The opened task's breadcrumb is "Tasks" only.
+- The supervisor card shows the wake, time and cost but not the pass model: GET /api/task does not send it.
+- Task menu buttons carry no `menuitem` role, and their hints are `aria-hidden`.
+- `tests/live_task_chat_check.py`: the "Latest result" assertion became a route check, and its Add step check
+  uses a new one-step task.
+
+Still open:
+
+- The headless check below (type, Enter, preparing then ready, Start, suggest, Approve, a next-step message at
+  the boundary, 900 / 400 / 340 px, dark and light, reduced motion, 130 % text). No screenshot of the opened task
+  at 340 px was taken yet.
+- Fred's live check.
 
 Headless check (fake claude, scratch home, as plans 39 and 42): type, Enter, the row says preparing then ready,
 Start, the supervised task runs step 01, the fake supervisor suggests, Approve, step 02 runs; type a next-step

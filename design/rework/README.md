@@ -22,7 +22,7 @@ through its views; each page has the window mock on the left and its reasoning o
 | [explored/c-rail-and-focus.html](explored/c-rail-and-focus.html) | https://claude.ai/artifact/9x9mZUKL84WztY2xpRS9b4 | C: kept the session rail, focus pane, burn rate and agent lanes |
 | [explored/d-cells-drawer.html](explored/d-cells-drawer.html) | https://claude.ai/artifact/SqX2KpJqpnV6Q7FA7zhVzn | D: locked as [locked/cells-drawer.html](locked/cells-drawer.html) (this file is the proposal that was reviewed). Console Cells without the rail: A's list as home, C's focus content on a full-width session page, a searchable project picker in the header |
 | [explored/ca-rings-and-pill.html](explored/ca-rings-and-pill.html) | https://claude.ai/artifact/5jcCWoKfExdC7ncBJjvgCL | C + A merge; Console Cells is its alternate. Written before the anti-slop pass (has an eyebrow label, no sample-data note) |
-| [explored/e-prompt-run-supervise.html](explored/e-prompt-run-supervise.html) | - | Plan 48 proposal (2026-10-19, BRAINSTORM 7.6): the Board in three moments (Prompt, Run supervised, Supervise) on the Cells Board tokens: one status line per task, the card with one Start, the opened task with route, gauge and the supervisor's last decision, one message box and one menu. Waits for Fred to lock it |
+| [explored/e-prompt-run-supervise.html](explored/e-prompt-run-supervise.html) | - | Plan 48 proposal (2026-10-19, BRAINSTORM 7.6): the Board in three moments (Prompt, Run supervised, Supervise) on the Cells Board tokens: one status line per task, the card with one Start, the opened task with route, gauge and the supervisor's last decision, one message box and one menu. Built in plan 48 steps 4 to 6 while still explored; waits for Fred to lock it |
 
 ## Notes for the build
 
