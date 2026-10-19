@@ -32,6 +32,9 @@ TUNING = {
     "brief_model": ("passes", "rung", None, None),
     "review_model": ("passes", "rung", None, None),
     "default_model": ("passes", "rung", None, None),
+    "planner_model": ("passes", "rung", None, None),  # plan 47: the planner pass, Claude only (CLAUDE_ONLY)
+    "planner_timeout_s": ("passes", "s", 10, 600),
+    "planner_max_cost": ("passes", "usd", 0.05, 5),
     # plan 44: the supervisor's own numeric/rung settings (mode and map are enum/map, in KEYS but not TUNING)
     "supervisor_debounce_s": ("supervisor", "s", 0, 300),
     "supervisor_parallel": ("supervisor", "steps", 1, 4),
@@ -49,7 +52,7 @@ KEYS = tuple(TUNING) + ("kinds", "tiers", "supervisor_mode", "supervisor_project
 SUPERVISOR_MODES = ("off", "suggest", "auto")
 SUPERVISOR_MODELS = {"supervisor_model": "haiku", "supervisor_stuck_model": "sonnet"}  # never opus/fable/external
 WHOLE = frozenset({"steps", "s", "turns", "kb", "parts", "words", "tokens"})
-CLAUDE_ONLY = frozenset({"prep_model", "brief_model", "review_model"})  # their passes run on the Claude CLI
+CLAUDE_ONLY = frozenset({"prep_model", "brief_model", "review_model", "planner_model"})  # their passes run on the Claude CLI
 WINDOWS = ("day_usd", "week_usd", "month_usd")
 KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 MAX_RUNGS = 12  # per tier

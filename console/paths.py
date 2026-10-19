@@ -22,6 +22,9 @@ DEFAULTS = {
     "claude_exe": "",
     "prep_model": "haiku",
     "prep_timeout_s": 180,
+    "planner_model": "opus",  # plan 47 D4: the pass that reviews a Prep card's scope and writes its steps; Claude only
+    "planner_timeout_s": 120,
+    "planner_max_cost": 0.5,  # plan 47 D6: --max-budget-usd of one planner pass
     "default_model": "sonnet",
     "default_effort": "medium",
     "handoff_after_followups": 2,
