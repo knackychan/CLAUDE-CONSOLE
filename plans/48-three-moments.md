@@ -496,8 +496,14 @@ Continue clears it), web tests red `8798ae3`, web `388f287` (`recoveryBox` at th
   900 / 400 / 340 px, dark and light, a 400-character reason with unbreakable artifact names: no horizontal scroll,
   the box inside the viewport, the draft, caret and focus kept across a redraw. No page error (the browser's own
   favicon.ico 404 is ignored).
-- Seen, not changed (not section 7): on a stuck task the composer says "Saved guidance. Use Resume or Retry
-  explicitly to deliver it." with no guidance queued, and the bar shows Resume.
+- Fixed after Fred asked (`03d13ac`): on a stuck task the bar showed Resume, which posted /api/continue into the
+  step's session; `_pull` resumes a task only from stopped, so that turn ran without the task seeing it.
+  `Hub.levers` now turns `continue` off for the current step of a stuck non-chat task ("the step is stuck: Retry on
+  a model in the task menu"), so the button is gone. The composer's "Saved guidance. Use Resume or Retry explicitly
+  to deliver it." became "Sending saves this guidance; nothing runs. Retry asks whether to carry it into the next
+  run." (stopped, stuck, handed) or "Sending saves this guidance; it is delivered after you Resume." (paused).
+  1089 tests ran: one flaky assertion in `test_cut_after_done_names_both` (the saved why may add "(no HANDOFF
+  block)" under load) was loosened; recovery and web tests then OK, restart check PASS.
 
 Still open: Fred's live check (one real interrupted step: quit the tray during a step, start it again, open the
 task). The rest of plan 48 keeps its own open checks (section 5).
