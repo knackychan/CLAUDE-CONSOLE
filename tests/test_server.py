@@ -258,7 +258,8 @@ class RunServerTest(unittest.TestCase):
         row = self.session(sid)
         self.assertEqual((row["source"], row["title"], row["route"]),
                          ("window", "Fix add() in calc.py", "mechanical"))
-        self.assertEqual((row["prep_model"], row["prep_cost"], row["prep_turns"]), ("haiku", 0.03, 5))
+        self.assertEqual((row["prep_model"], row["prep_turns"]), ("haiku", 5))
+        self.assertAlmostEqual(row["prep_cost"], 0.05)  # plan 47 D6: the planner cost sits inside the prep cost
         self.assertEqual(self.hub.snapshot()["preps"], [])  # the run took the Prep card off the strip
         end = time.time() + 15
         while time.time() < end and self.session(sid)["run_live"]:

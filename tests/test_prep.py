@@ -90,7 +90,8 @@ class PrepTest(unittest.TestCase):
             self.assertEqual(card["route"], {"type": "mechanical", "reasoning": "low", "volume": "low",
                                              "model": "sonnet", "effort": "low"})
             self.assertEqual(card["reason"], "one-line fix with a clear spec")
-            self.assertEqual((card["model"], card["cost"], card["turns"]), ("haiku", 0.03, 5))
+            self.assertEqual((card["model"], card["turns"]), ("haiku", 5))
+            self.assertAlmostEqual(card["cost"], 0.05)  # plan 47 D6: Prep 0.03 plus the planner 0.02
             self.assertTrue(card["prompt"].startswith("Goal: Fix add() in calc.py\nWhere: calc.py:2"))
             self.assertEqual(prep.load(Path(tmp), card["id"])["raw"], "fix the add function")
             self.assertIsNone(prep.load(Path(tmp), "../x"))

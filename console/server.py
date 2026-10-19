@@ -3990,15 +3990,6 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.hub.cfg
         card = prep.load(self.hub.folder, body.get("prep")) if body.get("prep") else None
         files = attach.parse(body.get("files")) or self.hub.prep_files((card or {}).get("id") or body.get("files_from"))
-        if card and (card.get("route") or {}).get("reasoning") == "high":
-            # plan 46 D3: a hard card is never one chat: it runs as its design -> code -> verify task (the card's
-            # steps, or the ones hard_steps adds); Raw (no card) is the way to force one model
-            steps = tasks.hard_steps([{"kind": s["kind"], "goal": s["goal"]} for s in card.get("steps") or []
-                                      if s["kind"] != "verify"], card.get("demand"), cfg["task_max_steps"])
-            try:
-                return self._json({"session": "", "task": self.hub.create_task(card, steps, "auto")})
-            except runs.RunError as exc:
-                return self._error(409, str(exc))
         auto = body.get("model") == "auto"
         model = body.get("model") or cfg["default_model"]
         balance_note = ""

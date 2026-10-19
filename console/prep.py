@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, kinds, levers, paths, redact, routing, tasks
+from . import claude_cli, kinds, levers, paths, planner, redact, routing, tasks
 
 PROMPT_FILE = kinds.SEED / "prep.md"  # plan 29: the prep kind file's repo copy (the service reads kinds.text)
 DIR = "00-prep"
@@ -124,14 +124,18 @@ def run_prep(cfg: dict, folder: Path, project_dir: str, raw: str, exe: list, pre
     if (route["model"], route["effort"]) != picked:
         fields["reason"] = (f"{fields.get('reason', '')} Demand rule: {'/'.join(picked)} -> "
                             f"{route['model']}/{route['effort']}.").strip()
-    steps = tasks.plan_steps(tasks.hard_steps(fields.get("steps") or [], {"reasoning": route["reasoning"]},
-                                              cfg["task_max_steps"]), cfg["task_max_steps"])  # the only validator
+    # plan 47: the planner reviews the card's scope and writes its steps (used as given, a design step it planned
+    # stays); when it fails, Prep's own steps stand and the card shows the error (D5)
+    plan = planner.run(cfg, exe, project_dir, {"raw": raw, "fields": fields, "route": route},
+                       kinds.text(folder, "planner"))
+    steps = tasks.plan_steps(plan["steps"] or fields.get("steps") or [], cfg["task_max_steps"])  # the only validator
     card = {
         "id": prep_id or new_id(), "ts": time.time(), "project_dir": project_dir, "raw": raw,
         "fields": fields, "prompt": format_prompt(fields), "route": fields["route"],
         "steps": steps, "demand": {"reasoning": route["reasoning"], "volume": route["volume"]},
-        "reason": fields.get("reason", ""), "cost": result["cost"], "turns": result["turns"],
+        "reason": fields.get("reason", ""), "cost": result["cost"] + (plan["cost"] or 0), "turns": result["turns"],
         "model": cfg["prep_model"], "floors": routing.floors(misses),
+        "planner": {k: plan[k] for k in ("model", "scope", "note", "cost", "turns", "error")},
     }
     save(folder, card, prompt)
     return card

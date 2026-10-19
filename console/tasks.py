@@ -47,9 +47,6 @@ CHAT = "chat"  # plan 29: a no-step card or Raw runs one chat step (tasks.chat_s
 NEXT_KINDS = ("code", "verify", "scout", "design", CHAT)  # plan 36: manual same-task steps
 EDIT_KINDS = frozenset({"edit", "code", "debug", "document", "draft"})  # a verify follows the last of them
 NO_HARD_KINDS = ("code", "debug")  # plan 46 D4: a writer never takes a hard-only (Opus-rank) rung from the pool
-READ_FIRST = ("scout", "search")
-DESIGN_GOAL = "Design the change and write the plan the writers follow."
-CODE_GOAL = "Implement the plan, with its tests."
 DISALLOW = ("Agent",)
 HEADINGS = ("## Goal", "## Findings", "## Files touched", "## Troubleshooting", "## Open questions", "## Next")
 OLD_HEADINGS = ("## Findings", "## Files touched", "## Open questions", "## Next")  # a note from before plan 23
@@ -425,25 +422,6 @@ def plan_steps(proposed, max_steps: int) -> list:
             s["n"] = i + 1
     return steps
 
-
-def hard_steps(proposed, demand, max_steps: int) -> list:
-    """Plan 46: Prep's proposed steps for a hard task (demand reasoning high) with a design step in them and a
-    step that edits: the missing design goes after the leading scout / search steps, the missing code step goes
-    last, and the cap cuts the steps between. Not hard, or not a list: the dict items unchanged. Validation and the
-    verify stay plan_steps's."""
-    items = [i for i in proposed if isinstance(i, dict)] if isinstance(proposed, list) else []
-    if (demand or {}).get("reasoning") != "high":
-        return items
-    needs_code = not any(i.get("kind") in EDIT_KINDS for i in items)
-    room = max_steps - (1 if needs_code else 0)
-    if not any(i.get("kind") == "design" for i in items):
-        lead = 0
-        while lead < len(items) and items[lead].get("kind") in READ_FIRST:
-            lead += 1
-        items.insert(min(lead, max(room - 1, 0)), {"kind": "design", "goal": DESIGN_GOAL})
-    if needs_code:
-        items = items[:room] + [{"kind": "code", "goal": CODE_GOAL}]
-    return items
 
 
 def room_after(task: dict, n: int, max_steps: int) -> int:
