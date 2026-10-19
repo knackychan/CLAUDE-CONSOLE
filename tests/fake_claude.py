@@ -8,6 +8,7 @@ Prep (--json-schema): reads the prompt on stdin, prints one result object.
   (goal, findings, files, troubleshooting, questions, next); "LONG" in it gives 80 findings (over the word cap), "BROKEN"/"SLOW" as above.
   A request that starts with "You review the rules" is the rules review: one remove proposal and a summary.
   A schema with a `decision` property is the supervisor pass (plan 44): see supervisor() for its SUP-* modes.
+  A schema with a `scope` property is the planner pass (plan 47): see planner() for its PLANNER-* modes.
 Run (--input-format stream-json): per user message prints init / assistant / result.
   "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
   "DENY" in the message: the result carries one permission denial.
@@ -77,11 +78,39 @@ def supervisor(raw):
     return 3 if "SUP-EXIT" in raw else 0
 
 
+def planner(raw):
+    """Plan 47: the planner pass (its schema has a `scope` property). By default it keeps Prep's proposed steps (the
+    `- kind: goal` lines under "Prep's proposed steps") with scope ok; PLANNER-DESIGN answers scout, design, code;
+    PLANNER-BIG keeps Prep's steps with scope too_big; PLANNER-FAIL an error envelope that still reports its cost;
+    PLANNER-NOJSON prints text that is not JSON."""
+    if "PLANNER-NOJSON" in raw:
+        print("not json")
+        return 0
+    if "PLANNER-FAIL" in raw:
+        out({"type": "result", "subtype": "error_max_turns", "is_error": True, "total_cost_usd": 0.02, "num_turns": 12})
+        return 1
+    rest = raw.split("Prep's proposed steps", 1)[-1]
+    steps = [{"kind": m.group(1), "goal": m.group(2)} for m in re.finditer(r"^- ([a-z]+): (.+)$", rest, re.M)]
+    fields = {"scope": "ok", "note": "fake planner: the steps hold", "steps": steps}
+    if "PLANNER-DESIGN" in raw:
+        fields["steps"] = [{"kind": "scout", "goal": "find the add() callers"},
+                           {"kind": "design", "goal": "decide the fix and write the plan"},
+                           {"kind": "code", "goal": "fix add() and its test"}]
+    if "PLANNER-BIG" in raw:
+        fields.update(scope="too_big", note="fake planner: the request touches more than Prep read")
+    out({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.02, "num_turns": 4,
+         "result": json.dumps(fields), "structured_output": fields})
+    return 0
+
+
 def prep():
     raw = sys.stdin.read()
     try:
-        if "decision" in json.loads(arg("--json-schema")).get("properties", {}):
+        props = json.loads(arg("--json-schema")).get("properties", {})
+        if "decision" in props:
             return supervisor(raw)
+        if "scope" in props:
+            return planner(raw)
     except ValueError:
         pass
     fields = {"goal": "Fix add() in calc.py", "where": "calc.py:2", "keep": "the signature",

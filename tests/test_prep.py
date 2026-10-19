@@ -181,13 +181,54 @@ class PrepTest(unittest.TestCase):
             plain = prep.run_prep(cfg, Path(tmp), tmp, "fix the add function", FAKE)
             self.assertEqual(plain["steps"], [])
 
-    def test_hard_card_gets_design_and_code(self):
+    def test_planner_steps_replace_prep_steps(self):
+        """Plan 47: the planner's list is the card's; Prep's own steps are only its evidence."""
         with tempfile.TemporaryDirectory() as tmp:
             cfg = copy.deepcopy(paths.DEFAULTS)
-            card = prep.run_prep(cfg, Path(tmp), tmp, "THINK through the lock order", FAKE)
-            self.assertEqual([s["kind"] for s in card["steps"]], ["design", "code", "verify"])
-            card = prep.run_prep(cfg, Path(tmp), tmp, "THINK CHAIN fix add", FAKE)
+            card = prep.run_prep(cfg, Path(tmp), tmp, "CHAIN PLANNER-DESIGN fix add", FAKE)
             self.assertEqual([s["kind"] for s in card["steps"]], ["scout", "design", "code", "verify"])
+            self.assertEqual([s["n"] for s in card["steps"]], [1, 2, 3, 4])
+            self.assertEqual((card["planner"]["scope"], card["planner"]["error"], card["planner"]["model"]),
+                             ("ok", "", cfg["planner_model"]))
+            self.assertEqual(card["planner"]["turns"], 4)
+            self.assertIn("fake planner", card["planner"]["note"])
+            self.assertEqual(prep.load(Path(tmp), card["id"])["planner"], card["planner"])
+            big = prep.run_prep(cfg, Path(tmp), tmp, "CHAIN PLANNER-BIG fix add", FAKE)
+            self.assertEqual((big["planner"]["scope"], [s["kind"] for s in big["steps"]]),
+                             ("too_big", ["scout", "code", "verify"]))
+
+    def test_planner_failure_keeps_prep_steps(self):
+        """Plan 47 D5: any planner failure keeps Prep's steps through plan_steps and shows the error on the card."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = copy.deepcopy(paths.DEFAULTS)
+            for word in ("PLANNER-FAIL", "PLANNER-NOJSON"):
+                card = prep.run_prep(cfg, Path(tmp), tmp, f"CHAIN {word} fix add", FAKE)
+                self.assertEqual([s["kind"] for s in card["steps"]], ["scout", "code", "verify"], word)
+                self.assertNotEqual(card["planner"]["error"], "", word)
+            self.assertEqual(card["planner"]["scope"], "")
+            card = prep.run_prep(cfg, Path(tmp), tmp, "THINK PLANNER-FAIL through the lock order", FAKE)
+            self.assertEqual(card["steps"], [])  # a hard card whose planner failed has only Prep's list
+            self.assertNotEqual(card["planner"]["error"], "")
+
+    def test_planner_design_step_is_kept_and_not_doubled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = copy.deepcopy(paths.DEFAULTS)
+            card = prep.run_prep(cfg, Path(tmp), tmp, "THINK CHAIN PLANNER-DESIGN fix add", FAKE)
+            self.assertEqual([s["kind"] for s in card["steps"]], ["scout", "design", "code", "verify"])
+            self.assertEqual(sum(s["kind"] == "design" for s in card["steps"]), 1)
+            self.assertEqual(card["demand"]["reasoning"], "high")
+
+    def test_planner_cost_is_added(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = copy.deepcopy(paths.DEFAULTS)
+            card = prep.run_prep(cfg, Path(tmp), tmp, "CHAIN fix add", FAKE)
+            self.assertAlmostEqual(card["cost"], 0.03 + 0.02)  # Prep's 0.03 plus the fake planner's 0.02
+            self.assertAlmostEqual(card["planner"]["cost"], 0.02)
+            self.assertEqual(card["turns"], 5)  # Prep's own turns; the planner's sit in card["planner"]
+            failed = prep.run_prep(cfg, Path(tmp), tmp, "CHAIN PLANNER-FAIL fix add", FAKE)
+            self.assertAlmostEqual(failed["cost"], 0.03 + 0.02)  # a failed pass still cost its turns
+            broken = prep.run_prep(cfg, Path(tmp), tmp, "CHAIN PLANNER-NOJSON fix add", FAKE)
+            self.assertAlmostEqual(broken["cost"], 0.03)  # no envelope, no cost known
 
     def test_run_prep_routes_by_demand(self):
         with tempfile.TemporaryDirectory() as tmp:

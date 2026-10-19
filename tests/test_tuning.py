@@ -34,7 +34,7 @@ class ViewTest(unittest.TestCase):
             "brief_max_words", "brief_timeout_s", "gauge_red_tokens", "gauge_yellow_tokens", "balance_margin",
             "cache_bonus", "budget_warn_at", "daily_budget_usd", "allowances", "plan_max_kb", "plan_max_parts",
             "plan_hold", "replan_auto", "prep_model", "brief_model", "review_model", "default_model", "kinds", "tiers",
-            "user_name",
+            "user_name", "planner_model", "planner_timeout_s", "planner_max_cost",
             "supervisor_mode", "supervisor_projects", "supervisor_model", "supervisor_stuck_model",
             "supervisor_debounce_s", "supervisor_parallel", "supervisor_timeout_s", "supervisor_stall_s",
             "supervisor_max_auto_steps", "supervisor_max_retries", "supervisor_work_usd", "supervisor_task_usd",
@@ -85,6 +85,24 @@ class NumbersTest(unittest.TestCase):
                          {"brief_model": "a Claude model: this pass runs on the Claude CLI"})
         self.assertEqual(check(default_model="codex:nope")[1], {"default_model": "unknown model: codex:nope"})
         self.assertEqual(check(review_model="claude-opus-9")[1], {"review_model": "unknown model: claude-opus-9"})
+
+    def test_planner_keys(self):
+        """Plan 47 D4, D6: the planner runs the Claude CLI, bounded in seconds and dollars."""
+        clean, errors = check(planner_model="opus", planner_timeout_s=120.0, planner_max_cost=0.5)
+        self.assertEqual(errors, {})
+        self.assertEqual(clean, {"planner_model": "opus", "planner_timeout_s": 120, "planner_max_cost": 0.5})
+        self.assertEqual(check(planner_model="codex:gpt-6-astra")[1],
+                         {"planner_model": "a Claude model: this pass runs on the Claude CLI"})
+        self.assertEqual(check(planner_model="haiku")[1], {})
+        self.assertNotEqual(check(planner_timeout_s=5)[1], {})
+        self.assertNotEqual(check(planner_timeout_s=601)[1], {})
+        self.assertNotEqual(check(planner_max_cost=0.01)[1], {})
+        self.assertNotEqual(check(planner_max_cost=6)[1], {})
+        view = tuning.view(CFG)
+        self.assertEqual((view["planner_model"]["group"], view["planner_timeout_s"]["unit"], view["planner_max_cost"]["unit"]),
+                         ("passes", "s", "usd"))
+        self.assertEqual((view["planner_timeout_s"]["min"], view["planner_timeout_s"]["max"]), (10, 600))
+        self.assertEqual((view["planner_max_cost"]["min"], view["planner_max_cost"]["max"]), (0.05, 5))
 
     def test_allowances(self):
         clean, errors = check(allowances={"opus": {"day_usd": 10, "month_usd": 150}, "kimi-k3": {}})

@@ -14,7 +14,12 @@ class KindFilesTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.home, True)
 
     def test_one_seed_per_chain_kind_in_the_shape(self):
-        self.assertEqual(kinds.NAMES, tasks.KINDS + ("prep", "supervisor"))  # plan 29 Prep, plan 44 the supervisor
+        # plan 29 Prep, plan 44 the supervisor, plan 47 the planner
+        self.assertEqual(kinds.NAMES, tasks.KINDS + ("prep", "supervisor", "planner"))
+        self.assertTrue((kinds.SEED / "planner.md").exists())
+        self.assertTrue(kinds.seed_text("planner").startswith("# planner\n"))
+        self.assertIn("$You", kinds.seed_text("planner"))
+        self.assertNotIn("$raw", kinds.seed_text("planner"))  # the card text is appended, not slotted
         self.assertNotIn(tasks.CHAT, kinds.NAMES)  # a chat runs the prompt alone
         self.assertEqual(sorted(p.stem for p in kinds.SEED.glob("*.md")), sorted(kinds.NAMES))
         for kind in kinds.NAMES:
@@ -22,7 +27,7 @@ class KindFilesTest(unittest.TestCase):
             self.assertEqual(kinds.check(kind, text), "", kind)
             self.assertNotIn("Fred", text, kind)  # plan 31: the person is $you
             self.assertNotIn(chr(0x2014), text, kind)
-            if kind not in ("design", "replan", "prep", "supervisor"):  # no worker HANDOFF in these
+            if kind not in ("design", "replan", "prep", "supervisor", "planner"):  # no worker HANDOFF in these
                 at = [text.index(h) for h in ("## Role", "## Do\n", "## Do not", "## Read", "## Leave behind")]
                 self.assertEqual(at, sorted(at), kind)
                 self.assertIn("HANDOFF block", text, kind)

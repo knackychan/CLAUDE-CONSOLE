@@ -1555,23 +1555,6 @@ class TaskServerTest(RunServerTest):
         task = self.until(tid, self.at(1), "the design step starts")
         self.assertEqual((task["steps"][0]["model"], task["steps"][0]["tier"]), ("fable", "fable"))
 
-    def test_hard_card_never_runs_as_a_chat(self):
-        """Plan 46 D3: Run on a hard card starts its task (design, code, verify), even when its steps were cleared;
-        a Raw prompt (no card) still runs one chat on the model picked."""
-        card = self.prep_card("THINK fix add")
-        self.assertEqual([s["kind"] for s in card["steps"]], ["design", "code", "verify"])
-        server.prep.save(self.hub.folder, dict(card, steps=[]))
-        body = {"project_dir": str(self.project), "prompt": card["prompt"], "model": "sonnet", "effort": "low",
-                "prep": card["id"]}
-        status, data = self.call("/api/run", body)
-        self.assertEqual((status, data["session"]), (200, ""))
-        self.assertEqual([s["kind"] for s in self.hub.tasks[data["task"]]["steps"]], ["design", "code", "verify"])
-        self.assertEqual(self.call("/api/run", {"project_dir": str(self.project), "prompt": "THINK raw",
-                                                "model": "sonnet", "effort": "low"})[0], 200)
-        plain = self.prep_card("fix add")
-        server.prep.save(self.hub.folder, dict(plain, steps=[]))
-        self.assertEqual(self.call("/api/run", dict(body, prompt=plain["prompt"], prep=plain["id"]))[0], 200)
-
     def test_code_step_of_a_hard_task_is_not_routed_to_opus(self):
         """Plan 46 D4: a hard task's design step may take an Opus-rank rung, its code step never does."""
         self.hub.budget = lambda: {"opus": {"share": 0.01, "binding": "day"}, "sonnet": {"share": 0.9, "binding": "day"}}
