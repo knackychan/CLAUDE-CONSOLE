@@ -65,7 +65,8 @@ After the first live run (Fred, 2026-10-20):
 - D17 A chat from outside the Console has a dashed edge and a chip naming where it runs: VS Code, terminal,
   desktop or its harness (`sourceChip`, `6b26b04`).
 - Fix: the supervisor dropped every wake as "text is not a field of add_next_step"; `supervisor.run` now drops an
-  optional field another decision owns before `shape` (`bfa264f`).
+  optional field another decision owns before `shape` (`bfa264f`), and fills an omitted or blank `model` of
+  `add_next_step` with `auto` (`5688497`; wake 3 was refused as "a supervisor step runs on model auto").
 
 No new endpoint. Routes used: `GET /api/task` (route, gauge, `supervisor`, `message`, levers), `POST /api/task`
 (Start, with `supervised`), `POST /api/task/supervisor` (Approve, Reject, mode), `POST /api/task/message` (the box,
