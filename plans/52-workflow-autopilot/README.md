@@ -205,3 +205,50 @@ Today: the same plus one wake and one Approve per step, and the design step writ
 | D6 | Bug fixes 2 and 4 of section 1 | (a) fixed first, in their own small commit, before the redesign | (a) |
 
 The task files at the top of this README carry each decision.
+
+## 6. Fit with plans 48 to 51 (checked 2026-10-20, after the merge at `8d4c624`)
+
+This plan was written on a branch that forked at `759a570`, before plans 49 (planner handover), 50 (supervisor
+settings) and 51 (supervisor loose ends) were built on `claude/brainstorm-task-actions`. Nothing of plan 52 is
+implemented. Line numbers in sections 1 to 3 and in the task files are from `759a570`; the current ones are given
+below where a task depends on them.
+
+### What plan 52 replaces
+
+| Built | Replaced by | Why |
+|---|---|---|
+| Plan 44 D7 / T10 supervised intake (`Hub._supervised_task`, server.py:2924; one manual step, the rest in `supervisor.proposed`) | Task 1 | the chain runs the planner's steps; no `choose_next` wake between good steps |
+| Plan 49 (all of it): the digest's Planned next list, `add_next_step` `proposal`, `supervisor.proposal_of` / `trim_proposed`, the trim in `request_next`, `(planned pN)` on the card, the kind-file bullet "when the digest lists Planned next" | Task 1 (no task gets proposals any more) | the plumbing only serves the intake Task 1 deletes |
+| Plan 48 D2 "mode off runs the scripted chain, any other mode runs supervised" | Task 1 + Task 5 | every mode runs the chain; the level decides gates and dispatch |
+| Plan 48 opened-task layout (head, `supCard`, route, gauge, bar with Stop / Pause and the ⋯ task menu) and list grouping (Needs you / Running / Done) | Task 8 design (UI-1 to UI-9), built by a later web task | projects as groups, needs-you dock card, icon tools instead of the ⋯ menu |
+| Plan 50 mode words `off / suggest / auto`, default `suggest` | Task 5: `off / suggest / gated / auto`, default `gated` | D1 c |
+
+### What plan 52 keeps
+
+- Plan 48 moments 1 and 2 (Enter, the card with one Start, Ctrl+Enter raw), the message box modes (guidance,
+  answer, `next`), D6 (widened by Task 1 to any done task), D11 to D15, D16 (step rows under a running task, as
+  UI-2), D17 (outside chats marked, as UI-1's dashed card), the plan 48 section 7 recovery box.
+- Plan 50: the Tuning tab's Supervisor card, the Projects fold, the nine limits, the Tiers row and the Usage block.
+  Only the mode words and the default change (Task 5).
+- Plan 51: a next-step message may name haiku / sonnet / opus (the `message` wake stays in Task 2b); the view after
+  Reject (its text moves into the UI-7 dock card when the web task is built); the uncertain card keeps its decision.
+
+### Task updates needed before implementation
+
+| Task | Update |
+|---|---|
+| 1 | Also remove plan 49's plumbing (D7 below): `supervisor.digest` Planned next block, `PROPOSED_SHOWN` / `PROPOSED_CLIP`, `proposal` in `_OPTIONAL` / `_FIELDS` / `SCHEMA`, `proposal_of`, `trim_proposed`, the `proposed` entry in `revision`, the `run` kind fill, the `proposal` branch in `check`, `_supervisor_dispatch`'s `planned` lookup (server.py:1950-1960), the trim in `request_next`, `decisionText`'s `(planned pN)`. Tests to delete: `tests/test_supervisor.py::ProposalTest`, `tests/test_supervisor_server.py::PlannedStepTest`, `tests/test_web.py::PlannedProposalWebTest`, besides the ones Task 1 lists (`tests/test_server.py:3910` and the `proposed` asserts at 3968, 3985). Current refs: `create_task` server.py:2883, `_supervised_task` 2924, `_next_ok` 2051. |
+| 2a | Bug 2 is still there: `_sup_mode` (server.py:2137) calls `_supervisor_fred(task, now, "mode")` with no `keep`. Bug 4: the note is now at `web/app.js:3814`, `paused_after` at server.py:3956. |
+| 2b | The kind file rewrite must keep plan 51's sentence on a next-step request naming haiku / sonnet / opus, and drop plan 49's "Planned next" bullet (if D7 removes it). Test `test_kind_file_names_the_exception_moves` adds: no "Planned next". |
+| 5 | The mode words live in more places than the task lists: `tuning.SUPERVISOR_MODES` (tuning.py:52), the Board's `supMode` (app.js:1143-1144, two lists and the `"suggest"` fallback), the task menu segment (app.js:3744), plan 50's `supSaved` / `supRows` (app.js:2411, 2611-2613: the `"suggest"` default, the reset link, `ed`). The Models card reads `cfg.supervisor_config.modes`, so the segment gains `gated` by itself; the default and the reset follow `paths.DEFAULTS`. Add `tests/test_web.py::SupervisorSettingsTest` cases for four words and the `gated` default. Plan lines: `_ended` plan hold server.py:3405, `_replan_done` 3695 and 3701. |
+| 6 | `actions` must also carry plan 51's Reject view state and the recovery box's open levers (plan 48 section 7), so the UI reads one field. |
+| 7 | Close: `PLAN.md` row **52** (the task file says 49), and the plan 44 and 48 notes; add `plans/49-planner-handover.md` status "replaced by plan 52 Task 1" when D7 is (a). |
+| 8 | Unchanged; the web task that builds it is not written yet (D9). |
+
+### Decisions this check adds (defaults, Fred confirms)
+
+| # | Question | Default |
+|---|---|---|
+| D7 | Plan 49's proposal plumbing after Task 1 | (a) removed in Task 1: no new task has proposals and in-flight supervised tasks finish on the plain path (their `proposed` is ignored); (b) kept for those old tasks |
+| D8 | Order against the Stage B check (plan 36, a session is reviewing it now) | (a) plan 52 first; Stage B is re-read against it afterwards |
+| D9 | The web build of the locked design (UI-1 to UI-9) | (a) a plan of its own after Task 6, reading `actions` only; the 400 px window, pill, Prep and Usage pages keep their locked files |
