@@ -1135,7 +1135,8 @@ class Hub:
             paused = supervisor.policy(self.cfg, task, time.time())["paused"]  # D13: accepted, read after Resume
             return {"target": target, "mode": "next", "reason": self._base(task), "cold": None, "attachments": False,
                     "timing": ("Waits for Resume, then goes to the supervisor." if paused else "Goes to the supervisor.")
-                    + " The step it adds from your words starts without Approve."}
+                    + " The step it adds from your words starts without Approve."
+                    + " Model: auto, or haiku, sonnet or opus when you name one. An exact model is in the task menu."}
         cs = tasks.step(task, target["step"])
         off, mode, timing = self._base(task), "queued", "Queued for the end of this turn"
         gone = ("Supervisor off. Use Add step on a model in the task menu."
@@ -1754,7 +1755,7 @@ class Hub:
                 "revision": supervisor.revision(self.folder, task), "epoch": pol["epoch"],
                 "triggers": list(entry["triggers"]), "events": list(entry["events"]),
                 "model": supervisor.pass_model(settings, entry["triggers"]), "reserved": reserved, "pass": pid,
-                "day": day, "gates": gates, "cfg": copy.deepcopy(self.cfg)}
+                "day": day, "gates": gates, "cfg": copy.deepcopy(self.cfg), "fred_words": context["fred_next"]}
 
     def _supervisor_job(self, task_id: str, wake: int, snapshot: dict) -> None:
         """Exactly one supervisor.run outside both locks; any failure is a no-decision result; completion always
@@ -1857,7 +1858,7 @@ class Hub:
         retries_left = max(0, pol["settings"]["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
         ok, why = supervisor.check(decision, task, self.task_levers(task["id"]) or {}, self.next_sources(task),
                                    {"triggers": snapshot["triggers"], "owned": self._sup_owned(task),
-                                    "retries_left": retries_left})
+                                    "retries_left": retries_left, "fred_words": snapshot.get("fred_words") or ""})
         return ("suggest", "", decision) if ok else ("refused", why, decision)
 
     # -- plan 44: gated, idempotent dispatch (Task 6) -------------------------------------------------------
@@ -1935,9 +1936,12 @@ class Hub:
                     return 409, {"error": reason}
             cs = tasks.current_step(task)
             retries_left = max(0, pol["settings"]["supervisor_max_retries"] - (pol["retries"].get(cs["n"], 0) if cs else 0))
+            said = "\n\n".join(m["text"] for m in task.get("messages", [])
+                               if m.get("mode") == "next" and m.get("wake") == wake
+                               and m["status"] == "dispatched")  # his words, verbatim
             ok, why = supervisor.check(decision, task, self.task_levers(task_id) or {}, self.next_sources(task),
                                        {"triggers": pending.get("triggers") or [], "owned": self._sup_owned(task),
-                                        "retries_left": retries_left})
+                                        "retries_left": retries_left, "fred_words": said})
             if not ok:
                 return self._sup_refuse(task, pending, why)
             if by == "fred":  # the Approve itself is Fred's act: reset the window, keep this very decision
@@ -1945,14 +1949,11 @@ class Hub:
                 pending["epoch"] = task["supervisor"]["epoch"]
             if kind == "add_next_step":
                 n = decision.get("source_step", task["current"])
-                said = "\n\n".join(m["text"] for m in task.get("messages", [])
-                                   if m.get("mode") == "next" and m.get("wake") == wake
-                                   and m["status"] == "dispatched")  # his words, verbatim
                 planned = supervisor.proposal_of(decision, task)  # plan 49 D2: his words, the planner's, the pass's
                 req = {"task": task_id, "source_step": n, "source_session": tasks.step(task, n)["session"],
                        "kind": decision.get("kind") or planned["kind"],
                        "instructions": said or (planned["goal"] if planned else decision["instructions"].strip()),
-                       "model": "auto"}  # D11: a held card's Approve also carries his words
+                       "model": decision.get("model") or "auto"}  # D11: a held card's Approve also carries his words
                 intent = {"call": "request_next", "request_id": supervisor.request_id(task_id, wake), "source_step": n}
                 if planned is not None:
                     req["proposal"] = intent["proposal"] = decision["proposal"]
@@ -2029,10 +2030,12 @@ class Hub:
                 self.wake_supervisor(task, "stalled_stop", followup)
             what = (f"step {body['step']:02d}" + (" held for Fred" if held else "")) if body.get("step") else kind
             who = "fred (message)" if by == "message" else by
+            model = req["model"] if kind == "add_next_step" else "auto"
+            line = (f"supervisor: {status} {what} (wake {wake}, {kind} on {model} by {who})" if model != "auto" else
+                    f"supervisor: {status} {kind} ({what}, wake {wake}, by {who})")
             try:
                 self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
-                                     "to": task["state"], "session": "",
-                                     "why": f"supervisor: {status} {kind} ({what}, wake {wake}, by {who})"}])
+                                     "to": task["state"], "session": "", "why": line}])
             except OSError:
                 pass
             return code, body
@@ -2211,6 +2214,13 @@ class Hub:
                   "decision": (r.get("decision") or {}).get("decision", "") if isinstance(r.get("decision"), dict) else "",
                   "cost": r.get("cost"), "error": redact.clip(redact.mask(str(r.get("error") or "")), 200)}
                  for r in records[-10:]]
+        rejected = None  # plan 51 D5: after Reject the card says what comes next
+        last = records[-1] if records else {}
+        if card is None and last.get("action") == "reject" and last.get("status") == "rejected":
+            word = next(((r.get("decision") or {}).get("decision", "") for r in reversed(records)
+                         if r.get("wake") == last.get("wake") and r.get("phase") == "result"
+                         and isinstance(r.get("decision"), dict)), "")
+            rejected = {"wake": last.get("wake"), "decision": word, "note": bool(sup.get("reject_note"))}
         hold = pol["reason"] or ledger["error"] or (
             "supervisor: task cap reached" if spent >= settings["supervisor_task_usd"] else "")
         return {"mode": pol["mode"], "reason": pol["reason"], "paused": pol["paused"], "wakes": sup.get("wakes", 0),
@@ -2218,7 +2228,7 @@ class Hub:
                 "caps": {"auto_steps_left": pol["auto_steps_left"], "work_usd_left": pol["work_usd_left"],
                          "task_usd_left": round(max(0.0, settings["supervisor_task_usd"] - spent - active), 4)},
                 "queued": task["id"] in self.wakes, "active": task["id"] in self.supervising,
-                "pending": card, "audit": audit}
+                "pending": card, "rejected": rejected, "audit": audit}
 
     def _sup_work(self, task: dict) -> float:
         """The current window's supervisor-caused work cost (live costs included), saved as the work_usd projection."""
@@ -2534,7 +2544,10 @@ class Hub:
         step = tasks._blank(len(task["steps"]) + 1, kind, "", requested if requested != "auto" else "",
                             checked=source["n"] if kind == "verify" else 0)
         route = self._route_for(dict(task, last_good=source["n"]), step)  # plan 39: the previous note and rung are the source's
-        if requested != "auto" and route["rung"] != requested:
+        if requested in supervisor.TIER_WORDS:  # plan 51 D3: a tier word pins the rank; balance may pick any rung of it
+            if fills.rank_of(route["rung"], self.cfg) != requested:
+                return None, self.rung_ok(requested, kind, task["project_dir"]) or f"no usable {requested} model for this step"
+        elif requested != "auto" and route["rung"] != requested:
             return None, self.rung_ok(requested, kind, task["project_dir"]) or "selected model cannot run this step"
         if kind == "verify" and requested == "auto":
             rank = fills.rank_of(route["rung"], self.cfg)
