@@ -84,11 +84,12 @@ saved result. Real-provider handoff delivery and the native window remain open l
 
 Plan 36: [guided implementation](plans/36-next-step/README.md) and
 [design guideline](design/brainstorm/2026-10-15-next-step.md). **Stage A shipped 2026-10-15** (Tasks 1-4,
-checked with fake harnesses; live provider checks open). Stage B (agent bridge, Tasks 5-6) not started.
+checked with fake harnesses; live provider checks open). Stage B (agent bridge, Tasks 5-6) checked against the
+supervisor 2026-10-20 and closed as superseded (README section 7, D1-D7 pending Fred's review): an agent's next
+step comes from its HANDOFF Next section through the supervisor (plans 44, 48, 49, 51), never from a bridge.
 Add Code / Verify / Investigate / Plan / Chat as a fresh session in the same task and folder,
 using the previous step's handover and an explicit model choice. Stage A delivers the Board
-controls and manual progression; Stage B lets agents request the same operation through a
-scoped Console bridge. Each stage has compatibility, recovery, UI and test acceptance gates.
+controls and manual progression. Each stage has compatibility, recovery, UI and test acceptance gates.
 This is a separate feature plan; it does not activate or replace the audit fixes in plan 34.
 
 ## Build order (2026-10-14)
@@ -315,3 +316,4 @@ is written for its recommended option (a) and the task files mark the lines anot
 - 2026-10-20 - Plan 51 written from the supervision review (items 3, 6 and 8): a tier word in a next-step message was dropped (and `_next_route` checks only exact rungs), Reject left a quiet card showing the rejected decision, and `fold_log` wrote decision None on an uncertain card. D1-D6 written as defaults. No code changed.
 - 2026-10-20 - Plan 51 built (D1-D6 as written): tests red `b4231ea`; steps 2 to 4 in three parallel sessions (Fred asked): `3966ee8` supervisor.py (tier word checked against Fred's words, fold_log keeps the uncertain decision and intent, kind line), `6d35415` server.py (rank route, message model, Reject view, timing line), `c3f7920` web (card after Reject, recovery line). 1117 tests OK. Fred copies `dotclaude/console/kinds/supervisor.md` again.
 - 2026-10-20 - Workflow autopilot plan merged from claude/nifty-kalam-4a5ea6 (decided and its design locked there, nothing implemented) and renumbered 49 to 52, since plan 49 here is the planner handover; its explored mocks are now `52-a-sections.html` and `52-b-projects-dock.html`.
+- 2026-10-20 - Plan 36 Stage B checked against the supervisor (README section 7): the agent bridge, its capability token and a direct agent call to `request_next` conflict with plan 44 4.5 (only Fred's menu, Fred's Approve and Fred's next-step message add a step; model output acts only through `check` and `_supervisor_dispatch`), the queue it needed is plan 48's next-step message, and the step's HANDOFF Next section already reaches the pass through the digest. Recommended closed as superseded, D1-D7 for Fred; design guideline section 8 marked superseded. No code changed.

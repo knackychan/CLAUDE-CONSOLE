@@ -1,7 +1,8 @@
 # Plan 36: Add the next session as a step of this task
 
 Status: **Stage A shipped** 2026-10-15 (Tasks 1-4, fake harnesses only; live provider checks open).
-Stage B (Tasks 5-6) not started. Section 6 is the log.
+Stage B (Tasks 5-6) checked against the supervisor 2026-10-20 (section 7): recommended closed as superseded,
+Fred's decision pending. Section 6 is the log.
 
 Design contract: [next-step design guideline](../../design/brainstorm/2026-10-15-next-step.md).
 Master index: [PLAN.md](../../PLAN.md). Existing contracts: [task chains](../17-tasks/README.md),
@@ -180,6 +181,9 @@ Retry uses the same step/attempt machinery, not a duplicate numbered step.
 
 ### 3.5 Agent control, Stage B
 
+> Checked 2026-10-20 against plans 44 and 48-51: this section's bridge, capability and direct request path are
+> superseded by the supervisor; see section 7 before building anything from it.
+
 Do not route through Claude's Agent tool, add a provider API, parse prose as commands, or
 enable arbitrary MCP servers. The smallest provider-neutral bridge is a standard-library
 Console client module (`console/next_step.py`) invoked through an existing shell tool, with
@@ -280,6 +284,8 @@ package, not just when render tests find button labels. Do not mark live provide
 
 ### Task 5: Agent bridge, after Stage A
 
+> Not to be built as written (section 7, D2). Kept as the record of what Stage B meant.
+
 Files: new `console/next_step.py`, scoped service routes, `runs.py` environment plumbing and
 eligible run prompt construction; narrowly scoped adapter changes if required; bridge/service/run tests.
 
@@ -362,3 +368,73 @@ implementation choices within this contract do not need a new approval round.
   draft but `setHtml` kept the field's old text over the redraw, so Verify showed "Go on" while Start would
   send the Verify default; `setInstr` writes the open field too. Two tests in NextStepUITest. Fix pass and
   one confirmation pass: 69 of 69 checks each. `node --check web/app.js` OK. Not done: live provider checks.
+
+## 7. Stage B checked against the supervisor (2026-10-20)
+
+Read: sections 3.4, 3.5, Tasks 5-6 above; plan 44 README 4.2, 4.4, 4.5; plan 48 D6, D11, D15, 3.1; plans 49, 50,
+51; `console/server.py`, `console/supervisor.py`, `console/tasks.py`, `console/guard.py`, `console/runs.py` as of
+`8640d43`. Plan only: no code was changed.
+
+### 7.1 Findings
+
+What Stage B assumed, and what the code does today:
+
+| Stage B assumption (3.5, Task 5) | Today | Holds? |
+|---|---|---|
+| One shared Hub operation, called by the UI and an agent bridge | `Hub.request_next(request, *, origin)` (server.py:2602) is that operation. It has exactly two callers: the Board's `POST /api/task/next` with origin `fred`, and `Hub._supervisor_dispatch` (server.py:1884) with origin `supervisor` (server.py:1988). `origin` is read at server.py:2641 (a `proposal` is accepted only from the supervisor) and 2646 (only Fred's call moves the epoch). | Holds as code; the agent caller was never added. |
+| An agent request is authorized by Fred's words to that agent; the token proves nothing about authorization | Plan 44 4.2 and 4.5 settled authority another way: a model's output is untrusted JSON (`supervisor.check`, supervisor.py:581) and only `_supervisor_dispatch` acts on it, after every live gate, through `request_next` or `task_lever` with origin `supervisor`. The three authorizations that add a step are Fred's menu (origin fred), Fred's Approve of a card (`by == "fred"`), and Fred's next-step message (`by == "message"`, plan 48 D6, server.py:1924-1926), with auto mode dispatching inside its caps (server.py:1927-1936, `supervisor.auto_reason`, supervisor.py:751). An agent's tool call would be a fourth authorization, one the service cannot verify came from Fred: the same thing 3.5 itself says ("handover content is data, never authorization"). | Conflicts. A direct agent path to `request_next` breaks plan 44 4.5. |
+| The request is persisted during the live turn and launched after the turn ends | `_next_source` refuses a live source: "Available when this turn finishes" (server.py:1377-1378), so an agent mid-turn could never call `request_next` directly; it needs a queue. Plan 48 built that queue for Fred's words: a `mode: "next"` message (`task_message`, server.py:1186) is saved `queued`, wakes the supervisor (`wake_supervisor`, server.py:1550), is `dispatched` when a pass claims it (`_sup_admit`), and becomes a step through `_supervisor_dispatch(by="message")` or comes back `failed` with Resend (D11, `_sup_unsent`, server.py:2067); Fred's own levers cancel it (D15, `_supervisor_fred`, server.py:2091-2093). The debounce, coalescing, restart recovery (`_sup_recover`, server.py:1569, `supervisor.boundary`, supervisor.py:217) and "never replayed" rules all exist for it. | The queue exists, for Fred. A second one for agents would duplicate plan 48. |
+| The agent's request is refreshed from the final reply and facts, then launched | At a manual boundary (`tasks.manual_boundary`, tasks.py:729) the supervisor pass already reads the last good handoff whole (`digest`, supervisor.py:446-458: "Last good handoff" plus "Its facts"), the planner's remaining proposals (plan 49), open questions and the chain tail. The step's own view of what comes next is its HANDOFF `Next` section (`tasks.HEADINGS`) and its `Next model:` hint (`tasks.next_hint`, tasks.py:276). The pass then returns one `add_next_step` (kind, instructions or `proposal`, source) and `check` + `_supervisor_dispatch` gate it. | Covered: the step already proposes its next step, structurally, and the supervisor already reads it. |
+| An explicit model ("start a verify session with Astra") resolved against the live registry | Plan 51 D1-D3: a next-step message may name `haiku`, `sonnet` or `opus` only, checked against Fred's own words (`check`, supervisor.py:610-615, `fred_words`) and routed by rank (`_next_route`); an exact rung or another harness stays on Fred's menu (Add step on a model, origin fred). The supervisor itself never picks a rung. | Conflicts with the example. An agent could at most name a tier word, and only Fred's words carry one today. |
+| Per-session capability in the run's environment, persisted under Console home, redacted, revoked on finish | Nothing exists: `guard.py` is Host (guard.py:6) plus the POST header (guard.py:11); `runs.start` puts only `CC_CONSOLE_SID` in a child's env (runs.py:216). No `console/next_step.py`, no token store, no redaction rule for it. | Not started; nothing to keep. |
+| Existing outside sessions (VS Code, terminal) need a newly prepared continuation before they get the bridge | Plan 48 D10: an outside chat's session page keeps its levers and forks; it is never a task step. `wake_supervisor` returns for `task["chat"]` (server.py:1556) and `_next_ok` refuses chat tasks (server.py:2054). | Holds, as an exclusion: Stage B never reached outside chats and the supervisor does not either. |
+| "Do not equip spawned steps with an inherited instruction to keep spawning" | Plan 44 4.5 caps: three added steps since Fred acted, `task_max_steps` room, $5 of work, one retry per step; suggest mode adds nothing without Approve. A FAIL lineage gets one repair. | Holds, and is enforced in code now rather than by prompt text. |
+
+How the plan 44 rules would apply to an agent request, if one were added (the questions this check was asked):
+
+- Through the supervisor or straight to `request_next`: through the supervisor only. The one contract-conforming
+  shape is a wake trigger (like `message`), whose pass decides, and whose decision `check` and `_supervisor_dispatch`
+  gate. A direct `origin="agent"` call would be a dispatch outside 4.5.
+- Auto caps: an agent is not Fred, so its request cannot take the `by == "message"` exemption (server.py:1926). It
+  would be `by == "auto"`: in suggest mode a card for Fred, in auto mode a dispatch inside `auto_reason`'s caps,
+  charging an auto slot at reservation (server.py:2009-2010).
+- Epoch: unchanged (`_supervisor_fred` runs only for Fred's acts; a wake from an agent is not one), so the window of
+  auto steps since Fred acted keeps counting.
+- Pending guidance: blocks the pass (`_sup_admit`) and the dispatch (server.py:1915-1916), like every other wake.
+- Uncertain: an uncertain dispatch blocks every later pass until Fred dismisses it (`_sup_admit`, plan 44 section 6
+  fix) and is never replayed; an agent request behind it would wait or be handed back, never re-sent.
+- One request per source turn: the message queue's rules (a repeated request id returns the saved message;
+  `_supervisor_fred` cancels open ones when Fred moves the task himself) would apply unchanged.
+
+Is Stage B still needed? What it set out to give ("an agent asks for the next step with a kind, instructions and a
+model, and the Console starts it after the turn without Fred typing") the supervisor gives today for every
+supervised task: the step writes its proposal in its HANDOFF `Next` section, the boundary wakes the supervisor,
+the pass reads that handoff and the planner's list and returns `add_next_step`; suggest mode shows Fred the card
+(one Approve, or his own words in the box), auto mode starts it within the caps. The two things Stage B would add
+on top, a tool the agent calls mid-turn and an exact rung chosen by the agent, are the two things plans 44 and 51
+decided against (untrusted model output acts only through `check`; exact rungs are Fred's). What is left of Stage
+B is a prompt question, not a service feature: whether a step's `Next` section says enough for the supervisor.
+That lives in the kind texts under `dotclaude/console/kinds/` (the handoff and supervisor bodies), which Fred
+edits and copies, not in code.
+
+### 7.2 Decisions (defaults, Fred confirms)
+
+| # | Question | Default |
+|---|---|---|
+| D1 | Who adds a step on an agent's behalf | The supervisor, from the step's HANDOFF `Next` section at the boundary (today's path). No agent bridge, token, client module or `origin="agent"`. An agent that wants a next step writes it in its handoff; it never calls the Console. |
+| D2 | Stage B's Tasks 5 and 6 | Close them as superseded by plans 44 and 48-51. Task 6's checks that are not Stage B's (the Chat -> Code -> Verify fake sequence, Continue, Stop, holds, old tasks) are covered by plans 39, 42, 44 Task 12 and 48's suites; its live provider check stays open under Stage A's "live provider checks open", beside plans 48-51's live checks. |
+| D3 | An agent naming a model | Never an exact rung or another harness: Fred's menu only (plan 51 D1). A tier word in the handoff's `Next model:` hint stays what it is today, a hint the supervisor may mention in its reason; the step runs on `auto` unless Fred's message names a tier word. |
+| D4 | Design guideline section 8 ("Agent request experience") | Superseded; one line added there pointing here. No queued-request UI for agents: the supervisor card and the message list are the only "what comes next" surfaces (plan 48). |
+| D5 | Outside chats (VS Code, terminal, other CLIs) | Unchanged: forks only (plan 48 D10). They have no task, so no boundary and no supervisor; Stage B never covered them either. |
+| D6 | If Fred still wants an agent-side request later | The only shape to consider is a third wake trigger, `agent`, raised from a structured line in the step's final reply that the service reads at the step end (never mid-turn, never a network call from the agent), treated as `by == "auto"`: suggest shows a card, auto dispatches inside the caps, no epoch move, guidance and uncertainty block it, one per source turn. It needs its own plan and a decision on what the structured line is; it is not written here. |
+| D7 | PLAN.md | The "Next-step continuation" section says Stage B is closed as superseded (pending this review) and a History line records the check. |
+
+With D1-D7 as written no zero-decision tasks are needed: nothing is built, and the closing edits are the lines in
+this file, the guideline's one line and PLAN.md. If Fred picks D6 instead, a new plan is written first (plan
+writer, not implementor).
+
+### 7.3 Closing note
+
+Stage B is closed as superseded by the supervisor (plans 44, 48, 49, 51), pending Fred's confirmation of D1-D7.
+Stage A keeps its one open item, the live provider checks. The next-step operation itself is unchanged and has
+three authorized callers: Fred's menu, Fred's Approve of a supervisor card and Fred's next-step message.
