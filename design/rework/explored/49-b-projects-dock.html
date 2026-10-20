@@ -294,6 +294,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sacts { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
 .sacts .sp { flex: 1; }
 .opt.sel { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--you); }
+.bar { gap: 6px; padding-right: 12px; }
+.bar .use { margin: 0 6px 0 10px; }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -485,7 +487,7 @@ function card() {
   if (stepOpen !== null && state !== "observed") return stepPage(stepOpen);
   const a = A[state];
   if (state === "observed") {
-    document.getElementById("card").innerHTML = `<div class="head"><div><h2>Refactor render queue</h2><div class="sub"><span class="state q">observed · VS Code</span><span>MOTION STUDIO</span><span>sonnet · medium</span></div></div><div class="cost"><b>$1.12</b><span class="m mut">this chat</span></div></div>
+    document.getElementById("card").innerHTML = `<div class="hd"><div class="hl"><h2>Refactor render queue</h2><div class="meta"><span class="pst q">Observed</span><span class="fact"><i>In</i>VS Code</span><span class="fact"><i>Project</i>MOTION STUDIO</span><span class="fact"><i>Model</i>sonnet, medium effort</span></div></div><div class="cost"><b>$1.12</b><span>this chat</span></div></div>
       ${sect("You", "VS Code, 14:02", `<p class="brief">Move the render queue into its own module and keep the API.</p>`)}
       ${sect("Claude", "sonnet, 14:09", `<p class="brief">Split queue.ts into queue/core.ts and queue/workers.ts; 14 tests pass. Next: remove the old export.</p>`)}
       ${sect("Read only", "", `<p class="brief mut">Driven in VS Code. To act on it here, continue it as a fork: a new Console run with its levers.</p>`)}`;
@@ -549,10 +551,10 @@ function bar() {
   ICONS["Hand off to a follow-up task"] = ICONS["Hand off"];
   const tools = quiet.filter(x => ICONS[x]), words = quiet.filter(x => !ICONS[x]);
   h = `<span class="tools2">${tools.map(x => `<button class="ib ${x === "Delete" ? "dz" : ""}" title="${x}" aria-label="${x}">${ICONS[x]}</button>`).join("")}</span>` + h + SP;
-  h += words.map(x => `<button class="btn ghost">${x.replace(" as a fork", " (fork)")}</button>`).join("");
+  h += words.map(x => `<button class="btn">${x.replace(" as a fork", " (fork)")}</button>`).join("");
   h += a.bar.map(b => `<button class="btn">${b}</button>`).join("");
   h += pr.map(p => `<button class="btn ${p[1]}">${p[0]}</button>`).join("");
-  if (state === "observed") h += `<button class="btn go">Continue as a fork</button>`;
+  if (state === "observed") h += `<button class="btn go" title="Continue as a fork: a new Console run with its levers">Continue (fork)</button>`;
   document.getElementById("bar").innerHTML = h;
   const steer = document.getElementById("steer");
   steer.hidden = !a.box;
