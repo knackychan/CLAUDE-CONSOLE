@@ -1607,7 +1607,8 @@ class SupervisorSettingsTest(unittest.TestCase):
                                                       "day_limit": 2, "error": ""}}
         html = render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(data)})")
         self.assertIn("Supervisor passes", html)
-        self.assertIn("$0.12 of $2.00", html)
+        self.assertIn("<b class=\"\">$0.12</b>", html)
+        self.assertIn("of $2.00 a day", html)
         self.assertIn("4 passes", html)
         self.assertIn("$0.42", html)  # the month, without September
         self.assertIn("10 passes", html)
