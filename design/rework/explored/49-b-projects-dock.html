@@ -189,6 +189,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .lnk { justify-self: start; background: none; border: 0; padding: 0; color: var(--ink); font: 12.5px var(--ui); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); cursor: pointer; }
 .lnk:hover { text-decoration-color: var(--ink); }
 .slot .ac { display: flex; gap: 16px; flex-wrap: wrap; }
+.fold .pv.full { white-space: normal; color: var(--ink); line-height: 1.55; }
+.open { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); margin-left: 18px; }
+.facts { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font: 12px var(--ui); padding: 2px 9px; border-radius: 10px; background: var(--raise); color: var(--ink); }
+.chip.y { color: var(--you); background: color-mix(in srgb, var(--you) 10%, var(--raise)); }
+.fl { display: grid; gap: 6px; }
+.fl .fold { font-size: 13px; gap: 6px; }
+.files { list-style: none; margin: 0 0 0 18px; padding: 0; display: grid; gap: 4px; font: 12px var(--mono); }
+.files li { display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
+.files .nw { font: 600 10px var(--mono); color: var(--ok); width: 32px; flex: none; }
+.files .nw.og { color: var(--mut); }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -348,12 +359,19 @@ function card() {
       <span class="seg" title="Autonomy level for this task; the project default is gated"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></div></div>
       <div class="cost"><b>${cost}</b><span class="m mut">task</span></div></div>
     <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><button class="fold" id="pf"><span class="car">▸</span><span class="pv">${esc(S.prompt)}</span></button><div class="raw" id="raw" hidden>${esc(S.prompt)}</div></div></section>
-    <section class="sect"><div class="sh"><span class="lbl">Brief</span><span class="sm">prep · haiku</span></div><div class="sb"><p class="brief">${esc(S.brief)}</p>
-      <dl class="kv"><dt>Files</dt><dd>src/core/paths.ts, src/core/settings.ts, a vitest file</dd><dt>Source</dt><dd>D:\\MY DOCS\\MY TOOLS\\MOTION STUDIO\\</dd><dt>Route</dt><dd>risky · reasoning high · opus/high</dd></dl></div></section>
+    <section class="sect"><div class="sh"><span class="lbl">Brief</span><span class="sm">prep · haiku</span></div><div class="sb"><button class="fold" data-fold="bf"><span class="car">▸</span><span class="pv">${esc(S.brief)}</span></button>
+      <div id="bf" class="open" hidden>
+      <div class="facts">
+        <span class="chip y" title="Prep rated the task: safeJoin guards file paths and settings write user data">Risky</span><span class="chip">Deep reasoning</span><span class="chip">Opus, high effort</span>
+      </div>
+      <div class="fl"><button class="fold" data-fold="ff"><span class="car">▸</span><span>3 files to create</span><span class="mut" style="font-size:12px">· copied from MOTION STUDIO</span></button>
+        <ul id="ff" class="files" hidden><li><span class="nw">new</span>src/core/paths.ts</li><li><span class="nw">new</span>src/core/settings.ts</li><li><span class="nw">new</span>src/core/paths.test.ts</li><li><span class="nw og">from</span><span title="D:\MY DOCS\MY TOOLS\MOTION STUDIO\src\core">MOTION STUDIO / src/core/paths.ts, settings.ts</span></li></ul></div>
+      </div></div></section>
     <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rows}</div></div></section>
 
     <div class="blk"><div class="meter"><span>context</span><div class="cells ctx">${cells(15, state === "running" ? 6 : state === "ready" ? 0 : 4)}</div><b>${state === "running" ? "61K" : state === "ready" ? "0" : "38K"}</b>
       <span>spend</span><div class="cells usd">${cells(20, 2, 1)}</div><b>${cost} · cap $5</b></div></div>`;
+  document.querySelectorAll("[data-fold]").forEach(b => b.onclick = () => { const r = document.getElementById(b.dataset.fold); r.hidden = !r.hidden; b.querySelector(".car").textContent = r.hidden ? "▸" : "▾"; if (b.dataset.fold === "bf") b.querySelector(".pv").classList.toggle("full", !r.hidden); });
   document.getElementById("pf").onclick = e => { const r = document.getElementById("raw"); r.hidden = !r.hidden; e.currentTarget.querySelector(".car").textContent = r.hidden ? "▸" : "▾"; };
   document.querySelectorAll(".seg button").forEach(b => b.onclick = () => { level = b.dataset.l; render(); });
 }
