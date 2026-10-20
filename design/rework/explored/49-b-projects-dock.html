@@ -199,7 +199,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .files { list-style: none; margin: 0 0 0 18px; padding: 0; display: grid; gap: 4px; font: 12px var(--mono); }
 .files li { display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
 .files .nw { font: 600 10px var(--mono); color: var(--ok); width: 32px; flex: none; }
-.files .nw.og { color: var(--mut); }
+.files .fn { flex: 1; min-width: 0; }
+.files .og { font: 12px var(--ui); color: var(--mut); white-space: nowrap; }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -364,8 +365,8 @@ function card() {
       <div class="facts">
         <span class="chip y" title="Prep rated the task: safeJoin guards file paths and settings write user data">Risky</span><span class="chip">Deep reasoning</span><span class="chip">Opus, high effort</span>
       </div>
-      <div class="fl"><button class="fold" data-fold="ff"><span class="car">▸</span><span>3 files to create</span><span class="mut" style="font-size:12px">· copied from MOTION STUDIO</span></button>
-        <ul id="ff" class="files" hidden><li><span class="nw">new</span>src/core/paths.ts</li><li><span class="nw">new</span>src/core/settings.ts</li><li><span class="nw">new</span>src/core/paths.test.ts</li><li><span class="nw og">from</span><span title="D:\MY DOCS\MY TOOLS\MOTION STUDIO\src\core">MOTION STUDIO / src/core/paths.ts, settings.ts</span></li></ul></div>
+      <div class="fl"><button class="fold" data-fold="ff"><span class="car">▸</span><span>3 files to create</span></button>
+        <ul id="ff" class="files" hidden><li><span class="nw">new</span><span class="fn">src/core/paths.ts</span><span class="og">copy of Motion Studio's paths.ts</span></li><li><span class="nw">new</span><span class="fn">src/core/settings.ts</span><span class="og">copy of Motion Studio's settings.ts</span></li><li><span class="nw">new</span><span class="fn">src/core/paths.test.ts</span><span class="og">new tests</span></li></ul></div>
       </div></div></section>
     <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rows}</div></div></section>
 
