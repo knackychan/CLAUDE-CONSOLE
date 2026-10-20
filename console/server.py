@@ -2142,7 +2142,14 @@ class Hub:
             sup = task["supervisor"] = supervisor.initial(self.cfg, task["project_dir"], now)
         old = sup.get("mode")
         sup["mode"] = mode
-        self._supervisor_fred(task, now, "mode")
+        # plan 52 Task 2a: a still fresh standing card survives the switch (same evidence, the epoch moves with it)
+        keep = sup.get("pending") if isinstance(sup.get("pending"), dict) else None
+        if keep is not None and (keep.get("status") not in ("suggest", "held") or keep.get("epoch") != sup.get("epoch")
+                                 or keep.get("revision") != supervisor.revision(self.folder, task)):
+            keep = None
+        self._supervisor_fred(task, now, "mode", keep=keep)
+        if keep is not None:
+            keep.update(epoch=sup["epoch"], revision=supervisor.revision(self.folder, task))
         if mode == "off":
             self.wakes.pop(task["id"], None)
             pending = sup.get("pending")
@@ -2158,6 +2165,14 @@ class Hub:
             else:
                 task["supervisor"] = before
             return 500, {"error": f"the mode was not saved: {exc}"}
+        if mode != "off" and mode != old:  # plan 52 Task 2a: act on the switch, once
+            if keep is not None:
+                if mode in ("auto", "gated"):
+                    self._sup_auto(task["id"], keep["wake"])
+            else:
+                found = supervisor.boundary(task, tasks.read_chain(self.folder, task, 50))
+                if found:  # the boundary's own event was consumed by the earlier wake: wake on the mode line
+                    self.wake_supervisor(task, found["trigger"], line)
         return 200, {"task": task["id"], "mode": mode}
 
     def _sup_reject(self, task: dict, wake: int, note: str) -> tuple:
@@ -2262,7 +2277,7 @@ class Hub:
         task = self.tasks.get(task_id)
         if task is None or not self.sup_auto:
             return
-        if supervisor.policy(self.cfg, task, time.time())["mode"] != "auto":
+        if supervisor.policy(self.cfg, task, time.time())["mode"] not in ("auto", "gated"):
             return
         self._supervisor_dispatch(task_id, wake, "auto")
 
@@ -3954,7 +3969,8 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
             "handoff_note": t.get("handoff_note") or "",
             "handoff_to": t.get("handoff_to") or "", "handoff_from": t.get("handoff_from") or "",  # plan 44: whole-task links
             "paused_after": cs["n"] if t["owner"] == "fred" and t["state"] in ("running", "waiting") and cs
-            and cs["state"] != "running" else 0,  # the step ended while paused: nothing starts until Resume
+            and cs["state"] != "running" and not (tasks.manual_boundary(t) and (t.get("supervisor") or {}).get("paused")
+                                                  is not True) else 0,  # ended while paused; a boundary is not a pause (plan 52)
             "hold": t["why"].endswith(" over its pace"),
             "plan": t.get("plan") or None, "redo": t.get("redo") or "",
             "steps": [{**{k: s[k] for k in ("n", "kind", "state", "model", "effort", "session", "verdict", "retries",

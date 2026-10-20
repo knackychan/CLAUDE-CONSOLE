@@ -946,6 +946,12 @@ class TaskOverviewTest(unittest.TestCase):
         paused = render(self.setup + "row.paused_after = 1; d.levers = {resume: ''}; inspTask(t, d, row)")
         self.assertIn("Nothing starts until you Resume", paused)
 
+    def test_no_paused_note_unless_resume_is_open(self):
+        """Plan 52 Task 2a: a supervised boundary is not paused, whatever its resume lever text says."""
+        boundary = ("t.state = 'waiting'; t.why = 'choose next step'; row.state = 'waiting'; row.paused_after = 1; "
+                    "d.levers = {resume: 'not paused', done: ''}; ")
+        self.assertNotIn("Nothing starts until you Resume", render(self.setup + boundary + "inspTask(t, d, row)"))
+
     def test_resume_renders_from_the_lever_after_a_pause(self):
         paused = ("t.state = 'waiting'; t.owner = 'fred'; row.state = 'waiting'; row.paused_after = 1; "
                   "d.levers = {resume: '', stop: 'task is waiting'}; taskButtons(t, d)")

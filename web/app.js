@@ -3811,7 +3811,7 @@ function attentionArea(t, d, row) {  // plan 48: the gate's one button; Retry on
     const [w, tone] = stuck ? ["Stuck", "r"] : t.state === "stopped" ? ["Stopped", "q"] : ["Waiting", "y"];
     out += `<div class="askbox${stuck ? " r" : ""}"><span class="st ${tone}">${sprite(stuck ? "stuck" : t.state === "stopped" ? "stopped" : "waiting")}${w}</span><div class="q">${esc(reason)}</div>${confirm ? `<div class="lr">${confirm}</div>` : ""}</div>`;
   }
-  if (row.paused_after && lv.resume !== "choose a next step or finish the task") out += `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
+  if (row.paused_after && lv.resume === "") out +=  /* plan 52 Task 2a: only when Resume is really open */ `<p class="note m">Paused: step ${row.paused_after} ended. Nothing starts until you Resume.</p>`;
   return out ? `<section class="task-attention">${out}</section>` : "";
 }
 const SUP_HEAD = { suggest: ["Supervisor suggests", "y"], held: ["Supervisor's step is held", "y"], escalate: ["Supervisor asks you", "y"],

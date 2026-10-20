@@ -2165,10 +2165,83 @@ class LooseEndsServerTest(NextMessageTest):
         self.assertEqual((code, body.get("status")), (200, "dismissed"), body)
 
 
+class ModeSwitchTest(ApprovalTest):
+    """Plan 52 Task 2a: a mode switch keeps a standing suggestion (auto dispatches it) or wakes once; no false Paused."""
+
+    def at_boundary(self, tid="20260101-000000-abcd"):
+        tid = self.supervised_task(tid)
+        task = self.hub.tasks[tid]
+        tasks.write_note(self.folder, task, task["steps"][0],
+                         "## Goal\ngoal\n## Findings\n- f\n## Files touched\n- (none)\n## Troubleshooting\n- (none)\n"
+                         "## Open questions\n- (none)\n## Next\n- verify")
+        return tid
+
+    def mode(self, tid, mode):
+        code, body = self.hub.supervisor_action({"task": tid, "mode": mode})
+        self.assertEqual(code, 200, body)
+
+    def test_mode_switch_to_auto_dispatches_the_standing_suggestion(self):
+        tid = self.at_boundary()
+        self.pending(tid, ADD)
+        with mock.patch.object(self.hub, "request_next", wraps=self.hub.request_next) as request:
+            self.mode(tid, "auto")
+        self.assertEqual(request.call_count, 1)
+        task = self.hub.tasks[tid]
+        self.assertEqual(len(task["steps"]), 2)
+        whys = [r["why"] for r in tasks.read_chain(self.folder, task)]
+        self.assertTrue(any(w.startswith("supervisor: dispatched add_next_step") and "by auto" in w for w in whys), whys)
+        self.assertNotIn("superseded", [r.get("status") for r in supervisor.read_log(self.folder, tid)])
+
+    def test_mode_switch_to_suggest_keeps_the_card(self):
+        tid = self.at_boundary()
+        self.hub.tasks[tid]["supervisor"]["mode"] = "auto"
+        self.pending(tid, ADD)
+        with mock.patch.object(self.hub, "request_next") as request:
+            self.mode(tid, "suggest")
+        self.assertEqual(request.call_count, 0)
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["pending"]["status"], "suggest")
+        code, body = self.hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})
+        self.assertEqual(code, 200, body)  # still fresh: the mode change moved the epoch with the card
+
+    def test_a_stale_card_is_not_kept(self):
+        tid = self.at_boundary()
+        self.pending(tid, ADD)
+        task = self.hub.tasks[tid]
+        tasks.write_note(self.folder, task, task["steps"][0], "## Goal\nchanged\n## Findings\n- g\n## Files touched\n"
+                         "- (none)\n## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\n- verify")
+        with mock.patch.object(self.hub, "request_next") as request:
+            self.mode(tid, "auto")
+        self.assertEqual(request.call_count, 0)
+        self.assertIsNone(self.hub.tasks[tid]["supervisor"]["pending"])  # superseded as before
+        self.assertIn(tid, self.hub.wakes)  # and the boundary wakes once on the mode line
+
+    def test_mode_switch_with_no_card_rewakes_once(self):
+        tid = self.at_boundary()
+        self.pending(tid, ADD)
+        self.assertEqual(self.hub.supervisor_action({"task": tid, "wake": 1, "action": "reject"})[0], 200)
+        self.assertNotIn(tid, self.hub.wakes)
+        self.hub.sup_recovered = True  # the restart scan is not under test here
+        self.mode(tid, "auto")
+        self.assertIn(tid, self.hub.wakes)
+        self.tick(self.now + 100.0)
+        self.drain()
+        self.assertEqual(len(self.calls), 1)
+        self.mode(tid, "auto")  # the same mode again: no new wake
+        self.assertNotIn(tid, self.hub.wakes)
+        self.mode(tid, "off")
+        self.assertNotIn(tid, self.hub.wakes)
+
+    def test_paused_after_is_zero_at_a_supervised_boundary(self):
+        tid = self.at_boundary()
+        self.assertEqual(server.task_row(self.hub.tasks[tid])["paused_after"], 0)
+        self.hub.tasks[tid]["supervisor"]["paused"] = True
+        self.assertEqual(server.task_row(self.hub.tasks[tid])["paused_after"], 1)
+
+
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
 for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
               ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest, PlannedStepTest,
-              LooseEndsServerTest):
+              LooseEndsServerTest, ModeSwitchTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name
