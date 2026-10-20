@@ -389,7 +389,7 @@ function list() {
   const c1subs = subs("c1", [["code", "sonnet", "run"], ["verify", "opus", "q"]]);
   const fash = row("f1", "y", "Batch prepare launch split", "held · confirm Fable", "", true);
   const pin = `<div class="pin"><span class="lbl">Needs you · ${t1y ? 2 : 1} · all projects</span>${t1y ? t1row.replace("<span class=\"t\">", "<span class=\"t\">") + "" : ""}${fash}</div>`;
-  const prj = (nm, lv, n) => `<div class="prj"><span class="nm">${nm}</span><span class="c">${n}</span></div>`;
+  const prj = (nm, lv, n) => `<div class="prj"><span class="nm">${nm}</span></div>`;
   const n = t1y ? 2 : 1;
   document.getElementById("needs").textContent = n + (n > 1 ? " need you" : " needs you");
   document.getElementById("list").innerHTML = pin +
