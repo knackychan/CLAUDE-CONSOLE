@@ -277,6 +277,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .use b { font-weight: 400; color: var(--ink); }
 .use .dv { width: 1px; height: 14px; background: var(--line); }
 @container (max-width: 560px) { .use .cells { display: none; } }
+.btn.dz { color: var(--bad); }
+.btn.dz:hover { border-color: var(--bad); }
+.steer { align-items: center; padding: 12px 12px 4px !important; gap: 8px !important; }
+.steer input { min-height: 40px; padding: 8px 12px !important; font-size: 13.5px !important; }
+.steer .btn { min-height: 40px; padding: 0 16px; }
+.bar { padding: 8px 12px 10px !important; }
+#steeruse:empty { display: none; }
+.tools2 { display: inline-flex; gap: 2px; }
+.tools2:empty { display: none; }
+.ib { width: 32px; height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--mut); display: grid; place-items: center; cursor: pointer; }
+.ib:hover { color: var(--ink); border-color: var(--line); background: var(--raise); }
+.ib.dz:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -313,7 +325,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
       <main class="task">
         <div class="tscroll" id="card"></div>
         <div class="dock" id="dock"></div>
-        <div class="steer" id="steer" hidden><input id="steerin" placeholder="Guidance for the running step, queued for its turn end"><button class="btn">Send</button></div>
+        <div class="steer" id="steer"><input id="steerin" placeholder=""><button class="btn">Send</button><span id="steeruse"></span></div>
         <div class="bar" id="bar"></div>
       </main>
     </div>
@@ -326,7 +338,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
       <li><b>Source on every row:</b> <code>run</code> tag = driven here, full levers; dashed outline with the app name = observed, fork only.</li>
       <li><b>Needs you</b> is a pinned strip above the projects; a task in it leaves a one-line pointer in its project group.</li>
       <li><b>Dock:</b> the needs-you slot sits between the card and the bar and never scrolls away; empty most of the time, then the card is all plan.</li>
-      <li>Delete, Hand off, Open in terminal, the folder and the level sit in the menu (⋯ at the bar's left).</li>
+      <li><b>No menu:</b> every action of the state is in the bar, quiet ones as ghost buttons on the left of the state's own, Delete in red; the level is in the head. The message box is always open when the state takes words.</li>
     </ul>
   </div>
 </div>
@@ -510,29 +522,38 @@ function cells(n, f, h = 0) { let s = ""; for (let i = 0; i < n; i++) s += `<i c
 function bar() {
   const a = A[state];
   const pr = level === "auto" ? a.primary.filter(p => !p[0].includes("from now on")) : a.primary;
-  let h = a.menu.length ? `<button class="btn ghost" id="mb" title="More">⋯</button>` : "";
-  if (a.box) h += `<button class="btn ghost" id="msg">Message</button>`;
+  let h = "";
   // usage lives in the bar: the context of what is on the page (the live step, or the picked step) and its spend
   const r = stepOpen !== null && state !== "observed" ? steps(state)[stepOpen] : null;
   const u = state === "observed" ? [9, "92K", "$1.12"] : r ? (r[3] === "q" ? null : [r[3] === "run" ? 6 : 3, r[3] === "run" ? "61K" : "31K", (r[5] || "$0") + " step"])
     : [state === "running" ? 6 : state === "ready" ? 0 : 4, state === "running" ? "61K" : state === "ready" ? "0" : "38K", ({ ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62" }[state]) + " of $5"];
-  if (u) h += `<span class="use" title="Context: ${u[1]} of 300K · spend ${u[2]}"><span class="cells ctx">${cells(15, u[0])}</span><b>${u[1]}</b><span class="dv"></span><b>${u[2]}</b></span>`;
-  h += `<span class="sp"></span>`;
+  const use = u ? `<span class="use" title="Context: ${u[1]} of 300K · spend ${u[2]}"><span class="cells ctx">${cells(15, u[0])}</span><b>${u[1]}</b><span class="dv"></span><b>${u[2]}</b></span>` : "";
+  if (state !== "ready") h += use;
+  const SP = `<span class="sp"></span>`;
+  // every action in sight: icon tools at the left, then usage, then the state's own actions, the primary at the right edge
+  const quiet = state === "observed" ? a.menu.filter(x => x !== "Continue as a fork") : a.menu.filter(x => x !== "-");
+  // utility actions are 32 px icon buttons (name in the tooltip); the state's own actions keep their words
+  const I = (d) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const ICONS = {
+    "Open in terminal": I('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2 2-2 2M8.5 10.5h3"/>'),
+    "Open folder": I('<path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>'),
+    "Hand off": I('<path d="M9.5 2.5h4v4M13.5 2.5l-6 6M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/>'),
+    "Delete": I('<path d="M2.5 4.5h11M6 4.5V3a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1.5M4 4.5l.7 8.6a1 1 0 0 1 0 0 1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8.6"/>'),
+  };
+  ICONS["Hand off to a follow-up task"] = ICONS["Hand off"];
+  const tools = quiet.filter(x => ICONS[x]), words = quiet.filter(x => !ICONS[x]);
+  h = `<span class="tools2">${tools.map(x => `<button class="ib ${x === "Delete" ? "dz" : ""}" title="${x}" aria-label="${x}">${ICONS[x]}</button>`).join("")}</span>` + h + SP;
+  h += words.map(x => `<button class="btn ghost">${x.replace(" as a fork", " (fork)")}</button>`).join("");
   h += a.bar.map(b => `<button class="btn">${b}</button>`).join("");
   if (state === "decision") h += `<button class="btn you">Take a</button>`;
   h += pr.map(p => `<button class="btn ${p[1]}">${p[0]}</button>`).join("");
-  if (state === "observed") h += `<button class="btn">Open in terminal</button><button class="btn go">Continue as a fork</button>`;
+  if (state === "observed") h += `<button class="btn go">Continue as a fork</button>`;
   document.getElementById("bar").innerHTML = h;
   const steer = document.getElementById("steer");
-  steer.hidden = true;
-  document.getElementById("steerin").placeholder = { guidance: "Guidance for the running step, queued for its turn end", answer: "Another answer, in your words", "next step": "What comes next: becomes the next step" }[a.box] || "";
-  const m = document.getElementById("msg"); if (m) m.onclick = () => { steer.hidden = !steer.hidden; };
-  const mb = document.getElementById("mb");
-  const menu = document.getElementById("menu");
-  menu.hidden = !menuOpen;
-  menu.innerHTML = a.menu.map(x => x === "-" ? "<hr>" : `<button class="${x === "Delete" ? "dz" : ""}">${x}</button>`).join("") +
-    (state === "observed" ? "" : `<hr><div class="lvrow"><span>Level</span><span class="seg"><button aria-pressed="${level === "gated"}">gated</button><button aria-pressed="${level === "auto"}">auto</button></span></div>`);
-  if (mb) mb.onclick = () => { menuOpen = !menuOpen; menu.hidden = !menuOpen; };
+  steer.hidden = !a.box;
+  document.getElementById("steeruse").innerHTML = "";
+  document.getElementById("steerin").placeholder = { guidance: "Guide the running step: read at its next turn", answer: "Or answer in your own words", "next step": "What comes next: becomes the next step" }[a.box] || "";
+  document.getElementById("menu").hidden = true;
 }
 function render() { list(); card();
   document.querySelectorAll(".sub").forEach(b => b.onclick = () => { if (b.dataset.task !== "t1") { document.querySelectorAll(".sub.pick").forEach(x => x.classList.remove("pick")); b.classList.add("pick"); return; } stepOpen = +b.dataset.sub; stepTab = "Chat"; render(); });
