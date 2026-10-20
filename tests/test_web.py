@@ -1621,5 +1621,30 @@ class SupervisorSettingsTest(unittest.TestCase):
         self.assertEqual(render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(empty)})"), "")
 
 
+@unittest.skipUnless(NODE, "Node is not installed")
+class LooseEndsWebTest(unittest.TestCase):
+    """Plan 51: the card after Reject says what to do next; the recovery box names the uncertain decision."""
+
+    def test_sup_card_after_reject_points_to_the_box(self):
+        base = OpenedTaskTest.setup + "d.supervisor.pending = null; d.supervisor.rejected = {wake: 3, decision: 'add_next_step', note: true}; "
+        html = render(base + "d.message = {mode: 'next'}; supCard(t, d)")
+        self.assertIn("You rejected wake 3", html)
+        self.assertIn('class="act was"', html)
+        self.assertIn("Write what to do instead in the box below", html)
+        self.assertIn("your note goes with it", html)
+        self.assertNotIn("supapprove", html)
+        self.assertNotIn("supreject", html)
+        self.assertNotIn("your note goes with it",
+                         render(base + "d.supervisor.rejected.note = false; d.message = {mode: 'next'}; supCard(t, d)"))
+        menu = render(base + "d.message = {mode: 'queued'}; supCard(t, d)")
+        self.assertIn("Add step on a model or Finish task is in the task menu", menu)
+        self.assertNotIn("You rejected", render(OpenedTaskTest.setup + "supCard(t, d)"))
+
+    def test_recovery_box_names_the_uncertain_decision(self):
+        extra = """d.supervisor = {mode: 'suggest', pending: {wake: 4, status: 'uncertain', decision: {decision: 'add_next_step', kind: 'code', source_step: 1, model: 'auto'}, error: 'x', can_approve: false, can_reject: true}, audit: []}; """
+        html = render(RecoveryBoxTest.setup + extra + "attentionArea(t, d, row)")
+        self.assertIn("wake 4 dispatch (Add 03 code from 01", html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -660,5 +660,44 @@ class ProposalTest(unittest.TestCase):
             self.assertNotEqual(supervisor.revision(home, task), planned)
 
 
+class LooseEndsTest(unittest.TestCase):
+    """Plan 51: a tier word from Fred's next-step message, and the uncertain card keeps its decision."""
+
+    def check(self, model, triggers=("message",), words="verify on Opus"):
+        task = {"id": "t", "state": "waiting", "why": "choose next step", "current": 1, "owner": "fred",
+                "steps": [{"n": 1, "kind": "code", "state": "done", "session": "s1"}]}
+        d = ok(decision="add_next_step", kind="verify", instructions="check it", model=model)
+        return supervisor.check(d, task, dict(LEVERS), {"01": ""},
+                                {"triggers": list(triggers), "owned": [1], "retries_left": 1, "fred_words": words})
+
+    def test_message_step_may_name_a_tier_word(self):
+        self.assertEqual(self.check("opus"), (True, ""))
+        self.assertEqual(self.check("auto"), (True, ""))
+        self.assertEqual(self.check("auto", triggers=("choose_next",), words=""), (True, ""))
+        self.assertEqual(self.check("opus", words="verify it"), (False, "the model must be one Fred's message names"))
+        self.assertEqual(self.check("opus", triggers=("choose_next",)), (False, "a supervisor step runs on model auto"))
+        self.assertEqual(self.check("sonnet", words="write two sonnets"),
+                         (False, "the model must be one Fred's message names"))  # a whole word only
+        for bad in ("fable", "claude-opus-5-5", "codex:gpt-6-luna"):
+            self.assertFalse(self.check(bad, words=f"verify on {bad}")[0], bad)
+
+    def test_fold_keeps_uncertain_decision_and_intent(self):
+        add = ok(decision="add_next_step", kind="code", instructions="fix", model="auto")
+        intent = {"call": "request_next", "request_id": "r1", "source_step": 1}
+        records = [{"ts": 1.0, "wake": 2, "phase": "claimed", "events": ["e2"]},
+                   {"ts": 2.0, "wake": 2, "phase": "result", "decision": add, "status": "suggest", "triggers": ["message"],
+                    "cost": 0.001, "day": "2026-10-20"},
+                   {"ts": 3.0, "wake": 2, "phase": "dispatching", "status": "dispatching", "dispatch": intent, "by": "fred"},
+                   {"ts": 4.0, "wake": 2, "phase": "recovered", "outcome": "uncertain", "events": ["e2"]}]
+        pending = supervisor.fold_log(records)["pending"]
+        self.assertEqual(pending["status"], "uncertain")
+        self.assertEqual(pending["decision"], add)
+        self.assertEqual(pending["triggers"], ["message"])
+        self.assertEqual(pending["dispatch"], intent)
+        bare = supervisor.fold_log([records[0], dict(records[2])])["pending"]
+        self.assertEqual(bare["status"], "uncertain")
+        self.assertIsNone(bare["decision"])
+
+
 if __name__ == "__main__":
     unittest.main()

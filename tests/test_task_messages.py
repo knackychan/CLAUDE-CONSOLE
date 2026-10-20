@@ -304,6 +304,7 @@ class TaskMessageTest(_TaskServerTest):
                 got = self.hub.message_availability(self.hub.tasks[tid])
                 self.assertEqual((got["mode"], got["reason"], got["attachments"]), ("next", "", False))
                 self.assertIn("without Approve", got["timing"])
+                self.assertIn("Model: auto, or haiku, sonnet or opus when you name one. An exact model is in the task menu.", got["timing"])
         for done in (False, True):
             with self.subTest(off=done):
                 tid = self.boundary_task(n=2 + done, done=done, mode="off")

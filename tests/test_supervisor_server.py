@@ -2080,9 +2080,95 @@ class PlannedStepTest(NextMessageTest):
         self.assertEqual((code, request.call_count), (409, 0), body)
 
 
+class LooseEndsServerTest(NextMessageTest):
+    """Plan 51: a model named in a next-step message, the view after Reject, the uncertain card after a restart."""
+
+    OPUS = dict(ADD, kind="code", instructions="the model's own words", model="opus")
+
+    def result(self, tid, wake, decision):
+        supervisor.append_log(self.folder, tid, {"ts": 2.0, "wake": wake, "phase": "result", "decision": dict(decision),
+                                                 "status": "suggest", "triggers": ["choose_next"], "cost": 0.001})
+
+    def test_next_route_accepts_a_rank_word(self):
+        tid = self.at_boundary()
+        task = self.hub.tasks[tid]
+        source = task["steps"][0]
+        route = {"rung": "claude-opus-5-5", "model": "opus", "effort": "high", "notes": [], "hold": ""}
+        with mock.patch.object(self.hub, "_route_for", return_value=dict(route)):
+            got, why = self.hub._next_route(task, source, "code", "opus")
+        self.assertEqual((got or {}).get("rung"), "claude-opus-5-5", why)
+        with mock.patch.object(self.hub, "_route_for", return_value=dict(route, rung="sonnet", model="sonnet")):
+            got, why = self.hub._next_route(task, source, "code", "opus")
+        self.assertIsNone(got)
+        self.assertTrue(why)
+        with mock.patch.object(self.hub, "_route_for", return_value=dict(route)):  # a rung keeps the exact check
+            got, why = self.hub._next_route(task, source, "code", "claude-opus-4-8")
+        self.assertIsNone(got)
+
+    def test_message_on_opus_dispatches_that_word(self):
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(self.OPUS), cost=0.001, model="haiku", turns=2, error="")
+        self.say(tid, text="fix the header on opus")
+        with mock.patch.object(self.hub, "request_next", wraps=self.hub.request_next) as request:
+            self.run_wake()
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[0]["model"], "opus")
+        whys = [r["why"] for r in tasks.read_chain(self.folder, self.hub.tasks[tid])]
+        self.assertTrue(any(w.endswith("add_next_step on opus by fred (message))") for w in whys), whys)
+
+    def test_message_model_not_written_is_refused(self):
+        tid = self.at_boundary()
+        self.answer = dict(decision=dict(self.OPUS), cost=0.001, model="haiku", turns=2, error="")
+        self.say(tid, text="fix the header")
+        with mock.patch.object(self.hub, "request_next") as request:
+            self.run_wake()
+        self.assertEqual(request.call_count, 0)
+        task = self.hub.tasks[tid]
+        self.assertEqual(len(task["steps"]), 1)
+        self.assertEqual(task["messages"][0]["status"], "failed")  # plan 48 D11: his words come back with Resend
+        self.assertIn("names", task["messages"][0]["error"])
+
+    def test_reject_view_says_what_next(self):
+        tid = self.at_boundary()
+        self.pending(tid, ADD)
+        self.result(tid, 1, ADD)
+        code, body = self.hub.supervisor_action({"task": tid, "wake": 1, "action": "reject", "note": "code first"})
+        self.assertEqual(code, 200, body)
+        view = self.hub.supervisor_view(self.hub.tasks[tid])
+        self.assertEqual(view["rejected"], {"wake": 1, "decision": "add_next_step", "note": True})
+        self.pending(tid, ADD, wake=2)
+        self.assertIsNone(self.hub.supervisor_view(self.hub.tasks[tid])["rejected"])
+        other = self.at_boundary("20260101-000000-beef")
+        self.pending(other, ADD)
+        self.result(other, 1, ADD)
+        self.assertEqual(self.hub.supervisor_action({"task": other, "wake": 1, "action": "reject"})[0], 200)
+        self.assertEqual(self.hub.supervisor_view(self.hub.tasks[other])["rejected"]["note"], False)
+
+    def test_uncertain_card_keeps_decision_after_restart(self):
+        tid = self.at_boundary()
+        intent = {"call": "request_next", "request_id": supervisor.request_id(tid, 1), "source_step": 1}
+        supervisor.append_log(self.folder, tid, {"ts": 1.0, "wake": 1, "phase": "claimed", "events": ["e1"]})
+        self.result(tid, 1, ADD)
+        supervisor.append_log(self.folder, tid, {"ts": 3.0, "wake": 1, "phase": "dispatching", "status": "dispatching",
+                                                 "dispatch": intent, "by": "fred"})
+        hub = server.Hub(self.hub.cfg, self.folder, exe=self.hub.runs.exe)
+        hub.user_home = self.hub.user_home
+        with mock.patch.object(hub, "request_next", side_effect=AssertionError("no replay")):
+            hub.reconcile_supervisor()
+            pending = hub.tasks[tid]["supervisor"]["pending"]
+            self.assertEqual((pending["status"], pending["decision"]["decision"]), ("uncertain", "add_next_step"))
+            self.assertEqual(pending["dispatch"], intent)
+            card = hub.supervisor_view(hub.tasks[tid])["pending"]
+            self.assertFalse(card["can_approve"])
+            self.assertEqual(hub.supervisor_action({"task": tid, "wake": 1, "action": "approve"})[0], 409)
+            code, body = hub.supervisor_action({"task": tid, "wake": 1, "action": "reject"})
+        self.assertEqual((code, body.get("status")), (200, "dismissed"), body)
+
+
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
 for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
-              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest, PlannedStepTest):
+              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest, PlannedStepTest,
+              LooseEndsServerTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name
