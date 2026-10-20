@@ -23,7 +23,11 @@ unless a decision card appears. Then the same prompt as task 06c2 again, to comp
 
 ## Close
 
-- `PLAN.md` row 49 state and History line; `BRAINSTORM.md` 7.6 gains one paragraph: "Plan 52: the chain is the run
+- `PLAN.md` row 52 state and History line (renumbered from 49 at `8d4c624`); `BRAINSTORM.md` 7.6 gains one paragraph: "Plan 52: the chain is the run
   loop; the supervisor handles exceptions; levels gated / auto / suggest / off; decision cards; the finish card".
 - `plans/44-supervisor/README.md` section 1: a note that D7 (supervised intake) is replaced by plan 52 Task 1.
 - `plans/48-three-moments.md` section 2: D6 widened to any done task (Reopen).
+- `plans/49-planner-handover.md`: already marked replaced in Task 1 (D7); `plans/50-supervisor-settings.md`: a note
+  that Task 5 added `gated` and made it the default; `plans/36-next-step/README.md`: Stage B re-read against the
+  built plan 52 (D8), as its own check, before Fred closes it.
+- The web build of `design/rework/locked/workflow-autopilot.html` is its own plan, written after Task 6 (D9).

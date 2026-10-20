@@ -245,7 +245,7 @@ below where a task depends on them.
 | 7 | Close: `PLAN.md` row **52** (the task file says 49), and the plan 44 and 48 notes; add `plans/49-planner-handover.md` status "replaced by plan 52 Task 1" when D7 is (a). |
 | 8 | Unchanged; the web task that builds it is not written yet (D9). |
 
-### Decisions this check adds (defaults, Fred confirms)
+### Decisions this check adds (Fred, 2026-10-20: D7 to D9 as defaulted; the task files carry them)
 
 | # | Question | Default |
 |---|---|---|
