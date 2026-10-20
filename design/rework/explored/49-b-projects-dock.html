@@ -102,8 +102,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 
 /* the plan as a step timeline: a rail of cells on the left, one row per step */
 .tl { display: grid; grid-template-columns: minmax(0, 1fr); }
-.st { display: grid; grid-template-columns: 14px 22px minmax(0, 1fr) auto auto; gap: 0 10px; align-items: baseline; padding: 6px 0; position: relative; }
-.st::before { content: ""; position: absolute; left: 6px; top: 20px; bottom: -6px; width: 1px; background: var(--line); }
+.st { display: grid; grid-template-columns: 14px 22px minmax(0, 1fr) auto auto 10px; gap: 0 10px; align-items: baseline; padding: 7px 8px; margin: 0 -8px; border-radius: 6px; position: relative; cursor: pointer; }
+.st:hover, .st:focus-visible { background: var(--raise); }
+.st:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.st .go { color: var(--mut); font: 14px var(--ui); opacity: 0; }
+.st:hover .go, .st:focus-visible .go { opacity: 1; color: var(--ink); }
+.st:hover .what b { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); }
+@media (prefers-reduced-motion: no-preference) { .st { transition: background-color .12s; } .st .go { transition: opacity .12s; } }
+.st::before { content: ""; position: absolute; left: 14px; top: 22px; bottom: -7px; width: 1px; background: var(--line); }
 .st:last-child::before { display: none; }
 .st .dt { width: 13px; height: 13px; border-radius: 2px; background: var(--off); align-self: center; position: relative; z-index: 1; }
 .st.done .dt { background: var(--ink); } .st.run .dt { background: var(--ink); } .st.fail .dt { background: var(--bad); } .st.wait .dt { background: var(--you); }
@@ -211,6 +217,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .cp:hover { background: var(--off); color: var(--ink); }
 .cp.ok { color: var(--ok); }
 .open { margin-left: 18px !important; }
+.sphead { display: flex; align-items: center; gap: 8px; margin: -6px 0 6px; min-width: 0; }
+.sphead .back { min-height: 26px; padding: 2px 8px; }
+.sphead .crumb { font-size: 12px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 12px 0 0; }
+.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--mut); font: 600 12px var(--ui); padding: 6px 10px; cursor: pointer; margin-bottom: -1px; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.spbody { padding-top: 12px; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.chat { display: grid; gap: 10px; }
+.msg { display: grid; gap: 2px; font-size: 13px; }
+.msg.me div { color: var(--mut); }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -291,7 +308,7 @@ const A = {
   done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
   observed: { line: ["q", "observed · VS Code"], primary: [], bar: [], menu: ["Continue as a fork", "Verify as a fork", "Hand off", "Escalate as a fork", "Open in terminal"], box: "" },
 };
-let state = "running", level = "gated", menuOpen = false;
+let state = "running", level = "gated", menuOpen = false, stepOpen = null, stepTab = "Chat";
 const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
 function list() {
@@ -350,7 +367,27 @@ function slot() {
   return "";
 }
 
+function stepPage(i) {
+  const r = steps(state)[i], n = String(i + 1).padStart(2, "0");
+  const started = r[3] !== "q";
+  const chat = {
+    scout: [["Console", "Find paths.ts (with safeJoin) and settings.ts in Motion Studio and any tests for them."], ["scout", "Read src/core/paths.ts: safeJoin at :35-41 rejects an escape with startsWith(root + path.sep). settings.ts imports assistantCli.js, which Artcoustic lacks. No vitest tests in Motion Studio."]],
+    design: [["Console", "Using the scout findings, write a short adaptation plan for src/core/paths.ts and src/core/settings.ts."], ["design", "Reading docs/design-spec.md:83 and the T02 section. vitest is not in package.json: the plan adds it as a devDependency."]],
+  }[r[0]] || [["Console", r[2]], [r[0], "Wrote src/core/paths.ts and settings.ts; npx vitest run: 6 passed."]];
+  const tabs = ["Chat", "Received", "Handoff", "Files"];
+  const body = !started ? `<p class="mut" style="margin:0">Not started yet. It runs after step ${String(i).padStart(2, "0")} with this goal:</p><div class="txt"><div class="tt">${esc(r[2])}</div></div>`
+    : stepTab === "Chat" ? `<div class="chat">${chat.map(([w, t]) => `<div class="msg ${w === "Console" ? "me" : ""}"><span class="lbl">${w}</span><div>${esc(t)}</div></div>`).join("")}${r[3] === "run" ? `<div class="msg"><span class="lbl">${r[0]}</span><div class="mut">working<span class="cells" style="display:inline-grid;grid-template-columns:6px;margin-left:8px;vertical-align:middle"><i class="f live"></i></span></div></div>` : ""}</div>`
+    : `<p class="mut" style="margin:0">${stepTab} of step ${n}, as the step inspector shows it today.</p>`;
+  document.getElementById("card").innerHTML = `
+    <div class="sphead"><button class="btn ghost back" id="back">‹ Task</button><span class="crumb">${esc(S.task)}</span></div>
+    <div class="head"><div><h2>${n} · ${r[0]}</h2><div class="sub"><span class="state ${r[3] === "done" ? "g" : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q"}">${r[4] || "· queued"}</span><span>${r[1]}</span></div></div><div class="cost"><b>${r[5] || "$0"}</b><span class="m mut">step</span></div></div>
+    ${started ? `<div class="tabs">${tabs.map(t => `<button data-tab="${t}" aria-pressed="${t === stepTab}">${t}</button>`).join("")}</div>` : ""}
+    <div class="spbody">${body}</div>`;
+  document.getElementById("back").onclick = () => { stepOpen = null; render(); };
+  document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { stepTab = b.dataset.tab; stepPage(i); });
+}
 function card() {
+  if (stepOpen !== null && state !== "observed") return stepPage(stepOpen);
   const a = A[state];
   if (state === "observed") {
     document.getElementById("card").innerHTML = `<div class="head"><div><h2>Refactor render queue</h2><div class="sub"><span class="state q">observed · VS Code</span><span>MOTION STUDIO</span><span>sonnet · medium</span></div></div><div class="cost"><b>$1.12</b><span class="m mut">this chat</span></div></div>
@@ -362,7 +399,7 @@ function card() {
   const rows = steps(state).map((r, i) => {
     const cls = { q: "q", done: "done", run: "run", fail: "fail", wait: "wait" }[r[3]];
     const ck = r[3] === "done" ? (r[4].includes("PASS") ? "g" : "n") : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q";
-    return `<div class="st ${cls}"><span class="dt ${r[3] === "run" ? "live" : ""}"></span><span class="n">${String(i + 1).padStart(2, "0")}</span><span class="what"><b>${r[0]}</b><span class="rt">${r[1]}</span><span class="g">${esc(r[2])}</span></span><span class="chk ${ck}">${r[4] || "· queued"}</span><span class="c">${r[5] || ""}</span></div>`;
+    return `<div class="st ${cls}" tabindex="0" role="button" data-step="${i}" title="Open step ${String(i + 1).padStart(2, "0")}"><span class="dt ${r[3] === "run" ? "live" : ""}"></span><span class="n">${String(i + 1).padStart(2, "0")}</span><span class="what"><b>${r[0]}</b><span class="rt">${r[1]}</span><span class="g">${esc(r[2])}</span></span><span class="chk ${ck}">${r[4] || "· queued"}</span><span class="c">${r[5] || ""}</span><span class="go" aria-hidden="true">›</span></div>`;
   }).join("");
   const cost = { ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62" }[state];
   document.getElementById("card").innerHTML = `
@@ -414,9 +451,11 @@ function bar() {
     (state === "observed" ? "" : `<hr><div class="lvrow"><span>Level</span><span class="seg"><button aria-pressed="${level === "gated"}">gated</button><button aria-pressed="${level === "auto"}">auto</button></span></div>`);
   if (mb) mb.onclick = () => { menuOpen = !menuOpen; menu.hidden = !menuOpen; };
 }
-function render() { list(); card(); document.getElementById("dock").innerHTML = state === "observed" ? "" : slot(); bar(); }
+function render() { list(); card();
+  document.querySelectorAll(".st[data-step]").forEach(e => { const go = () => { stepOpen = +e.dataset.step; stepTab = "Chat"; render(); }; e.onclick = go; e.onkeydown = k => { if (k.key === "Enter" || k.key === " ") { k.preventDefault(); go(); } }; });
+  document.getElementById("dock").innerHTML = state === "observed" ? "" : slot(); bar(); }
 document.querySelectorAll("#views button[data-s]").forEach(b => b.onclick = () => {
-  state = b.dataset.s; menuOpen = false;
+  state = b.dataset.s; menuOpen = false; stepOpen = null;
   document.querySelectorAll("#views button[data-s]").forEach(x => x.setAttribute("aria-pressed", x === b)); render();
 });
 document.getElementById("theme").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "light" ? "dark" : "light"; };
