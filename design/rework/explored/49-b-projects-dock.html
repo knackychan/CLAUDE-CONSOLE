@@ -186,7 +186,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sect .raw { margin: 0; }
 .sect .st:first-child { padding-top: 0; }
 .tscroll { gap: 0 !important; }
-.tscroll > .head { padding-bottom: 12px; }
+
 .tscroll > .blk:last-child { border-top: 1px solid var(--line); padding-top: 12px; }
 @container (max-width: 520px) { .sect { grid-template-columns: minmax(0, 1fr); gap: 6px; } .sect .sh { display: flex; gap: 8px; } }
 .slot .q { font-size: 14px; }
@@ -250,6 +250,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sub.q .sn { color: var(--mut); }
 .sub .sm { font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; }
 @media (prefers-reduced-motion: no-preference) { .sub { transition: background-color .12s; } }
+/* page head, the same on the task and the step page: one title size, one meta size (12 px UI), figures in mono */
+.crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; margin: -4px 0 10px; }
+.crumbs .back { flex: none; }
+.crumbs .path { flex: 1; min-width: 0; display: flex; gap: 6px; font-size: 12px; color: var(--mut); white-space: nowrap; overflow: hidden; }
+.crumbs .pt { overflow: hidden; text-overflow: ellipsis; }
+.crumbs .cur { color: var(--ink); flex: none; }
+.nb { width: 32px; height: 32px; flex: none; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 16px var(--ui); cursor: pointer; display: grid; place-items: center; }
+.nb:hover { border-color: var(--ink); }
+.nb:disabled { opacity: .35; cursor: default; border-color: var(--line); }
+.hd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding-bottom: 12px; }
+.hd h2 { margin: 0 0 6px; font: 600 17px/1.3 var(--ui); }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font: 12px var(--ui); }
+.pst { font: 600 12px var(--ui); padding: 2px 9px; border-radius: 10px; background: var(--raise); }
+.pst.g { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--raise)); }
+.pst.y { color: var(--you); background: color-mix(in srgb, var(--you) 12%, var(--raise)); }
+.pst.r { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--raise)); }
+.pst.q { color: var(--mut); }
+.fact { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+.fact i { font-style: normal; color: var(--mut); }
+.hd .cost { text-align: right; display: grid; justify-items: end; gap: 2px; }
+.hd .cost b { font: 700 28px/1 var(--dot); }
+.hd .cost span { font: 12px var(--ui); color: var(--mut); }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -422,11 +444,17 @@ function stepPage(i) {
     : stepTab === "Chat" ? thread
     : sect(stepTab, "", `<p class="brief mut">${stepTab} of step ${n}, as the step inspector shows it today.</p>`);
   document.getElementById("card").innerHTML = `
-    <div class="sphead"><button class="btn ghost back" id="back">‹ Task</button><span class="crumb">${esc(S.task)}</span></div>
-    <div class="head"><div><h2>${n} · ${r[0]}</h2><div class="sub"><span class="state ${r[3] === "done" ? "g" : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q"}">${r[4] || "· queued"}</span><span>${r[1]}</span></div></div><div class="cost"><b>${r[5] || "$0"}</b><span class="m mut">step</span></div></div>
+    <div class="crumbs"><button class="btn back" id="back" title="Back to the task (Esc)">← Task</button><span class="path"><span class="pt">${esc(S.task)}</span><span class="sep">/</span><span class="cur">Step ${n} of ${steps(state).length}</span></span>
+      <button class="nb" id="prev" title="Previous step" ${i === 0 ? "disabled" : ""}>‹</button><button class="nb" id="next" title="Next step" ${i === steps(state).length - 1 ? "disabled" : ""}>›</button></div>
+    <div class="hd"><div class="hl"><h2>${r[0][0].toUpperCase() + r[0].slice(1)}</h2><div class="meta">
+      <span class="pst ${r[3] === "done" ? "g" : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q"}">${{ done: "✓ Done", run: "▸ Running", q: "· Queued", wait: "? Waits for you", fail: "✕ Failed" }[r[3]]}</span>
+      <span class="fact"><i>Model</i>${r[1].replace(" · ", ", ")} effort</span>${r[3] === "done" ? `<span class="fact"><i>Took</i>27 s</span>` : r[3] === "run" ? `<span class="fact"><i>For</i>3 min</span>` : ""}</div></div>
+      <div class="cost"><b>${r[5] || "$0"}</b><span>this step</span></div></div>
     ${started ? `<div class="tabs">${tabs.map(t => `<button data-tab="${t}" aria-pressed="${t === stepTab}">${t}</button>`).join("")}</div>` : ""}
     <div class="spbody">${body}${started ? usage(r[3] === "run" ? 6 : 3, r[3] === "run" ? "61K" : "31K", (r[5] || "$0") + " · this step", 1) : ""}</div>`;
   document.getElementById("back").onclick = () => { stepOpen = null; render(); };
+  document.getElementById("prev").onclick = () => { stepOpen = Math.max(0, i - 1); render(); };
+  document.getElementById("next").onclick = () => { stepOpen = Math.min(steps(state).length - 1, i + 1); render(); };
   document.querySelectorAll("[data-tl]").forEach(b => b.onclick = () => { const u = document.getElementById(b.dataset.tl); u.hidden = !u.hidden; b.querySelector(".car").textContent = u.hidden ? "▸" : "▾"; });
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { stepTab = b.dataset.tab; stepPage(i); });
 }
@@ -448,9 +476,11 @@ function card() {
   }).join("");
   const cost = { ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62" }[state];
   document.getElementById("card").innerHTML = `
-    <div class="head"><div><h2>${esc(S.task)}</h2><div class="sub"><span class="state ${a.line[0]}">${esc(a.line[1])}</span><span>${S.project}</span>
-      <span class="seg" title="Autonomy level for this task; the project default is gated"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></div></div>
-      <div class="cost"><b>${cost}</b><span class="m mut">task</span></div></div>
+    <div class="hd"><div class="hl"><h2>${esc(S.task)}</h2><div class="meta">
+      <span class="pst ${a.line[0]}">${{ ready: "Ready to start", running: "▸ Running", plan_ready: "? Plan to confirm", decision: "? Needs you", failed_twice: "✕ Failed twice", done: "✓ Done" }[state]}</span>
+      ${state === "running" ? `<span class="fact"><i>Now</i>02 design on opus, 3 min</span>` : ""}<span class="fact"><i>Project</i>${S.project}</span>
+      <span class="fact"><i>Level</i><span class="seg" title="Autonomy level for this task; the project default is gated"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></span></div></div>
+      <div class="cost"><b>${cost}</b><span>this task</span></div></div>
     <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><div class="tx"><button class="car tg" data-t="pr" aria-label="Expand">▸</button><button class="pv tg" data-t="pr">${esc(S.prompt)}</button><div id="pr" class="txt" hidden><div class="tt">${esc(S.prompt)}</div><button class="cp" data-c="pr" title="Copy to clipboard" aria-label="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div></div></div></section>
     <section class="sect"><div class="sh"><span class="lbl">Brief</span><span class="sm">prep · haiku</span></div><div class="sb"><div class="tx"><button class="car tg" data-t="bt" aria-label="Expand">▸</button><button class="pv tg" data-t="bt">${esc(S.brief)}</button><div id="bt" class="txt" hidden><div class="tt">${esc(S.brief)}</div><button class="cp" data-c="bt" title="Copy to clipboard" aria-label="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div></div>
       <div id="bf" class="open" data-with="bt" hidden>
