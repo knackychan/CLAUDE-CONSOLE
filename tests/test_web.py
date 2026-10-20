@@ -1529,5 +1529,17 @@ class RecoveryBoxTest(unittest.TestCase):
         self.assertNotIn("<input", html.split('class="askbox recovery"', 1)[1].split("</div>", 1)[0])
 
 
+class PlannedProposalWebTest(unittest.TestCase):
+    """Plan 49: a suggestion that takes the planner's step says which one."""
+
+    def test_decision_names_planned_proposal(self):
+        html = render(OpenedTaskTest.setup + "PEND.decision.proposal = 1; supCard(t, d)")
+        self.assertIn("(planned p1)", html)
+        self.assertNotIn("planned p", render(OpenedTaskTest.setup + "supCard(t, d)"))
+        nokind = render(OpenedTaskTest.setup + "t.supervisor = {proposed: [{kind: 'code', goal: 'g', model: ''}]};"
+                        " delete PEND.decision.kind; PEND.decision.proposal = 1; supCard(t, d)")
+        self.assertIn(" code from 01", nokind)
+
+
 if __name__ == "__main__":
     unittest.main()

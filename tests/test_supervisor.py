@@ -573,5 +573,92 @@ class SpendViewTest(unittest.TestCase):
         self.assertEqual((view["total"]["cost"], view["total"]["runs"]), (0.4, 3))
 
 
+class ProposalTest(unittest.TestCase):
+    """Plan 49: the planner's proposed steps reach the digest, add_next_step can name one, and an added step trims."""
+
+    PLANNED = [{"kind": "code", "goal": "fix X in app.py", "model": "sonnet"},
+               {"kind": "verify", "goal": "run the tests", "model": ""}]
+
+    def test_digest_lists_proposed_goals(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = evidence_task(home)
+            task["supervisor"]["proposed"] = [dict(p) for p in self.PLANNED]
+            text = supervisor.digest(home, task, context(task))
+            self.assertIn("p1 code (sonnet): fix X in app.py", text)
+            self.assertIn("p2 verify: run the tests", text)
+            self.assertNotIn("Prep proposed kinds", text)
+            self.assertLess(text.index("Allowed now"), text.index("p1 code"))
+            task["supervisor"]["proposed"] = [{"kind": "code", "goal": f"part {i}", "model": ""} for i in range(1, 10)]
+            text = supervisor.digest(home, task, context(task))
+            self.assertIn("p8 code: part 8", text)
+            self.assertNotIn("p9 code", text)
+            self.assertIn("... 1 more", text)
+            task["supervisor"]["proposed"] = [{"kind": "code", "goal": "z" * 900, "model": ""}]
+            self.assertNotIn("z" * 301, supervisor.digest(home, task, context(task)))
+
+    def check(self, d, proposed=None):
+        task = {"id": "t", "state": "waiting", "why": "choose next step", "current": 1, "owner": "fred",
+                "steps": [{"n": 1, "kind": "code", "state": "done", "session": "s1"}],
+                "supervisor": {"proposed": self.PLANNED if proposed is None else proposed}}
+        return supervisor.check(d, task, dict(LEVERS), {"01": ""},
+                                {"triggers": ["choose_next"], "owned": [1], "retries_left": 1})
+
+    def test_check_proposal_index_and_kind(self):
+        take = ok(decision="add_next_step", proposal=1, model="auto")
+        self.assertEqual(self.check(take), (True, ""))
+        self.assertTrue(self.check(dict(take, kind="code"))[0])
+        self.assertTrue(self.check(dict(take, proposal=2))[0])  # its kind, verify, comes from the proposal
+        self.assertEqual(self.check(dict(take, proposal=3)), (False, "proposal p3 is not in the planned list"))
+        self.assertEqual(self.check(dict(take, kind="verify")), (False, "kind differs from proposal p1"))
+        self.assertFalse(self.check(take, proposed=[])[0])
+        self.assertFalse(self.check(dict(take, proposal=0))[0])
+        self.assertFalse(self.check(dict(take, proposal=True))[0])
+        self.assertFalse(self.check(dict(take, model="sonnet"))[0])
+        self.assertFalse(self.check(ok(decision="add_next_step", model="auto", kind="code"))[0])  # no words at all
+        self.assertFalse(self.check(ok(decision="wait", proposal=1))[0])  # a field of add_next_step only
+
+    def test_run_fills_kind_from_proposal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task = {"id": "20260101-000000-abcd", "project_dir": tmp, "steps": [],
+                    "supervisor": {"proposed": [dict(p) for p in self.PLANNED]}}
+            prompt = supervisor.build_prompt(kinds.text(tmp, "supervisor"), task, "digest")
+            fields = {"decision": "add_next_step", "reason": "r", "confidence": "high", "for_fred": "", "proposal": 2}
+            body = {"type": "result", "is_error": False, "total_cost_usd": 0.002, "num_turns": 2,
+                    "structured_output": fields}
+            with mock.patch.object(compact.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
+                    cmd, 0, json.dumps(body).encode(), b"")):
+                got = supervisor.run(cfg(), FAKE, task, prompt, "haiku", 0.5)
+            self.assertEqual(got["error"], "")
+            self.assertEqual((got["decision"]["kind"], got["decision"]["model"], got["decision"]["proposal"]),
+                             ("verify", "auto", 2))
+            body["structured_output"] = dict(fields, proposal=5)
+            with mock.patch.object(compact.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
+                    cmd, 0, json.dumps(body).encode(), b"")):
+                got = supervisor.run(cfg(), FAKE, task, prompt, "haiku", 0.5)
+            self.assertNotIn("kind", got["decision"])  # check() refuses the missing proposal
+
+    def test_trim_proposed(self):
+        items = [{"kind": "code", "goal": "a"}, {"kind": "verify", "goal": "b"}, {"kind": "code", "goal": "c"}]
+        self.assertEqual(supervisor.trim_proposed(items, "code", 2), [items[2]])  # p1 passed over, p2 used
+        self.assertEqual(supervisor.trim_proposed(items, "code"), items[1:])
+        self.assertEqual(supervisor.trim_proposed(items, "verify"), [items[0], items[2]])
+        self.assertEqual(supervisor.trim_proposed(items, "design"), items)
+        self.assertEqual(supervisor.trim_proposed(items, "code", 9), items[1:])  # a stale index: the kind rule
+        self.assertEqual(supervisor.trim_proposed(None, "code"), [])
+        self.assertEqual(len(items), 3)  # the input is untouched
+
+    def test_revision_changes_with_proposed(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = evidence_task(home)
+            rev = supervisor.revision(home, task)
+            task["supervisor"]["proposed"] = [dict(p) for p in self.PLANNED]
+            planned = supervisor.revision(home, task)
+            self.assertNotEqual(rev, planned)
+            task["supervisor"]["proposed"][0]["model"] = "opus"  # the model is not what a decision names
+            self.assertEqual(supervisor.revision(home, task), planned)
+            task["supervisor"]["proposed"] = task["supervisor"]["proposed"][1:]
+            self.assertNotEqual(supervisor.revision(home, task), planned)
+
+
 if __name__ == "__main__":
     unittest.main()

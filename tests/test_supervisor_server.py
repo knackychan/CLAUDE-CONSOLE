@@ -2002,9 +2002,87 @@ class NextMessageTest(DispatchTest):
         self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "cancelled")
 
 
+class PlannedStepTest(NextMessageTest):
+    """Plan 49: a step taken from the planner's proposals carries the planner's goal, and every added step trims."""
+
+    PLANNED = [{"kind": "code", "goal": "fix X in app.py", "model": "sonnet"},
+               {"kind": "verify", "goal": "run the tests", "model": ""}]
+    TAKE = {"decision": "add_next_step", "proposal": 1, "model": "auto", "reason": "the plan's next step",
+            "confidence": "high", "for_fred": ""}
+
+    def planned(self, tid="20260101-000000-abcd"):
+        tid = self.at_boundary(tid)
+        task = self.hub.tasks[tid]
+        task["supervisor"]["proposed"] = [dict(p) for p in self.PLANNED]
+        tasks.save(self.folder, task)
+        return tid
+
+    def add(self, tid, kind, rid, origin="fred", **extra):
+        req = {"task": tid, "source_step": 1, "source_session": "s1", "kind": kind, "instructions": "Fred's step",
+               "model": "auto", **extra}
+        code, preview = self.hub.preview_next(req)
+        self.assertEqual(code, 200, preview)
+        req = dict(req, revision=preview["revision"], request_id=rid)
+        return self.hub.request_next(req, origin=origin) + (req,)
+
+    def kinds_left(self, tid):
+        return [p["kind"] for p in self.hub.tasks[tid]["supervisor"]["proposed"]]
+
+    def test_proposal_step_uses_planner_goal_and_trims(self):
+        tid = self.planned()
+        self.pending(tid, dict(self.TAKE, kind="code"))
+        code, body = self.hub._supervisor_dispatch(tid, 1, "fred")
+        self.assertEqual(code, 200, body)
+        task = self.hub.tasks[tid]
+        self.assertEqual([(s["n"], s["kind"]) for s in task["steps"]], [(1, "scout"), (2, "code")])
+        self.assertEqual(task["steps"][1]["goal"], "fix X in app.py")
+        self.assertEqual(self.kinds_left(tid), ["verify"])
+        self.assertEqual(tasks.load(self.folder, tid)["supervisor"]["proposed"], task["supervisor"]["proposed"])
+        intent = [r for r in supervisor.read_log(self.folder, tid) if r.get("phase") == "dispatching"][0]["dispatch"]
+        self.assertEqual(intent["proposal"], 1)
+
+    def test_message_words_win_over_proposal(self):
+        tid = self.planned()
+        self.answer = dict(decision=dict(self.TAKE), cost=0.001, model="haiku", turns=2, error="")  # no kind given
+        self.say(tid)
+        self.run_wake()
+        self.assertIn("p1 code (sonnet): fix X in app.py", self.calls[0]["prompt"])
+        task = self.hub.tasks[tid]
+        self.assertEqual(len(task["steps"]), 2)
+        self.assertEqual((task["steps"][1]["kind"], task["steps"][1]["goal"]), ("code", self.TEXT))
+        self.assertEqual(self.kinds_left(tid), ["verify"])
+
+    def test_menu_add_step_trims_first_same_kind(self):
+        tid = self.planned()
+        code, body, _ = self.add(tid, "verify", "b" * 32, proposal=1)  # Fred's body cannot name a proposal
+        self.assertEqual(code, 200, body)
+        task = self.hub.tasks[tid]
+        self.assertEqual(task["steps"][1]["goal"], "Fred's step")
+        self.assertEqual(self.kinds_left(tid), ["code"])
+
+    def test_repeated_request_id_trims_once(self):
+        tid = self.planned()
+        code, body, req = self.add(tid, "code", "c" * 32, origin="supervisor", proposal=1)
+        self.assertEqual(code, 200, body)
+        again = self.hub.request_next(req, origin="supervisor")
+        self.assertEqual(again[0], 200, again[1])
+        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
+        self.assertEqual(self.kinds_left(tid), ["verify"])
+
+    def test_stale_proposal_refused(self):
+        tid = self.planned()
+        self.pending(tid, dict(self.TAKE, proposal=2))
+        task = self.hub.tasks[tid]
+        task["supervisor"]["proposed"] = task["supervisor"]["proposed"][:1]  # trimmed since the card was saved
+        tasks.save(self.folder, task)
+        with mock.patch.object(self.hub, "request_next") as request:
+            code, body = self.hub._supervisor_dispatch(tid, 1, "fred")
+        self.assertEqual((code, request.call_count), (409, 0), body)
+
+
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
 for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
-              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest):
+              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest, PlannedStepTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)
 del _cls, _name
