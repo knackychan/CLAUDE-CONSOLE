@@ -569,7 +569,7 @@ function bar() {
   const steer = document.getElementById("steer");
   steer.hidden = !a.box;
   document.getElementById("steeruse").innerHTML = "";
-  document.getElementById("steerin").placeholder = { guidance: state === "failed_twice" ? "Tell Claude what to try differently on the retry" : "Message Claude while it works, for example: use vitest, not jest", answer: "Or write your own answer", "next step": "Ask for something more: it becomes the next step" }[a.box] || "";
+  document.getElementById("steerin").placeholder = { guidance: state === "failed_twice" ? "Tell the agent what to try differently on the retry" : "Message the agent while it works, for example: use vitest, not jest", answer: "Or write your own answer", "next step": "Ask for something more: it becomes the next step" }[a.box] || "";
   document.getElementById("menu").hidden = true;
 }
 function render() { list(); card();
