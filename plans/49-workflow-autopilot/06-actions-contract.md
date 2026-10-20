@@ -19,8 +19,11 @@ def actions(self, task: dict) -> dict:
 `state` is one of `preparing, ready, running, plan_ready, decision, suggestion, hold, failed_twice, stuck, paused,
 stopped, done, handed, observed` by the rules of README section 3 (the table there is the spec; the row text is
 `line`). Options of a decision card are the `primary` list (`post: /api/task/message`, `body: {mode: "answer",
-text: <option text>}`); Accept is `/api/task/accept`; Approve / Reject carry `wake`. An action whose lever is off
-is listed with its `off` reason so the UI can grey it with a title, as the levers do today. `confirm: true` marks
+text: <option text>}`); Accept is `/api/task/accept`; Approve / Reject carry `wake`. State `plan_ready` lists two primaries: `confirm` (`/api/task/confirm {task}`) and `confirm_auto`
+(`{task, remember: "auto"}`, label "Confirm, and run plans automatically from now on"); a decision card with a
+default adds `default_auto` after the options (`/api/task/message {mode: answer, text: <default text>, remember:
+"auto"}`, label "Take the default from now on"). Neither appears when the project is already at `auto`. An action
+whose lever is off is listed with its `off` reason so the UI can grey it with a title, as the levers do today. `confirm: true` marks
 the two-click ones (Stop, Delete, Confirm Fable, Finish).
 
 An observed chat (`source != window`, plan 37) returns `state: "observed"`, `primary: []`, `bar: []`, and `menu`:

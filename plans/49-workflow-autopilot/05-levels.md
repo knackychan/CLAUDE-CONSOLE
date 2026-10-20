@@ -33,6 +33,21 @@ word (`policy()` as today); an unknown word fails closed to `off` with the reaso
 - `Hub._decision_default`: `auto` only (Task 3).
 - Models page: the mode select and the per-project map show four words (`web/app.js`, the existing `supmode`
   segment and the Models page select; text only).
+- Switch up from the card (README section 2, Fred 2026-10-20): `Hub.remember_level(task, level) -> str`, called
+  under tlock before the gate passes: validates `level in MODES`, writes `supervisor_projects[norm(task["project_dir"])]
+  = level` through `tuning.validate` and `paths.set_config` (the one config lock, plan 27), sets
+  `task["supervisor"]["mode"] = level` with the chain line `supervisor mode: <old> -> <level> by Fred (project)`,
+  and returns "" or the refusal. Callers:
+  - `Hub.task_lever(task_id, "confirm", ..., remember=None)` (`POST /api/task/confirm {task, remember: "auto"}`):
+    `remember` is applied first; a refusal is a 400 and nothing is confirmed. Only `plan ready: confirm` accepts
+    `remember` (409 "remember applies to the plan confirm only" on a Fable or pace confirm).
+  - `Hub.task_message(body)` with `remember: "auto"` in `answer` mode on a task whose `decision` has a default: the
+    level is written, then the message is saved as today. The text must equal the default option's text (400
+    otherwise: the switch means "take defaults").
+  Tests: `tests/test_server.py::test_confirm_with_remember_auto_sets_the_project_level_once` (config.json gains the
+  project at auto, the task runs on, a second task in the project starts at auto, a refused level confirms
+  nothing), `test_remember_is_refused_on_a_fable_confirm`,
+  `tests/test_task_messages.py::test_answer_with_remember_auto_takes_the_default_and_switches`.
 
 ## Tests (red first)
 

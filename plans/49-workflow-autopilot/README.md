@@ -152,6 +152,13 @@ word; it takes these words instead of off / suggest / auto):
 Hard stops at every level, unchanged: Fable confirm, pace and usage holds, the second verify FAIL, the work and
 spend caps, Pause, Stop, Delete, a decision without a default.
 
+Switching up from the card (Fred, 2026-10-20): every gate that `auto` would pass by itself carries a second button
+that passes it now and moves the project to `auto` for the future: on the plan-confirm card "Confirm, and run
+plans automatically from now on"; on a decision card with a default "Take the default, and take defaults from
+now on". One POST (`/api/task/confirm {task, remember: "auto"}`, `/api/task/message {..., remember: "auto"}`):
+the project's level is written to `supervisor_projects` and the task's own mode set to `auto`, then the gate
+passes. The task menu's level segment switches back down at any time.
+
 ## 3. User actions per task state
 
 The service already computes most of these (`Hub.task_levers`, `message_availability`, `supervisor_view`); the
@@ -163,8 +170,8 @@ message box (plan 42: guidance while running, answer at a question, next step at
 | preparing | `preparing · Prep, then the planner` | - | Drop | - | - |
 | ready (card) | `ready · N steps · Start` | Start | Edit steps, Drop | Edit prompt, Review rules | - |
 | running | `running · 02 code · sonnet · 3m` | - | Stop, Pause | Hand off, Retry on a model (after a failed attempt), Open in terminal, level, folder, Delete | guidance (queued for the turn end) |
-| plan ready (gated) | `plan ready · confirm` | Confirm plan | Edit plan, Redo design, Stop | as running | guidance |
-| needs you: decision | `needs you · <question>` | the options (a, b, c) | Redo design (plan gap), Stop | as running | answer (free text = another option) |
+| plan ready (gated) | `plan ready · confirm` | Confirm plan; Confirm and run plans automatically from now on | Edit plan, Redo design, Stop | as running | guidance |
+| needs you: decision | `needs you · <question>` | the options (a, b, c); with a default: Take the default from now on | Redo design (plan gap), Stop | as running | answer (free text = another option) |
 | needs you: supervisor card | `needs you · <decision>: <reason>` | Approve | Reject (with a note), Stop | as running | next step (words replace the suggestion) |
 | needs you: hold | `held · confirm Fable` / `over its pace` / `usage limit until hh:mm` | Confirm / Run anyway / Retry on a model | Stop | as running | guidance |
 | needs you: second failure | `failed twice · <detail>` | Retry on a model (note) | Accept step result, Hand off, Finish | Delete | guidance carried into the retry |
