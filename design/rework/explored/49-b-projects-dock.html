@@ -370,7 +370,7 @@ const A = {
   running: { line: ["n", "running · 02 design · opus · 3m"], primary: [], bar: ["Pause", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   plan_ready: { line: ["y", "plan ready · confirm"], primary: [], bar: ["Edit plan", "Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   decision: { line: ["y", "needs you · SHEETS_DIR or PRODUCT_SHEETS_DIR?"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "answer" },
-  failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [["Retry on a model", "you"]], bar: ["Accept step result", "Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [], bar: ["Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
   observed: { line: ["q", "observed · VS Code"], primary: [], bar: [], menu: ["Continue as a fork", "Verify as a fork", "Hand off", "Escalate as a fork", "Open in terminal"], box: "" },
 };
@@ -431,7 +431,8 @@ function slot() {
     <div class="sacts"><button class="btn">Read the plan</button><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Confirm this plan, and set the project to auto: later plans run without asking">Confirm and auto accept</button>` : ""}<button class="btn you">Confirm</button></div></div>`;
   if (state === "failed_twice") return `<div class="slot r">${tag("Failed twice", "bad")}
     <div class="q">2 of 6 tests still fail after the fix.</div>
-    <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div></div>`;
+    <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div>
+    <div class="sacts"><button class="btn" onclick="stepOpen = 4; render();">See the failure</button><span class="sp"></span><button class="btn">Accept step result</button><button class="btn you" title="Runs the verify again on fable, with your note from the box below">Retry on a stronger model</button></div></div>`;
   if (state === "done") return `<div class="slot g">${tag("Finished", "ok")}
     <div class="q">4 steps passed. 2 files written, 6 tests pass, the build is clean.</div>
     <div class="ac"><button class="lnk">See the changed files</button></div></div>`;
@@ -556,7 +557,7 @@ function bar() {
   const steer = document.getElementById("steer");
   steer.hidden = !a.box;
   document.getElementById("steeruse").innerHTML = "";
-  document.getElementById("steerin").placeholder = { guidance: "Guide the running step: read at its next turn", answer: "Or answer in your own words", "next step": "What comes next: becomes the next step" }[a.box] || "";
+  document.getElementById("steerin").placeholder = { guidance: state === "failed_twice" ? "Add a note for the retry: what to try differently" : "Guide the running step: read at its next turn", answer: "Or answer in your own words", "next step": "What comes next: becomes the next step" }[a.box] || "";
   document.getElementById("menu").hidden = true;
 }
 function render() { list(); card();
