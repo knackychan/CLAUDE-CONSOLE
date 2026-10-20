@@ -301,6 +301,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .hd h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hd .hl { min-width: 0; }
 .meta { flex-wrap: nowrap !important; white-space: nowrap; overflow: hidden; }
+.hd .cost .lvl { margin-bottom: 4px; }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -507,9 +508,8 @@ function card() {
   document.getElementById("card").innerHTML = `
     <div class="hd"><div class="hl"><span class="eb">${S.project}</span><h2 title="${esc(S.task)}">${esc(S.task)}</h2><div class="meta">
       <span class="pst ${a.line[0]}">${{ ready: "Ready to start", running: "▸ Running", plan_ready: "? Plan to confirm", decision: "? Needs you", failed_twice: "✕ Failed twice", done: "✓ Done" }[state]}</span>
-      ${state === "running" ? `<span class="fact"><i>Now</i>02 design on opus, 3 min</span>` : ""}
-      <span class="fact"><i>Level</i><span class="seg" title="Autonomy level for this task; the project default is gated"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></span></div></div>
-      <div class="cost"><b>${cost}</b><span>this task</span></div></div>
+      ${state === "running" ? `<span class="fact"><i>Now</i>02 design on opus, 3 min</span>` : ""}</div></div>
+      <div class="cost"><span class="lvl" title="Autonomy level of this task"><span class="seg"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></span><b>${cost}</b><span>this task</span></div></div>
     <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><div class="tx"><button class="car tg" data-t="pr" aria-label="Expand">▸</button><button class="pv tg" data-t="pr">${esc(S.prompt)}</button><div id="pr" class="txt" hidden><div class="tt">${esc(S.prompt)}</div><button class="cp" data-c="pr" title="Copy to clipboard" aria-label="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div></div></div></section>
     <section class="sect"><div class="sh"><span class="lbl">Brief</span><span class="sm">prep · haiku</span></div><div class="sb"><div class="tx"><button class="car tg" data-t="bt" aria-label="Expand">▸</button><button class="pv tg" data-t="bt">${esc(S.brief)}</button><div id="bt" class="txt" hidden><div class="tt">${esc(S.brief)}</div><button class="cp" data-c="bt" title="Copy to clipboard" aria-label="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div></div>
       <div id="bf" class="open" data-with="bt" hidden>
