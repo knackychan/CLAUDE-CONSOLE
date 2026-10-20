@@ -1,7 +1,8 @@
 # Plan 51 - Supervisor loose ends: a model in a next-step message, after Reject, the uncertain card
 
-Status: written 2026-10-20 from the supervision review (items 3, 6 and 8). D1-D6 are written in as defaults; Fred
-confirms or changes them before step 1. No code changed. Lands on plans 36, 44 (backend), 48 and 49.
+Status: written 2026-10-20 from the supervision review (items 3, 6 and 8); D1-D6 confirmed by Fred the same
+day as written. Steps 1 to 5 done 2026-10-20 (section 5); headless and live checks open. Lands on plans 36,
+44 (backend), 48 and 49.
 
 ## 1. Finding
 
@@ -139,6 +140,16 @@ One commit per step, tests first, stage only this plan's lines (other chats edit
    9 minutes), then the full suite.
 4. `web/app.js`, `web/style.css` (3.3, 3.4). `py -m unittest tests.test_web`, `node --check web/app.js`.
 5. Docs.
+
+Done 2026-10-20: step 1 `b4231ea`, then steps 2 to 4 in three parallel sessions in this folder, each committing
+only its own files (Fred asked): step 2 `3966ee8` (supervisor.py and the kind line), step 3 `6d35415` (server.py),
+step 4 `c3f7920` (web/app.js, web/style.css); step 5 the docs commit. `py -m unittest discover -s tests`: 1117 tests
+OK. The headless and live checks below were not run (Fred: checks wait).
+
+Departures: the Reject view test lives in `tests/test_supervisor_server.py` (`LooseEndsServerTest`), the rank-route test
+calls `Hub._next_route` with a mocked `_route_for` (a real ladder rung of rank opus is not in the test config), and
+the chain line of a dispatch with a model reads `supervisor: dispatched <what> (wake N, add_next_step on opus by fred
+(message))`.
 
 Headless check (fake claude, scratch home, as plan 48): a next-step message "verify on opus" starts a step on an opus
 rung; Reject a suggestion and read the hint; stop the service during a dispatch, start it, open the task: the card
