@@ -1,0 +1,353 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot A Sections</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Plan 49 variant A: the list in three sections by who drives (Needs you, Runs here, Observed); the task card in the
+   order of the brief: prompt, brief, plan, needs-you slot, cost and context; one action bar at the foot.
+   Tokens are Console Cells (locked), unchanged. */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 24px 16px 48px; }
+.wrap { max-width: 940px; margin: 0 auto; display: grid; gap: 18px; }
+header h1 { font: 700 30px/1 var(--dot); margin: 0 0 8px; }
+header p { margin: 0; color: var(--mut); max-width: 74ch; }
+.views { display: flex; gap: 4px; flex-wrap: wrap; }
+.views .g { font: 500 10.5px var(--mono); color: var(--mut); text-transform: uppercase; letter-spacing: .04em; align-self: center; margin: 0 6px 0 10px; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; min-height: 32px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mut { color: var(--mut); }
+.lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); } .cells i.y { background: var(--you); } .cells i.r { background: var(--bad); } .cells i.g { background: var(--ok); }
+.cells i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+@media (prefers-reduced-motion: no-preference) { .live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+@keyframes blink { 50% { background: var(--off); } }
+
+/* window: the Board size, 900 x 680; a CSS container */
+.win { width: 100%; max-width: 900px; height: 680px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; position: relative; }
+.top { height: 36px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 0 12px; border-bottom: 1px solid var(--line); }
+.top .brand { font: 600 13px var(--ui); }
+.top .sp { flex: 1; }
+.scope { height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 600 12px var(--mono); }
+.needs { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); background: transparent; border-radius: 4px; padding: 1px 7px; }
+.rb { width: 34px; height: 36px; border: 0; background: transparent; color: var(--mut); font: 14px var(--ui); }
+.body { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+@container (max-width: 700px) { .body { grid-template-columns: minmax(0, 1fr); } .list { display: none; } }
+
+/* the list */
+.list { border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: thin; padding-bottom: 10px; }
+.sec { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 12px 6px; gap: 8px; }
+.sec:first-child { padding-top: 10px; }
+.sec .hint { font: 10.5px var(--mono); color: var(--mut); }
+.row { margin: 0 8px 4px; padding: 7px 9px; border-radius: 8px; background: var(--raise); border: 1px solid transparent; display: grid; gap: 2px; cursor: pointer; grid-template-columns: minmax(0, 1fr); }
+.row:hover { border-color: var(--line); }
+.row.pick { border-color: var(--ink); }
+.row.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 7%, var(--raise)); }
+.row.y.pick { border-color: var(--you); }
+.row .l1 { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.row .t { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .l2 { display: flex; gap: 6px; font: 11px var(--mono); color: var(--mut); min-width: 0; }
+.row .l2 .ln { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .l2 .ln.y { color: var(--you); } .row .l2 .ln.r { color: var(--bad); } .row .l2 .ln.n { color: var(--ink); }
+.mk { width: 8px; height: 8px; flex: none; border-radius: 1px; background: var(--off); }
+.mk.n { background: var(--ink); } .mk.y { background: var(--you); } .mk.r { background: var(--bad); } .mk.g { background: var(--ok); }
+/* level tag: gated is an outline, auto is filled ink; the word is always there */
+.lv { font: 600 10px/1 var(--mono); padding: 3px 5px; border-radius: 3px; border: 1px solid var(--line); color: var(--mut); white-space: nowrap; flex: none; }
+.lv.auto { background: var(--ink); color: var(--win); border-color: var(--ink); }
+/* observed rows: no card fill, a dashed left rule, the app name in place of a level */
+.row.obs { background: transparent; border: 1px dashed var(--line); padding-block: 5px; }
+.row.obs .t { font-weight: 400; }
+.src { font: 600 10px/1 var(--mono); padding: 3px 5px; border-radius: 3px; color: var(--mut); border: 1px dashed var(--mut); white-space: nowrap; flex: none; }
+
+/* the task card */
+.task { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.tscroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 14px 18px 18px; display: grid; gap: 14px; align-content: start; grid-template-columns: minmax(0, 1fr); }
+.head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: start; }
+.head h2 { margin: 0; font: 600 16px/1.3 var(--ui); }
+.head .sub { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font: 11px var(--mono); color: var(--mut); }
+.head .cost { grid-row: span 2; text-align: right; }
+.head .cost b { display: block; font: 700 28px/1 var(--dot); }
+.state { font: 600 12px var(--mono); }
+.state.y { color: var(--you); } .state.r { color: var(--bad); } .state.g { color: var(--ok); } .state.n { color: var(--ink); } .state.q { color: var(--mut); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { font: 600 10.5px var(--mono); background: transparent; color: var(--mut); border: 0; padding: 2px 8px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--win); }
+.blk { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr); }
+.fold { display: flex; gap: 8px; align-items: baseline; background: none; border: 0; color: var(--ink); padding: 0; cursor: pointer; font: inherit; text-align: left; width: 100%; min-width: 0; }
+.fold .car { font: 11px var(--mono); color: var(--mut); width: 10px; flex: none; }
+.fold .pv { flex: 1; min-width: 0; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.raw { font: 12px/1.55 var(--mono); color: var(--mut); background: var(--raise); border-radius: 6px; padding: 8px 10px; margin: 0 0 0 18px; white-space: pre-wrap; }
+.brief { font-size: 13px; line-height: 1.55; }
+.brief .where { color: var(--mut); font-size: 12px; margin-top: 4px; }
+
+/* the plan as a step timeline: a rail of cells on the left, one row per step */
+.tl { display: grid; grid-template-columns: minmax(0, 1fr); }
+.st { display: grid; grid-template-columns: 14px 22px minmax(0, 1fr) auto auto; gap: 0 10px; align-items: baseline; padding: 6px 0; position: relative; }
+.st::before { content: ""; position: absolute; left: 6px; top: 20px; bottom: -6px; width: 1px; background: var(--line); }
+.st:last-child::before { display: none; }
+.st .dt { width: 13px; height: 13px; border-radius: 2px; background: var(--off); align-self: center; position: relative; z-index: 1; }
+.st.done .dt { background: var(--ink); } .st.run .dt { background: var(--ink); } .st.fail .dt { background: var(--bad); } .st.wait .dt { background: var(--you); }
+.st .n { font: 11px var(--mono); color: var(--mut); }
+.st .what { min-width: 0; }
+.st .what b { font-weight: 600; font-size: 13px; }
+.st .what .rt { font: 11px var(--mono); color: var(--mut); margin-left: 6px; }
+.st .what .g { display: block; color: var(--mut); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st .chk { font: 11px var(--mono); white-space: nowrap; }
+.st .chk.g { color: var(--ok); } .st .chk.r { color: var(--bad); } .st .chk.q { color: var(--mut); } .st .chk.n { color: var(--ink); } .st .chk.y { color: var(--you); }
+.st .c { font: 11px var(--mono); color: var(--mut); width: 52px; text-align: right; }
+.st.q .what b { color: var(--mut); font-weight: 400; }
+
+/* the one needs-you slot */
+.slot { border-radius: 8px; padding: 12px; background: color-mix(in srgb, var(--you) 9%, var(--win)); border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+.slot.r { background: color-mix(in srgb, var(--bad) 8%, var(--win)); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.slot.g { background: var(--raise); border-color: var(--line); }
+.slot .q { font-weight: 600; }
+.slot .from { font: 11px var(--mono); color: var(--mut); }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; text-align: left; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--win); color: var(--ink); font: 13px var(--ui); cursor: pointer; }
+.opt:hover { border-color: var(--ink); }
+.opt .k { font: 600 12px var(--mono); color: var(--mut); }
+.opt .def { font: 600 10px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); padding: 1px 5px; border-radius: 3px; }
+.opt.isdef { border-color: color-mix(in srgb, var(--you) 55%, transparent); }
+.why { font-size: 12px; color: var(--mut); }
+.sumt { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+.sumt td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+.sumt td:last-child { text-align: right; }
+
+/* cost and context */
+.meter { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; font: 11px var(--mono); color: var(--mut); }
+.meter .cells.ctx { grid-template-columns: repeat(15, 7px); }
+.meter .cells.usd { grid-template-columns: repeat(20, 7px); }
+.meter b { color: var(--ink); font-weight: 400; }
+
+/* the one action bar: menu left, optional message toggle, secondary, primary at the right edge */
+.bar { flex: none; border-top: 1px solid var(--line); padding: 8px 12px; display: flex; gap: 6px; align-items: center; }
+.bar .sp { flex: 1; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.you { background: var(--you); border-color: var(--you); color: #1a0d00; }
+.btn.ghost { border-color: transparent; color: var(--mut); }
+.btn.ghost:hover { color: var(--ink); border-color: var(--line); }
+.btn.sm { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+.btn[disabled] { opacity: .4; cursor: default; }
+.steer { flex: none; border-top: 1px solid var(--line); padding: 8px 12px 0; display: flex; gap: 6px; }
+.steer input { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+.menu { position: absolute; bottom: 52px; left: 312px; z-index: 4; background: var(--win); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; min-width: 230px; display: grid; }
+.menu button { text-align: left; background: transparent; border: 0; color: var(--ink); font: 13px var(--ui); padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+.menu button:hover { background: var(--raise); }
+.menu .dz { color: var(--bad); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.menu .lvrow { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; font-size: 13px; }
+.notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
+.notes b { color: var(--ink); }
+.notes li { margin: 4px 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>49 A · Sections</h1>
+    <p>The list splits by who drives: <b>Needs you</b> across every project on top, <b>Runs here</b> (Console runs, full levers), <b>Observed</b> (VS Code, terminal, desktop: read only, fork only). The card reads top to bottom in the order of the brief, and one bar holds the actions of the state, primary at the right.</p>
+  </header>
+  <div class="views" id="views">
+    <span class="g">State</span>
+    <button data-s="ready">plan ready to start</button>
+    <button data-s="running" aria-pressed="true">running</button>
+    <button data-s="plan_ready">plan confirm (gated)</button>
+    <button data-s="decision">needs you: decision</button>
+    <button data-s="failed_twice">failed twice</button>
+    <button data-s="done">done</button>
+    <button data-s="observed">observed chat</button>
+    <span class="g">Theme</span>
+    <button id="theme">light / dark</button>
+  </div>
+
+  <div class="win">
+    <div class="top">
+      <span class="brand">Console</span>
+      <span class="sp"></span>
+      <button class="scope">All projects ▾</button>
+      <button class="needs" id="needs">2 need you</button>
+      <button class="rb">⋯</button><button class="rb">–</button><button class="rb">✕</button>
+    </div>
+    <div class="body">
+      <nav class="list" id="list"></nav>
+      <main class="task">
+        <div class="tscroll" id="card"></div>
+        <div class="steer" id="steer" hidden><input id="steerin" placeholder="Guidance for the running step, queued for its turn end"><button class="btn">Send</button></div>
+        <div class="bar" id="bar"></div>
+      </main>
+    </div>
+    <div class="menu" id="menu" hidden></div>
+  </div>
+
+  <div class="notes">
+    <ul>
+      <li><b>Who drives, at a glance:</b> runs are filled cards with a level tag (<code>gated</code> outlined, <code>auto</code> filled); observed chats are dashed outlines with the app name. No fill means no levers.</li>
+      <li><b>Needs you</b> is one section across projects, sorted by age; a run that needs you leaves Runs here while it waits.</li>
+      <li><b>The slot</b> is empty while nothing needs you: the plan sits right above the bar. When a decision, a hold or a second failure comes, it takes the slot under the plan and the bar's primary turns orange.</li>
+      <li><b>Message</b> is a quiet button in the bar; the box opens above the bar only when asked, in the mode of the state (guidance, answer, next step).</li>
+      <li>Delete, Hand off, Open in terminal, the folder and the level sit in the menu (⋯ at the bar's left).</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const S = {
+  task: "Create src/core/paths.ts and settings.ts from Motion Studio",
+  project: "ARTCOUSTIC-AUDIO-REPORT",
+  prompt: "T02: copy Motion Studio's `paths.ts`/`safeJoin` and `settings.ts` into `src/core/`, with PORT 4322, APP_HOME `~/ArtcousticReport`, the report-page/product-sheet paths, and vitest coverage for `safeJoin` and settings round-trip.",
+  brief: "Create src/core/paths.ts and src/core/settings.ts by copying Motion Studio's equivalents, adapted to Artcoustic Report (PORT 4322, APP_HOME ~/ArtcousticReport, report-page and product-sheet paths), and add vitest tests covering safeJoin traversal rejection and settings save/load round-trip.",
+  where: "New: src/core/paths.ts, src/core/settings.ts, a vitest file. Source: D:\\MY DOCS\\MY TOOLS\\MOTION STUDIO\\. Route: risky · reasoning high · opus/high.",
+};
+// step rows per state: [kind, route, goal, status, check, cost]
+const STEPS = {
+  base: [
+    ["scout", "haiku · low", "Find paths.ts, safeJoin, settings.ts and their tests in Motion Studio", "q", "", ""],
+    ["design", "opus · high", "Adaptation plan: ports, roots, safeJoin, settings scope, test layout", "q", "", ""],
+    ["code", "sonnet · medium", "Write both files and the vitest tests; npx vitest run and npm run build pass", "q", "", ""],
+    ["verify", "opus · medium", "Check step 3", "q", "", ""],
+  ],
+};
+function steps(state) {
+  const s = STEPS.base.map(r => r.slice());
+  const done = (i, chk, c) => { s[i][3] = "done"; s[i][4] = chk; s[i][5] = c; };
+  if (state === "ready") return s;
+  done(0, "✓ handoff 412 w", "$0.010");
+  if (state === "running") { s[1][3] = "run"; s[1][4] = "▸ running 3m"; s[1][5] = "$0.21"; }
+  if (state === "plan_ready") { done(1, "✓ plan 2,140 w", "$0.38"); s[2][3] = "wait"; s[2][4] = "? confirm plan"; }
+  if (state === "decision") { done(1, "✓ plan 2,140 w", "$0.38"); s[2][3] = "wait"; s[2][4] = "? asks"; s[2][5] = "$0.06"; }
+  if (state === "failed_twice") { done(1, "✓ plan 2,140 w", "$0.38"); done(2, "✓ handoff 690 w", "$0.18"); s[3][3] = "fail"; s[3][4] = "✕ FAIL ×2"; s[3][5] = "$0.11"; s.splice(3, 0, ["fix", "opus · high", "Fix: vitest not installed, test script missing", "fail", "✕ FAIL", "$0.09"]); }
+  if (state === "done") { done(1, "✓ plan 2,140 w", "$0.38"); done(2, "✓ handoff 690 w", "$0.18"); done(3, "✓ PASS", "$0.05"); }
+  return s;
+}
+const A = {
+  ready: { line: ["y", "ready · 4 steps · Start"], primary: [["Start", "you"]], bar: ["Edit steps", "Drop"], menu: ["Edit prompt", "Review rules"], box: "" },
+  running: { line: ["n", "running · 02 design · opus · 3m"], primary: [], bar: ["Pause", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  plan_ready: { line: ["y", "plan ready · confirm"], primary: [["Confirm, and run plans automatically from now on", ""], ["Confirm plan", "you"]], bar: ["Edit plan", "Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  decision: { line: ["y", "needs you · SHEETS_DIR or PRODUCT_SHEETS_DIR?"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "answer" },
+  failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [["Retry on a model", "you"]], bar: ["Accept step result", "Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
+  observed: { line: ["q", "observed · VS Code"], primary: [], bar: [], menu: ["Continue as a fork", "Verify as a fork", "Hand off", "Escalate as a fork", "Open in terminal"], box: "" },
+};
+let state = "running", level = "gated", menuOpen = false;
+const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function list() {
+  const sel = state === "observed" ? "obs1" : "t1";
+  const t1 = A[state === "observed" ? "running" : state];
+  const t1y = ["ready", "plan_ready", "decision", "failed_twice"].includes(state);
+  const t1row = `<div class="row ${t1y ? "y" : ""} ${sel === "t1" ? "pick" : ""}"><div class="l1"><span class="mk ${t1.line[0]}"></span><span class="t">${esc(S.task)}</span><span class="lv ${level}">${level}</span></div><div class="l2"><span class="ln ${t1.line[0]}">${esc(t1.line[1])}</span></div><div class="l2"><span class="ln">${S.project}</span></div></div>`;
+  const needs = `<div class="row y"><div class="l1"><span class="mk y"></span><span class="t">Batch prepare launch split</span><span class="lv gated">gated</span></div><div class="l2"><span class="ln y">held · confirm Fable</span></div><div class="l2"><span class="ln">fashion_packshots_ai</span></div></div>`;
+  const runs = `<div class="row"><div class="l1"><span class="mk n live"></span><span class="t">Plan 49 Task 2: supervisor on exceptions</span><span class="lv auto">auto</span></div><div class="l2"><span class="ln n">running · 01 code · sonnet · 6m</span></div><div class="l2"><span class="ln">CLAUDE CONSOLE</span></div></div>
+    <div class="row"><div class="l1"><span class="mk g"></span><span class="t">Storyboard kit: shotTiming tests</span><span class="lv gated">gated</span></div><div class="l2"><span class="ln">done · 3 steps · $0.41</span></div><div class="l2"><span class="ln">MOTION STUDIO</span></div></div>`;
+  const obs = `<div class="row obs ${sel === "obs1" ? "pick" : ""}"><div class="l1"><span class="mk n live"></span><span class="t">Refactor render queue</span><span class="src">VS Code</span></div><div class="l2"><span class="ln">working · MOTION STUDIO · $1.12</span></div></div>
+    <div class="row obs"><div class="l1"><span class="mk y"></span><span class="t">Fix eslint config</span><span class="src">terminal</span></div><div class="l2"><span class="ln y">waiting in terminal · ARTCOUSTIC</span></div></div>
+    <div class="row obs"><div class="l1"><span class="mk"></span><span class="t">Workflow redesign brainstorm</span><span class="src">desktop</span></div><div class="l2"><span class="ln">idle · CLAUDE CONSOLE · $2.30</span></div></div>`;
+  const n = t1y ? 2 : 1;
+  document.getElementById("needs").textContent = n + (n > 1 ? " need you" : " needs you");
+  document.getElementById("list").innerHTML =
+    `<div class="sec"><span class="lbl">Needs you · ${n}</span><span class="hint">all projects</span></div>${t1y ? t1row : ""}${needs}` +
+    `<div class="sec"><span class="lbl">Runs here · ${t1y ? 2 : 3}</span><span class="hint">driven by Console</span></div>${t1y ? "" : t1row}${runs}` +
+    `<div class="sec"><span class="lbl">Observed · 3</span><span class="hint">read only · fork</span></div>${obs}`;
+}
+
+function slot() {
+  if (state === "decision") return `<div class="slot"><span class="lbl" style="color:var(--you)">Needs you · decision</span>
+    <div class="q">Which name for the product-sheet folder?</div><div class="from">from 03 code · design-spec:83 says SHEETS_DIR, T02:16 says PRODUCT_SHEETS_DIR</div>
+    <div class="opts"><button class="opt isdef"><span class="k">a)</span><span>PRODUCT_SHEETS_DIR, as T02 (the newer spec)</span><span class="def">default</span></button>
+    <button class="opt"><span class="k">b)</span><span>SHEETS_DIR, as design-spec, and update T02</span><span></span></button></div>
+    <div class="why">Default a: T02 is the task's own spec. ${level === "auto" ? "On auto, taken in 7:40 unless you choose." : "Gated: waits for you."}</div>
+    ${level === "gated" ? `<div><button class="btn sm">Take the default, and take defaults from now on</button></div>` : ""}</div>`;
+  if (state === "plan_ready") return `<div class="slot"><span class="lbl" style="color:var(--you)">Needs you · plan</span>
+    <div class="q">The design step wrote the plan. Confirm once and it runs to the end.</div>
+    <div class="from">plan.md · 2,140 w · 2 steps left (code, verify) · 3 decisions answered from the repo</div></div>`;
+  if (state === "failed_twice") return `<div class="slot r"><span class="lbl" style="color:var(--bad)">Needs you · failed twice</span>
+    <div class="q">verify FAIL after the fix: 2 of 6 tests fail (settings round-trip on Windows paths).</div>
+    <div class="from">attempt 1 · code sonnet · FAIL: vitest missing · attempt 2 · fix opus · FAIL: path.sep on win32</div></div>`;
+  if (state === "done") return `<div class="slot g"><span class="lbl">Finish</span>
+    <table class="sumt"><tr><td>Files</td><td>src/core/paths.ts, src/core/settings.ts, src/core/paths.test.ts, package.json</td></tr>
+    <tr><td>Checks</td><td>npx vitest run 6/6 · npm run build ok</td></tr><tr><td>Still open</td><td>none</td></tr></table></div>`;
+  return "";
+}
+
+function card() {
+  const a = A[state];
+  if (state === "observed") {
+    document.getElementById("card").innerHTML = `<div class="head"><div><h2>Refactor render queue</h2><div class="sub"><span class="state q">observed · VS Code</span><span>MOTION STUDIO</span><span>sonnet · medium</span></div></div><div class="cost"><b>$1.12</b><span class="m mut">this chat</span></div></div>
+      <div class="blk"><span class="lbl">Last turns</span><div class="brief">You: move the render queue into its own module and keep the API.<br><span class="mut">Claude: Split queue.ts into queue/core.ts and queue/workers.ts; 14 tests pass. Next: remove the old export.</span></div></div>
+      <div class="blk"><span class="lbl">Context</span><div class="meter"><span>context</span><div class="cells ctx">${cells(15, 9)}</div><b>92K</b></div></div>
+      <div class="slot g"><div class="q" style="font-weight:400">Driven in VS Code. Console only reads it: to act, fork it into a Console run from the menu.</div></div>`;
+    return;
+  }
+  const rows = steps(state).map((r, i) => {
+    const cls = { q: "q", done: "done", run: "run", fail: "fail", wait: "wait" }[r[3]];
+    const ck = r[3] === "done" ? (r[4].includes("PASS") ? "g" : "n") : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q";
+    return `<div class="st ${cls}"><span class="dt ${r[3] === "run" ? "live" : ""}"></span><span class="n">${String(i + 1).padStart(2, "0")}</span><span class="what"><b>${r[0]}</b><span class="rt">${r[1]}</span><span class="g">${esc(r[2])}</span></span><span class="chk ${ck}">${r[4] || "· queued"}</span><span class="c">${r[5] || ""}</span></div>`;
+  }).join("");
+  const cost = { ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62" }[state];
+  document.getElementById("card").innerHTML = `
+    <div class="head"><div><h2>${esc(S.task)}</h2><div class="sub"><span class="state ${a.line[0]}">${esc(a.line[1])}</span><span>${S.project}</span>
+      <span class="seg" title="Autonomy level for this task; the project default is gated"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></div></div>
+      <div class="cost"><b>${cost}</b><span class="m mut">task</span></div></div>
+    <div class="blk"><button class="fold" id="pf"><span class="car">▸</span><span class="lbl">Prompt</span><span class="pv">${esc(S.prompt)}</span></button><div class="raw" id="raw" hidden>${esc(S.prompt)}</div></div>
+    <div class="blk"><span class="lbl">Brief · from prep</span><div class="brief">${esc(S.brief)}<div class="where">${esc(S.where)}</div></div></div>
+    <div class="blk"><span class="lbl">Plan · ${steps(state).length} steps</span><div class="tl">${rows}</div></div>
+    ${slot()}
+    <div class="blk"><div class="meter"><span>context</span><div class="cells ctx">${cells(15, state === "running" ? 6 : state === "ready" ? 0 : 4)}</div><b>${state === "running" ? "61K" : state === "ready" ? "0" : "38K"}</b>
+      <span>spend</span><div class="cells usd">${cells(20, 2, 1)}</div><b>${cost} · cap $5</b></div></div>`;
+  document.getElementById("pf").onclick = e => { const r = document.getElementById("raw"); r.hidden = !r.hidden; e.currentTarget.querySelector(".car").textContent = r.hidden ? "▸" : "▾"; };
+  document.querySelectorAll(".seg button").forEach(b => b.onclick = () => { level = b.dataset.l; render(); });
+}
+function cells(n, f, h = 0) { let s = ""; for (let i = 0; i < n; i++) s += `<i class="${i < f ? "f" : i < f + h ? "h" : ""}"></i>`; return s; }
+
+function bar() {
+  const a = A[state];
+  const pr = level === "auto" ? a.primary.filter(p => !p[0].includes("from now on")) : a.primary;
+  let h = a.menu.length ? `<button class="btn ghost" id="mb" title="More">⋯</button>` : "";
+  if (a.box) h += `<button class="btn ghost" id="msg">Message</button>`;
+  h += `<span class="sp"></span>`;
+  h += a.bar.map(b => `<button class="btn">${b}</button>`).join("");
+  if (state === "decision") h += `<button class="btn you">Answer a) PRODUCT_SHEETS_DIR</button>`;
+  h += pr.map(p => `<button class="btn ${p[1]}">${p[0]}</button>`).join("");
+  if (state === "observed") h += `<button class="btn">Open in terminal</button><button class="btn go">Continue as a fork</button>`;
+  document.getElementById("bar").innerHTML = h;
+  const steer = document.getElementById("steer");
+  steer.hidden = true;
+  document.getElementById("steerin").placeholder = { guidance: "Guidance for the running step, queued for its turn end", answer: "Another answer, in your words", "next step": "What comes next: becomes the next step" }[a.box] || "";
+  const m = document.getElementById("msg"); if (m) m.onclick = () => { steer.hidden = !steer.hidden; };
+  const mb = document.getElementById("mb");
+  const menu = document.getElementById("menu");
+  menu.hidden = !menuOpen;
+  menu.innerHTML = a.menu.map(x => x === "-" ? "<hr>" : `<button class="${x === "Delete" ? "dz" : ""}">${x}</button>`).join("") +
+    (state === "observed" ? "" : `<hr><div class="lvrow"><span>Level</span><span class="seg"><button aria-pressed="${level === "gated"}">gated</button><button aria-pressed="${level === "auto"}">auto</button></span></div>`);
+  if (mb) mb.onclick = () => { menuOpen = !menuOpen; menu.hidden = !menuOpen; };
+}
+function render() { list(); card(); bar(); }
+document.querySelectorAll("#views button[data-s]").forEach(b => b.onclick = () => {
+  state = b.dataset.s; menuOpen = false;
+  document.querySelectorAll("#views button[data-s]").forEach(x => x.setAttribute("aria-pressed", x === b)); render();
+});
+document.getElementById("theme").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "light" ? "dark" : "light"; };
+render();
+</script>

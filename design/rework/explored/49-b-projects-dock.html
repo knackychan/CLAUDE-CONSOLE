@@ -1,0 +1,610 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot B Dock</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Plan 49 variant A: the list in three sections by who drives (Needs you, Runs here, Observed); the task card in the
+   order of the brief: prompt, brief, plan, needs-you slot, cost and context; one action bar at the foot.
+   Tokens are Console Cells (locked), unchanged. */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 24px 16px 48px; }
+.wrap { max-width: 940px; margin: 0 auto; display: grid; gap: 18px; }
+header h1 { font: 700 30px/1 var(--dot); margin: 0 0 8px; }
+header p { margin: 0; color: var(--mut); max-width: 74ch; }
+.views { display: flex; gap: 4px; flex-wrap: wrap; }
+.views .g { font: 500 10.5px var(--mono); color: var(--mut); text-transform: uppercase; letter-spacing: .04em; align-self: center; margin: 0 6px 0 10px; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; min-height: 32px; cursor: pointer; }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.m { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mut { color: var(--mut); }
+.lbl { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); } .cells i.y { background: var(--you); } .cells i.r { background: var(--bad); } .cells i.g { background: var(--ok); }
+.cells i.h { background: repeating-linear-gradient(135deg, var(--ink) 0 1.2px, transparent 1.2px 3.2px), var(--off); }
+@media (prefers-reduced-motion: no-preference) { .live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+@keyframes blink { 50% { background: var(--off); } }
+
+/* window: the Board size, 900 x 680; a CSS container */
+.win { width: 100%; max-width: 900px; height: 680px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; position: relative; }
+.top { height: 36px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 0 12px; border-bottom: 1px solid var(--line); }
+.top .brand { font: 600 13px var(--ui); }
+.top .sp { flex: 1; }
+.scope { height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 600 12px var(--mono); }
+.needs { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); background: transparent; border-radius: 4px; padding: 1px 7px; }
+.rb { width: 34px; height: 36px; border: 0; background: transparent; color: var(--mut); font: 14px var(--ui); }
+.body { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+@container (max-width: 700px) { .body { grid-template-columns: minmax(0, 1fr); } .list { display: none; } }
+
+/* the list */
+.list { border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: thin; padding-bottom: 10px; }
+.sec { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 12px 6px; gap: 8px; }
+.sec:first-child { padding-top: 10px; }
+.sec .hint { font: 10.5px var(--mono); color: var(--mut); }
+.row { margin: 0 8px 4px; padding: 7px 9px; border-radius: 8px; background: var(--raise); border: 1px solid transparent; display: grid; gap: 2px; cursor: pointer; grid-template-columns: minmax(0, 1fr); }
+.row:hover { border-color: var(--line); }
+.row.pick { border-color: var(--ink); }
+.row.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 7%, var(--raise)); }
+.row.y.pick { border-color: var(--you); }
+.row .l1 { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.row .t { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .l2 { display: flex; gap: 6px; font: 11px var(--mono); color: var(--mut); min-width: 0; }
+.row .l2 .ln { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .l2 .ln.y { color: var(--you); } .row .l2 .ln.r { color: var(--bad); } .row .l2 .ln.n { color: var(--ink); }
+.mk { width: 8px; height: 8px; flex: none; border-radius: 1px; background: var(--off); }
+.mk.n { background: var(--ink); } .mk.y { background: var(--you); } .mk.r { background: var(--bad); } .mk.g { background: var(--ok); }
+/* level tag: gated is an outline, auto is filled ink; the word is always there */
+.lv { font: 600 10px/1 var(--mono); padding: 3px 5px; border-radius: 3px; border: 1px solid var(--line); color: var(--mut); white-space: nowrap; flex: none; }
+.lv.auto { background: var(--ink); color: var(--win); border-color: var(--ink); }
+/* observed rows: no card fill, a dashed left rule, the app name in place of a level */
+.row.obs { background: transparent; border: 1px dashed var(--line); padding-block: 5px; }
+.row.obs .t { font-weight: 400; }
+.src { font: 600 10px/1 var(--mono); padding: 3px 5px; border-radius: 3px; color: var(--mut); border: 1px dashed var(--mut); white-space: nowrap; flex: none; }
+
+/* the task card */
+.task { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.tscroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 14px 18px 18px; display: grid; gap: 14px; align-content: start; grid-template-columns: minmax(0, 1fr); }
+.head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: start; }
+.head h2 { margin: 0; font: 600 16px/1.3 var(--ui); }
+.head .sub { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font: 11px var(--mono); color: var(--mut); }
+.head .cost { grid-row: span 2; text-align: right; }
+.head .cost b { display: block; font: 700 28px/1 var(--dot); }
+.state { font: 600 12px var(--mono); }
+.state.y { color: var(--you); } .state.r { color: var(--bad); } .state.g { color: var(--ok); } .state.n { color: var(--ink); } .state.q { color: var(--mut); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { font: 600 10.5px var(--mono); background: transparent; color: var(--mut); border: 0; padding: 2px 8px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--win); }
+.blk { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr); }
+.fold { display: flex; gap: 8px; align-items: baseline; background: none; border: 0; color: var(--ink); padding: 0; cursor: pointer; font: inherit; text-align: left; width: 100%; min-width: 0; }
+.fold .car { font: 11px var(--mono); color: var(--mut); width: 10px; flex: none; }
+.fold .pv { flex: 1; min-width: 0; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.raw { font: 12px/1.55 var(--mono); color: var(--mut); background: var(--raise); border-radius: 6px; padding: 8px 10px; margin: 0 0 0 18px; white-space: pre-wrap; }
+.brief { font-size: 13px; line-height: 1.55; }
+.brief .where { color: var(--mut); font-size: 12px; margin-top: 4px; }
+
+/* the plan as a step timeline: a rail of cells on the left, one row per step */
+.tl { display: grid; grid-template-columns: minmax(0, 1fr); }
+.st { display: grid; grid-template-columns: 14px 22px minmax(0, 1fr) auto auto 10px; gap: 0 10px; align-items: baseline; padding: 7px 8px; margin: 0 -8px; border-radius: 6px; position: relative; cursor: pointer; }
+.st:hover, .st:focus-visible { background: var(--raise); }
+.st:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.st .go { color: var(--mut); font: 14px var(--ui); opacity: 0; }
+.st:hover .go, .st:focus-visible .go { opacity: 1; color: var(--ink); }
+.st:hover .what b { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); }
+@media (prefers-reduced-motion: no-preference) { .st { transition: background-color .12s; } .st .go { transition: opacity .12s; } }
+.st::before { content: ""; position: absolute; left: 14px; top: 22px; bottom: -7px; width: 1px; background: var(--line); }
+.st:last-child::before { display: none; }
+.st .dt { width: 13px; height: 13px; border-radius: 2px; background: var(--off); align-self: center; position: relative; z-index: 1; }
+.st.done .dt { background: var(--ink); } .st.run .dt { background: var(--ink); } .st.fail .dt { background: var(--bad); } .st.wait .dt { background: var(--you); }
+.st .n { font: 11px var(--mono); color: var(--mut); }
+.st .what { min-width: 0; }
+.st .what b { font-weight: 600; font-size: 13px; }
+.st .what .rt { font: 11px var(--mono); color: var(--mut); margin-left: 6px; }
+.st .what .g { display: block; color: var(--mut); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st .chk { font: 11px var(--mono); white-space: nowrap; }
+.st .chk.g { color: var(--ok); } .st .chk.r { color: var(--bad); } .st .chk.q { color: var(--mut); } .st .chk.n { color: var(--ink); } .st .chk.y { color: var(--you); }
+.st .c { font: 11px var(--mono); color: var(--mut); width: 52px; text-align: right; }
+.st.q .what b { color: var(--mut); font-weight: 400; }
+
+/* the one needs-you slot */
+.slot { border-radius: 8px; padding: 12px; background: color-mix(in srgb, var(--you) 9%, var(--win)); border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+.slot.r { background: color-mix(in srgb, var(--bad) 8%, var(--win)); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.slot.g { background: var(--raise); border-color: var(--line); }
+.slot .q { font-weight: 600; }
+.slot .from { font: 11px var(--mono); color: var(--mut); }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; text-align: left; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--win); color: var(--ink); font: 13px var(--ui); cursor: pointer; }
+.opt:hover { border-color: var(--ink); }
+.opt .k { font: 600 12px var(--mono); color: var(--mut); }
+.opt .def { font: 600 10px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); padding: 1px 5px; border-radius: 3px; }
+.opt.isdef { border-color: color-mix(in srgb, var(--you) 55%, transparent); }
+.why { font-size: 12px; color: var(--mut); }
+.sumt { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+.sumt td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+.sumt td:last-child { text-align: right; }
+
+/* cost and context */
+.meter { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; font: 11px var(--mono); color: var(--mut); }
+.meter .cells.ctx { grid-template-columns: repeat(15, 7px); }
+.meter .cells.usd { grid-template-columns: repeat(20, 7px); }
+.meter b { color: var(--ink); font-weight: 400; }
+
+/* the one action bar: menu left, optional message toggle, secondary, primary at the right edge */
+.bar { flex: none; border-top: 1px solid var(--line); padding: 8px 12px; display: flex; gap: 6px; align-items: center; }
+.bar .sp { flex: 1; }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.btn:hover { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.you { background: var(--you); border-color: var(--you); color: #1a0d00; }
+.btn.ghost { border-color: transparent; color: var(--mut); }
+.btn.ghost:hover { color: var(--ink); border-color: var(--line); }
+.btn.sm { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+.btn[disabled] { opacity: .4; cursor: default; }
+.steer { flex: none; border-top: 1px solid var(--line); padding: 8px 12px 0; display: flex; gap: 6px; }
+.steer input { flex: 1; min-width: 0; font: 13px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+.menu { position: absolute; bottom: 52px; left: 312px; z-index: 4; background: var(--win); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; min-width: 230px; display: grid; }
+.menu button { text-align: left; background: transparent; border: 0; color: var(--ink); font: 13px var(--ui); padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+.menu button:hover { background: var(--raise); }
+.menu .dz { color: var(--bad); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.menu .lvrow { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; font-size: 13px; }
+.dock { flex: none; padding: 0 12px 8px; display: grid; grid-template-columns: minmax(0, 1fr); max-height: 300px; overflow-y: auto; }
+.dock:empty { display: none; }
+.dock .slot { padding: 10px 12px; }
+.prj { display: flex; align-items: center; gap: 6px; padding: 14px 12px 5px; }
+.prj .nm { flex: 1; min-width: 0; font: 600 11px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prj .c { font: 10.5px var(--mono); color: var(--mut); }
+.pin { margin: 8px 8px 0; padding: 6px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); background: color-mix(in srgb, var(--you) 5%, transparent); }
+.pin .lbl { color: var(--you); padding: 2px 4px 6px; display: block; }
+.pin .row { margin: 0 0 4px; }
+.sect { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 0 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.sect .sh { display: grid; align-content: start; gap: 2px; padding-top: 1px; }
+.sect .sh .lbl { color: var(--ink); }
+.sect .sh .sm { font: 10.5px var(--mono); color: var(--mut); }
+.sect .sb { min-width: 0; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+.sect .brief { margin: 0; }
+.kv { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 3px 10px; margin: 0; padding: 8px 10px; background: var(--raise); border-radius: 6px; font: 11.5px var(--mono); }
+.kv dt { color: var(--mut); }
+.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sect .raw { margin: 0; }
+.sect .st:first-child { padding-top: 0; }
+.tscroll { gap: 0 !important; }
+
+.tscroll > .blk:last-child { border-top: 1px solid var(--line); padding-top: 12px; }
+@container (max-width: 520px) { .sect { grid-template-columns: minmax(0, 1fr); gap: 6px; } .sect .sh { display: flex; gap: 8px; } }
+.slot .q { font-size: 14px; }
+.slot .why { font-size: 13px; }
+.opt .k { font: 600 12px var(--mono); color: var(--mut); }
+.lnk { justify-self: start; background: none; border: 0; padding: 0; color: var(--ink); font: 12.5px var(--ui); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); cursor: pointer; }
+.lnk:hover { text-decoration-color: var(--ink); }
+.slot .ac { display: flex; gap: 16px; flex-wrap: wrap; }
+.fold .pv.full { white-space: normal; color: var(--ink); line-height: 1.55; }
+.open { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); margin-left: 18px; }
+.facts { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font: 12px var(--ui); padding: 2px 9px; border-radius: 10px; background: var(--raise); color: var(--ink); }
+.chip.y { color: var(--you); background: color-mix(in srgb, var(--you) 10%, var(--raise)); }
+.fl { display: grid; gap: 6px; }
+.fl .fold { font-size: 13px; gap: 6px; }
+.files { list-style: none; margin: 0 0 0 18px; padding: 0; display: grid; gap: 4px; font: 12px var(--mono); }
+.files li { display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
+.files .nw { font: 600 10px var(--mono); color: var(--ok); width: 32px; flex: none; }
+.files .fn { flex: 1; min-width: 0; }
+.files .og { font: 12px var(--ui); color: var(--mut); white-space: nowrap; }
+.tx { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 0 6px; align-items: start; }
+.tx .car { background: none; border: 0; color: var(--mut); font: 11px var(--mono); padding: 3px 0 0; cursor: pointer; text-align: left; }
+.tx .pv { grid-column: 2; background: none; border: 0; padding: 0; text-align: left; font: 13px var(--ui); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; }
+.tx .pv:hover { color: var(--ink); }
+.txt { grid-column: 2; position: relative; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; }
+.txt .tt { max-height: 116px; overflow-y: auto; padding: 8px 36px 8px 10px; font: 13px/1.55 var(--ui); color: var(--ink); user-select: text; cursor: text; white-space: pre-wrap; scrollbar-width: thin; scrollbar-color: var(--off) transparent; }
+.cp { position: absolute; top: 5px; right: 6px; width: 24px; height: 24px; border: 0; border-radius: 4px; background: var(--raise); color: var(--mut); display: grid; place-items: center; cursor: pointer; font: 12px var(--mono); }
+.cp:hover { background: var(--off); color: var(--ink); }
+.cp.ok { color: var(--ok); }
+.open { margin-left: 18px !important; }
+.sphead { display: flex; align-items: center; gap: 8px; margin: -6px 0 6px; min-width: 0; }
+.sphead .back { min-height: 26px; padding: 2px 8px; }
+.sphead .crumb { font-size: 12px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; gap: 2px; margin: 4px 0 0; padding-bottom: 6px; }
+.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--mut); font: 600 12px var(--ui); padding: 6px 10px; cursor: pointer; margin-bottom: -1px; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.spbody { padding-top: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.chat { display: grid; gap: 10px; }
+.msg { display: grid; gap: 2px; font-size: 13px; }
+.msg.me div { color: var(--mut); }
+.thread { display: grid; gap: 10px; padding: 12px 0 14px; border-top: 1px solid var(--line); grid-template-columns: minmax(0, 1fr); }
+.bub { display: grid; gap: 3px; max-width: 86%; font-size: 13px; line-height: 1.55; }
+.bub .who { font: 10.5px var(--mono); color: var(--mut); }
+.bub.me { justify-self: end; background: var(--raise); border-radius: 10px 10px 2px 10px; padding: 8px 11px; }
+.bub.ai { justify-self: start; }
+.tools { justify-self: start; display: grid; gap: 4px; }
+.tfold { background: none; border: 1px solid var(--line); border-radius: 12px; padding: 2px 10px 2px 8px; color: var(--mut); font: 11px var(--mono); cursor: pointer; justify-self: start; display: inline-flex; gap: 6px; }
+.tfold:hover { color: var(--ink); border-color: var(--ink); }
+.tools ul { list-style: none; margin: 0 0 0 10px; padding: 0 0 0 10px; border-left: 1px solid var(--line); display: grid; gap: 2px; font: 11.5px var(--mono); white-space: pre; }
+.tools li { display: flex; gap: 8px; }
+.tools .ok { color: var(--ok); }
+.subs { margin: -2px 8px 6px 20px; padding: 2px 0 0 8px; border-left: 1px solid var(--line); display: grid; gap: 1px; }
+.sub { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 6px; align-items: baseline; width: 100%; padding: 3px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: 12px var(--ui); text-align: left; cursor: pointer; }
+.sub:hover { background: var(--raise); }
+.sub:hover .sn { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); }
+.sub.pick { background: var(--raise); box-shadow: inset 2px 0 0 var(--ink); }
+.sub .sg { font: 11px var(--mono); color: var(--mut); }
+.sub.done .sg { color: var(--ok); } .sub.run .sg { color: var(--ink); } .sub.fail .sg { color: var(--bad); } .sub.wait .sg { color: var(--you); }
+.sub .sn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub.q .sn { color: var(--mut); }
+.sub .sm { font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .sub { transition: background-color .12s; } }
+/* page head, the same on the task and the step page: one title size, one meta size (12 px UI), figures in mono */
+.crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; margin: -4px 0 10px; }
+.crumbs .back { flex: none; }
+.crumbs .path { flex: 1; min-width: 0; display: flex; gap: 6px; font-size: 12px; color: var(--mut); white-space: nowrap; overflow: hidden; }
+.crumbs .pt { overflow: hidden; text-overflow: ellipsis; }
+.crumbs .cur { color: var(--ink); flex: none; }
+.nb { width: 32px; height: 32px; flex: none; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 16px var(--ui); cursor: pointer; display: grid; place-items: center; }
+.nb:hover { border-color: var(--ink); }
+.nb:disabled { opacity: .35; cursor: default; border-color: var(--line); }
+.hd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding-bottom: 12px; }
+.hd h2 { margin: 0 0 6px; font: 600 17px/1.3 var(--ui); }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font: 12px var(--ui); }
+.pst { font: 600 12px var(--ui); padding: 2px 9px; border-radius: 10px; background: var(--raise); }
+.pst.g { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--raise)); }
+.pst.y { color: var(--you); background: color-mix(in srgb, var(--you) 12%, var(--raise)); }
+.pst.r { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--raise)); }
+.pst.q { color: var(--mut); }
+.fact { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+.fact i { font-style: normal; color: var(--mut); }
+.hd .cost { text-align: right; display: grid; justify-items: end; gap: 2px; }
+.hd .cost b { font: 700 28px/1 var(--dot); }
+.hd .cost span { font: 12px var(--ui); color: var(--mut); }
+.use { display: inline-flex; align-items: center; gap: 8px; margin-left: 8px; font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.use .cells.ctx { grid-template-columns: repeat(15, 4px); }
+.use b { font-weight: 400; color: var(--ink); }
+.use .dv { width: 1px; height: 14px; background: var(--line); }
+@container (max-width: 560px) { .use .cells { display: none; } }
+.btn.dz { color: var(--bad); }
+.btn.dz:hover { border-color: var(--bad); }
+.steer { align-items: center; padding: 12px 12px 4px !important; gap: 8px !important; }
+.steer input { min-height: 40px; padding: 8px 12px !important; font-size: 13.5px !important; }
+.steer .btn { min-height: 40px; padding: 0 16px; }
+.bar { padding: 8px 12px 10px !important; }
+#steeruse:empty { display: none; }
+.tools2 { display: inline-flex; gap: 2px; }
+.tools2:empty { display: none; }
+.ib { width: 32px; height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--mut); display: grid; place-items: center; cursor: pointer; }
+.ib:hover { color: var(--ink); border-color: var(--line); background: var(--raise); }
+.ib.dz:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.mk.live { animation: none; }
+@media (prefers-reduced-motion: no-preference) { .mk.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+.sacts { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.sacts .sp { flex: 1; }
+.opt.sel { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--you); }
+.bar { gap: 6px; padding-right: 12px; }
+.bar .use { margin: 0 4px 0 8px; gap: 6px; }
+.hd { align-items: end; }
+.hd .eb { display: block; font: 600 11px var(--mono); letter-spacing: .04em; color: var(--mut); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd .hl { min-width: 0; }
+.meta { flex-wrap: nowrap !important; white-space: nowrap; overflow: hidden; }
+.hd .cost .lvl { margin-bottom: 4px; }
+.hd { grid-template-columns: minmax(0, 1fr) 140px !important; }
+.tscroll { scrollbar-gutter: stable; }
+.eblink { background: none; border: 0; padding: 0; cursor: pointer; text-align: left; max-width: 100%; }
+.eblink:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.stepnav button { font-size: 12px; padding: 2px 10px; }
+.stepnav button:hover:not(:disabled) { color: var(--ink); background: var(--raise); }
+.stepnav button:disabled { opacity: .35; cursor: default; }
+.sv { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; width: calc(100% + 16px); margin: 0 -8px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--mut); font: 12px var(--ui); text-align: left; cursor: pointer; }
+.sv:hover { background: var(--raise); color: var(--ink); }
+.sv .sg { font: 10px var(--mono); color: var(--mut); text-align: center; }
+.sv span:nth-child(2) { font: 600 11px var(--mono); }
+.sv .tx2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sv .tm { font: 11px var(--mono); }
+.notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
+.notes b { color: var(--ink); }
+.notes li { margin: 4px 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>49 B · Projects and dock</h1>
+    <p>The list is grouped by <b>project</b>, each with its level, and a pinned <b>Needs you</b> strip across projects above them. Each row carries its source: <code>run</code> (driven here) or the app name (observed). On the card the needs-you slot is <b>docked above the bar</b>, so a decision is always in sight however long the plan is.</p>
+  </header>
+  <div class="views" id="views">
+    <span class="g">State</span>
+    <button data-s="ready">plan ready to start</button>
+    <button data-s="running" aria-pressed="true">running</button>
+    <button data-s="plan_ready">plan confirm (gated)</button>
+    <button data-s="decision">needs you: decision</button>
+    <button data-s="suggestion">supervisor suggests</button>
+    <button data-s="hold">held: Fable</button>
+    <button data-s="failed_twice">failed twice</button>
+    <button data-s="done">done</button>
+    <button data-s="observed">observed chat</button>
+    <span class="g">Theme</span>
+    <button id="theme">light / dark</button>
+  </div>
+
+  <div class="win">
+    <div class="top">
+      <span class="brand">Console</span>
+      <span class="sp"></span>
+      <button class="scope">All projects ▾</button>
+      <button class="needs" id="needs">2 need you</button>
+      <button class="rb">⋯</button><button class="rb">–</button><button class="rb">✕</button>
+    </div>
+    <div class="body">
+      <nav class="list" id="list"></nav>
+      <main class="task">
+        <div class="tscroll" id="card"></div>
+        <div class="dock" id="dock"></div>
+        <div class="steer" id="steer"><input id="steerin" placeholder=""><button class="btn">Send</button><span id="steeruse"></span></div>
+        <div class="bar" id="bar"></div>
+      </main>
+    </div>
+    <div class="menu" id="menu" hidden></div>
+  </div>
+
+  <div class="notes">
+    <ul>
+      <li><b>Projects first:</b> each project header carries its level (<code>gated</code> outlined, <code>auto</code> filled), so the autonomy of every project is in sight in the list; the task's own level sits in its head.</li>
+      <li><b>Source on every row:</b> <code>run</code> tag = driven here, full levers; dashed outline with the app name = observed, fork only.</li>
+      <li><b>Needs you</b> is a pinned strip above the projects; a task in it leaves a one-line pointer in its project group.</li>
+      <li><b>Dock:</b> the needs-you slot sits between the card and the bar and never scrolls away; empty most of the time, then the card is all plan.</li>
+      <li><b>No menu:</b> every action of the state is in the bar, quiet ones as ghost buttons on the left of the state's own, Delete in red; the level is in the head. The message box is always open when the state takes words.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const S = {
+  task: "Create src/core/paths.ts and settings.ts from Motion Studio",
+  project: "ARTCOUSTIC-AUDIO-REPORT",
+  prompt: "T02: copy Motion Studio's `paths.ts`/`safeJoin` and `settings.ts` into `src/core/`, with PORT 4322, APP_HOME `~/ArtcousticReport`, the report-page/product-sheet paths, and vitest coverage for `safeJoin` and settings round-trip.",
+  brief: "Create src/core/paths.ts and src/core/settings.ts by copying Motion Studio's equivalents, adapted to Artcoustic Report (PORT 4322, APP_HOME ~/ArtcousticReport, report-page and product-sheet paths), and add vitest tests covering safeJoin traversal rejection and settings save/load round-trip.",
+  where: "New: src/core/paths.ts, src/core/settings.ts, a vitest file. Source: D:\\MY DOCS\\MY TOOLS\\MOTION STUDIO\\. Route: risky · reasoning high · opus/high.",
+};
+// step rows per state: [kind, route, goal, status, check, cost]
+const STEPS = {
+  base: [
+    ["scout", "haiku · low", "Find paths.ts, safeJoin, settings.ts and their tests in Motion Studio", "q", "", ""],
+    ["design", "opus · high", "Adaptation plan: ports, roots, safeJoin, settings scope, test layout", "q", "", ""],
+    ["code", "sonnet · medium", "Write both files and the vitest tests; npx vitest run and npm run build pass", "q", "", ""],
+    ["verify", "opus · medium", "Check step 3", "q", "", ""],
+  ],
+};
+const A = {
+  ready: { line: ["y", "ready · 4 steps · Start"], primary: [["Start", "you"]], bar: ["Edit steps", "Drop"], menu: ["Edit prompt", "Review rules"], box: "" },
+  running: { line: ["n", "running · 02 design · opus · 3m"], primary: [], bar: ["Pause", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  plan_ready: { line: ["y", "plan ready · confirm"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  decision: { line: ["y", "needs you · SHEETS_DIR or PRODUCT_SHEETS_DIR?"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "answer" },
+  failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [], bar: ["Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  suggestion: { line: ["y", "needs you · supervisor suggests a step"], primary: [], bar: ["Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "reject" },
+  hold: { line: ["y", "held · confirm Fable"], primary: [], bar: ["Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
+  observed: { line: ["q", "observed · VS Code"], primary: [], bar: [], menu: ["Continue as a fork", "Verify as a fork", "Hand off", "Escalate as a fork", "Open in terminal"], box: "" },
+};
+let state = "running", level = "gated", menuOpen = false, stepOpen = null, stepTab = "Chat";
+const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function list() {
+  const t1y = ["ready", "plan_ready", "decision", "failed_twice", "suggestion", "hold"].includes(state);
+  const t1 = A[state === "observed" ? "running" : state];
+  const sel = state === "observed" ? "obs1" : stepOpen !== null ? "" : "t1";
+  const run = `<span class="lv" title="Driven by Console">run</span>`;
+  const row = (id, mk, t, ln, src, y) => `<div class="row ${y ? "y" : ""} ${src ? "" : ""} ${sel === id ? "pick" : ""}"><div class="l1"><span class="mk ${mk} ${/running|working/.test(ln) ? "live" : ""}"></span><span class="t">${esc(t)}</span></div><div class="l2"><span class="ln ${mk === "q" ? "" : mk}">${src ? esc(src) + " · " : ""}${esc(ln)}</span></div></div>`;
+  const obs = (id, mk, t, ln, src) => row(id, mk, t, ln, src).replace('class="row', 'class="row obs');
+  // the steps of a running run, under its row: one line each, a link to the step page
+  const glyph = { done: "✓", run: "▸", q: "·", wait: "?", fail: "✕" };
+  const subs = (task, list) => `<div class="subs">${list.map(([k, m, st], i) => `<button class="sub ${st} ${task === "t1" && stepOpen === i ? "pick" : ""}" data-task="${task}" data-sub="${i}" title="Open step ${String(i + 1).padStart(2, "0")}"><span class="sg">${glyph[st]}</span><span class="sn">${String(i + 1).padStart(2, "0")} ${k}</span><span class="sm">${st === "run" ? m + " · running" : st === "q" ? "queued" : st === "done" ? "done" : ""}</span></button>`).join("")}</div>`;
+  const t1subs = state === "running" ? subs("t1", steps(state).map(r => [r[0], r[1].split(" · ")[0], r[3]])) : "";
+  const t1row = row("t1", t1.line[0], S.task, t1.line[1], "", t1y).replace('class="row', 'data-task="t1" class="row') + t1subs;
+  const c1subs = subs("c1", [["code", "sonnet", "run"], ["verify", "opus", "q"]]);
+  const fash = row("f1", "y", "Batch prepare launch split", "held · confirm Fable", "", true);
+  const pin = `<div class="pin"><span class="lbl">Needs you · ${t1y ? 2 : 1} · all projects</span>${t1y ? t1row.replace("<span class=\"t\">", "<span class=\"t\">") + "" : ""}${fash}</div>`;
+  const prj = (nm, lv, n) => `<div class="prj"><span class="nm">${nm}</span></div>`;
+  const n = t1y ? 2 : 1;
+  document.getElementById("needs").textContent = n + (n > 1 ? " need you" : " needs you");
+  document.getElementById("list").innerHTML = pin +
+    prj("ARTCOUSTIC-AUDIO-REPORT", level, t1y ? "1 run · 1 observed" : "1 run · 1 observed") + (t1y ? `<div class="row quiet mut" style="background:transparent;padding:2px 9px;font-size:12px">Create src/core/paths.ts … in Needs you</div>` : t1row) +
+      obs("o2", "y", "Fix eslint config", "waiting in terminal", "terminal") +
+    prj("CLAUDE CONSOLE", "auto", "1 run · 1 observed") + row("c1", "n", "Plan 49 Task 2: supervisor on exceptions", "running · 01 code · sonnet · 6m", "") + c1subs +
+      obs("o3", "q", "Workflow redesign brainstorm", "idle · $2.30", "desktop") +
+    prj("MOTION STUDIO", "gated", "1 run · 1 observed") + row("m1", "g", "Storyboard kit: shotTiming tests", "done · 3 steps · $0.41", "") +
+      obs("obs1", "n", "Refactor render queue", "working · $1.12", "VS Code") +
+    prj("fashion_packshots_ai", "gated", "1 run · in Needs you");
+}
+
+function steps(state) {
+  const s = STEPS.base.map(r => r.slice());
+  const done = (i, chk, c) => { s[i][3] = "done"; s[i][4] = chk; s[i][5] = c; };
+  if (state === "ready") return s;
+  done(0, "✓ done", "$0.01");
+  if (state === "running") { s[1][3] = "run"; s[1][4] = "▸ running"; s[1][5] = "$0.21"; }
+  if (state === "plan_ready") { done(1, "✓ done", "$0.38"); s[2][3] = "wait"; s[2][4] = "? waits for you"; }
+  if (state === "decision") { done(1, "✓ done", "$0.38"); s[2][3] = "wait"; s[2][4] = "? asks you"; s[2][5] = "$0.06"; }
+  if (state === "failed_twice") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); s[3][3] = "fail"; s[3][4] = "✕ failed"; s[3][5] = "$0.11"; s.splice(3, 0, ["fix", "opus · high", "Fix: vitest not installed, test script missing", "fail", "✕ failed", "$0.09"]); }
+  if (state === "suggestion") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); done(3, "✓ passed", "$0.05"); }
+  if (state === "hold") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); s[3][3] = "wait"; s[3][4] = "? held"; }
+  if (state === "done") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); done(3, "✓ passed", "$0.05"); }
+  return s;
+}
+// the slot: a tag, one sentence that says what is asked, at most one plain line of why, then its choices
+function slot() {
+  const tag = (t, c = "you") => `<span class="lbl" style="color:var(--${c})">${t}</span>`;
+  if (state === "decision") return `<div class="slot">${tag("Your decision")}
+    <div class="q">Which name for the product-sheet folder?</div>
+    <div class="why">The two specs disagree. ${level === "auto" ? "Console takes the default in 7 min if you do not choose." : "The task waits for you."}</div>
+    <div class="opts"><button class="opt isdef sel" data-k="a"><span class="k">a</span><span>PRODUCT_SHEETS_DIR, as in T02</span><span class="def">default</span></button>
+    <button class="opt" data-k="b"><span class="k">b</span><span>SHEETS_DIR, as in the design spec</span><span></span></button></div>
+    <div class="sacts"><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Take the default here, and set the project to auto: later defaults are taken after 10 min">Take default and auto accept</button>` : ""}<button class="btn you" id="pick">Confirm a</button></div></div>`;
+  if (state === "plan_ready") return `<div class="slot">${tag("Plan to confirm")}
+    <div class="q">The plan is written. Confirm it and the last 2 steps run on their own.</div>
+    <div class="sacts"><button class="btn">Read or edit the plan</button><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Confirm this plan, and set the project to auto: later plans run without asking">Confirm and auto accept</button>` : ""}<button class="btn you">Confirm</button></div></div>`;
+  if (state === "failed_twice") return `<div class="slot r">${tag("Failed twice", "bad")}
+    <div class="q">2 of 6 tests still fail after the fix.</div>
+    <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div>
+    <div class="sacts"><button class="btn" onclick="stepOpen = 4; render();">See the failure</button><span class="sp"></span><button class="btn">Accept step result</button><button class="btn you" title="Runs the step again one model up, with your note from the box below">Retry on a stronger model</button></div></div>`;
+  if (state === "suggestion") return `<div class="slot">${tag("Supervisor suggests")}
+    <div class="q">Add a step: list the new app folders in the README.</div>
+    <div class="why">All 4 steps passed, but T02 says the README names every app folder, and PRODUCT_SHEETS_DIR is new. Level suggest: it waits for you.</div>
+    <div class="sacts"><button class="btn" title="Turns it down; a note in the box below says why">Reject</button><span class="sp"></span><button class="btn" title="Adds the step and lets the supervisor add steps by itself from now on">Approve and auto accept</button><button class="btn you">Approve</button></div></div>`;
+  if (state === "hold") return `<div class="slot">${tag("Held")}
+    <div class="q">The verify wants to run on Fable.</div>
+    <div class="why">Fable is scarce, so you confirm it each time. Opus can run it instead, a little less sure.</div>
+    <div class="sacts"><span class="sp"></span><button class="btn">Run on opus instead</button><button class="btn you">Confirm Fable</button></div></div>`;
+  if (state === "done") return `<div class="slot g">${tag("Finished", "ok")}
+    <div class="q">4 steps passed. 2 files written, 6 tests pass, the build is clean.</div>
+    <div class="ac"><button class="lnk">See the changed files</button></div></div>`;
+  return "";
+}
+
+// one section pattern for every page: label column (name, one muted line), hairline above, body
+const sect = (l, sub, body) => `<section class="sect"><div class="sh"><span class="lbl">${l}</span>${sub ? `<span class="sm">${sub}</span>` : ""}</div><div class="sb">${body}</div></section>`;
+const usage = (ctxN, ctxT, usdT, n = 2) => sect("Usage", "", `<div class="meter"><span>context</span><div class="cells ctx">${cells(15, ctxN)}</div><b>${ctxT}</b><span>spend</span><div class="cells usd">${cells(20, n, 1)}</div><b>${usdT}</b></div>`);
+function stepPage(i) {
+  const r = steps(state)[i], n = String(i + 1).padStart(2, "0");
+  const started = r[3] !== "q";
+  // a turn: ["me", text] Console's message to the step; ["ai", text]; ["tools", [call, ...]] a folded run of tool calls
+  const chat = {
+    scout: [["me", "08:11", "Find paths.ts (with safeJoin) and settings.ts in Motion Studio and any vitest tests for them. Report their paths, exports and imports."],
+      ["ai", "08:11", "I'll start in Motion Studio's src/core, then check this repo's config."],
+      ["tools", "08:11", ["Glob  MOTION STUDIO/src/core/*.ts", "Read  src/core/paths.ts", "Read  src/core/settings.ts", "Grep  \"vitest\" in MOTION STUDIO", "Read  package.json", "Read  docs/design-spec.md:80-90"]],
+      ["ai", "08:12", "safeJoin is at paths.ts:35-41 and rejects an escape with startsWith(root + path.sep). settings.ts imports assistantCli.js, which Artcoustic lacks. Motion Studio has no vitest tests. Handoff written."]],
+    design: [["me", "08:12", "Using the scout findings, write a short adaptation plan for src/core/paths.ts and src/core/settings.ts."],
+      ["ai", "08:12", "Reading the T02 spec and design-spec:83 to settle the folder names first."],
+      ["tools", "08:13", ["Read  docs/implementation-plan-v2-opus.md", "Read  docs/design-spec.md:83", "Read  package.json"]],
+      ["ai", "08:14", "vitest is not in package.json: the plan adds it as a devDependency. Writing plan.md."]],
+  }[r[0]] || [["me", "08:16", r[2]], ["tools", "08:17", ["Write  src/core/paths.ts", "Write  src/core/settings.ts", "Bash  npx vitest run"]], ["ai", "08:19", "Wrote both files; npx vitest run: 6 passed."]];
+  const who = r[0];
+  const thread = `<div class="thread">${chat.map(([k, t, x], j) => k === "me"
+      ? `<div class="bub me"><span class="who">Console · ${t}</span><div>${esc(x)}</div></div>`
+      : k === "tools"
+      ? `<div class="tools"><button class="tfold" data-tl="tl${j}"><span class="car">▸</span>${x.length} tool calls</button><ul id="tl${j}" hidden>${x.map(c => `<li><span class="ok">✓</span>${esc(c)}</li>`).join("")}</ul></div>`
+      : `<div class="bub ai"><span class="who">${who} · ${t}</span><div>${esc(x)}</div></div>`).join("")}${r[3] === "run" ? `<div class="bub ai"><span class="who">${who} · now</span><div class="mut">working <span class="cells" style="display:inline-grid;grid-template-columns:6px;margin-left:6px;vertical-align:middle"><i class="f live"></i></span></div></div>` : ""}</div>`;
+  const tabs = ["Chat", "Received", "Handoff", "Files"];
+  const body = !started ? sect("Goal", `runs after ${String(i).padStart(2, "0")}`, `<p class="brief">${esc(r[2])}</p>`)
+    : stepTab === "Chat" ? thread
+    : sect(stepTab, "", `<p class="brief mut">${stepTab} of step ${n}, as the step inspector shows it today.</p>`);
+  document.getElementById("card").innerHTML = `
+    <div class="hd"><div class="hl"><button class="eb eblink" id="back" title="Back to the task (Esc)">← ${esc(S.task)}</button><h2>${n} · ${r[0][0].toUpperCase() + r[0].slice(1)}</h2><div class="meta">
+      <span class="pst ${r[3] === "done" ? "g" : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q"}">${{ done: "✓ Done", run: "▸ Running", q: "· Queued", wait: "? Waits for you", fail: "✕ Failed" }[r[3]]}</span>
+      <span class="fact"><i>Model</i>${r[1].replace(" · ", ", ")} effort</span>${r[3] === "done" ? `<span class="fact"><i>Took</i>27 s</span>` : r[3] === "run" ? `<span class="fact"><i>For</i>3 min</span>` : ""}</div></div>
+      <div class="cost"><span class="lvl seg stepnav"><button id="prev" title="Previous step" ${i === 0 ? "disabled" : ""}>‹</button><button id="next" title="Next step" ${i === steps(state).length - 1 ? "disabled" : ""}>›</button></span><b title="Spent on this step">${r[5] || "$0"}</b></div></div>
+    ${started ? `<div class="tabs">${tabs.map(t => `<button data-tab="${t}" aria-pressed="${t === stepTab}">${t}</button>`).join("")}</div>` : ""}
+    <div class="spbody">${body}</div>`;
+  document.getElementById("back").onclick = () => { stepOpen = null; render(); };
+  document.getElementById("prev").onclick = () => { stepOpen = Math.max(0, i - 1); render(); };
+  document.getElementById("next").onclick = () => { stepOpen = Math.min(steps(state).length - 1, i + 1); render(); };
+  document.querySelectorAll("[data-tl]").forEach(b => b.onclick = () => { const u = document.getElementById(b.dataset.tl); u.hidden = !u.hidden; b.querySelector(".car").textContent = u.hidden ? "▸" : "▾"; });
+  document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { stepTab = b.dataset.tab; stepPage(i); });
+}
+function card() {
+  if (stepOpen !== null && state !== "observed") return stepPage(stepOpen);
+  const a = A[state];
+  if (state === "observed") {
+    document.getElementById("card").innerHTML = `<div class="hd"><div class="hl"><span class="eb">MOTION STUDIO · VS Code</span><h2>Refactor render queue</h2><div class="meta"><span class="pst q">Observed</span><span class="fact"><i>Model</i>sonnet, medium effort</span></div></div><div class="cost"><b>$1.12</b><span>this chat</span></div></div>
+      ${sect("You", "VS Code, 14:02", `<p class="brief">Move the render queue into its own module and keep the API.</p>`)}
+      ${sect("Claude", "sonnet, 14:09", `<p class="brief">Split queue.ts into queue/core.ts and queue/workers.ts; 14 tests pass. Next: remove the old export.</p>`)}
+      ${sect("Read only", "", `<p class="brief mut">Driven in VS Code. To act on it here, continue it as a fork: a new Console run with its levers.</p>`)}`;
+    return;
+  }
+  const rows = steps(state).map((r, i) => {
+    const cls = { q: "q", done: "done", run: "run", fail: "fail", wait: "wait" }[r[3]];
+    const ck = r[3] === "done" ? (r[4].includes("PASS") ? "g" : "n") : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q";
+    return `<div class="st ${cls}" tabindex="0" role="button" data-step="${i}" title="Open step ${String(i + 1).padStart(2, "0")}"><span class="dt ${r[3] === "run" ? "live" : ""}"></span><span class="n">${String(i + 1).padStart(2, "0")}</span><span class="what"><b>${r[0]}</b><span class="rt">${r[1]}</span><span class="g">${esc(r[2])}</span></span><span class="chk ${ck}">${r[4] || "· queued"}</span><span class="c">${r[5] || ""}</span><span class="go" aria-hidden="true">›</span></div>`;
+  }).join("") ;
+  const SV = { failed_twice: [3, "retried 04 fix with a note: use path.posix in safeJoin", "11:02"], done: [2, "applied a replan: the fix step was not needed", "10:48"], suggestion: [4, "woke on done: suggests one more step", "10:51"] }[state];
+  const svline = SV ? `<button class="sv" title="Open the supervisor's reason (supervisor.jsonl)"><span class="sg">◆</span><span>Supervisor</span><span class="tx2">${SV[1]}</span><span class="tm">${SV[2]}</span></button>` : "";
+  const rowsSV = SV ? rows.split('<div class="st ').map((x, k) => k === 0 ? x : '<div class="st ' + x).reduce((acc, x, k) => acc + x + (k === SV[0] ? svline : ""), "") : rows;
+  const cost = { ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62", suggestion: "$0.63", hold: "$0.57" }[state];
+  document.getElementById("card").innerHTML = `
+    <div class="hd"><div class="hl"><span class="eb">${S.project}</span><h2 title="${esc(S.task)}">${esc(S.task)}</h2><div class="meta">
+      <span class="pst ${a.line[0]}">${{ ready: "Ready to start", running: "▸ Running", plan_ready: "? Plan to confirm", decision: "? Needs you", failed_twice: "✕ Failed twice", done: "✓ Done", suggestion: "? Needs you", hold: "? Held" }[state]}</span>
+      ${state === "running" ? `<span class="fact"><i>Now</i>02 design on opus, 3 min</span>` : ""}</div></div>
+      <div class="cost"><span class="lvl" title="Autonomy level of this task"><span class="seg"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></span><b title="Spent on this task">${cost}</b></div></div>
+    <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><div class="tx"><button class="car tg" data-t="pr" aria-label="Expand">▸</button><button class="pv tg" data-t="pr">${esc(S.prompt)}</button><div id="pr" class="txt" hidden><div class="tt">${esc(S.prompt)}</div><button class="cp" data-c="pr" title="Copy to clipboard" aria-label="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div></div></div></section>
+    <section class="sect"><div class="sh"><span class="lbl">Brief</span><span class="sm">prep · haiku</span></div><div class="sb"><div class="tx"><button class="car tg" data-t="bt" aria-label="Expand">▸</button><button class="pv tg" data-t="bt">${esc(S.brief)}</button><div id="bt" class="txt" hidden><div class="tt">${esc(S.brief)}</div><button class="cp" data-c="bt" title="Copy to clipboard" aria-label="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div></div>
+      <div id="bf" class="open" data-with="bt" hidden>
+      <div class="facts">
+        <span class="chip y" title="Prep rated the task: safeJoin guards file paths and settings write user data">Risky</span><span class="chip">Deep reasoning</span><span class="chip">Opus, high effort</span>
+      </div>
+      <div class="fl"><button class="fold" data-fold="ff"><span class="car">▸</span><span>3 files to create</span></button>
+        <ul id="ff" class="files" hidden><li><span class="nw">new</span><span class="fn">src/core/paths.ts</span></li><li><span class="nw">new</span><span class="fn">src/core/settings.ts</span></li><li><span class="nw">new</span><span class="fn">src/core/paths.test.ts</span></li></ul></div>
+      </div></div></section>
+    <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rowsSV}</div></div></section>
+
+`;
+  const ICON = document.querySelector(".cp") && document.querySelector(".cp").innerHTML;
+  document.querySelectorAll(".tg").forEach(b => b.onclick = () => { const id = b.dataset.t, box = document.getElementById(id), open = box.hidden; box.hidden = !open;
+    document.querySelectorAll(`[data-with="${id}"]`).forEach(e => e.hidden = !open); const t = b.closest(".tx"); t.querySelector(".pv").hidden = open; t.querySelector(".car").textContent = open ? "▾" : "▸"; });
+  document.querySelectorAll(".cp").forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(document.getElementById(b.dataset.c).querySelector(".tt").innerText); } catch (e) {}
+    b.textContent = "✓"; b.classList.add("ok"); setTimeout(() => { b.innerHTML = ICON; b.classList.remove("ok"); }, 1200); });
+  document.querySelectorAll("[data-fold]").forEach(b => b.onclick = () => { const r = document.getElementById(b.dataset.fold); r.hidden = !r.hidden; b.querySelector(".car").textContent = r.hidden ? "▸" : "▾"; const pv = b.querySelector(".pv"); if (pv) pv.classList.toggle("full", !r.hidden); });
+  document.querySelectorAll(".seg button").forEach(b => b.onclick = () => { level = b.dataset.l; render(); });
+}
+function cells(n, f, h = 0) { let s = ""; for (let i = 0; i < n; i++) s += `<i class="${i < f ? "f" : i < f + h ? "h" : ""}"></i>`; return s; }
+
+function bar() {
+  const a = A[state];
+  const pr = level === "auto" ? a.primary.filter(p => !p[0].includes("from now on")) : a.primary;
+  let h = "";
+  // usage lives in the bar: the context of what is on the page (the live step, or the picked step) and its spend
+  const r = stepOpen !== null && state !== "observed" ? steps(state)[stepOpen] : null;
+  const u = state === "observed" ? [9, "92K", "$1.12"] : r ? (r[3] === "q" ? null : [r[3] === "run" ? 6 : 3, r[3] === "run" ? "61K" : "31K", (r[5] || "$0") + " step"])
+    : [state === "running" ? 6 : state === "ready" ? 0 : 4, state === "running" ? "61K" : state === "ready" ? "0" : "38K", ({ ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62", suggestion: "$0.63", hold: "$0.57" }[state]) + " of $5"];
+  const use = u ? `<span class="use" title="Context: ${u[1]} of 300K · spend ${u[2]}"><span class="cells ctx">${cells(15, u[0])}</span><b>${u[1]}</b><span class="dv"></span><b>${u[2]}</b></span>` : "";
+  if (state !== "ready") h += use;
+  const SP = `<span class="sp"></span>`;
+  // every action in sight: icon tools at the left, then usage, then the state's own actions, the primary at the right edge
+  const quiet = state === "observed" ? a.menu.filter(x => x !== "Continue as a fork") : a.menu.filter(x => x !== "-");
+  // utility actions are 32 px icon buttons (name in the tooltip); the state's own actions keep their words
+  const I = (d) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const ICONS = {
+    "Open in terminal": I('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2 2-2 2M8.5 10.5h3"/>'),
+    "Open folder": I('<path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>'),
+    "Hand off": I('<path d="M9.5 2.5h4v4M13.5 2.5l-6 6M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/>'),
+    "Delete": I('<path d="M2.5 4.5h11M6 4.5V3a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1.5M4 4.5l.7 8.6a1 1 0 0 1 0 0 1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8.6"/>'),
+  };
+  ICONS["Hand off to a follow-up task"] = ICONS["Hand off"];
+  const tools = quiet.filter(x => ICONS[x]), words = quiet.filter(x => !ICONS[x]);
+  h = `<span class="tools2">${tools.map(x => `<button class="ib ${x === "Delete" ? "dz" : ""}" title="${x}" aria-label="${x}">${ICONS[x]}</button>`).join("")}</span>` + h + SP;
+  h += words.map(x => `<button class="btn">${x.replace(" as a fork", " (fork)")}</button>`).join("");
+  h += a.bar.map(b => `<button class="btn">${b}</button>`).join("");
+  h += pr.map(p => `<button class="btn ${p[1]}">${p[0]}</button>`).join("");
+  if (state === "observed") h += `<button class="btn go" title="Continue as a fork: a new Console run with its levers">Continue (fork)</button>`;
+  document.getElementById("bar").innerHTML = h;
+  const steer = document.getElementById("steer");
+  steer.hidden = !a.box;
+  document.getElementById("steeruse").innerHTML = "";
+  document.getElementById("steerin").placeholder = { guidance: state === "failed_twice" ? "Tell the agent what to try differently on the retry" : "Message the agent while it works, for example: use vitest, not jest", answer: "Or write your own answer", reject: "Why not, or what to do instead", "next step": "Ask for something more: it becomes the next step" }[a.box] || "";
+  document.getElementById("menu").hidden = true;
+}
+function render() { list(); card();
+  setTimeout(() => document.querySelectorAll(".opt[data-k]").forEach(o => o.onclick = () => { document.querySelectorAll(".opt").forEach(x => x.classList.toggle("sel", x === o)); document.getElementById("pick").textContent = "Confirm " + o.dataset.k; }));
+  document.querySelectorAll(".sub").forEach(b => b.onclick = () => { if (b.dataset.task !== "t1") { document.querySelectorAll(".sub.pick").forEach(x => x.classList.remove("pick")); b.classList.add("pick"); return; } stepOpen = +b.dataset.sub; stepTab = "Chat"; render(); });
+  document.querySelectorAll('.row[data-task="t1"]').forEach(e => e.onclick = () => { stepOpen = null; render(); });
+  document.querySelectorAll(".st[data-step]").forEach(e => { const go = () => { stepOpen = +e.dataset.step; stepTab = "Chat"; render(); }; e.onclick = go; e.onkeydown = k => { if (k.key === "Enter" || k.key === " ") { k.preventDefault(); go(); } }; });
+  document.getElementById("dock").innerHTML = state === "observed" ? "" : slot(); bar(); }
+document.querySelectorAll("#views button[data-s]").forEach(b => b.onclick = () => {
+  state = b.dataset.s; menuOpen = false; stepOpen = null;
+  document.querySelectorAll("#views button[data-s]").forEach(x => x.setAttribute("aria-pressed", x === b)); render();
+});
+document.getElementById("theme").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "light" ? "dark" : "light"; };
+render();
+</script>
