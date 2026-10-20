@@ -1,7 +1,8 @@
 # Plan 50 - Supervisor settings and spend on the Models and Usage pages
 
-Status: written 2026-10-20 from the supervision review (item 5, and the plan 44 "Models/Usage UI" left open).
-D1-D6 are written in as defaults; Fred confirms or changes them before step 1. No code changed.
+Status: written 2026-10-20 from the supervision review (item 5, and the plan 44 "Models/Usage UI" left open);
+D1-D6 confirmed by Fred the same day as written. Steps 1 to 4 done 2026-10-20 (section 5); the headless and
+live checks are open.
 Lands on plans 26 (Models page), 44 (backend), 48 (Board) and the Usage page (BRAINSTORM 7.5, D13).
 
 ## 1. Finding
@@ -102,6 +103,20 @@ One commit per step, tests first, stage only this plan's lines (other chats edit
 Headless check (fake claude, scratch home, as plan 48): change the global mode, set one project to off, Save,
 Reload: the values stay; Start a card in that project: `supervised: false`. Usage page with a scratch ledger:
 the block reads. 400 and 340 px, dark and light, no horizontal scroll.
+
+Done 2026-10-20: step 1 `3dda302`, step 2 `cc33dca`, step 3 `d7b886f`, step 4 the docs commit (server comment,
+CLAUDE.md). `py -m unittest discover -s tests`: 1108 tests OK; `node --check web/app.js` clean. The headless check
+above was not run (Fred: checks wait).
+
+Departures from sections 3 and 4:
+
+- The POST round-trip test is `tests/test_server.py::test_models_page_saves_supervisor_mode_and_map`, next to plan 26's
+  Models page test (it needs the HTTP fixture); it passed at step 1, since it pins the existing backend contract.
+- The mode and project buttons call one `supPick(spec)`, so the tests drive it directly. The segment reuses the
+  task menu's `.seg` style (`web/style.css`: the `.action-list .seg` rules also match `.tf .seg`).
+- The Usage block uses the `mfill tokens` row: the cells turn orange (`y`) at the fills' `warn_at`, and the figure
+  is today's cost with "of $2.00 a day" beside it (the test asserts both parts; the first draft put both in the
+  58 px figure column).
 
 Live check (Fred): set a project to off from the Models page and run one card there as a chain.
 

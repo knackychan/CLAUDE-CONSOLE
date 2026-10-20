@@ -4003,7 +4003,7 @@ class Handler(BaseHTTPRequestHandler):
                 "handoff_auto": bool(cfg["handoff_auto"]),
                 "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
                 "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()},
-                # plan 44 backend: mode/map and choices for the future supervisor UI (no frontend wiring yet)
+                # plan 44 backend: mode/map and choices; the Models page's Supervisor card edits them (plan 50)
                 "supervisor_config": {"modes": list(supervisor.MODES), "mode": cfg.get("supervisor_mode", "suggest"),
                                       "projects": cfg.get("supervisor_projects") or {},
                                       "models": {"supervisor_model": cfg.get("supervisor_model", "haiku"),
