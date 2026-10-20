@@ -272,6 +272,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .hd .cost { text-align: right; display: grid; justify-items: end; gap: 2px; }
 .hd .cost b { font: 700 28px/1 var(--dot); }
 .hd .cost span { font: 12px var(--ui); color: var(--mut); }
+.use { display: inline-flex; align-items: center; gap: 8px; margin-left: 8px; font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.use .cells.ctx { grid-template-columns: repeat(15, 5px); }
+.use b { font-weight: 400; color: var(--ink); }
+.use .dv { width: 1px; height: 14px; background: var(--line); }
+@container (max-width: 560px) { .use .cells { display: none; } }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -451,7 +456,7 @@ function stepPage(i) {
       <span class="fact"><i>Model</i>${r[1].replace(" · ", ", ")} effort</span>${r[3] === "done" ? `<span class="fact"><i>Took</i>27 s</span>` : r[3] === "run" ? `<span class="fact"><i>For</i>3 min</span>` : ""}</div></div>
       <div class="cost"><b>${r[5] || "$0"}</b><span>this step</span></div></div>
     ${started ? `<div class="tabs">${tabs.map(t => `<button data-tab="${t}" aria-pressed="${t === stepTab}">${t}</button>`).join("")}</div>` : ""}
-    <div class="spbody">${body}${started ? usage(r[3] === "run" ? 6 : 3, r[3] === "run" ? "61K" : "31K", (r[5] || "$0") + " · this step", 1) : ""}</div>`;
+    <div class="spbody">${body}</div>`;
   document.getElementById("back").onclick = () => { stepOpen = null; render(); };
   document.getElementById("prev").onclick = () => { stepOpen = Math.max(0, i - 1); render(); };
   document.getElementById("next").onclick = () => { stepOpen = Math.min(steps(state).length - 1, i + 1); render(); };
@@ -465,7 +470,6 @@ function card() {
     document.getElementById("card").innerHTML = `<div class="head"><div><h2>Refactor render queue</h2><div class="sub"><span class="state q">observed · VS Code</span><span>MOTION STUDIO</span><span>sonnet · medium</span></div></div><div class="cost"><b>$1.12</b><span class="m mut">this chat</span></div></div>
       ${sect("You", "VS Code, 14:02", `<p class="brief">Move the render queue into its own module and keep the API.</p>`)}
       ${sect("Claude", "sonnet, 14:09", `<p class="brief">Split queue.ts into queue/core.ts and queue/workers.ts; 14 tests pass. Next: remove the old export.</p>`)}
-      ${usage(9, "92K", "$1.12", 2)}
       ${sect("Read only", "", `<p class="brief mut">Driven in VS Code. To act on it here, continue it as a fork: a new Console run with its levers.</p>`)}`;
     return;
   }
@@ -492,7 +496,7 @@ function card() {
       </div></div></section>
     <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rows}</div></div></section>
 
-    ${usage(state === "running" ? 6 : state === "ready" ? 0 : 4, state === "running" ? "61K" : state === "ready" ? "0" : "38K", cost + " · cap $5")}`;
+`;
   const ICON = document.querySelector(".cp") && document.querySelector(".cp").innerHTML;
   document.querySelectorAll(".tg").forEach(b => b.onclick = () => { const id = b.dataset.t, box = document.getElementById(id), open = box.hidden; box.hidden = !open;
     document.querySelectorAll(`[data-with="${id}"]`).forEach(e => e.hidden = !open); const t = b.closest(".tx"); t.querySelector(".pv").hidden = open; t.querySelector(".car").textContent = open ? "▾" : "▸"; });
@@ -508,6 +512,11 @@ function bar() {
   const pr = level === "auto" ? a.primary.filter(p => !p[0].includes("from now on")) : a.primary;
   let h = a.menu.length ? `<button class="btn ghost" id="mb" title="More">⋯</button>` : "";
   if (a.box) h += `<button class="btn ghost" id="msg">Message</button>`;
+  // usage lives in the bar: the context of what is on the page (the live step, or the picked step) and its spend
+  const r = stepOpen !== null && state !== "observed" ? steps(state)[stepOpen] : null;
+  const u = state === "observed" ? [9, "92K", "$1.12"] : r ? (r[3] === "q" ? null : [r[3] === "run" ? 6 : 3, r[3] === "run" ? "61K" : "31K", (r[5] || "$0") + " step"])
+    : [state === "running" ? 6 : state === "ready" ? 0 : 4, state === "running" ? "61K" : state === "ready" ? "0" : "38K", ({ ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62" }[state]) + " of $5"];
+  if (u) h += `<span class="use" title="Context: ${u[1]} of 300K · spend ${u[2]}"><span class="cells ctx">${cells(15, u[0])}</span><b>${u[1]}</b><span class="dv"></span><b>${u[2]}</b></span>`;
   h += `<span class="sp"></span>`;
   h += a.bar.map(b => `<button class="btn">${b}</button>`).join("");
   if (state === "decision") h += `<button class="btn you">Take a</button>`;
