@@ -432,7 +432,7 @@ function slot() {
   if (state === "failed_twice") return `<div class="slot r">${tag("Failed twice", "bad")}
     <div class="q">2 of 6 tests still fail after the fix.</div>
     <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div>
-    <div class="sacts"><button class="btn" onclick="stepOpen = 4; render();">See the failure</button><span class="sp"></span><button class="btn">Accept step result</button><button class="btn you" title="Runs the verify again on fable, with your note from the box below">Retry on a stronger model</button></div></div>`;
+    <div class="sacts"><button class="btn" onclick="stepOpen = 4; render();">See the failure</button><span class="sp"></span><button class="btn">Accept step result</button><button class="btn you" title="Runs the step again one model up, with your note from the box below">Retry on a stronger model</button></div></div>`;
   if (state === "done") return `<div class="slot g">${tag("Finished", "ok")}
     <div class="q">4 steps passed. 2 files written, 6 tests pass, the build is clean.</div>
     <div class="ac"><button class="lnk">See the changed files</button></div></div>`;
