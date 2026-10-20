@@ -183,6 +183,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .tscroll > .head { padding-bottom: 12px; }
 .tscroll > .blk:last-child { border-top: 1px solid var(--line); padding-top: 12px; }
 @container (max-width: 520px) { .sect { grid-template-columns: minmax(0, 1fr); gap: 6px; } .sect .sh { display: flex; gap: 8px; } }
+.slot .q { font-size: 14px; }
+.slot .why { font-size: 13px; }
+.opt .k { font: 600 12px var(--mono); color: var(--mut); }
+.lnk { justify-self: start; background: none; border: 0; padding: 0; color: var(--ink); font: 12.5px var(--ui); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); cursor: pointer; }
+.lnk:hover { text-decoration-color: var(--ink); }
+.slot .ac { display: flex; gap: 16px; flex-wrap: wrap; }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -254,22 +260,10 @@ const STEPS = {
     ["verify", "opus · medium", "Check step 3", "q", "", ""],
   ],
 };
-function steps(state) {
-  const s = STEPS.base.map(r => r.slice());
-  const done = (i, chk, c) => { s[i][3] = "done"; s[i][4] = chk; s[i][5] = c; };
-  if (state === "ready") return s;
-  done(0, "✓ handoff 412 w", "$0.010");
-  if (state === "running") { s[1][3] = "run"; s[1][4] = "▸ running 3m"; s[1][5] = "$0.21"; }
-  if (state === "plan_ready") { done(1, "✓ plan 2,140 w", "$0.38"); s[2][3] = "wait"; s[2][4] = "? confirm plan"; }
-  if (state === "decision") { done(1, "✓ plan 2,140 w", "$0.38"); s[2][3] = "wait"; s[2][4] = "? asks"; s[2][5] = "$0.06"; }
-  if (state === "failed_twice") { done(1, "✓ plan 2,140 w", "$0.38"); done(2, "✓ handoff 690 w", "$0.18"); s[3][3] = "fail"; s[3][4] = "✕ FAIL ×2"; s[3][5] = "$0.11"; s.splice(3, 0, ["fix", "opus · high", "Fix: vitest not installed, test script missing", "fail", "✕ FAIL", "$0.09"]); }
-  if (state === "done") { done(1, "✓ plan 2,140 w", "$0.38"); done(2, "✓ handoff 690 w", "$0.18"); done(3, "✓ PASS", "$0.05"); }
-  return s;
-}
 const A = {
   ready: { line: ["y", "ready · 4 steps · Start"], primary: [["Start", "you"]], bar: ["Edit steps", "Drop"], menu: ["Edit prompt", "Review rules"], box: "" },
   running: { line: ["n", "running · 02 design · opus · 3m"], primary: [], bar: ["Pause", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
-  plan_ready: { line: ["y", "plan ready · confirm"], primary: [["Confirm, and run plans automatically from now on", ""], ["Confirm plan", "you"]], bar: ["Edit plan", "Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  plan_ready: { line: ["y", "plan ready · confirm"], primary: [["Confirm plan", "you"]], bar: ["Edit plan", "Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   decision: { line: ["y", "needs you · SHEETS_DIR or PRODUCT_SHEETS_DIR?"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "answer" },
   failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [["Retry on a model", "you"]], bar: ["Accept step result", "Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
@@ -301,22 +295,36 @@ function list() {
     prj("fashion_packshots_ai", "gated", "1 run · in Needs you");
 }
 
+function steps(state) {
+  const s = STEPS.base.map(r => r.slice());
+  const done = (i, chk, c) => { s[i][3] = "done"; s[i][4] = chk; s[i][5] = c; };
+  if (state === "ready") return s;
+  done(0, "✓ done", "$0.01");
+  if (state === "running") { s[1][3] = "run"; s[1][4] = "▸ running"; s[1][5] = "$0.21"; }
+  if (state === "plan_ready") { done(1, "✓ done", "$0.38"); s[2][3] = "wait"; s[2][4] = "? waits for you"; }
+  if (state === "decision") { done(1, "✓ done", "$0.38"); s[2][3] = "wait"; s[2][4] = "? asks you"; s[2][5] = "$0.06"; }
+  if (state === "failed_twice") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); s[3][3] = "fail"; s[3][4] = "✕ failed"; s[3][5] = "$0.11"; s.splice(3, 0, ["fix", "opus · high", "Fix: vitest not installed, test script missing", "fail", "✕ failed", "$0.09"]); }
+  if (state === "done") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); done(3, "✓ passed", "$0.05"); }
+  return s;
+}
+// the slot: a tag, one sentence that says what is asked, at most one plain line of why, then its choices
 function slot() {
-  if (state === "decision") return `<div class="slot"><span class="lbl" style="color:var(--you)">Needs you · decision</span>
-    <div class="q">Which name for the product-sheet folder?</div><div class="from">from 03 code · design-spec:83 says SHEETS_DIR, T02:16 says PRODUCT_SHEETS_DIR</div>
-    <div class="opts"><button class="opt isdef"><span class="k">a)</span><span>PRODUCT_SHEETS_DIR, as T02 (the newer spec)</span><span class="def">default</span></button>
-    <button class="opt"><span class="k">b)</span><span>SHEETS_DIR, as design-spec, and update T02</span><span></span></button></div>
-    <div class="why">Default a: T02 is the task's own spec. ${level === "auto" ? "On auto, taken in 7:40 unless you choose." : "Gated: waits for you."}</div>
-    ${level === "gated" ? `<div><button class="btn sm">Take the default, and take defaults from now on</button></div>` : ""}</div>`;
-  if (state === "plan_ready") return `<div class="slot"><span class="lbl" style="color:var(--you)">Needs you · plan</span>
-    <div class="q">The design step wrote the plan. Confirm once and it runs to the end.</div>
-    <div class="from">plan.md · 2,140 w · 2 steps left (code, verify) · 3 decisions answered from the repo</div></div>`;
-  if (state === "failed_twice") return `<div class="slot r"><span class="lbl" style="color:var(--bad)">Needs you · failed twice</span>
-    <div class="q">verify FAIL after the fix: 2 of 6 tests fail (settings round-trip on Windows paths).</div>
-    <div class="from">attempt 1 · code sonnet · FAIL: vitest missing · attempt 2 · fix opus · FAIL: path.sep on win32</div></div>`;
-  if (state === "done") return `<div class="slot g"><span class="lbl">Finish</span>
-    <table class="sumt"><tr><td>Files</td><td>src/core/paths.ts, src/core/settings.ts, src/core/paths.test.ts, package.json</td></tr>
-    <tr><td>Checks</td><td>npx vitest run 6/6 · npm run build ok</td></tr><tr><td>Still open</td><td>none</td></tr></table></div>`;
+  const tag = (t, c = "you") => `<span class="lbl" style="color:var(--${c})">${t}</span>`;
+  if (state === "decision") return `<div class="slot">${tag("Your decision")}
+    <div class="q">Which name for the product-sheet folder?</div>
+    <div class="why">The two specs disagree. ${level === "auto" ? "Console takes the default in 7 min if you do not choose." : "The task waits for you."}</div>
+    <div class="opts"><button class="opt isdef"><span class="k">a</span><span>PRODUCT_SHEETS_DIR, as in T02</span><span class="def">default</span></button>
+    <button class="opt"><span class="k">b</span><span>SHEETS_DIR, as in the design spec</span><span></span></button></div>
+    ${level === "gated" ? `<button class="lnk">Take a, and always take the default from now on</button>` : ""}</div>`;
+  if (state === "plan_ready") return `<div class="slot">${tag("Plan to confirm")}
+    <div class="q">The plan is written. Confirm it and the last 2 steps run on their own.</div>
+    <div class="ac"><button class="lnk">Read the plan</button>${level === "gated" ? `<button class="lnk">Confirm, and run plans automatically from now on</button>` : ""}</div></div>`;
+  if (state === "failed_twice") return `<div class="slot r">${tag("Failed twice", "bad")}
+    <div class="q">2 of 6 tests still fail after the fix.</div>
+    <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div></div>`;
+  if (state === "done") return `<div class="slot g">${tag("Finished", "ok")}
+    <div class="q">4 steps passed. 2 files written, 6 tests pass, the build is clean.</div>
+    <div class="ac"><button class="lnk">See the changed files</button></div></div>`;
   return "";
 }
 
@@ -358,7 +366,7 @@ function bar() {
   if (a.box) h += `<button class="btn ghost" id="msg">Message</button>`;
   h += `<span class="sp"></span>`;
   h += a.bar.map(b => `<button class="btn">${b}</button>`).join("");
-  if (state === "decision") h += `<button class="btn you">Answer a) PRODUCT_SHEETS_DIR</button>`;
+  if (state === "decision") h += `<button class="btn you">Take a</button>`;
   h += pr.map(p => `<button class="btn ${p[1]}">${p[0]}</button>`).join("");
   if (state === "observed") h += `<button class="btn">Open in terminal</button><button class="btn go">Continue as a fork</button>`;
   document.getElementById("bar").innerHTML = h;
