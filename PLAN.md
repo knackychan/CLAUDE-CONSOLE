@@ -85,7 +85,7 @@ saved result. Real-provider handoff delivery and the native window remain open l
 Plan 36: [guided implementation](plans/36-next-step/README.md) and
 [design guideline](design/brainstorm/2026-10-15-next-step.md). **Stage A shipped 2026-10-15** (Tasks 1-4,
 checked with fake harnesses; live provider checks open). Stage B (agent bridge, Tasks 5-6) checked against the
-supervisor 2026-10-20 and closed as superseded (README section 7, D1-D7 pending Fred's review): an agent's next
+supervisor 2026-10-20 and closed as superseded (README section 7, D1-D7 confirmed by Fred 2026-10-20): an agent's next
 step comes from its HANDOFF (a `Replan:` line mid-chain, the Next section at done) through the chain and the
 supervisor (plans 24, 44, 48, 49, 51, 52), never from a bridge.
 Add Code / Verify / Investigate / Plan / Chat as a fresh session in the same task and folder,
@@ -319,3 +319,4 @@ is written for its recommended option (a) and the task files mark the lines anot
 - 2026-10-20 - Workflow autopilot plan merged from claude/nifty-kalam-4a5ea6 (decided and its design locked there, nothing implemented) and renumbered 49 to 52, since plan 49 here is the planner handover; its explored mocks are now `52-a-sections.html` and `52-b-projects-dock.html`.
 - 2026-10-20 - Plan 36 Stage B checked against the supervisor (README section 7): the agent bridge, its capability token and a direct agent call to `request_next` conflict with plan 44 4.5 (only Fred's menu, Fred's Approve and Fred's next-step message add a step; model output acts only through `check` and `_supervisor_dispatch`), the queue it needed is plan 48's next-step message, and the step's HANDOFF Next section already reaches the pass through the digest. Recommended closed as superseded, D1-D7 for Fred; design guideline section 8 marked superseded. No code changed.
 - 2026-10-20 - Plan 36 Stage B re-checked on Fable against plan 52 (merged meanwhile): a supervised chain has no boundary between good steps, so an agent's mid-chain channel is the `Replan:` line (auto-applied at gated / auto) and its end channel the Next section read by the done wake (a card); D1 and D6 reworded, levels gated / auto named. Still closed as superseded, D1-D7 for Fred. No code changed.
+- 2026-10-20 - Plan 36 Stage B closed: Fred confirmed D1-D7 as written (an agent's next step comes from its HANDOFF, Replan: mid-chain or the Next section at done, through the chain and the supervisor; no bridge). No code changed.

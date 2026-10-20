@@ -1,8 +1,8 @@
 # Plan 36: Add the next session as a step of this task
 
 Status: **Stage A shipped** 2026-10-15 (Tasks 1-4, fake harnesses only; live provider checks open).
-Stage B (Tasks 5-6) checked against the supervisor 2026-10-20 (section 7): recommended closed as superseded,
-Fred's decision pending. Section 6 is the log.
+Stage B (Tasks 5-6) checked against the supervisor 2026-10-20 (section 7): **closed as superseded**, D1-D7
+confirmed by Fred the same day. Section 6 is the log.
 
 Design contract: [next-step design guideline](../../design/brainstorm/2026-10-15-next-step.md).
 Master index: [PLAN.md](../../PLAN.md). Existing contracts: [task chains](../17-tasks/README.md),
@@ -426,7 +426,7 @@ service feature: whether the step kind texts say clearly when to write `Replan:`
 hold. That lives under `dotclaude/console/kinds/` and `console/step_prompt.md` (plan 52 Task 3 edits the latter),
 which Fred edits and copies, not in service code.
 
-### 7.2 Decisions (defaults, Fred confirms)
+### 7.2 Decisions (D1-D7 confirmed by Fred as written, 2026-10-20)
 
 | # | Question | Default |
 |---|---|---|
@@ -445,7 +445,7 @@ writer, not implementor).
 ### 7.3 Closing note
 
 Stage B is closed as superseded by the chain's `Replan:` line and the supervisor (plans 24, 44, 48, 49, 51, 52),
-pending Fred's confirmation of D1-D7. Stage A keeps its one open item, the live provider checks; plan 52 Task 1
+D1-D7 confirmed by Fred 2026-10-20. Stage A keeps its one open item, the live provider checks; plan 52 Task 1
 leaves its manual tasks and `choose_next` wake untouched. The next-step operation itself is unchanged and has
 three authorized callers: Fred's menu, Fred's Approve of a supervisor card and Fred's next-step message (after
 plan 52 Task 4 also the Reopen of a done chain task).
