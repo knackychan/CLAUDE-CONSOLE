@@ -1,7 +1,7 @@
 # Plan 49 - The planner's steps reach the supervisor
 
-Status: written 2026-10-20 from the supervision review (items 1 and 2). D1-D4 are written in as defaults; Fred
-confirms or changes them before step 1. No code changed. Lands on plans 36, 44 (backend), 47 and 48.
+Status: written 2026-10-20 from the supervision review (items 1 and 2); D1-D4 confirmed by Fred the same day as
+written. Steps 1 to 5 done 2026-10-20 (section 5); Fred's live check open. Lands on plans 36, 44 (backend), 47 and 48.
 
 ## 1. Finding
 
@@ -118,6 +118,21 @@ One commit per step, tests first, stage only this plan's lines (other chats edit
 
 Live check (Fred): a supervised task from a three-step planner card; the first suggestion names p1 and its card
 shows the planner's goal; after Approve the route shows one fewer proposed row.
+
+Done 2026-10-20: step 1 `2cb29dc`, step 2 `dab54bd`, step 3 `38111a0`, step 4 `ca8ad64`, step 5 the docs commit.
+Focused `tests.test_supervisor_server tests.test_supervisor tests.test_server`: 364 OK; `node --check web/app.js`
+clean; `py -m unittest discover -s tests`: 1102 tests OK.
+
+Departures from section 4:
+
+- The web test is `test_decision_names_planned_proposal` (the card says "(planned p1)" and takes the kind from the
+  proposal), not a route test: the trim is server-side and `routeHtml` is unchanged.
+- `test_repeated_request_id_trims_once` repeats the request on one Hub, not across a restart; the trim lives
+  inside the request's own commit, so plan 44's crash matrix already covers the restart side.
+- `test_stale_proposal_refused` trims the saved list directly; the menu Add step path would be stale anyway
+  (it adds a step and moves the epoch).
+- The digest numbers each planned step by its place in the saved list, so an unreadable item never shifts p1, p2.
+- `decisionText` reads the kind from the proposal when the decision has none (a message wake's fake pass).
 
 ## 6. Not done here
 
