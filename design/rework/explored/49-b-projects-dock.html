@@ -168,6 +168,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .pin { margin: 8px 8px 0; padding: 6px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); background: color-mix(in srgb, var(--you) 5%, transparent); }
 .pin .lbl { color: var(--you); padding: 2px 4px 6px; display: block; }
 .pin .row { margin: 0 0 4px; }
+.sect { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 0 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.sect .sh { display: grid; align-content: start; gap: 2px; padding-top: 1px; }
+.sect .sh .lbl { color: var(--ink); }
+.sect .sh .sm { font: 10.5px var(--mono); color: var(--mut); }
+.sect .sb { min-width: 0; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+.sect .brief { margin: 0; }
+.kv { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 3px 10px; margin: 0; padding: 8px 10px; background: var(--raise); border-radius: 6px; font: 11.5px var(--mono); }
+.kv dt { color: var(--mut); }
+.kv dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sect .raw { margin: 0; }
+.sect .st:first-child { padding-top: 0; }
+.tscroll { gap: 0 !important; }
+.tscroll > .head { padding-bottom: 12px; }
+.tscroll > .blk:last-child { border-top: 1px solid var(--line); padding-top: 12px; }
+@container (max-width: 520px) { .sect { grid-template-columns: minmax(0, 1fr); gap: 6px; } .sect .sh { display: flex; gap: 8px; } }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -324,9 +339,10 @@ function card() {
     <div class="head"><div><h2>${esc(S.task)}</h2><div class="sub"><span class="state ${a.line[0]}">${esc(a.line[1])}</span><span>${S.project}</span>
       <span class="seg" title="Autonomy level for this task; the project default is gated"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></div></div>
       <div class="cost"><b>${cost}</b><span class="m mut">task</span></div></div>
-    <div class="blk"><button class="fold" id="pf"><span class="car">▸</span><span class="lbl">Prompt</span><span class="pv">${esc(S.prompt)}</span></button><div class="raw" id="raw" hidden>${esc(S.prompt)}</div></div>
-    <div class="blk"><span class="lbl">Brief · from prep</span><div class="brief">${esc(S.brief)}<div class="where">${esc(S.where)}</div></div></div>
-    <div class="blk"><span class="lbl">Plan · ${steps(state).length} steps</span><div class="tl">${rows}</div></div>
+    <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><button class="fold" id="pf"><span class="car">▸</span><span class="pv">${esc(S.prompt)}</span></button><div class="raw" id="raw" hidden>${esc(S.prompt)}</div></div></section>
+    <section class="sect"><div class="sh"><span class="lbl">Brief</span><span class="sm">prep · haiku</span></div><div class="sb"><p class="brief">${esc(S.brief)}</p>
+      <dl class="kv"><dt>Files</dt><dd>src/core/paths.ts, src/core/settings.ts, a vitest file</dd><dt>Source</dt><dd>D:\\MY DOCS\\MY TOOLS\\MOTION STUDIO\\</dd><dt>Route</dt><dd>risky · reasoning high · opus/high</dd></dl></div></section>
+    <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rows}</div></div></section>
 
     <div class="blk"><div class="meter"><span>context</span><div class="cells ctx">${cells(15, state === "running" ? 6 : state === "ready" ? 0 : 4)}</div><b>${state === "running" ? "61K" : state === "ready" ? "0" : "38K"}</b>
       <span>spend</span><div class="cells usd">${cells(20, 2, 1)}</div><b>${cost} · cap $5</b></div></div>`;
