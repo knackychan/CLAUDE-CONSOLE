@@ -309,6 +309,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .stepnav button { font-size: 12px; padding: 2px 10px; }
 .stepnav button:hover:not(:disabled) { color: var(--ink); background: var(--raise); }
 .stepnav button:disabled { opacity: .35; cursor: default; }
+.sv { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; width: calc(100% + 16px); margin: 0 -8px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--mut); font: 12px var(--ui); text-align: left; cursor: pointer; }
+.sv:hover { background: var(--raise); color: var(--ink); }
+.sv .sg { font: 10px var(--mono); color: var(--mut); text-align: center; }
+.sv span:nth-child(2) { font: 600 11px var(--mono); }
+.sv .tx2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sv .tm { font: 11px var(--mono); }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -325,6 +331,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
     <button data-s="running" aria-pressed="true">running</button>
     <button data-s="plan_ready">plan confirm (gated)</button>
     <button data-s="decision">needs you: decision</button>
+    <button data-s="suggestion">supervisor suggests</button>
+    <button data-s="hold">held: Fable</button>
     <button data-s="failed_twice">failed twice</button>
     <button data-s="done">done</button>
     <button data-s="observed">observed chat</button>
@@ -386,6 +394,8 @@ const A = {
   plan_ready: { line: ["y", "plan ready · confirm"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   decision: { line: ["y", "needs you · SHEETS_DIR or PRODUCT_SHEETS_DIR?"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "answer" },
   failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [], bar: ["Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  suggestion: { line: ["y", "needs you · supervisor suggests a step"], primary: [], bar: ["Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "reject" },
+  hold: { line: ["y", "held · confirm Fable"], primary: [], bar: ["Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
   observed: { line: ["q", "observed · VS Code"], primary: [], bar: [], menu: ["Continue as a fork", "Verify as a fork", "Hand off", "Escalate as a fork", "Open in terminal"], box: "" },
 };
@@ -393,7 +403,7 @@ let state = "running", level = "gated", menuOpen = false, stepOpen = null, stepT
 const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
 function list() {
-  const t1y = ["ready", "plan_ready", "decision", "failed_twice"].includes(state);
+  const t1y = ["ready", "plan_ready", "decision", "failed_twice", "suggestion", "hold"].includes(state);
   const t1 = A[state === "observed" ? "running" : state];
   const sel = state === "observed" ? "obs1" : stepOpen !== null ? "" : "t1";
   const run = `<span class="lv" title="Driven by Console">run</span>`;
@@ -429,6 +439,8 @@ function steps(state) {
   if (state === "plan_ready") { done(1, "✓ done", "$0.38"); s[2][3] = "wait"; s[2][4] = "? waits for you"; }
   if (state === "decision") { done(1, "✓ done", "$0.38"); s[2][3] = "wait"; s[2][4] = "? asks you"; s[2][5] = "$0.06"; }
   if (state === "failed_twice") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); s[3][3] = "fail"; s[3][4] = "✕ failed"; s[3][5] = "$0.11"; s.splice(3, 0, ["fix", "opus · high", "Fix: vitest not installed, test script missing", "fail", "✕ failed", "$0.09"]); }
+  if (state === "suggestion") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); done(3, "✓ passed", "$0.05"); }
+  if (state === "hold") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); s[3][3] = "wait"; s[3][4] = "? held"; }
   if (state === "done") { done(1, "✓ done", "$0.38"); done(2, "✓ done", "$0.18"); done(3, "✓ passed", "$0.05"); }
   return s;
 }
@@ -448,6 +460,14 @@ function slot() {
     <div class="q">2 of 6 tests still fail after the fix.</div>
     <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div>
     <div class="sacts"><button class="btn" onclick="stepOpen = 4; render();">See the failure</button><span class="sp"></span><button class="btn">Accept step result</button><button class="btn you" title="Runs the step again one model up, with your note from the box below">Retry on a stronger model</button></div></div>`;
+  if (state === "suggestion") return `<div class="slot">${tag("Supervisor suggests")}
+    <div class="q">Add a step: list the new app folders in the README.</div>
+    <div class="why">All 4 steps passed, but T02 says the README names every app folder, and PRODUCT_SHEETS_DIR is new. Level suggest: it waits for you.</div>
+    <div class="sacts"><button class="btn" title="Turns it down; a note in the box below says why">Reject</button><span class="sp"></span><button class="btn" title="Adds the step and lets the supervisor add steps by itself from now on">Approve and auto accept</button><button class="btn you">Approve</button></div></div>`;
+  if (state === "hold") return `<div class="slot">${tag("Held")}
+    <div class="q">The verify wants to run on Fable.</div>
+    <div class="why">Fable is scarce, so you confirm it each time. Opus can run it instead, a little less sure.</div>
+    <div class="sacts"><span class="sp"></span><button class="btn">Run on opus instead</button><button class="btn you">Confirm Fable</button></div></div>`;
   if (state === "done") return `<div class="slot g">${tag("Finished", "ok")}
     <div class="q">4 steps passed. 2 files written, 6 tests pass, the build is clean.</div>
     <div class="ac"><button class="lnk">See the changed files</button></div></div>`;
@@ -508,11 +528,14 @@ function card() {
     const cls = { q: "q", done: "done", run: "run", fail: "fail", wait: "wait" }[r[3]];
     const ck = r[3] === "done" ? (r[4].includes("PASS") ? "g" : "n") : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q";
     return `<div class="st ${cls}" tabindex="0" role="button" data-step="${i}" title="Open step ${String(i + 1).padStart(2, "0")}"><span class="dt ${r[3] === "run" ? "live" : ""}"></span><span class="n">${String(i + 1).padStart(2, "0")}</span><span class="what"><b>${r[0]}</b><span class="rt">${r[1]}</span><span class="g">${esc(r[2])}</span></span><span class="chk ${ck}">${r[4] || "· queued"}</span><span class="c">${r[5] || ""}</span><span class="go" aria-hidden="true">›</span></div>`;
-  }).join("");
-  const cost = { ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62" }[state];
+  }).join("") ;
+  const SV = { failed_twice: [3, "retried 04 fix with a note: use path.posix in safeJoin", "11:02"], done: [2, "applied a replan: the fix step was not needed", "10:48"], suggestion: [4, "woke on done: suggests one more step", "10:51"] }[state];
+  const svline = SV ? `<button class="sv" title="Open the supervisor's reason (supervisor.jsonl)"><span class="sg">◆</span><span>Supervisor</span><span class="tx2">${SV[1]}</span><span class="tm">${SV[2]}</span></button>` : "";
+  const rowsSV = SV ? rows.split('<div class="st ').map((x, k) => k === 0 ? x : '<div class="st ' + x).reduce((acc, x, k) => acc + x + (k === SV[0] ? svline : ""), "") : rows;
+  const cost = { ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62", suggestion: "$0.63", hold: "$0.57" }[state];
   document.getElementById("card").innerHTML = `
     <div class="hd"><div class="hl"><span class="eb">${S.project}</span><h2 title="${esc(S.task)}">${esc(S.task)}</h2><div class="meta">
-      <span class="pst ${a.line[0]}">${{ ready: "Ready to start", running: "▸ Running", plan_ready: "? Plan to confirm", decision: "? Needs you", failed_twice: "✕ Failed twice", done: "✓ Done" }[state]}</span>
+      <span class="pst ${a.line[0]}">${{ ready: "Ready to start", running: "▸ Running", plan_ready: "? Plan to confirm", decision: "? Needs you", failed_twice: "✕ Failed twice", done: "✓ Done", suggestion: "? Needs you", hold: "? Held" }[state]}</span>
       ${state === "running" ? `<span class="fact"><i>Now</i>02 design on opus, 3 min</span>` : ""}</div></div>
       <div class="cost"><span class="lvl" title="Autonomy level of this task"><span class="seg"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></span><b title="Spent on this task">${cost}</b></div></div>
     <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><div class="tx"><button class="car tg" data-t="pr" aria-label="Expand">▸</button><button class="pv tg" data-t="pr">${esc(S.prompt)}</button><div id="pr" class="txt" hidden><div class="tt">${esc(S.prompt)}</div><button class="cp" data-c="pr" title="Copy to clipboard" aria-label="Copy to clipboard"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></button></div></div></div></section>
@@ -524,7 +547,7 @@ function card() {
       <div class="fl"><button class="fold" data-fold="ff"><span class="car">▸</span><span>3 files to create</span></button>
         <ul id="ff" class="files" hidden><li><span class="nw">new</span><span class="fn">src/core/paths.ts</span></li><li><span class="nw">new</span><span class="fn">src/core/settings.ts</span></li><li><span class="nw">new</span><span class="fn">src/core/paths.test.ts</span></li></ul></div>
       </div></div></section>
-    <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rows}</div></div></section>
+    <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rowsSV}</div></div></section>
 
 `;
   const ICON = document.querySelector(".cp") && document.querySelector(".cp").innerHTML;
@@ -544,7 +567,7 @@ function bar() {
   // usage lives in the bar: the context of what is on the page (the live step, or the picked step) and its spend
   const r = stepOpen !== null && state !== "observed" ? steps(state)[stepOpen] : null;
   const u = state === "observed" ? [9, "92K", "$1.12"] : r ? (r[3] === "q" ? null : [r[3] === "run" ? 6 : 3, r[3] === "run" ? "61K" : "31K", (r[5] || "$0") + " step"])
-    : [state === "running" ? 6 : state === "ready" ? 0 : 4, state === "running" ? "61K" : state === "ready" ? "0" : "38K", ({ ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62" }[state]) + " of $5"];
+    : [state === "running" ? 6 : state === "ready" ? 0 : 4, state === "running" ? "61K" : state === "ready" ? "0" : "38K", ({ ready: "$0.13", running: "$0.34", plan_ready: "$0.51", decision: "$0.57", failed_twice: "$0.89", done: "$0.62", suggestion: "$0.63", hold: "$0.57" }[state]) + " of $5"];
   const use = u ? `<span class="use" title="Context: ${u[1]} of 300K · spend ${u[2]}"><span class="cells ctx">${cells(15, u[0])}</span><b>${u[1]}</b><span class="dv"></span><b>${u[2]}</b></span>` : "";
   if (state !== "ready") h += use;
   const SP = `<span class="sp"></span>`;
@@ -569,7 +592,7 @@ function bar() {
   const steer = document.getElementById("steer");
   steer.hidden = !a.box;
   document.getElementById("steeruse").innerHTML = "";
-  document.getElementById("steerin").placeholder = { guidance: state === "failed_twice" ? "Tell the agent what to try differently on the retry" : "Message the agent while it works, for example: use vitest, not jest", answer: "Or write your own answer", "next step": "Ask for something more: it becomes the next step" }[a.box] || "";
+  document.getElementById("steerin").placeholder = { guidance: state === "failed_twice" ? "Tell the agent what to try differently on the retry" : "Message the agent while it works, for example: use vitest, not jest", answer: "Or write your own answer", reject: "Why not, or what to do instead", "next step": "Ask for something more: it becomes the next step" }[a.box] || "";
   document.getElementById("menu").hidden = true;
 }
 function render() { list(); card();
