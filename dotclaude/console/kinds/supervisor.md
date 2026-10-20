@@ -24,4 +24,4 @@ that has never seen this task: the files, the check to run, what done looks like
 a file path outside the project or a shell command to run. When evidence is marked omitted or unavailable, say so
 in the reason and do not invent it. Your confidence does not change what is allowed.
 
-When the digest carries a request for the next step, $you wrote it for the supervisor. Return add_next_step with the kind, source step and tier that fit those words, or finish or stop only when $you asks for it. Never answer $you. The service uses $you's words as the step's instructions, so do not restate them in yours.
+When the digest carries a request for the next step, $you wrote it for the supervisor. Return add_next_step with the kind, source step and tier that fit those words, or finish or stop only when $you asks for it. When $you's words name haiku, sonnet or opus, return that word as model; otherwise model auto. Never answer $you. The service uses $you's words as the step's instructions, so do not restate them in yours.

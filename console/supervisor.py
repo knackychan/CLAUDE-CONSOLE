@@ -17,6 +17,9 @@ MODES = ("off", "suggest", "auto")
 # The supervisor's own pass is fixed to one Claude alias per role; a hand edit can never move it to opus/fable.
 MODEL_ALIASES = {"supervisor_model": "haiku", "supervisor_stuck_model": "sonnet"}
 
+# The tier words a next-step message may name for a supervisor step (plan 51 D1); anything else runs on auto.
+TIER_WORDS = ("haiku", "sonnet", "opus")
+
 _INT = {  # key -> (low, high) inclusive; a bool is never a count
     "supervisor_debounce_s": (0, 300),
     "supervisor_parallel": (1, 4),
@@ -258,7 +261,8 @@ def fold_log(records: list) -> dict:
         if not isinstance(wake, int) or isinstance(wake, bool):
             continue
         w = wakes.setdefault(wake, {"events": [], "status": "", "cost": 0.0, "uncertain": False,
-                                    "decision": None, "record": None, "state": ""})
+                                    "decision": None, "record": None, "state": "", "triggers": None,
+                                    "dispatch": None})
         if isinstance(rec.get("status"), str):
             w["state"] = rec["status"]  # the latest lifecycle status of this wake
         for e in rec.get("events") or []:
@@ -282,6 +286,10 @@ def fold_log(records: list) -> dict:
             day, reserved = rec.get("day"), rec.get("reserved")
             if isinstance(day, str) and isinstance(reserved, (int, float)) and not isinstance(reserved, bool):
                 days.setdefault(day, {"cost": 0.0, "reserved": 0.0})["reserved"] = round(float(reserved), 6)
+        if phase in ("result", "dispatching") and rec.get("triggers"):
+            w["triggers"] = rec["triggers"]
+        if phase == "dispatching":
+            w["dispatch"] = rec.get("dispatch")
         if phase == "dispatching" or rec.get("outcome") == "uncertain":
             w["uncertain"] = True
             uncertain = True
@@ -290,8 +298,10 @@ def fold_log(records: list) -> dict:
         top = max(wakes)
         w = wakes[top]
         if w["uncertain"] and w["status"] in ("dispatching", "recovered"):
-            pending = {"wake": top, "events": w["events"], "decision": None, "status": "uncertain",
-                       "error": "Service restarted during dispatch; it will not be replayed.", "by": "", "dispatch": None}
+            pending = {"wake": top, "events": w["events"], "triggers": w["triggers"] or [],
+                       "decision": w["decision"], "status": "uncertain",
+                       "error": "Service restarted during dispatch; it will not be replayed.", "by": "",
+                       "dispatch": w["dispatch"]}
         elif w["decision"] is not None and w["record"] and w["state"] in VISIBLE:
             r = w["record"]
             pending = {"wake": top, "events": w["events"], "triggers": r.get("triggers") or [],
@@ -597,8 +607,12 @@ def check(decision, task: dict, levers: dict, sources: dict, policy: dict) -> tu
             return False, "kind must be one of " + ", ".join(tasks.NEXT_KINDS)
         if planned is None and not _text(decision.get("instructions"), tasks.STEP_GOAL_MAX):
             return False, f"instructions must be 1 to {tasks.STEP_GOAL_MAX} characters"
-        if decision.get("model") != "auto":
-            return False, "a supervisor step runs on model auto"
+        model = decision.get("model")
+        if model != "auto":
+            if model not in TIER_WORDS or "message" not in triggers:
+                return False, "a supervisor step runs on model auto"
+            if not re.search(rf"\b{model}\b", policy.get("fred_words") or "", re.I):
+                return False, "the model must be one Fred's message names"
         n = decision.get("source_step", task.get("current"))
         src = next((s for s in task["steps"] if s["n"] == n), None) if isinstance(n, int) else None
         if src is None:
