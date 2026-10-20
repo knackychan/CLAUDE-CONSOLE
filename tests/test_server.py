@@ -1700,6 +1700,21 @@ class TaskServerTest(RunServerTest):
         self.assertEqual(len(self.hub.cfg["tiers"]["think"]), len(paths.DEFAULTS["tiers"]["think"]))  # untouched tier
         self.assertEqual(self.hub.cfg["allowances"], {"opus": {"day_usd": 12}})
 
+    def test_models_page_saves_supervisor_mode_and_map(self):
+        """Plan 50: the Models page posts the global mode and the project map in one Save, all or nothing."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "config.json").write_text(json.dumps({"projects": [str(self.project)]}), encoding="utf-8")
+        status, data = self.call("/api/config/models", {"changes": {
+            "supervisor_mode": "auto", "supervisor_projects": {str(self.project): "off"}, "supervisor_day_usd": 3}})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["supervisor_config"]["mode"], "auto")
+        self.assertEqual(list(data["supervisor_config"]["projects"].values()), ["off"])
+        self.assertEqual(data["tuning"]["supervisor_day_usd"]["value"], 3)
+        status, data = self.call("/api/config/models", {"changes": {
+            "supervisor_mode": "suggest", "supervisor_projects": {"C:/not-a-project": "off"}}})
+        self.assertNotEqual(status, 200)
+        self.assertEqual(self.hub.cfg["supervisor_mode"], "auto")  # nothing of the refused Save was written
+
     def test_a_one_tier_save_keeps_the_other_tiers_as_written(self):
         """Plan 27 B6: the page posts only the tiers that changed; the service merges per tier, so a tier that names
         a model gone from models.json stays in config.json as written and never blocks a Save of another tier."""

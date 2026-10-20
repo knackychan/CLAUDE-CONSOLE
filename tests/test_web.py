@@ -1541,5 +1541,84 @@ class PlannedProposalWebTest(unittest.TestCase):
         self.assertIn(" code from 01", nokind)
 
 
+SUP_TUNING = {k: {"value": v, "default": v, "min": lo, "max": hi, "unit": u, "group": "supervisor"} for k, v, lo, hi, u in (
+    ("supervisor_debounce_s", 20, 0, 300, "s"), ("supervisor_parallel", 1, 1, 4, "steps"),
+    ("supervisor_timeout_s", 90, 10, 600, "s"), ("supervisor_stall_s", 1800, 600, 7200, "s"),
+    ("supervisor_max_auto_steps", 3, 0, 12, "steps"), ("supervisor_max_retries", 1, 0, 1, "steps"),
+    ("supervisor_work_usd", 5, 0, 50, "usd"), ("supervisor_task_usd", 0.5, 0, 10, "usd"),
+    ("supervisor_day_usd", 2, 0, 100, "usd"), ("supervisor_model", "haiku", None, None, "rung"),
+    ("supervisor_stuck_model", "sonnet", None, None, "rung"))}
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class SupervisorSettingsTest(unittest.TestCase):
+    """Plan 50: the supervisor card on the Tuning tab, its row on Tiers and its spend on the Usage page."""
+
+    def setup(self, projects=None):
+        cfg = {"projects": ["D:\\a", "D:\\b"], "models": ["haiku"], "ladder": {}, "tiers": {"think": [], "write": [], "read": []}, "kind_pins": {},
+               "tuning": SUP_TUNING, "supervisor_config": {"modes": ["off", "suggest", "auto"], "mode": "suggest",
+                                                           "projects": projects or {}}}
+        return f"cfg = {json.dumps(cfg)}; resetModels(); "
+
+    def test_tuning_has_a_supervisor_card(self):
+        html = render(self.setup() + "tuningTab()")
+        self.assertIn(">Supervisor<", html)
+        for label in ("Wait after a step ends", "Passes at once", "Pass timeout", "Stalled after",
+                      "Auto steps before you act", "Auto retries per step", "Auto work spend before you act",
+                      "Pass spend per task", "Pass spend per day"):
+            self.assertIn(label, html)
+        self.assertIn('data-msup="mode:auto"', html)
+        self.assertIn('data-msup="mode:suggest" aria-pressed="true"', html)
+        self.assertIn('data-msup="proj:1:default"', html)
+        self.assertNotIn('data-mval="supervisor_model"', html)
+
+    def test_mode_change_posts_supervisor_mode(self):
+        got = render(self.setup() + "supPick('mode:auto'); modelChanges()")
+        self.assertEqual(got, {"supervisor_mode": "auto"})
+        self.assertEqual(render(self.setup() + "supPick('mode:auto'); supPick('mode:suggest'); modelChanges()"), {})
+        self.assertEqual(render(self.setup() + "supPick('mode:auto'); tabEdits('tuning')"), 1)
+
+    def test_project_mode_posts_the_whole_map(self):
+        saved = {"d:\\a": "off"}
+        got = render(self.setup(saved) + "supPick('proj:1:auto'); modelChanges()")
+        self.assertEqual(got, {"supervisor_projects": {"d:\\a": "off", "D:\\b": "auto"}})
+        self.assertEqual(render(self.setup(saved) + "supPick('proj:0:default'); modelChanges()"),
+                         {"supervisor_projects": {}})
+        self.assertEqual(render(self.setup(saved) + "supPick('proj:0:auto'); modelChanges()"),
+                         {"supervisor_projects": {"D:\\a": "auto"}})
+        html = render(self.setup(saved) + "tuningTab()")
+        self.assertIn('data-msup="proj:0:off" aria-pressed="true"', html)  # the lower-case key shows on its project
+        self.assertIn('data-msup="proj:1:default" aria-pressed="true"', html)
+
+    def test_tiers_names_the_supervisor_passes(self):
+        setup = self.setup().replace("resetModels(); ", "") + (
+            "cfg.tuning = Object.assign({}, cfg.tuning, Object.fromEntries(PASSES.map(([k]) => [k, {value: 'haiku', "
+            "default: 'haiku', unit: 'rung', group: 'passes'}]))); resetModels(); ")
+        html = render(setup + "tiersTab()")
+        self.assertIn("Supervisor", html)
+        self.assertIn("haiku, sonnet on a stuck step", html)
+        self.assertIn("never runs on opus or fable", html)
+
+    def test_usage_shows_supervisor_spend(self):
+        days = {"2026-10-20": {"cost": 0.12, "runs": 4, "unknown": 1, "reserved": 0.0},
+                "2026-10-03": {"cost": 0.3, "runs": 6, "unknown": 0, "reserved": 0.0},
+                "2026-09-30": {"cost": 9.0, "runs": 50, "unknown": 0, "reserved": 0.0}}
+        data = {"today": "2026-10-20", "supervisor": {"days": days, "today": days["2026-10-20"], "task_limit": 0.5,
+                                                      "day_limit": 2, "error": ""}}
+        html = render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(data)})")
+        self.assertIn("Supervisor passes", html)
+        self.assertIn("$0.12 of $2.00", html)
+        self.assertIn("4 passes", html)
+        self.assertIn("$0.42", html)  # the month, without September
+        self.assertIn("10 passes", html)
+        self.assertIn("1 unknown", html)
+        bad = dict(data, supervisor=dict(data["supervisor"], error="usage-days.json: bad JSON"))
+        self.assertIn("The supervisor ledger could not be read: usage-days.json: bad JSON",
+                      render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(bad)})"))
+        empty = dict(data, supervisor=dict(data["supervisor"], days={}, today={"cost": 0, "runs": 0, "unknown": 0,
+                                                                               "reserved": 0}))
+        self.assertEqual(render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(empty)})"), "")
+
+
 if __name__ == "__main__":
     unittest.main()
