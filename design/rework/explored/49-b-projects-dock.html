@@ -293,6 +293,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 @media (prefers-reduced-motion: no-preference) { .mk.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
 .sacts { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
 .sacts .sp { flex: 1; }
+.opt.sel { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--you); }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -422,9 +423,9 @@ function slot() {
   if (state === "decision") return `<div class="slot">${tag("Your decision")}
     <div class="q">Which name for the product-sheet folder?</div>
     <div class="why">The two specs disagree. ${level === "auto" ? "Console takes the default in 7 min if you do not choose." : "The task waits for you."}</div>
-    <div class="opts"><button class="opt isdef"><span class="k">a</span><span>PRODUCT_SHEETS_DIR, as in T02</span><span class="def">default</span></button>
-    <button class="opt"><span class="k">b</span><span>SHEETS_DIR, as in the design spec</span><span></span></button></div>
-    ${level === "gated" ? `<button class="lnk">Take a, and always take the default from now on</button>` : ""}</div>`;
+    <div class="opts"><button class="opt isdef sel" data-k="a"><span class="k">a</span><span>PRODUCT_SHEETS_DIR, as in T02</span><span class="def">default</span></button>
+    <button class="opt" data-k="b"><span class="k">b</span><span>SHEETS_DIR, as in the design spec</span><span></span></button></div>
+    <div class="sacts"><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Take the default here, and set the project to auto: later defaults are taken after 10 min">Take default and auto accept</button>` : ""}<button class="btn you" id="pick">Confirm a</button></div></div>`;
   if (state === "plan_ready") return `<div class="slot">${tag("Plan to confirm")}
     <div class="q">The plan is written. Confirm it and the last 2 steps run on their own.</div>
     <div class="sacts"><button class="btn">Read the plan</button><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Confirm this plan, and set the project to auto: later plans run without asking">Confirm and auto accept</button>` : ""}<button class="btn you">Confirm</button></div></div>`;
@@ -549,7 +550,6 @@ function bar() {
   h = `<span class="tools2">${tools.map(x => `<button class="ib ${x === "Delete" ? "dz" : ""}" title="${x}" aria-label="${x}">${ICONS[x]}</button>`).join("")}</span>` + h + SP;
   h += words.map(x => `<button class="btn ghost">${x.replace(" as a fork", " (fork)")}</button>`).join("");
   h += a.bar.map(b => `<button class="btn">${b}</button>`).join("");
-  if (state === "decision") h += `<button class="btn you">Take a</button>`;
   h += pr.map(p => `<button class="btn ${p[1]}">${p[0]}</button>`).join("");
   if (state === "observed") h += `<button class="btn go">Continue as a fork</button>`;
   document.getElementById("bar").innerHTML = h;
@@ -560,6 +560,7 @@ function bar() {
   document.getElementById("menu").hidden = true;
 }
 function render() { list(); card();
+  setTimeout(() => document.querySelectorAll(".opt[data-k]").forEach(o => o.onclick = () => { document.querySelectorAll(".opt").forEach(x => x.classList.toggle("sel", x === o)); document.getElementById("pick").textContent = "Confirm " + o.dataset.k; }));
   document.querySelectorAll(".sub").forEach(b => b.onclick = () => { if (b.dataset.task !== "t1") { document.querySelectorAll(".sub.pick").forEach(x => x.classList.remove("pick")); b.classList.add("pick"); return; } stepOpen = +b.dataset.sub; stepTab = "Chat"; render(); });
   document.querySelectorAll('.row[data-task="t1"]').forEach(e => e.onclick = () => { stepOpen = null; render(); });
   document.querySelectorAll(".st[data-step]").forEach(e => { const go = () => { stepOpen = +e.dataset.step; stepTab = "Chat"; render(); }; e.onclick = go; e.onkeydown = k => { if (k.key === "Enter" || k.key === " ") { k.preventDefault(); go(); } }; });
