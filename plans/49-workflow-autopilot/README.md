@@ -1,7 +1,20 @@
 # Plan 49: Workflow autopilot. One prompt, a plan, a run loop, Fred only at real decisions
 
-Status: sketch, 2026-10-20. Nothing implemented. Fred decides section 5, then this folder gets its
-zero-decision task files. Process only: the visual design of the action bar is another chat's work.
+Status: decided 2026-10-20 (Fred: D1 c, D2 to D6 as recommended). Task files 01 to 07 written the same day;
+nothing implemented. Process only: the visual design of the action bar is another chat's work.
+
+| # | File | Delivers | Depends on |
+|---|---|---|---|
+| 1 | [01-intake-chain.md](01-intake-chain.md) | a supervised Start runs the planner's whole chain | none |
+| 2 | [02-exceptions.md](02-exceptions.md) | the two bugs (2a), the supervisor on exceptions only (2b) | 1 |
+| 3 | [03-decision-card.md](03-decision-card.md) | DECISION block, the card, the default after a timeout | 1 |
+| 4 | [04-finish.md](04-finish.md) | the finish summary, Accept, Reopen | 1 |
+| 5 | [05-levels.md](05-levels.md) | gated / auto / suggest / off, gated by default | 2, 3 |
+| 6 | [06-actions-contract.md](06-actions-contract.md) | GET /api/task `actions` for the UI chat | 3, 4, 5 |
+| 7 | [07-live-check.md](07-live-check.md) | headless and live checks, docs | 1-6 |
+
+Tests first in every task, one commit per task, `py -m unittest discover -s tests` at each boundary. Other chats
+edit `PLAN.md`, `BRAINSTORM.md` and `web/app.js` in parallel: anchored edits, stage only this plan's lines.
 Master: [../../PLAN.md](../../PLAN.md). Lands on plans 17 (chain), 24 (plan and replan), 42 (messages),
 44 (supervisor backend), 47 (planner), 48 (three moments). Design: [../../BRAINSTORM.md](../../BRAINSTORM.md) 7.6.
 
@@ -172,9 +185,9 @@ Prep $0.005, planner $0.12, scout $0.01, design on opus (the big one, $0.3 to $1
 verify $0.05, briefs $0, supervisor $0 when nothing goes wrong. Fred's clicks: Start, maybe one decision, Accept.
 Today: the same plus one wake and one Approve per step, and the design step written by a haiku pass.
 
-## 5. Open decisions for Fred
+## 5. Decisions (Fred, 2026-10-20: D1 c; D2 to D6 the recommended option)
 
-| # | Question | Options | Recommended |
+| # | Question | Options | Taken |
 |---|---|---|---|
 | D1 | Autonomy default | (a) `gated`: approve the plan once, then it runs; (b) `auto`; (c) per project, global default `gated` | (c) with `gated` as the default: the plan is the one thing worth a look, and a project like CLAUDE CONSOLE can be `auto` later |
 | D2 | Decision timeout on `auto` | (a) 10 minutes then the default; (b) no timeout, always wait; (c) take the default at once, log it | (a) |
@@ -183,6 +196,4 @@ Today: the same plus one wake and one Approve per step, and the design step writ
 | D5 | Finish summary | (a) built in code from briefs and facts; (b) the D12 haiku wake writes it | (a), the wake adds one line at most |
 | D6 | Bug fixes 2 and 4 of section 1 | (a) fixed first, in their own small commit, before the redesign | (a) |
 
-After Fred answers: task files `01-intake-chain.md` (change A, D4), `02-exceptions.md` (change B, the bug fixes),
-`03-decision-card.md` (change C, D2, D3), `04-finish.md` (change D, D5), `05-levels.md` (D1, config and the
-Models page), `06-actions-contract.md` (section 3 as `GET /api/task` fields for the UI chat), `07-live-check.md`.
+The task files at the top of this README carry each decision.
