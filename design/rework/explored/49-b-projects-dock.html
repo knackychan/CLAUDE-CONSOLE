@@ -482,7 +482,7 @@ function stepPage(i) {
     <div class="hd"><div class="hl"><span class="eb">${S.project}</span><h2>${r[0][0].toUpperCase() + r[0].slice(1)}</h2><div class="meta">
       <span class="pst ${r[3] === "done" ? "g" : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q"}">${{ done: "✓ Done", run: "▸ Running", q: "· Queued", wait: "? Waits for you", fail: "✕ Failed" }[r[3]]}</span>
       <span class="fact"><i>Model</i>${r[1].replace(" · ", ", ")} effort</span>${r[3] === "done" ? `<span class="fact"><i>Took</i>27 s</span>` : r[3] === "run" ? `<span class="fact"><i>For</i>3 min</span>` : ""}</div></div>
-      <div class="cost"><b>${r[5] || "$0"}</b><span>this step</span></div></div>
+      <div class="cost"><b title="Spent on this step">${r[5] || "$0"}</b></div></div>
     ${started ? `<div class="tabs">${tabs.map(t => `<button data-tab="${t}" aria-pressed="${t === stepTab}">${t}</button>`).join("")}</div>` : ""}
     <div class="spbody">${body}</div>`;
   document.getElementById("back").onclick = () => { stepOpen = null; render(); };
