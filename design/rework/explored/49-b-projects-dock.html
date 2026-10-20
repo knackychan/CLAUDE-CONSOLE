@@ -220,11 +220,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sphead { display: flex; align-items: center; gap: 8px; margin: -6px 0 6px; min-width: 0; }
 .sphead .back { min-height: 26px; padding: 2px 8px; }
 .sphead .crumb { font-size: 12px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 12px 0 0; }
+.tabs { display: flex; gap: 2px; margin: 4px 0 0; padding-bottom: 6px; }
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--mut); font: 600 12px var(--ui); padding: 6px 10px; cursor: pointer; margin-bottom: -1px; }
 .tabs button:hover { color: var(--ink); }
 .tabs button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); }
-.spbody { padding-top: 12px; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.spbody { padding-top: 0; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
 .chat { display: grid; gap: 10px; }
 .msg { display: grid; gap: 2px; font-size: 13px; }
 .msg.me div { color: var(--mut); }
@@ -367,6 +367,9 @@ function slot() {
   return "";
 }
 
+// one section pattern for every page: label column (name, one muted line), hairline above, body
+const sect = (l, sub, body) => `<section class="sect"><div class="sh"><span class="lbl">${l}</span>${sub ? `<span class="sm">${sub}</span>` : ""}</div><div class="sb">${body}</div></section>`;
+const usage = (ctxN, ctxT, usdT, n = 2) => sect("Usage", "", `<div class="meter"><span>context</span><div class="cells ctx">${cells(15, ctxN)}</div><b>${ctxT}</b><span>spend</span><div class="cells usd">${cells(20, n, 1)}</div><b>${usdT}</b></div>`);
 function stepPage(i) {
   const r = steps(state)[i], n = String(i + 1).padStart(2, "0");
   const started = r[3] !== "q";
@@ -375,14 +378,14 @@ function stepPage(i) {
     design: [["Console", "Using the scout findings, write a short adaptation plan for src/core/paths.ts and src/core/settings.ts."], ["design", "Reading docs/design-spec.md:83 and the T02 section. vitest is not in package.json: the plan adds it as a devDependency."]],
   }[r[0]] || [["Console", r[2]], [r[0], "Wrote src/core/paths.ts and settings.ts; npx vitest run: 6 passed."]];
   const tabs = ["Chat", "Received", "Handoff", "Files"];
-  const body = !started ? `<p class="mut" style="margin:0">Not started yet. It runs after step ${String(i).padStart(2, "0")} with this goal:</p><div class="txt"><div class="tt">${esc(r[2])}</div></div>`
-    : stepTab === "Chat" ? `<div class="chat">${chat.map(([w, t]) => `<div class="msg ${w === "Console" ? "me" : ""}"><span class="lbl">${w}</span><div>${esc(t)}</div></div>`).join("")}${r[3] === "run" ? `<div class="msg"><span class="lbl">${r[0]}</span><div class="mut">working<span class="cells" style="display:inline-grid;grid-template-columns:6px;margin-left:8px;vertical-align:middle"><i class="f live"></i></span></div></div>` : ""}</div>`
-    : `<p class="mut" style="margin:0">${stepTab} of step ${n}, as the step inspector shows it today.</p>`;
+  const body = !started ? sect("Goal", `runs after ${String(i).padStart(2, "0")}`, `<p class="brief">${esc(r[2])}</p>`)
+    : stepTab === "Chat" ? chat.map(([w, t], k) => sect(w === "Console" ? "Console" : w, w === "Console" ? "to the step" : r[1].split(" · ")[0] + ", 08:1" + (k + 1), `<p class="brief ${w === "Console" ? "mut" : ""}">${esc(t)}</p>`)).join("") + (r[3] === "run" ? sect(r[0], "now", `<p class="brief mut">working <span class="cells" style="display:inline-grid;grid-template-columns:6px;margin-left:6px;vertical-align:middle"><i class="f live"></i></span></p>`) : "")
+    : sect(stepTab, "", `<p class="brief mut">${stepTab} of step ${n}, as the step inspector shows it today.</p>`);
   document.getElementById("card").innerHTML = `
     <div class="sphead"><button class="btn ghost back" id="back">‹ Task</button><span class="crumb">${esc(S.task)}</span></div>
     <div class="head"><div><h2>${n} · ${r[0]}</h2><div class="sub"><span class="state ${r[3] === "done" ? "g" : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q"}">${r[4] || "· queued"}</span><span>${r[1]}</span></div></div><div class="cost"><b>${r[5] || "$0"}</b><span class="m mut">step</span></div></div>
     ${started ? `<div class="tabs">${tabs.map(t => `<button data-tab="${t}" aria-pressed="${t === stepTab}">${t}</button>`).join("")}</div>` : ""}
-    <div class="spbody">${body}</div>`;
+    <div class="spbody">${body}${started ? usage(r[3] === "run" ? 6 : 3, r[3] === "run" ? "61K" : "31K", (r[5] || "$0") + " · this step", 1) : ""}</div>`;
   document.getElementById("back").onclick = () => { stepOpen = null; render(); };
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { stepTab = b.dataset.tab; stepPage(i); });
 }
@@ -391,9 +394,10 @@ function card() {
   const a = A[state];
   if (state === "observed") {
     document.getElementById("card").innerHTML = `<div class="head"><div><h2>Refactor render queue</h2><div class="sub"><span class="state q">observed · VS Code</span><span>MOTION STUDIO</span><span>sonnet · medium</span></div></div><div class="cost"><b>$1.12</b><span class="m mut">this chat</span></div></div>
-      <div class="blk"><span class="lbl">Last turns</span><div class="brief">You: move the render queue into its own module and keep the API.<br><span class="mut">Claude: Split queue.ts into queue/core.ts and queue/workers.ts; 14 tests pass. Next: remove the old export.</span></div></div>
-      <div class="blk"><span class="lbl">Context</span><div class="meter"><span>context</span><div class="cells ctx">${cells(15, 9)}</div><b>92K</b></div></div>
-      <div class="slot g"><div class="q" style="font-weight:400">Driven in VS Code. Console only reads it: to act, fork it into a Console run from the menu.</div></div>`;
+      ${sect("You", "VS Code, 14:02", `<p class="brief">Move the render queue into its own module and keep the API.</p>`)}
+      ${sect("Claude", "sonnet, 14:09", `<p class="brief">Split queue.ts into queue/core.ts and queue/workers.ts; 14 tests pass. Next: remove the old export.</p>`)}
+      ${usage(9, "92K", "$1.12", 2)}
+      ${sect("Read only", "", `<p class="brief mut">Driven in VS Code. To act on it here, continue it as a fork: a new Console run with its levers.</p>`)}`;
     return;
   }
   const rows = steps(state).map((r, i) => {
@@ -417,8 +421,7 @@ function card() {
       </div></div></section>
     <section class="sect"><div class="sh"><span class="lbl">Plan</span><span class="sm">${steps(state).length} steps · planner opus</span></div><div class="sb"><div class="tl">${rows}</div></div></section>
 
-    <div class="blk"><div class="meter"><span>context</span><div class="cells ctx">${cells(15, state === "running" ? 6 : state === "ready" ? 0 : 4)}</div><b>${state === "running" ? "61K" : state === "ready" ? "0" : "38K"}</b>
-      <span>spend</span><div class="cells usd">${cells(20, 2, 1)}</div><b>${cost} · cap $5</b></div></div>`;
+    ${usage(state === "running" ? 6 : state === "ready" ? 0 : 4, state === "running" ? "61K" : state === "ready" ? "0" : "38K", cost + " · cap $5")}`;
   const ICON = document.querySelector(".cp") && document.querySelector(".cp").innerHTML;
   document.querySelectorAll(".tg").forEach(b => b.onclick = () => { const id = b.dataset.t, box = document.getElementById(id), open = box.hidden; box.hidden = !open;
     document.querySelectorAll(`[data-with="${id}"]`).forEach(e => e.hidden = !open); const t = b.closest(".tx"); t.querySelector(".pv").hidden = open; t.querySelector(".car").textContent = open ? "▾" : "▸"; });
