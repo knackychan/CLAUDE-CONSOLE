@@ -1,8 +1,8 @@
 # Task 6: the actions contract for the UI (README section 3 as data)
 
 Files: `console/server.py` (`Hub.actions`, GET /api/task), `tests/test_server.py`, `CLAUDE.md` (one line under the
-Board write contract), `plans/49-workflow-autopilot/README.md` (section 3 marked "served by `actions`").
-Commit boundary: `feat: GET /api/task actions, the one aligned action set per state (plan 49 Task 6)`.
+Board write contract), `plans/52-workflow-autopilot/README.md` (section 3 marked "served by `actions`").
+Commit boundary: `feat: GET /api/task actions, the one aligned action set per state (plan 52 Task 6)`.
 
 The UI must not reproduce business rules (plan 36 3.4). Today it reads `levers`, `message`, `supervisor.pending`,
 `recovery`, `handoff_available` and `next_step` and decides the bar itself. This task adds one read-only field so

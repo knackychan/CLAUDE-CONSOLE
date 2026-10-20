@@ -4,7 +4,7 @@
 <title>Autopilot A Sections</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-/* Plan 49 variant A: the list in three sections by who drives (Needs you, Runs here, Observed); the task card in the
+/* Plan 52 variant A: the list in three sections by who drives (Needs you, Runs here, Observed); the task card in the
    order of the brief: prompt, brief, plan, needs-you slot, cost and context; one action bar at the foot.
    Tokens are Console Cells (locked), unchanged. */
 :root {
@@ -259,7 +259,7 @@ function list() {
   const t1y = ["ready", "plan_ready", "decision", "failed_twice"].includes(state);
   const t1row = `<div class="row ${t1y ? "y" : ""} ${sel === "t1" ? "pick" : ""}"><div class="l1"><span class="mk ${t1.line[0]}"></span><span class="t">${esc(S.task)}</span><span class="lv ${level}">${level}</span></div><div class="l2"><span class="ln ${t1.line[0]}">${esc(t1.line[1])}</span></div><div class="l2"><span class="ln">${S.project}</span></div></div>`;
   const needs = `<div class="row y"><div class="l1"><span class="mk y"></span><span class="t">Batch prepare launch split</span><span class="lv gated">gated</span></div><div class="l2"><span class="ln y">held · confirm Fable</span></div><div class="l2"><span class="ln">fashion_packshots_ai</span></div></div>`;
-  const runs = `<div class="row"><div class="l1"><span class="mk n live"></span><span class="t">Plan 49 Task 2: supervisor on exceptions</span><span class="lv auto">auto</span></div><div class="l2"><span class="ln n">running · 01 code · sonnet · 6m</span></div><div class="l2"><span class="ln">CLAUDE CONSOLE</span></div></div>
+  const runs = `<div class="row"><div class="l1"><span class="mk n live"></span><span class="t">Plan 52 Task 2: supervisor on exceptions</span><span class="lv auto">auto</span></div><div class="l2"><span class="ln n">running · 01 code · sonnet · 6m</span></div><div class="l2"><span class="ln">CLAUDE CONSOLE</span></div></div>
     <div class="row"><div class="l1"><span class="mk g"></span><span class="t">Storyboard kit: shotTiming tests</span><span class="lv gated">gated</span></div><div class="l2"><span class="ln">done · 3 steps · $0.41</span></div><div class="l2"><span class="ln">MOTION STUDIO</span></div></div>`;
   const obs = `<div class="row obs ${sel === "obs1" ? "pick" : ""}"><div class="l1"><span class="mk n live"></span><span class="t">Refactor render queue</span><span class="src">VS Code</span></div><div class="l2"><span class="ln">working · MOTION STUDIO · $1.12</span></div></div>
     <div class="row obs"><div class="l1"><span class="mk y"></span><span class="t">Fix eslint config</span><span class="src">terminal</span></div><div class="l2"><span class="ln y">waiting in terminal · ARTCOUSTIC</span></div></div>

@@ -4,7 +4,7 @@
 <title>Autopilot B Dock</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-/* Plan 49 variant A: the list in three sections by who drives (Needs you, Runs here, Observed); the task card in the
+/* Plan 52 variant A: the list in three sections by who drives (Needs you, Runs here, Observed); the task card in the
    order of the brief: prompt, brief, plan, needs-you slot, cost and context; one action bar at the foot.
    Tokens are Console Cells (locked), unchanged. */
 :root {
@@ -423,7 +423,7 @@ function list() {
   document.getElementById("list").innerHTML = pin +
     prj("ARTCOUSTIC-AUDIO-REPORT", level, t1y ? "1 run · 1 observed" : "1 run · 1 observed") + (t1y ? `<div class="row quiet mut" style="background:transparent;padding:2px 9px;font-size:12px">Create src/core/paths.ts … in Needs you</div>` : t1row) +
       obs("o2", "y", "Fix eslint config", "waiting in terminal", "terminal") +
-    prj("CLAUDE CONSOLE", "auto", "1 run · 1 observed") + row("c1", "n", "Plan 49 Task 2: supervisor on exceptions", "running · 01 code · sonnet · 6m", "") + c1subs +
+    prj("CLAUDE CONSOLE", "auto", "1 run · 1 observed") + row("c1", "n", "Plan 52 Task 2: supervisor on exceptions", "running · 01 code · sonnet · 6m", "") + c1subs +
       obs("o3", "q", "Workflow redesign brainstorm", "idle · $2.30", "desktop") +
     prj("MOTION STUDIO", "gated", "1 run · 1 observed") + row("m1", "g", "Storyboard kit: shotTiming tests", "done · 3 steps · $0.41", "") +
       obs("obs1", "n", "Refactor render queue", "working · $1.12", "VS Code") +

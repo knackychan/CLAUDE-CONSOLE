@@ -4,7 +4,7 @@ Files: `console/tasks.py` (`reply_decision`, `DECISION_MAX`, `on_step_ended`), `
 `Hub.tick`, `task_row`, `task_message` answer path, `_decision_default`), `console/step_prompt.md`,
 `dotclaude/console/kinds/design.md`, `console/plan.py` (no change; `add_answer` reused), `console/paths.py`,
 `console/tuning.py`, `tests/test_tasks.py`, `tests/test_server.py`, `tests/test_plan.py`.
-Commit boundary: `feat: DECISION block, the decision card and its default after a timeout (plan 49 Task 3)`.
+Commit boundary: `feat: DECISION block, the decision card and its default after a timeout (plan 52 Task 3)`.
 
 ## Format (the model's side)
 

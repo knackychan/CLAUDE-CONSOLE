@@ -23,7 +23,7 @@ unless a decision card appears. Then the same prompt as task 06c2 again, to comp
 
 ## Close
 
-- `PLAN.md` row 49 state and History line; `BRAINSTORM.md` 7.6 gains one paragraph: "Plan 49: the chain is the run
+- `PLAN.md` row 49 state and History line; `BRAINSTORM.md` 7.6 gains one paragraph: "Plan 52: the chain is the run
   loop; the supervisor handles exceptions; levels gated / auto / suggest / off; decision cards; the finish card".
-- `plans/44-supervisor/README.md` section 1: a note that D7 (supervised intake) is replaced by plan 49 Task 1.
+- `plans/44-supervisor/README.md` section 1: a note that D7 (supervised intake) is replaced by plan 52 Task 1.
 - `plans/48-three-moments.md` section 2: D6 widened to any done task (Reopen).

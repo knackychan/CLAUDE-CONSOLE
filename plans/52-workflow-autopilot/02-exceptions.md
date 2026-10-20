@@ -5,7 +5,7 @@ Files: `console/server.py` (`_sup_mode`, `_supervisor_fred`, `task_row`), `conso
 the UI chat may take it instead: say so in the commit), `tests/test_supervisor.py`, `tests/test_supervisor_server.py`,
 `tests/test_web.py`.
 Two commits: `fix: a mode switch at a boundary dispatches or re-wakes; no Paused note at a supervised boundary
-(plan 49 Task 2a)` then `feat: the supervisor wakes on exceptions only (plan 49 Task 2b)`.
+(plan 52 Task 2a)` then `feat: the supervisor wakes on exceptions only (plan 52 Task 2b)`.
 
 ## 2a: the bugs
 

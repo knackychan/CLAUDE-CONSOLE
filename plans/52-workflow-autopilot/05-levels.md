@@ -4,7 +4,7 @@ Files: `console/supervisor.py` (`MODES`, `auto_reason`), `console/paths.py`, `co
 (`_ended` plan hold, `_replan_done` replan_auto, `_decision_default`), `web/app.js` (`supMode`, `startLine`, the mode
 segment: four words; the UI chat owns the look), `tests/test_supervisor.py`, `tests/test_server.py`,
 `tests/test_tuning.py`, `tests/test_web.py`.
-Commit boundary: `feat: autonomy levels, gated by default (plan 49 Task 5)`.
+Commit boundary: `feat: autonomy levels, gated by default (plan 52 Task 5)`.
 
 ## The words
 

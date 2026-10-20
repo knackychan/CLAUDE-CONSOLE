@@ -2,7 +2,7 @@
 
 Files: `console/tasks.py` (`summary`, `fred` lever `accept`), `console/server.py` (`task_levers`, `task_lever`,
 GET /api/task `summary`, `task_row`), `tests/test_tasks.py`, `tests/test_server.py`.
-Commit boundary: `feat: the finish summary and Accept on a done task (plan 49 Task 4)`.
+Commit boundary: `feat: the finish summary and Accept on a done task (plan 52 Task 4)`.
 
 ## Summary (code, no model)
 

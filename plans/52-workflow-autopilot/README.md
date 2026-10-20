@@ -1,4 +1,4 @@
-# Plan 49: Workflow autopilot. One prompt, a plan, a run loop, Fred only at real decisions
+# Plan 52: Workflow autopilot. One prompt, a plan, a run loop, Fred only at real decisions
 
 Status: decided 2026-10-20 (Fred: D1 c, D2 to D6 as recommended). Task files 01 to 07 written the same day;
 nothing implemented. Process only: the visual design of the action bar is another chat's work.

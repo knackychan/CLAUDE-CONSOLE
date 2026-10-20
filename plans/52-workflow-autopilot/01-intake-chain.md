@@ -2,7 +2,7 @@
 
 Files: `console/server.py` (`create_task`, `_supervised_task`, `_task_new`), `console/supervisor.py` (`initial`,
 `boundary`), `tests/test_server.py`, `tests/test_supervisor_server.py`, `tests/test_task_messages.py`.
-Commit boundary: `feat: a supervised task runs the planner's whole chain (plan 49 Task 1)`; full suite green.
+Commit boundary: `feat: a supervised task runs the planner's whole chain (plan 52 Task 1)`; full suite green.
 
 ## What changes
 
