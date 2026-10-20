@@ -291,6 +291,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .ib.dz:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .mk.live { animation: none; }
 @media (prefers-reduced-motion: no-preference) { .mk.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
+.sacts { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.sacts .sp { flex: 1; }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -365,7 +367,7 @@ const STEPS = {
 const A = {
   ready: { line: ["y", "ready · 4 steps · Start"], primary: [["Start", "you"]], bar: ["Edit steps", "Drop"], menu: ["Edit prompt", "Review rules"], box: "" },
   running: { line: ["n", "running · 02 design · opus · 3m"], primary: [], bar: ["Pause", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
-  plan_ready: { line: ["y", "plan ready · confirm"], primary: [["Confirm plan", "you"]], bar: ["Edit plan", "Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  plan_ready: { line: ["y", "plan ready · confirm"], primary: [], bar: ["Edit plan", "Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   decision: { line: ["y", "needs you · SHEETS_DIR or PRODUCT_SHEETS_DIR?"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "answer" },
   failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [["Retry on a model", "you"]], bar: ["Accept step result", "Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
@@ -425,7 +427,7 @@ function slot() {
     ${level === "gated" ? `<button class="lnk">Take a, and always take the default from now on</button>` : ""}</div>`;
   if (state === "plan_ready") return `<div class="slot">${tag("Plan to confirm")}
     <div class="q">The plan is written. Confirm it and the last 2 steps run on their own.</div>
-    <div class="ac"><button class="lnk">Read the plan</button>${level === "gated" ? `<button class="lnk">Confirm, and run plans automatically from now on</button>` : ""}</div></div>`;
+    <div class="sacts"><button class="btn">Read the plan</button><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Confirm this plan, and set the project to auto: later plans run without asking">Confirm and auto accept</button>` : ""}<button class="btn you">Confirm</button></div></div>`;
   if (state === "failed_twice") return `<div class="slot r">${tag("Failed twice", "bad")}
     <div class="q">2 of 6 tests still fail after the fix.</div>
     <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div></div>`;
