@@ -289,6 +289,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .ib { width: 32px; height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--mut); display: grid; place-items: center; cursor: pointer; }
 .ib:hover { color: var(--ink); border-color: var(--line); background: var(--raise); }
 .ib.dz:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.mk.live { animation: none; }
+@media (prefers-reduced-motion: no-preference) { .mk.live { animation: blink 1.6s steps(2, jump-none) infinite; } }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -377,7 +379,7 @@ function list() {
   const t1 = A[state === "observed" ? "running" : state];
   const sel = state === "observed" ? "obs1" : stepOpen !== null ? "" : "t1";
   const run = `<span class="lv" title="Driven by Console">run</span>`;
-  const row = (id, mk, t, ln, src, y) => `<div class="row ${y ? "y" : ""} ${src ? "" : ""} ${sel === id ? "pick" : ""}"><div class="l1"><span class="mk ${mk}"></span><span class="t">${esc(t)}</span>${src ? `<span class="src">${src}</span>` : run}</div><div class="l2"><span class="ln ${mk === "q" ? "" : mk}">${esc(ln)}</span></div></div>`;
+  const row = (id, mk, t, ln, src, y) => `<div class="row ${y ? "y" : ""} ${src ? "" : ""} ${sel === id ? "pick" : ""}"><div class="l1"><span class="mk ${mk} ${/running|working/.test(ln) ? "live" : ""}"></span><span class="t">${esc(t)}</span></div><div class="l2"><span class="ln ${mk === "q" ? "" : mk}">${src ? esc(src) + " · " : ""}${esc(ln)}</span></div></div>`;
   const obs = (id, mk, t, ln, src) => row(id, mk, t, ln, src).replace('class="row', 'class="row obs');
   // the steps of a running run, under its row: one line each, a link to the step page
   const glyph = { done: "✓", run: "▸", q: "·", wait: "?", fail: "✕" };
@@ -387,7 +389,7 @@ function list() {
   const c1subs = subs("c1", [["code", "sonnet", "run"], ["verify", "opus", "q"]]);
   const fash = row("f1", "y", "Batch prepare launch split", "held · confirm Fable", "", true);
   const pin = `<div class="pin"><span class="lbl">Needs you · ${t1y ? 2 : 1} · all projects</span>${t1y ? t1row.replace("<span class=\"t\">", "<span class=\"t\">") + "" : ""}${fash}</div>`;
-  const prj = (nm, lv, n) => `<div class="prj"><span class="nm">${nm}</span><span class="c">${n}</span><span class="lv ${lv}">${lv}</span></div>`;
+  const prj = (nm, lv, n) => `<div class="prj"><span class="nm">${nm}</span><span class="c">${n}</span></div>`;
   const n = t1y ? 2 : 1;
   document.getElementById("needs").textContent = n + (n > 1 ? " need you" : " needs you");
   document.getElementById("list").innerHTML = pin +
