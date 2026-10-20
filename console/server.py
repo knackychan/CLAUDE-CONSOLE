@@ -1948,10 +1948,14 @@ class Hub:
                 said = "\n\n".join(m["text"] for m in task.get("messages", [])
                                    if m.get("mode") == "next" and m.get("wake") == wake
                                    and m["status"] == "dispatched")  # his words, verbatim
+                planned = supervisor.proposal_of(decision, task)  # plan 49 D2: his words, the planner's, the pass's
                 req = {"task": task_id, "source_step": n, "source_session": tasks.step(task, n)["session"],
-                       "kind": decision["kind"], "instructions": said or decision["instructions"].strip(),
+                       "kind": decision.get("kind") or planned["kind"],
+                       "instructions": said or (planned["goal"] if planned else decision["instructions"].strip()),
                        "model": "auto"}  # D11: a held card's Approve also carries his words
                 intent = {"call": "request_next", "request_id": supervisor.request_id(task_id, wake), "source_step": n}
+                if planned is not None:
+                    req["proposal"] = intent["proposal"] = decision["proposal"]
             else:
                 intent = {"call": "task_lever", "lever": self._SUP_LEVER[kind]}
             sup = task["supervisor"]
@@ -1961,7 +1965,7 @@ class Hub:
                 spent[cs["n"]] = spent.get(cs["n"], 0) + 1
             if kind == "add_next_step":
                 lineage = supervisor.fail_lineage(task, tasks.step(task, req["source_step"]))
-                if lineage is not None and decision["kind"] == "code":  # a repair spends its FAIL lineage's retry
+                if lineage is not None and req["kind"] == "code":  # a repair spends its FAIL lineage's retry
                     spent[lineage] = spent.get(lineage, 0) + 1
                 intent["lineage"] = lineage
             sup["retries"] = spent
@@ -2620,6 +2624,10 @@ class Hub:
             step.update(request_id=request_id, request_hash=signature, request_status="starting",
                         manual_route=route, requested_model=payload["model"])
             step["attempts"] = []
+            if isinstance(updated.get("supervisor"), dict):  # plan 49 D3: an added step leaves the planned list
+                proposal = request.get("proposal") if origin == "supervisor" else None  # Fred's body never names one
+                updated["supervisor"]["proposed"] = supervisor.trim_proposed(
+                    updated["supervisor"].get("proposed"), payload["kind"], proposal)
             # the reservation waits until the launch records a session, so the hub loop cannot start it too
             updated.update(state="waiting", owner="fred", why=f"starting step {step['n']:02d}")
             if origin == "fred":
