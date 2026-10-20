@@ -239,6 +239,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .tools ul { list-style: none; margin: 0 0 0 10px; padding: 0 0 0 10px; border-left: 1px solid var(--line); display: grid; gap: 2px; font: 11.5px var(--mono); white-space: pre; }
 .tools li { display: flex; gap: 8px; }
 .tools .ok { color: var(--ok); }
+.subs { margin: -2px 8px 6px 20px; padding: 2px 0 0 8px; border-left: 1px solid var(--line); display: grid; gap: 1px; }
+.sub { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 6px; align-items: baseline; width: 100%; padding: 3px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: 12px var(--ui); text-align: left; cursor: pointer; }
+.sub:hover { background: var(--raise); }
+.sub:hover .sn { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); }
+.sub.pick { background: var(--raise); box-shadow: inset 2px 0 0 var(--ink); }
+.sub .sg { font: 11px var(--mono); color: var(--mut); }
+.sub.done .sg { color: var(--ok); } .sub.run .sg { color: var(--ink); } .sub.fail .sg { color: var(--bad); } .sub.wait .sg { color: var(--you); }
+.sub .sn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub.q .sn { color: var(--mut); }
+.sub .sm { font: 10.5px var(--mono); color: var(--mut); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .sub { transition: background-color .12s; } }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -325,11 +336,16 @@ const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&g
 function list() {
   const t1y = ["ready", "plan_ready", "decision", "failed_twice"].includes(state);
   const t1 = A[state === "observed" ? "running" : state];
-  const sel = state === "observed" ? "obs1" : "t1";
+  const sel = state === "observed" ? "obs1" : stepOpen !== null ? "" : "t1";
   const run = `<span class="lv" title="Driven by Console">run</span>`;
   const row = (id, mk, t, ln, src, y) => `<div class="row ${y ? "y" : ""} ${src ? "" : ""} ${sel === id ? "pick" : ""}"><div class="l1"><span class="mk ${mk}"></span><span class="t">${esc(t)}</span>${src ? `<span class="src">${src}</span>` : run}</div><div class="l2"><span class="ln ${mk === "q" ? "" : mk}">${esc(ln)}</span></div></div>`;
   const obs = (id, mk, t, ln, src) => row(id, mk, t, ln, src).replace('class="row', 'class="row obs');
-  const t1row = row("t1", t1.line[0], S.task, t1.line[1], "", t1y);
+  // the steps of a running run, under its row: one line each, a link to the step page
+  const glyph = { done: "✓", run: "▸", q: "·", wait: "?", fail: "✕" };
+  const subs = (task, list) => `<div class="subs">${list.map(([k, m, st], i) => `<button class="sub ${st} ${task === "t1" && stepOpen === i ? "pick" : ""}" data-task="${task}" data-sub="${i}" title="Open step ${String(i + 1).padStart(2, "0")}"><span class="sg">${glyph[st]}</span><span class="sn">${String(i + 1).padStart(2, "0")} ${k}</span><span class="sm">${st === "run" ? m + " · running" : st === "q" ? "queued" : st === "done" ? "done" : ""}</span></button>`).join("")}</div>`;
+  const t1subs = state === "running" ? subs("t1", steps(state).map(r => [r[0], r[1].split(" · ")[0], r[3]])) : "";
+  const t1row = row("t1", t1.line[0], S.task, t1.line[1], "", t1y).replace('class="row', 'data-task="t1" class="row') + t1subs;
+  const c1subs = subs("c1", [["code", "sonnet", "run"], ["verify", "opus", "q"]]);
   const fash = row("f1", "y", "Batch prepare launch split", "held · confirm Fable", "", true);
   const pin = `<div class="pin"><span class="lbl">Needs you · ${t1y ? 2 : 1} · all projects</span>${t1y ? t1row.replace("<span class=\"t\">", "<span class=\"t\">") + "" : ""}${fash}</div>`;
   const prj = (nm, lv, n) => `<div class="prj"><span class="nm">${nm}</span><span class="c">${n}</span><span class="lv ${lv}">${lv}</span></div>`;
@@ -338,7 +354,7 @@ function list() {
   document.getElementById("list").innerHTML = pin +
     prj("ARTCOUSTIC-AUDIO-REPORT", level, t1y ? "1 run · 1 observed" : "1 run · 1 observed") + (t1y ? `<div class="row quiet mut" style="background:transparent;padding:2px 9px;font-size:12px">Create src/core/paths.ts … in Needs you</div>` : t1row) +
       obs("o2", "y", "Fix eslint config", "waiting in terminal", "terminal") +
-    prj("CLAUDE CONSOLE", "auto", "1 run · 1 observed") + row("c1", "n", "Plan 49 Task 2: supervisor on exceptions", "running · 01 code · sonnet · 6m", "") +
+    prj("CLAUDE CONSOLE", "auto", "1 run · 1 observed") + row("c1", "n", "Plan 49 Task 2: supervisor on exceptions", "running · 01 code · sonnet · 6m", "") + c1subs +
       obs("o3", "q", "Workflow redesign brainstorm", "idle · $2.30", "desktop") +
     prj("MOTION STUDIO", "gated", "1 run · 1 observed") + row("m1", "g", "Storyboard kit: shotTiming tests", "done · 3 steps · $0.41", "") +
       obs("obs1", "n", "Refactor render queue", "working · $1.12", "VS Code") +
@@ -480,6 +496,8 @@ function bar() {
   if (mb) mb.onclick = () => { menuOpen = !menuOpen; menu.hidden = !menuOpen; };
 }
 function render() { list(); card();
+  document.querySelectorAll(".sub").forEach(b => b.onclick = () => { if (b.dataset.task !== "t1") { document.querySelectorAll(".sub.pick").forEach(x => x.classList.remove("pick")); b.classList.add("pick"); return; } stepOpen = +b.dataset.sub; stepTab = "Chat"; render(); });
+  document.querySelectorAll('.row[data-task="t1"]').forEach(e => e.onclick = () => { stepOpen = null; render(); });
   document.querySelectorAll(".st[data-step]").forEach(e => { const go = () => { stepOpen = +e.dataset.step; stepTab = "Chat"; render(); }; e.onclick = go; e.onkeydown = k => { if (k.key === "Enter" || k.key === " ") { k.preventDefault(); go(); } }; });
   document.getElementById("dock").innerHTML = state === "observed" ? "" : slot(); bar(); }
 document.querySelectorAll("#views button[data-s]").forEach(b => b.onclick = () => {
