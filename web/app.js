@@ -3787,7 +3787,7 @@ function recoveryBox(t, d) {  // plan 48 section 7: what definitely finished, wh
     if (o && lv.stop === "") acts.push("Stop (bar) ends that run.");
     if (c && !acts.length) acts.push(`No recovery action is open: ${esc(String(lv.retry || "the service offers none").replace(/\.$/, ""))}.`);
   }
-  if (dispatch) lines.push(esc(`The supervisor's wake ${dispatch.wake} dispatch has an unknown outcome (card below). It is never replayed; Dismiss does not mean it failed.`));
+  if (dispatch) lines.push(esc(`The supervisor's wake ${dispatch.wake} dispatch${dispatch.decision ? ` (${decisionText(dispatch.decision, t)})` : ""} has an unknown outcome (card below). It is never replayed; Dismiss does not mean it failed.`));
   for (const m of unsure) lines.push(`Your message to step ${two(m.target.step)} has an unknown delivery (message box). It is never replayed; Dismiss does not mean it was not delivered.`);
   return `<div class="askbox recovery" role="group" aria-label="Recovery"><span class="lbl">Recovery</span>${lines.map((l) => `<p class="rl">${l}</p>`).join("")}${acts.length ? `<ul class="ra">${acts.map((a) => `<li>${a}</li>`).join("")}</ul>` : ""}</div>`;
 }
@@ -3850,6 +3850,13 @@ function supCard(t, d) {  // plan 48: the pending card (Approve only where can_a
       ${p.reason ? `<div class="why">${esc(p.reason)}</div>` : ""}${p.error ? `<div class="why r">${esc(p.error)}</div>` : ""}
       ${noting ? `<label class="nl" for="b-supnote">Note for the next wake (optional)</label><textarea class="in" id="b-supnote" rows="2" maxlength="2000"></textarea>` : ""}
       ${buttons ? `<div class="lr">${buttons}${!dismiss && p.can_reject && !noting ? '<span class="say">Reject takes a note for the next wake</span>' : ""}</div>` : ""}</div></div>`;
+  }
+  const rj = sup.rejected;
+  if (rj) {  // plan 51 D5: after Reject the card says where Fred goes next; no buttons
+    const next = d.message && d.message.mode === "next" ? `Write what to do instead in the box below${rj.note ? ", your note goes with it" : ""}` : "Add step on a model or Finish task is in the task menu";
+    return `<div class="blk sup-card"><span class="lbl">Supervisor · last decision</span><div class="askbox quiet dec">
+    <div class="who"><span class="st n">You rejected wake ${esc(rj.wake)}</span></div>
+    <div class="act was">${esc(decisionText({ decision: rj.decision }, t))}</div><p class="say">${esc(next)}</p></div></div>`;
   }
   const a = [...audit].reverse().find((x) => x.decision);
   if (!a) return `<div class="blk sup-card"><span class="lbl">Supervisor · last decision</span><p class="say">No decision yet: the supervisor decides when a step ends.</p></div>`;

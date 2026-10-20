@@ -995,6 +995,7 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .askbox.recovery .ra { margin: 2px 0 0; padding-left: 16px; color: var(--mut); font: 12px/1.45 var(--ui); overflow-wrap: anywhere; }
 /* plan 48 3.4: the opened task. The supervisor's card, the route's proposed rows, the context gauge, the task menu */
 .sup-card .askbox { margin: 0; }
+.sup-card .act.was { text-decoration: line-through; color: var(--mut); }
 .askbox.quiet { background: transparent; border-color: var(--line); }
 .dec { display: grid; gap: 6px; min-width: 0; }
 .dec .who { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
