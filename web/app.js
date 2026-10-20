@@ -3765,7 +3765,10 @@ const SUP_HEAD = { suggest: ["Supervisor suggests", "y"], held: ["Supervisor's s
 function decisionText(dec, t) {  // a supervisor decision as one sentence: "Add 03 verify from 02's handover", "Retry 02 code on opus"
   const word = dec && dec.decision, cur = t.steps.find((x) => x.n === t.current), last = latestStep(t);
   const on = dec && dec.model && dec.model !== "auto" ? " on " + dec.model : "";
-  if (word === "add_next_step") return dec.kind ? `Add ${two((last ? last.n : 0) + 1)} ${dec.kind}${on}${dec.source_step ? ` from ${two(dec.source_step)}'s handover` : ""}` : "Add a step";
+  if (word === "add_next_step") {  // plan 49: a named planned step gives its kind and says which one
+    const plan = dec.proposal ? (((t.supervisor || {}).proposed || [])[dec.proposal - 1] || {}) : {}, kind = dec.kind || plan.kind;
+    return kind ? `Add ${two((last ? last.n : 0) + 1)} ${kind}${on}${dec.source_step ? ` from ${two(dec.source_step)}'s handover` : ""}${dec.proposal ? ` (planned p${dec.proposal})` : ""}` : "Add a step";
+  }
   if (word === "retry") return `Retry ${cur ? two(cur.n) + " " + cur.kind : "the step"}${on}`;
   if (word === "stepdone") return `Accept ${cur ? two(cur.n) + "'s" : "the step's"} result`;
   if (word === "escalate_to_fred") return dec.for_fred || "Ask you";
