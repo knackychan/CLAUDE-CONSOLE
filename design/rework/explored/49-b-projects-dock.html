@@ -359,7 +359,7 @@ function card() {
     <div class="head"><div><h2>${esc(S.task)}</h2><div class="sub"><span class="state ${a.line[0]}">${esc(a.line[1])}</span><span>${S.project}</span>
       <span class="seg" title="Autonomy level for this task; the project default is gated"><button data-l="gated" aria-pressed="${level === "gated"}">gated</button><button data-l="auto" aria-pressed="${level === "auto"}">auto</button></span></div></div>
       <div class="cost"><b>${cost}</b><span class="m mut">task</span></div></div>
-    <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><button class="fold" id="pf"><span class="car">▸</span><span class="pv">${esc(S.prompt)}</span></button><div class="raw" id="raw" hidden>${esc(S.prompt)}</div></div></section>
+    <section class="sect"><div class="sh"><span class="lbl">Prompt</span><span class="sm">you, 08:10</span></div><div class="sb"><button class="fold" data-fold="pr"><span class="car">▸</span><span class="pv">${esc(S.prompt)}</span></button><div id="pr" hidden></div></div></section>
     <section class="sect"><div class="sh"><span class="lbl">Brief</span><span class="sm">prep · haiku</span></div><div class="sb"><button class="fold" data-fold="bf"><span class="car">▸</span><span class="pv">${esc(S.brief)}</span></button>
       <div id="bf" class="open" hidden>
       <div class="facts">
@@ -372,8 +372,7 @@ function card() {
 
     <div class="blk"><div class="meter"><span>context</span><div class="cells ctx">${cells(15, state === "running" ? 6 : state === "ready" ? 0 : 4)}</div><b>${state === "running" ? "61K" : state === "ready" ? "0" : "38K"}</b>
       <span>spend</span><div class="cells usd">${cells(20, 2, 1)}</div><b>${cost} · cap $5</b></div></div>`;
-  document.querySelectorAll("[data-fold]").forEach(b => b.onclick = () => { const r = document.getElementById(b.dataset.fold); r.hidden = !r.hidden; b.querySelector(".car").textContent = r.hidden ? "▸" : "▾"; if (b.dataset.fold === "bf") b.querySelector(".pv").classList.toggle("full", !r.hidden); });
-  document.getElementById("pf").onclick = e => { const r = document.getElementById("raw"); r.hidden = !r.hidden; e.currentTarget.querySelector(".car").textContent = r.hidden ? "▸" : "▾"; };
+  document.querySelectorAll("[data-fold]").forEach(b => b.onclick = () => { const r = document.getElementById(b.dataset.fold); r.hidden = !r.hidden; b.querySelector(".car").textContent = r.hidden ? "▸" : "▾"; const pv = b.querySelector(".pv"); if (pv) pv.classList.toggle("full", !r.hidden); });
   document.querySelectorAll(".seg button").forEach(b => b.onclick = () => { level = b.dataset.l; render(); });
 }
 function cells(n, f, h = 0) { let s = ""; for (let i = 0; i < n; i++) s += `<i class="${i < f ? "f" : i < f + h ? "h" : ""}"></i>`; return s; }
