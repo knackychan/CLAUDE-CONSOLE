@@ -12,6 +12,7 @@ nothing implemented. Process only: the visual design of the action bar is anothe
 | 5 | [05-levels.md](05-levels.md) | gated / auto / suggest / off, gated by default | 2, 3 |
 | 6 | [06-actions-contract.md](06-actions-contract.md) | GET /api/task `actions` for the UI chat | 3, 4, 5 |
 | 7 | [07-live-check.md](07-live-check.md) | headless and live checks, docs | 1-6 |
+| 8 | [08-design-lock.md](08-design-lock.md) | the locked UI: `design/rework/locked/workflow-autopilot.html` | 6 |
 
 Tests first in every task, one commit per task, `py -m unittest discover -s tests` at each boundary. Other chats
 edit `PLAN.md`, `BRAINSTORM.md` and `web/app.js` in parallel: anchored edits, stage only this plan's lines.
