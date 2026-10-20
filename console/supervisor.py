@@ -313,8 +313,9 @@ DECISIONS = ("add_next_step", "confirm", "keep", "retry", "stepdone", "stop", "f
              "escalate_to_fred", "wait")
 CONFIDENCE = ("low", "medium", "high")
 RETRY_MODELS = ("", "haiku", "sonnet", "opus")
-_OPTIONAL = {"kind": str, "instructions": str, "model": str, "source_step": int, "note": str, "text": str}
-_FIELDS = {"add_next_step": ("kind", "instructions", "model", "source_step"), "retry": ("note", "model"),
+_OPTIONAL = {"kind": str, "instructions": str, "model": str, "source_step": int, "note": str, "text": str,
+             "proposal": int}
+_FIELDS = {"add_next_step": ("kind", "instructions", "model", "source_step", "proposal"), "retry": ("note", "model"),
            "answer": ("text",)}  # every other decision carries the four required fields only
 _LEVER = {"confirm": "confirm", "keep": "keep", "retry": "retry", "stepdone": "stepdone", "stop": "stop",
           "finish": "done"}
@@ -334,8 +335,11 @@ SCHEMA = {
         "source_step": {"type": "integer", "minimum": 1},
         "note": {"type": "string", "maxLength": NOTE_MAX},
         "text": {"type": "string", "maxLength": TEXT_MAX},
+        "proposal": {"type": "integer", "minimum": 1},
     },
 }
+PROPOSED_SHOWN = 8  # planned steps listed in the digest (plan 49)
+PROPOSED_CLIP = 300  # characters of each planned goal in the digest; the step itself takes the saved goal whole
 
 
 class DigestError(Exception):
@@ -415,9 +419,14 @@ def digest(home, task: dict, context: dict) -> str:
     gates.append(f"- mode {pol.get('mode', 'off')}; auto steps left {pol.get('auto_steps_left', 0)}; retries left "
                  f"{context.get('retries_left', 0)}; work USD left {pol.get('work_usd_left', 0.0)}; "
                  f"own USD left task {budget.get('task_left', 0.0)} day {budget.get('day_left', 0.0)}")
-    proposed = [p.get("kind") for p in pol.get("proposed") or [] if isinstance(p, dict) and p.get("kind")]
-    if proposed:
-        gates.append("- Prep proposed kinds: " + ", ".join(proposed))
+    proposed = [(i, p) for i, p in enumerate(pol.get("proposed") or [], 1) if isinstance(p, dict) and p.get("kind")]
+    if proposed:  # plan 49: the planner's goals, numbered by their place in the saved list, as `proposal` names them
+        gates.append("- Planned next (the planner's steps; name one with proposal: N):")
+        for i, p in proposed[:PROPOSED_SHOWN]:
+            model = f" ({p['model']})" if p.get("model") else ""
+            gates.append(f"  p{i} {p['kind']}{model}: " + redact.clip(str(p.get("goal", "")), PROPOSED_CLIP))
+        if len(proposed) > PROPOSED_SHOWN:
+            gates.append(f"  ... {len(proposed) - PROPOSED_SHOWN} more")
     mandatory = ["\n".join(head), "\n".join(table), "\n".join(gates)]
     used = sum(_size(b) + 2 for b in mandatory)
     if used > DIGEST_MAX:
@@ -494,6 +503,8 @@ def revision(home, task: dict) -> str:
     data = {"goal": task.get("goal"), "project": task.get("project_dir"), "progression": task.get("progression"),
             "state": task["state"], "why": task["why"], "owner": task["owner"], "current": task.get("current"),
             "paused": sup.get("paused") is True, "epoch": sup.get("epoch"), "steps": steps,
+            "proposed": [[p.get("kind"), p.get("goal")] if isinstance(p, dict) else p
+                         for p in sup.get("proposed") or []],  # plan 49: a decision names a place in this list
             "plan": {"meta": {k: meta.get(k) for k in ("from", "dir", "parts")} if meta else None,
                      "text": _task_file(home, task, plan.index_file(task)) if meta else None}}
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
@@ -532,7 +543,29 @@ def shape(decision) -> str:
                 return f"{key} is not a field of {kind}"
     if "text" in decision and len(decision["text"]) > TEXT_MAX:
         return "text is over 400 characters"
+    if "proposal" in decision and decision["proposal"] < 1:
+        return "proposal must be 1 or more"
     return ""
+
+
+def proposal_of(decision: dict, task: dict):
+    """Plan 49: the saved planned step an add_next_step names with `proposal` (1-based), else None."""
+    p = decision.get("proposal") if isinstance(decision, dict) else None
+    sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+    items = sup.get("proposed") if isinstance(sup.get("proposed"), list) else []
+    if not isinstance(p, int) or isinstance(p, bool) or not 1 <= p <= len(items) or not isinstance(items[p - 1], dict):
+        return None
+    return items[p - 1]
+
+
+def trim_proposed(proposed, kind: str, proposal=None) -> list:
+    """Plan 49 D3: the planned steps left after a step of `kind` was added. A used `proposal` k drops 1..k (an earlier
+    one was passed over); else, or when k is not in the list, the first planned step of the same kind goes. Pure."""
+    items = list(proposed) if isinstance(proposed, list) else []
+    if isinstance(proposal, int) and not isinstance(proposal, bool) and 1 <= proposal <= len(items):
+        return items[proposal:]
+    at = next((i for i, p in enumerate(items) if isinstance(p, dict) and p.get("kind") == kind), None)
+    return items if at is None else items[:at] + items[at + 1:]
 
 
 def check(decision, task: dict, levers: dict, sources: dict, policy: dict) -> tuple:
@@ -552,9 +585,17 @@ def check(decision, task: dict, levers: dict, sources: dict, policy: dict) -> tu
     if kind == "escalate_to_fred":
         return (True, "") if _text(decision["for_fred"], FOR_FRED_MAX) else (False, "escalate_to_fred needs for_fred")
     if kind == "add_next_step":
-        if decision.get("kind") not in tasks.NEXT_KINDS:
+        step_kind, planned = decision.get("kind"), None
+        if "proposal" in decision:  # plan 49 D1: the planner's step, its kind and goal
+            planned = proposal_of(decision, task)
+            if planned is None:
+                return False, f"proposal p{decision['proposal']} is not in the planned list"
+            if step_kind is not None and step_kind != planned.get("kind"):
+                return False, f"kind differs from proposal p{decision['proposal']}"
+            step_kind = planned.get("kind")
+        if step_kind not in tasks.NEXT_KINDS:
             return False, "kind must be one of " + ", ".join(tasks.NEXT_KINDS)
-        if not _text(decision.get("instructions"), tasks.STEP_GOAL_MAX):
+        if planned is None and not _text(decision.get("instructions"), tasks.STEP_GOAL_MAX):
             return False, f"instructions must be 1 to {tasks.STEP_GOAL_MAX} characters"
         if decision.get("model") != "auto":
             return False, "a supervisor step runs on model auto"
@@ -641,6 +682,10 @@ def run(cfg: dict, exe: list, task: dict, prompt: str, model: str, max_cost: flo
         fields = {k: v for k, v in fields.items() if k not in _OPTIONAL or k in own}
         if fields.get("decision") == "add_next_step" and fields.get("model") in (None, ""):
             fields["model"] = "auto"  # the only model a supervisor step may name; another is still refused by check
+        if fields.get("decision") == "add_next_step" and "kind" not in fields:
+            planned = proposal_of(fields, task)  # plan 49: a named planned step gives its kind
+            if planned is not None and planned.get("kind"):
+                fields["kind"] = planned["kind"]
     why = shape(fields)
     if why:
         out["error"] = "no decision (" + why + ")"
