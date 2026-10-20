@@ -2347,6 +2347,12 @@ const TUNE = {  // key -> [label, unit word, scale from the config value to the 
   cache_bonus: ["Warm cache bonus", "points", 100], budget_warn_at: ["Over pace at", "% of pace", 100],
   daily_budget_usd: ["Daily budget", "$", 1], gauge_yellow_tokens: ["Yellow from", "K", 0.001],
   gauge_red_tokens: ["Red from", "K", 0.001],
+  // plan 50: the supervisor's numbers (its two pass models are fixed, so they are not here)
+  supervisor_debounce_s: ["Wait after a step ends", "s", 1], supervisor_parallel: ["Passes at once", "", 1],
+  supervisor_timeout_s: ["Pass timeout", "s", 1], supervisor_stall_s: ["Stalled after", "s", 1],
+  supervisor_max_auto_steps: ["Auto steps before you act", "", 1], supervisor_max_retries: ["Auto retries per step", "", 1],
+  supervisor_work_usd: ["Auto work spend before you act", "$", 1], supervisor_task_usd: ["Pass spend per task", "$", 1],
+  supervisor_day_usd: ["Pass spend per day", "$", 1],
 };
 const MGROUP = {  // Tuning cards: [name, the one fact, the ? sentence]
   you: ["You", "your name in the prompts", "The name the step prompts and the plan's Decisions use for you, so a question reads as waiting for you. Empty: the user."],
@@ -2355,6 +2361,7 @@ const MGROUP = {  // Tuning cards: [name, the one fact, the ? sentence]
   handoff: ["Handoff", "between steps", "What passes between steps: the word limit of a handoff and how long the pass that compacts it may take."],
   balancing: ["Balancing", "spread across models", "Auto uses configured USD pace, or today's processed tokens when no pace is available. Token balancing prefers idle models, then the lowest load. The margin and cache bonus apply to USD pace. Explicit picks keep their model."],
   gauge: ["Context gauge", "the cells' colours", "When the context cells turn yellow and red. Red is also where auto hand off starts."],
+  supervisor: ["Supervisor", "decides between steps", "The mode for new tasks, globally and per project, then the limits of auto mode and of the supervisor's own passes. A change applies to tasks started after the Save; the task menu changes one task."],
 };
 const KCARD = {  // Kinds and Tiers cards per tier: [name, the one fact on Kinds, the ? sentence on Kinds, on Tiers]
   read: ["Read", "look, search, small edits", "Kinds that look things up or make small changes. Their models come from the read tier, the cheap and fast ones.",
@@ -2381,8 +2388,10 @@ function resetModels() {
   if (!cfg || !cfg.tuning) { medit = null; return; }
   medit = { values: Object.fromEntries(Object.entries(cfg.tuning).map(([k, t]) => [k, clone(t.value)])),
     kinds: clone(cfg.kind_pins || {}),
-    tiers: Object.fromEntries(Object.entries(cfg.tiers || {}).map(([t, rows]) => [t, rows.map((r) => ({ rung: r.rung, effort: r.effort }))])) };
+    tiers: Object.fromEntries(Object.entries(cfg.tiers || {}).map(([t, rows]) => [t, rows.map((r) => ({ rung: r.rung, effort: r.effort }))])),
+    supMode: supSaved().mode, supProjects: clone(supSaved().projects) };
 }
+function supSaved() { const sc = cfg.supervisor_config || {}; return { mode: sc.mode || "suggest", projects: sc.projects || {} }; }  // plan 50
 function savedTiers() { return Object.fromEntries(Object.entries(cfg.tiers || {}).map(([t, rows]) => [t, rows.map((r) => ({ rung: r.rung, effort: r.effort }))])); }
 function pinOf(pins, k) { const p = pins[k] || {}; return { rung: p.rung || "auto", effort: p.effort || "auto" }; }
 function cleanPins(pins) {  // a kind on auto and auto is the code's rule: nothing to keep (the service drops it too)
@@ -2395,6 +2404,8 @@ function modelChanges() {  // the keys a Save would post, with their values (D1 
   if (!same(cleanPins(medit.kinds), cleanPins(cfg.kind_pins || {}))) out.kinds = cleanPins(medit.kinds);
   const tiers = Object.fromEntries(Object.entries(medit.tiers).filter(([t, rows]) => !same(rows, saved[t])));  // plan 27 B6: only the tiers that changed; the service merges per tier
   if (Object.keys(tiers).length) out.tiers = tiers;
+  if (medit.supMode !== supSaved().mode) out.supervisor_mode = medit.supMode;  // plan 50: the map goes whole (the service replaces it)
+  if (!same(medit.supProjects, supSaved().projects)) out.supervisor_projects = medit.supProjects;
   return out;
 }
 function tabEdits(tab) {
@@ -2404,7 +2415,7 @@ function tabEdits(tab) {
     return new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => !same(a[k], b[k]))).size;
   }
   if (tab === "tiers") return Object.keys(medit.tiers).filter((t) => !same(medit.tiers[t], savedTiers()[t])).length + passes.filter((k) => k in ch).length;
-  return Object.keys(ch).filter((k) => cfg.tuning[k] && !passes.includes(k)).length;
+  return Object.keys(ch).filter((k) => (cfg.tuning[k] || k.startsWith("supervisor_")) && !passes.includes(k)).length;
 }
 function rankOf(rung) {  // what /api/config says, else models.json through the Harnesses card (plan 5), else a Claude alias
   for (const rows of Object.values(cfg.tiers || {})) { const x = rows.find((r) => r.rung === rung); if (x && x.rank) return x.rank; }
@@ -2530,7 +2541,9 @@ function tiersTab() {
   };
   return `<p class="hint">Each step takes the emptiest model of its tier, so the load spreads from the first step; the order breaks ties and is used while usage is unknown. Drag to reorder. Models of a CLI that is off or not found are hidden; one line says how many. The models come from models.json (Settings, Harnesses, Open).</p>
     ${["think", "write", "read"].map(tierCard).join("")}
-    <div class="pcard">${cardHead("tpasses", "Console's own passes", "not steps", "Jobs the console runs for itself, not task steps: Prep enhances your prompt and proposes the steps, the planner checks the scope and writes the step list, the handoff pass compacts what a step hands to the next, the rules review checks CLAUDE.md, Run default is the composer's plain Run.")}${PASSES.map(pass).join("")}</div>`;
+    <div class="pcard">${cardHead("tpasses", "Console's own passes", "not steps", "Jobs the console runs for itself, not task steps: Prep enhances your prompt and proposes the steps, the planner checks the scope and writes the step list, the handoff pass compacts what a step hands to the next, the rules review checks CLAUDE.md, Run default is the composer's plain Run, the supervisor decides between the steps of a supervised task.")}${PASSES.map(pass).join("")}
+    <div class="krow"><span class="nm">Supervisor</span><span class="m">haiku, sonnet on a stuck step</span><span></span>
+      <span class="sub">supervisor_model · fixed: the supervisor never runs on opus or fable</span></div></div>`;
 }
 
 // Tuning: the numbers; a value off its default has the blue edge and a reset; out of range turns red and blocks Save
@@ -2571,11 +2584,34 @@ function allowanceFold() {  // D2 a: a row per usable tier rung's model key and 
     `<input inputmode="decimal" data-mal="${esc(key)}:${w}" aria-label="${esc(key)} ${w.split("_")[0]} USD" placeholder="${w[0]}" value="${(al[key] || {})[w] ?? ""}">`).join("")}</span><span class="sub">${bad ? esc(bad) : "day · week · month, USD; empty: no allowance"}</span></div>`; }).join("");
   return fold("Allowances", `${set} of ${keys.length} models · day / week / month`, rows, { cls: "alw" });
 }
+// plan 50: the supervisor's mode for new tasks and its per-project map, edited in medit and saved with the rest
+function supSeg(spec, modes, pick, label) {
+  return `<span class="seg" role="group" aria-label="${esc(label)}">${modes.map((m) =>
+    `<button class="btn sm" data-msup="${spec}:${m}" aria-pressed="${m === pick}">${m}</button>`).join("")}</span>`;
+}
+function supProjectMode(path) { const k = Object.keys(medit.supProjects).find((x) => sameDir(x, path)); return k ? medit.supProjects[k] : "default"; }
+function supRows() {
+  const modes = (cfg.supervisor_config || {}).modes || ["off", "suggest", "auto"], pick = medit.supMode, ed = pick !== "suggest";
+  const mode = `<div class="tf${ed ? " ed" : ""}"><span class="nm">Mode for new tasks</span><span class="v">${supSeg("mode", modes, pick, "Supervisor mode")}</span>
+    <span class="sub">supervisor_mode · default suggest${ed ? ' · <button class="rs" data-msup="mode:suggest">reset</button>' : ""}</span></div>`;
+  const projects = cfg.projects || [], set = projects.filter((p) => supProjectMode(p) !== "default").length;
+  const rows = projects.map((p, i) => { const m = supProjectMode(p); return `<div class="tf${m !== "default" ? " ed" : ""}"><span class="nm" title="${esc(p)}">${esc(p.split(/[\\/]/).filter(Boolean).pop() || p)}</span>
+    <span class="v">${supSeg("proj:" + i, ["default", ...modes], m, "Supervisor mode for " + p)}</span><span class="sub">${m === "default" ? "the mode for new tasks" : "this project only"}</span></div>`; }).join("");
+  return mode + (projects.length ? fold("Projects", `${set} set · default ${pick}`, rows, { cls: "supp" }) : "");
+}
+function supPick(spec) {
+  const [what, a, b] = spec.split(":");
+  if (what === "mode") { medit.supMode = a; return; }
+  const path = (cfg.projects || [])[Number(a)];
+  if (path == null) return;
+  for (const k of Object.keys(medit.supProjects)) if (sameDir(k, path)) delete medit.supProjects[k];
+  if (b !== "default") medit.supProjects[path] = b;
+}
 function tuningTab() {
   const groups = {};
   for (const [k, t] of Object.entries(cfg.tuning)) if (TUNE[k]) (groups[t.group] = groups[t.group] || []).push(k);
   return `<p class="hint">Numbers the service reads at each step. Saved to config.json; a hand edit of the file shows here after Reload.</p>
-    ${Object.entries(MGROUP).filter(([g]) => groups[g]).map(([g, [name, fact, help]]) => `<div class="pcard">${cardHead("g" + g, name, fact, help)}${groups[g].map(tuneRow).join("")}${g === "balancing" ? allowanceFold() : ""}</div>`).join("")}`;
+    ${Object.entries(MGROUP).filter(([g]) => groups[g]).map(([g, [name, fact, help]]) => `<div class="pcard">${cardHead("g" + g, name, fact, help)}${g === "supervisor" ? supRows() : ""}${groups[g].map(tuneRow).join("")}${g === "balancing" ? allowanceFold() : ""}</div>`).join("")}`;
 }
 
 function renderModels() {
@@ -2654,9 +2690,10 @@ $("mscroll").addEventListener("click", (e) => {
   if (r) { if (!r.disabled) roleAct(r.dataset.mrole || "", r.dataset.mrole ? "open" : r.dataset.mroleact); return; }
   const c = e.target.closest("[data-mclear]");
   if (c) { clearLimit(c.dataset.mclear); return; }
-  const t = e.target.closest("[data-q],[data-mreset],[data-mrm],[data-mbool]");
+  const t = e.target.closest("[data-q],[data-mreset],[data-mrm],[data-mbool],[data-msup]");
   if (!t) return;
-  if (t.dataset.q) { if (!mqOpen.delete(t.dataset.q)) mqOpen.add(t.dataset.q); }
+  if (t.dataset.msup) supPick(t.dataset.msup);  // plan 50
+  else if (t.dataset.q) { if (!mqOpen.delete(t.dataset.q)) mqOpen.add(t.dataset.q); }
   else if (t.dataset.mrm) { const [tier, i] = t.dataset.mrm.split(":"); medit.tiers[tier].splice(Number(i), 1); }
   else if (t.dataset.mbool) medit.values[t.dataset.mbool] = !medit.values[t.dataset.mbool];
   else {

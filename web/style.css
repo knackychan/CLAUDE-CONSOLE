@@ -1014,10 +1014,10 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .action-list .btn.stop { color: var(--bad); }
 .action-list hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 .action-list .grp { padding: 6px 4px 0; }
-.action-list .seg { display: inline-flex; justify-self: start; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.action-list .seg .btn { border: 0; border-radius: 0; box-shadow: none; font: 11px var(--mono); color: var(--mut); }
-.action-list .seg .btn + .btn { border-left: 1px solid var(--line); }
-.action-list .seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--win); }
+.action-list .seg, .tf .seg { display: inline-flex; justify-self: start; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.action-list .seg .btn, .tf .seg .btn { border: 0; border-radius: 0; box-shadow: none; font: 11px var(--mono); color: var(--mut); }
+.action-list .seg .btn + .btn, .tf .seg .btn + .btn { border-left: 1px solid var(--line); }
+.action-list .seg .btn[aria-pressed="true"], .tf .seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--win); }
 .retry-open { margin: 0; display: grid; gap: 8px; min-width: 0; }
 .hlinks { display: flex; gap: 8px; flex-wrap: wrap; }
 .hlinks .olink { white-space: nowrap; }
