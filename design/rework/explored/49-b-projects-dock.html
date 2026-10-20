@@ -273,7 +273,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .hd .cost b { font: 700 28px/1 var(--dot); }
 .hd .cost span { font: 12px var(--ui); color: var(--mut); }
 .use { display: inline-flex; align-items: center; gap: 8px; margin-left: 8px; font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
-.use .cells.ctx { grid-template-columns: repeat(15, 5px); }
+.use .cells.ctx { grid-template-columns: repeat(15, 4px); }
 .use b { font-weight: 400; color: var(--ink); }
 .use .dv { width: 1px; height: 14px; background: var(--line); }
 @container (max-width: 560px) { .use .cells { display: none; } }
@@ -295,7 +295,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sacts .sp { flex: 1; }
 .opt.sel { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--you); }
 .bar { gap: 6px; padding-right: 12px; }
-.bar .use { margin: 0 6px 0 10px; }
+.bar .use { margin: 0 4px 0 8px; gap: 6px; }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -370,7 +370,7 @@ const STEPS = {
 const A = {
   ready: { line: ["y", "ready · 4 steps · Start"], primary: [["Start", "you"]], bar: ["Edit steps", "Drop"], menu: ["Edit prompt", "Review rules"], box: "" },
   running: { line: ["n", "running · 02 design · opus · 3m"], primary: [], bar: ["Pause", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
-  plan_ready: { line: ["y", "plan ready · confirm"], primary: [], bar: ["Edit plan", "Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
+  plan_ready: { line: ["y", "plan ready · confirm"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   decision: { line: ["y", "needs you · SHEETS_DIR or PRODUCT_SHEETS_DIR?"], primary: [], bar: ["Redo design", "Stop"], menu: ["Hand off", "Open in terminal", "Open folder", "-", "Delete"], box: "answer" },
   failed_twice: { line: ["r", "failed twice · vitest run: 2 tests fail"], primary: [], bar: ["Hand off", "Finish"], menu: ["Open in terminal", "Open folder", "-", "Delete"], box: "guidance" },
   done: { line: ["g", "done · 4 steps · $0.62"], primary: [["Accept", "go"]], bar: ["Reopen"], menu: ["Hand off to a follow-up task", "Open folder", "-", "Delete"], box: "next step" },
@@ -430,7 +430,7 @@ function slot() {
     <div class="sacts"><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Take the default here, and set the project to auto: later defaults are taken after 10 min">Take default and auto accept</button>` : ""}<button class="btn you" id="pick">Confirm a</button></div></div>`;
   if (state === "plan_ready") return `<div class="slot">${tag("Plan to confirm")}
     <div class="q">The plan is written. Confirm it and the last 2 steps run on their own.</div>
-    <div class="sacts"><button class="btn">Read the plan</button><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Confirm this plan, and set the project to auto: later plans run without asking">Confirm and auto accept</button>` : ""}<button class="btn you">Confirm</button></div></div>`;
+    <div class="sacts"><button class="btn">Read or edit the plan</button><span class="sp"></span>${level === "gated" ? `<button class="btn" title="Confirm this plan, and set the project to auto: later plans run without asking">Confirm and auto accept</button>` : ""}<button class="btn you">Confirm</button></div></div>`;
   if (state === "failed_twice") return `<div class="slot r">${tag("Failed twice", "bad")}
     <div class="q">2 of 6 tests still fail after the fix.</div>
     <div class="why">Settings do not round-trip on Windows paths. Retry with a stronger model, or take the result as it is.</div>
