@@ -304,6 +304,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .hd .cost .lvl { margin-bottom: 4px; }
 .hd { grid-template-columns: minmax(0, 1fr) 140px !important; }
 .tscroll { scrollbar-gutter: stable; }
+.eblink { background: none; border: 0; padding: 0; cursor: pointer; text-align: left; max-width: 100%; }
+.eblink:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.stepnav button { font-size: 12px; padding: 2px 10px; }
+.stepnav button:hover:not(:disabled) { color: var(--ink); background: var(--raise); }
+.stepnav button:disabled { opacity: .35; cursor: default; }
 .notes { color: var(--mut); font-size: 13px; max-width: 80ch; }
 .notes b { color: var(--ink); }
 .notes li { margin: 4px 0; }
@@ -477,12 +482,10 @@ function stepPage(i) {
     : stepTab === "Chat" ? thread
     : sect(stepTab, "", `<p class="brief mut">${stepTab} of step ${n}, as the step inspector shows it today.</p>`);
   document.getElementById("card").innerHTML = `
-    <div class="crumbs"><button class="btn back" id="back" title="Back to the task (Esc)">← Task</button><span class="path"><span class="pt">${esc(S.task)}</span><span class="sep">/</span><span class="cur">Step ${n} of ${steps(state).length}</span></span>
-      <button class="nb" id="prev" title="Previous step" ${i === 0 ? "disabled" : ""}>‹</button><button class="nb" id="next" title="Next step" ${i === steps(state).length - 1 ? "disabled" : ""}>›</button></div>
-    <div class="hd"><div class="hl"><span class="eb">${S.project}</span><h2>${r[0][0].toUpperCase() + r[0].slice(1)}</h2><div class="meta">
+    <div class="hd"><div class="hl"><button class="eb eblink" id="back" title="Back to the task (Esc)">← ${esc(S.task)}</button><h2>${n} · ${r[0][0].toUpperCase() + r[0].slice(1)}</h2><div class="meta">
       <span class="pst ${r[3] === "done" ? "g" : r[3] === "fail" ? "r" : r[3] === "wait" ? "y" : r[3] === "run" ? "n" : "q"}">${{ done: "✓ Done", run: "▸ Running", q: "· Queued", wait: "? Waits for you", fail: "✕ Failed" }[r[3]]}</span>
       <span class="fact"><i>Model</i>${r[1].replace(" · ", ", ")} effort</span>${r[3] === "done" ? `<span class="fact"><i>Took</i>27 s</span>` : r[3] === "run" ? `<span class="fact"><i>For</i>3 min</span>` : ""}</div></div>
-      <div class="cost"><b title="Spent on this step">${r[5] || "$0"}</b></div></div>
+      <div class="cost"><span class="lvl seg stepnav"><button id="prev" title="Previous step" ${i === 0 ? "disabled" : ""}>‹</button><button id="next" title="Next step" ${i === steps(state).length - 1 ? "disabled" : ""}>›</button></span><b title="Spent on this step">${r[5] || "$0"}</b></div></div>
     ${started ? `<div class="tabs">${tabs.map(t => `<button data-tab="${t}" aria-pressed="${t === stepTab}">${t}</button>`).join("")}</div>` : ""}
     <div class="spbody">${body}</div>`;
   document.getElementById("back").onclick = () => { stepOpen = null; render(); };
