@@ -222,6 +222,65 @@ class CodexTest(unittest.TestCase):
         self.assertEqual(codex.summary([failed, wrote, done])["subtype"], "success")
         self.assertEqual(codex.summary([failed, done, {"type": "turn.started"}, done])["subtype"], "success")
 
+    def install(self, root, *, host):
+        """An npm install under `root`: the shim and its vendored native binary (with or without its command host),
+        and ~/.codex/.sandbox-bin's lone copy of codex.exe."""
+        bin_ = Path(root, "npm", "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64",
+                    "vendor", "x86_64-pc-windows-msvc", "bin")
+        bin_.mkdir(parents=True)
+        (bin_ / codex.NATIVE).write_text("x")
+        if host:
+            (bin_ / (codex.HOST + Path(codex.NATIVE).suffix)).write_text("x")
+        shim = Path(root, "npm", "codex.cmd")
+        shim.write_text("x")
+        sandbox = Path(root, ".codex", ".sandbox-bin", "codex.exe")
+        sandbox.parent.mkdir(parents=True)
+        sandbox.write_text("x")
+        return str(shim), str(bin_ / codex.NATIVE), str(sandbox)
+
+    def test_find_exe_skips_an_incomplete_sandbox_copy(self):
+        """Plan 57 (old plan 38) D1: codex.exe on PATH is ~/.codex/.sandbox-bin's lone copy; the npm install's native
+        binary has its command host beside it and wins, and the .cmd shim is never returned. An explicit exe that
+        exists still wins over both."""
+        with tempfile.TemporaryDirectory() as tmp:
+            shim, native, sandbox = self.install(tmp, host=True)
+            found = {"codex.cmd": shim, "codex": shim, "codex.exe": sandbox}
+            cfg = cfg_with()
+            with mock.patch("shutil.which", side_effect=found.get):
+                self.assertEqual(codex.find_exe(cfg), native)
+                self.assertEqual(codex.find_exe(cfg_with(codex={"exe": sandbox})), sandbox)
+                self.assertEqual(codex.find_exe(cfg_with(codex={"exe": sandbox + ".gone"})), native)
+            Path(native).parent.joinpath(codex.HOST + Path(codex.NATIVE).suffix).unlink()
+            Path(sandbox).parent.joinpath(codex.HOST + Path(codex.NATIVE).suffix).write_text("x")
+            with mock.patch("shutil.which", side_effect=found.get):
+                self.assertEqual(codex.find_exe(cfg), sandbox)  # only the PATH copy is complete now
+
+    def test_find_exe_without_a_complete_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim, native, sandbox = self.install(tmp, host=False)
+            with mock.patch("shutil.which", side_effect={"codex.cmd": shim, "codex.exe": sandbox}.get):
+                self.assertEqual(codex.find_exe(cfg_with()), native)  # what the shim would run, not the shim
+            with mock.patch("shutil.which", side_effect={"codex.exe": sandbox}.get):
+                self.assertEqual(codex.find_exe(cfg_with()), sandbox)
+            bare = str(Path(tmp, "bare", "codex.cmd"))
+            with mock.patch("shutil.which", side_effect={"codex.cmd": bare}.get):
+                self.assertEqual(codex.find_exe(cfg_with()), bare)  # the old order when nothing native is found
+            with mock.patch("shutil.which", return_value=None):
+                self.assertIsNone(codex.find_exe(cfg_with()))
+
+    def test_find_exe_leaves_the_write_check_alone(self):
+        """Plan 57 D1 and plan 43: discovery picks a binary, write_block reads only config.toml and the folder's
+        owner; neither calls the other."""
+        with tempfile.TemporaryDirectory() as tmp:
+            shim, native, sandbox = self.install(tmp, host=True)
+            with mock.patch("shutil.which", side_effect={"codex.cmd": shim, "codex.exe": sandbox}.get), \
+                    mock.patch.object(codex, "write_block", side_effect=AssertionError("find_exe asked the write check")):
+                self.assertEqual(codex.find_exe(cfg_with()), native)
+            with mock.patch.object(codex, "find_exe", side_effect=AssertionError("write_block asked discovery")), \
+                    mock.patch.dict(os.environ, {"CODEX_HOME": tmp}), mock.patch.object(codex, "WINDOWS", True), \
+                    mock.patch.object(codex, "_owned_by_me", return_value=True):
+                self.assertEqual(codex.write_block(tmp), "")
+
     def test_write_block_reads_the_sandbox_mode_and_the_owner(self):
         with tempfile.TemporaryDirectory() as home:
             config = Path(home, "config.toml")
