@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, facts, fills, kinds, levers, redact, routing
+from . import claude_cli, facts, fills, kinds, levers, paths, redact, routing
 from .fills import RANK_TIER, TIER_RANK, TIERS  # plan 18: the job tiers (the contract names them here)
 
 RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify and fix are computed.
@@ -932,10 +932,7 @@ def folder(home, task_id: str) -> Path:
 
 def save(home, task: dict) -> None:
     path = folder(home, task["id"]) / "task.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name("task.json.tmp")
-    tmp.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    paths.write_text_atomic(path, json.dumps(task, ensure_ascii=False, indent=2) + "\n")
 
 
 def message_target(task: dict) -> dict:
@@ -961,10 +958,7 @@ def message_files(home, task: dict, message: dict, files=None) -> list:
     path = folder(home, task['id']) / 'messages' / (message['id'] + '.json')
     if files is None:
         return json.loads(path.read_text(encoding='utf-8')) if message.get('files') else []
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix('.tmp')
-    tmp.write_text(json.dumps(files, ensure_ascii=False), encoding='utf-8')
-    os.replace(tmp, path)
+    paths.write_text_atomic(path, json.dumps(files, ensure_ascii=False))
     return files
 
 

@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import claude_cli
+from . import claude_cli, paths
 
 
 def agent_path(transcript: str, agent_id: str) -> str:
@@ -281,10 +281,7 @@ def _set_aside(folder) -> None:
 
 def _write(folder, data: dict) -> None:
     path = Path(folder) / DAYS_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(DAYS_FILE + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    paths.write_text_atomic(path, json.dumps(data, ensure_ascii=False) + "\n")
 
 
 def load_days(folder) -> dict:

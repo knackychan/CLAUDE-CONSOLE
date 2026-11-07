@@ -362,6 +362,11 @@ Plan gaps, summary/Accept/Reopen, message delivery and progression gates remain 
 file changed, so Task 6 needs no Models page Reset to repo copy. web/app.js, Task 7 and later visual work were not
 changed by this task. PLAN.md and plans/53-build/ were left untouched and unstaged.
 
+2026-11-07 persistence follow-up: [plan 54](../54-console-persistence.md) handles Listary's metadata-reader
+replacement collision through the shared atomic writer, without in-place saves or a save retry loop. Its
+10,000-save probe and full 1167-test suite passed with the Listary app, both hook hosts and service running.
+Genuine access errors and incompatible content locks still refuse safely. This follow-up did not start Task 7.
+
 ### What plan 52 replaces
 
 | Built | Replaced by | Why |

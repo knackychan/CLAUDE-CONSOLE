@@ -4,9 +4,10 @@ text editor). The service inlines a step's kind file into its prompt in place of
 the rendered text into the step folder as role.md. The text is string.Template text with named slots: $you and $You
 everywhere, $checked (verify), $failed, $model and $effort (fix), the design and replan slots (plan.design_slots,
 replan.build_prompt) and Prep's ($You, $raw, $misses, $window, prep.build_prompt). Never raises on a read: a missing or empty file reads the seed."""
-import os
 import re
 from pathlib import Path
+
+from . import paths
 
 SEED = Path(__file__).resolve().parent.parent / "dotclaude" / "console" / "kinds"
 NAMES = ("scout", "search", "draft", "proofread", "edit", "code", "document", "explain", "debug", "test", "design",
@@ -83,10 +84,7 @@ def save(home, kind: str, body: str) -> str:
     if why:
         raise ValueError(why)
     path = folder(home) / f"{kind}.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{kind}.md.tmp")
-    tmp.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    paths.write_text_atomic(path, body if body.endswith("\n") else body + "\n")
     return text(home, kind)
 
 

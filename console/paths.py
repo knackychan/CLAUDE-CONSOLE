@@ -233,17 +233,7 @@ def _rewrite_config(path: Path, change, missing=None) -> None:
         else:
             data = missing()
         change(data)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"config.json.{os.getpid()}.{threading.get_ident()}.tmp")
-        try:
-            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            os.replace(tmp, path)
-        except OSError:
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
-            raise
+        write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def set_harness(folder: Path, name: str, on: bool) -> None:
@@ -334,21 +324,25 @@ def _drop_opus_max_turns(folder: Path) -> None:
 
 
 def write_text_atomic(path: Path, text: str) -> None:
-    """Write <path> whole through a temp file of this write's own (pid and thread in its name), then os.replace: a
-    reader never sees half a file and two writers never share a temp file (plan 34 F5). OSError propagates, with the
-    temp file removed."""
+    """Publish whole text through this writer's temporary file. Windows open-destination handling is plan 54;
+    genuine write errors propagate, preserving the previous destination, with best-effort temporary cleanup."""
     path = Path(path)
+    if "\x00" in str(path):  # LPCWSTR would otherwise truncate the filename before Python can reject it.
+        raise ValueError("embedded null character")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError:
+        if os.name == "nt":
+            from . import winfiles
+            winfiles.write_text(tmp, path, text)
+        else:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+    finally:
         try:
-            tmp.unlink()
+            tmp.unlink(missing_ok=True)
         except OSError:
             pass
-        raise
 
 
 _WINDOW_LOCK = threading.Lock()  # the page (project) and the window (form, place) both save
@@ -368,10 +362,7 @@ def save_window(folder: Path, **fields) -> dict:
     with _WINDOW_LOCK:
         data = dict(load_window(folder), **fields)
         path = Path(folder) / "window.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name("window.json.tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
         return data
 
 

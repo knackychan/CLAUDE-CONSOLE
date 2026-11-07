@@ -38,6 +38,10 @@ resolution. Uncertain dispatches are never replayed automatically. Standalone se
 
 Plan 52 Task 6: GET /api/task `actions` serves the aligned state, row text, primary/bar/menu actions, message availability, Reject hint and recovery; place these without rebuilding the gates (README section 3). GET starts nothing and writes nothing.
 
+Console snapshots use paths.write_text_atomic (plan 54): whole-file replacement, with the temporary handle held
+through the Windows rename to handle open metadata readers. Keep each caller's locks and validation; genuine
+write errors and incompatible content locks still refuse the save. No in-place fallback or save retry loop.
+
 Plan 44 supervisor backend (shipped 2026-10-19; its UI and skill library are not): an eligible task transition
 (manual choose-next or FAIL, stuck, plan hold, automatic done after its brief, a 30-minute Claude stall) wakes
 Hub.wakes, debounced and coalesced by original chain event id; each admitted wake runs one bounded tool-free pass
