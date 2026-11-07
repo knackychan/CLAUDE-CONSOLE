@@ -1,5 +1,11 @@
 # Plan 50 - Supervisor settings and spend on the Models and Usage pages
 
+> Amended by plan 52 Task 5 (2026-11-07): the mode words are `off`, `suggest`, `gated` and `auto`, and the default is `gated`
+> (D2 below reads three words with `suggest` as the default). The Models card, the Projects fold and the task menu's segment
+> read `cfg.supervisor_config.modes`, so each gained `gated` by itself; `supSaved` and `supRows` default to `gated`. Its
+> card's words were checked headless for the first time in plan 52 Task 7 (check 6); Save, Reload and the Usage block of this plan's
+> headless check are still open. See [plan 52, section 6](52-workflow-autopilot/README.md).
+
 Status: written 2026-10-20 from the supervision review (item 5, and the plan 44 "Models/Usage UI" left open);
 D1-D6 confirmed by Fred the same day as written. Steps 1 to 4 done 2026-10-20 (section 5); the headless and
 live checks are open.

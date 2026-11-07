@@ -29,6 +29,13 @@ This backend rejects a `skills` decision field until that separately planned reg
 silently ignore the field or invent a registry. Backend intake and approval routes are included so the later
 UI has a complete contract. Navigation Tasks 1-5 are shipped; do not re-execute their historical reset advice.
 
+Note (2026-11-07, plan 52 Task 1): D7 of the brainstorm (supervised intake: a manual task with Prep's first step, the rest
+kept as `supervisor.proposed`) and Task 10's `Hub._supervised_task` are replaced by
+[plan 52 Task 1](../52-workflow-autopilot/01-intake-chain.md). A supervised Start now creates the ordinary automatic chain
+with the planner's whole step list; no task gets proposals (plan 49's plumbing went with it), and the supervisor wakes on
+stuck, a plan hold, done, Fred's message and a stall. `choose_next` and `fail` remain only for a manual task (plan 36/39
+Add step). The rest of this plan stands.
+
 ## 2. Tasks, in order
 
 ### Review annotations, 2026-10-18: binding implementation guidance

@@ -449,3 +449,19 @@ D1-D7 confirmed by Fred 2026-10-20. Stage A keeps its one open item, the live pr
 leaves its manual tasks and `choose_next` wake untouched. The next-step operation itself is unchanged and has
 three authorized callers: Fred's menu, Fred's Approve of a supervisor card and Fred's next-step message (after
 plan 52 Task 4 also the Reopen of a done chain task).
+
+### 7.4 Re-read against the built plan 52 (D8, 2026-11-07)
+
+Plan 52 Tasks 1 to 6 are built (`c9b9f00`..`282feca`, its README section 6). This re-reads 7.1 and 7.2 against
+`console/server.py`, `console/supervisor.py` and `console/tasks.py` as built; no code was changed.
+
+| Stage B finding or decision | As built | Holds? |
+|---|---|---|
+| D1: mid-chain the chain adds steps from a `Replan:` line, applied by itself at gated / auto | `Hub._replan_finish` applies the replan with no supervisor pass at `gated` and `auto`, and at `off` when `replan_auto` is on; `suggest` always waits for Confirm; a Pause holds a proposal (chain line `replanned: applied (level auto)`) | Holds; suggest and off are the waiting levels |
+| D1: at the end, the Next section reaches the done wake, which is a card | the done wake runs after the final brief and is report-only in every mode (`REPORT_ONLY`; `auto_reason` answers "report only: Fred approves this one") | Holds |
+| Reopen is Fred's words through the next-step message | Task 4 kept that path: `Hub._next_ok` accepts any done task with a valid policy that is on, and one `request_next` call follows | Holds |
+| `Hub.request_next` has two callers | still two: `POST /api/task/next` (origin fred) and `_supervisor_dispatch` (origin supervisor); Reopen, Accept and the decision default add none | Holds |
+| The supervisor wakes on exceptions, done and message | the triggers are stuck, hold, done, message, stalled and stalled_stop; `choose_next` and `fail` stay only for a manual task (plan 36/39 Add step) | Holds |
+| D6: a code-parsed line, never an agent call | `DECISION:` is parsed in code at the step end (`tasks.reply_decision`), is refused in a design step and never read mid-turn; no token, bridge or `origin="agent"` exists | Holds |
+
+Result: D1 to D7 stand as Fred confirmed them; nothing in plan 52 as built asks for a change here, and no kind file or code change follows. The prompt-text question at the end of 7.1 (when a step should write `Replan:`, what a `Next` section holds) stays Fred's. Reading this table is the check; Fred closes it.

@@ -33,6 +33,10 @@ Fred promotes it to `design/rework/locked/` before step 5 starts. Lands on plans
 | D5 | Non-goals | None crossed; orchestration D-1 now reads: the scripted chain stays for mode off. |
 | D6 | Authority of a next-step message | The message approves the one `add_next_step` the supervisor returns for that wake; instructions are Fred's words; every live gate is rechecked; logged `by fred (message)`. Any other decision waits for Approve. |
 
+D6 widened (plan 52 Task 1, built 2026-11-07): the message reaches the supervisor on any done task whose policy is valid and on,
+not only a finished manual one (`Hub._next_ok`). A done chain task reopens with Fred's words; the Board's Reopen is this box in
+`next` mode (plan 52 Task 4), through the same `request_next` call.
+
 Defaults written in (change before building if wrong):
 
 - D7 Replied and Idle chats join Running in the list; their status line says `replied · 3m` or `idle`.

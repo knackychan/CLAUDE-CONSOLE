@@ -1,5 +1,8 @@
 # Task 7: checks and close
 
+Status 2026-11-07: the headless part is done (`tests/live_autopilot_check.py`; results in README section 6) and the close
+notes below are written. The live part is Fred's.
+
 ## Headless (Claude, fake claude, scratch `CC_CONSOLE_HOME`, as plans 42 and 48)
 
 1. Type a prompt, Enter, Start on the card with the project at `gated`: the chain runs scout, design (PLAN-OK),

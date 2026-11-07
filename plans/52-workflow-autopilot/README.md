@@ -1,7 +1,9 @@
 # Plan 52: Workflow autopilot. One prompt, a plan, a run loop, Fred only at real decisions
 
 Status: decided 2026-10-20 (Fred: D1 c, D2 to D6 as recommended). Task files 01 to 07 written the same day;
-current progress is recorded in section 6. Process only: the visual design of the action bar is another chat's work.
+current progress is recorded in section 6. Tasks 1 to 6 built 2026-11-07; Task 7's headless part is done
+(section 6, `tests/live_autopilot_check.py`); Fred's live check and the web build of the locked design are open.
+Process only: the visual design of the action bar is another chat's work.
 
 | # | File | Delivers | Depends on |
 |---|---|---|---|
@@ -260,7 +262,8 @@ The earlier corrected full run had one failure and one error involving Access de
 FileIO trace caught Listary.exe holding `task.json` across the denied rename in a single-threaded reproducer.
 A controlled metadata-reader handle reproduced WinError 5; closing it allowed the replacement. With Listary
 closed, the unchanged save code completed 10,000 consecutive writes. No persistence code or retries were added.
-The runtime bug remains unresolved: Listary can still interfere with normal Console saves when running.
+At this task the runtime bug was still open: Listary could interfere with normal Console saves when running.
+[Plan 54](../54-console-persistence.md) fixed it afterwards (the persistence follow-up below).
 
 2026-11-07: Task 2b is closed. The supervisor kind names the exception moves, removes Planned next, and preserves
 plan 51's model-selection sentence. Tests were added first for the kind and the done, hold and stuck wakes,
@@ -299,7 +302,8 @@ Tests were added first. The focused modules passed 542 tests in 511.116 s with z
 additional chat-task safeguard check passed 1 test in 0.528 s. The closing full background suite passed 1130 tests
 in 554.940 s, with zero failures or errors and one ResourceWarning about implicit cleanup of an HTTP 409 response.
 Listary was closed for the focused checks and throughout the monitored closing full run, then restarted afterward.
-Its normal-runtime WinError 5 persistence bug remains unresolved; no persistence fix or retries were added.
+Its normal-runtime WinError 5 persistence bug was still open here (fixed afterwards by
+[plan 54](../54-console-persistence.md)); no persistence fix or retries were added in this task.
 
 An earlier full run passed 1128 tests in 574.125 s, with zero failures or errors and the same cleanup warning.
 Listary had restarted at 14:34 Taipei time during that run, so it was not used as the Listary-closed verification.
@@ -330,8 +334,8 @@ in 2.301 s. JavaScript syntax and diff whitespace checks passed. The full backgr
 
 Listary's app and hook hosts stayed closed throughout the focused and full runs, monitored by one-second polling
 with 525 and 578 checks respectively and zero detections. ListaryService remained running. The app and hook hosts
-were restarted afterward and verified running. The normal-runtime WinError 5 bug remains unresolved; tasks.save
-was not changed and no retries were added. No kind file changed, so Task 5 needs no Models page Reset to repo copy.
+were restarted afterward and verified running. The normal-runtime WinError 5 bug was still open here (fixed afterwards
+by [plan 54](../54-console-persistence.md)); tasks.save was not changed in this task and no retries were added. No kind file changed, so Task 5 needs no Models page Reset to repo copy.
 Task 6 and the later visual UI work were not started.
 
 2026-11-07: Task 6 is closed. GET /api/task adds the read-only `actions` projection, with one aligned state,
@@ -354,8 +358,8 @@ Listary restarted at 16:29:32 Taipei time during that first full run, so it was 
 verification. The app and hook hosts were closed again. The closing monitoring phase completed 788 one-second
 checks, including 613 from the closing suite's start through monitor shutdown, with zero app or hook-host
 detections. ListaryService.exe remained running throughout. Listary.exe, ListaryHookHost32.exe and
-ListaryHookHost64.exe were restarted afterward and verified running. The normal-runtime WinError 5 bug remains
-unresolved; no save retries were added.
+ListaryHookHost64.exe were restarted afterward and verified running. The normal-runtime WinError 5 bug was still
+open here (fixed afterwards by [plan 54](../54-console-persistence.md)); no save retries were added.
 
 GET starts no run or model pass, emits no wake, and leaves task.json unchanged. Existing GET fields, DECISION,
 Plan gaps, summary/Accept/Reopen, message delivery and progression gates remain on their existing paths. No kind
@@ -365,7 +369,50 @@ changed by this task. PLAN.md and plans/53-build/ were left untouched and unstag
 2026-11-07 persistence follow-up: [plan 54](../54-console-persistence.md) handles Listary's metadata-reader
 replacement collision through the shared atomic writer, without in-place saves or a save retry loop. Its
 10,000-save probe and full 1167-test suite passed with the Listary app, both hook hosts and service running.
-Genuine access errors and incompatible content locks still refuse safely. This follow-up did not start Task 7.
+Genuine access errors and incompatible content locks still refuse safely. This closes the WinError 5 bug
+recorded in the paragraphs above. This follow-up did not start Task 7.
+
+2026-11-07: Task 7, the headless part, is closed; the live part is Fred's (`07-live-check.md`). The script
+`tests/live_autopilot_check.py` (`py -m tests.live_autopilot_check [check numbers]`) runs seven checks, each on its own
+scratch service (a scratch `CC_CONSOLE_HOME`, the fake claude, a worker thread ticking `poll_once` and `advance`, a frozen
+supervisor clock) with the real HTTP routes and the real page in headless Edge, and no paid provider:
+
+1. Gated chain: the composer's Enter, the Prep card's Start, one Confirm plan on the opened task, code, verify PASS, done,
+   the finish summary, Accept. The POSTs of the whole run are `/api/prep`, `/api/task`, `/api/task/confirm` and
+   `/api/task/accept`; supervisor.jsonl holds one pass (the done wake, haiku). The hold's debounced wake drops with no
+   pass when Fred confirms inside the debounce.
+2. Auto with `DECIDE-NAME`: the decision shows two options (no "take defaults from now on" at auto). A fake `now` one
+   second short of `decision_timeout_s` takes nothing; one second past it takes the default, logs
+   `decision taken by default: a) SHEETS_DIR`, writes it under plan.md Decisions and sends it into the same session.
+3. Two crashes of step 03 (the chain's own retry wakes nothing), stuck, one sonnet wake, a Retry card with the
+   supervisor's note, Approve runs attempt 3 with the note in its prompt, and the chain finishes.
+4. A task at suggest with `plan_hold` and a standing Confirm card, switched to auto: the card dispatches by auto with no
+   second pass, `paused_after` stays 0 and the page shows no Paused note.
+5. 900, 400 and 340 px, dark and light, reduced motion, over the states of check 7, the Prep card and the list: no
+   horizontal scroll, no page error, no console error.
+6. The Models page Supervisor card and the opened task's menu show off, suggest, gated, auto with gated pressed (plan 50's
+   headless check, the part about the card's words), at the three widths in both themes, every button inside the
+   viewport. Save, Reload and the Usage block of that check are still open.
+7. `GET /api/task` `actions` at planning (the design step running), running, plan wait, decision, stuck, the Retry card,
+   done and accepted matches section 3 (state, line, primary, bar, menu, bodies, request ids, the four level actions,
+   every `post` an existing route); repeated reads agree; the task folder (each file's size and modified time) is the same
+   before and after the reads, with the worker and the passes held.
+
+HTTP-driven steps: today's page has no control for Accept, the decision options, Approve or the level switch, so the
+checks call the route and body that `actions` names, as the later page will. The page itself was driven for Enter, the
+Prep card's Start (the enhanced prompt carries the fake worker's words), Confirm plan, the Models page and the task menu.
+The fake clock is `Hub.sup_clock` and the `now` argument of `Hub._decision_default`; no seam was added to production code.
+`tests/fake_claude.py` gained the supervisor answers `SUP-RETRY` and `SUP-CONFIRM`; it needed no crash word (`SLOW` plus
+a kill is the existing crash). Under the fake worker the finish card's file list is empty (it writes no file). No
+production bug was found.
+
+Results: all seven checks pass, in 4.9, 5.2, 5.9, 4.6, 2.5, 16.3 and 5.1 s (46.7 s in all) for checks 1, 2, 3, 4, 6, 7 and 5
+in that order; the states that check 5 sweeps are built inside check 7. Six consecutive full runs passed.
+`py -m unittest discover -s tests`: 1167 tests OK in 660.196 s, zero failures or errors and one ResourceWarning line (the
+cleanup warning already seen at Tasks 4 and 6; it names no test). `node --check web/app.js`: clean.
+No WinError 5 or other file-lock error appeared in any run; the only socket error seen was WinError 10053 (the page left
+mid-response), which the script now ignores. `web/app.js`, the kind files and the running service were not touched. What is left for Fred: restart the service; Reset to repo copy on Models for `supervisor.md` and `design.md`;
+the live check of `07-live-check.md` and its comparison with task 20261020-081005-06c2.
 
 ### What plan 52 replaces
 
