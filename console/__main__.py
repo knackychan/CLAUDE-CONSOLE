@@ -138,7 +138,7 @@ def open_window(url: str) -> int:
     # (window.round_corners) and the background matches the page.
     win = webview.create_window(window.TITLE, url, js_api=api, width=api.open_size()[0],
                                 height=api.open_size()[1], x=x, y=y, min_size=(window.OPEN_MIN_W, window.PILL_H), frameless=True,
-                                easy_drag=False, background_color=window.BACKGROUND, on_top=api.state()["on_top"])
+                                easy_drag=False, text_select=True, background_color=window.BACKGROUND, on_top=api.state()["on_top"])
     api._attach(win)
     win.events.closing += api._remember_place
     webview.start(api._restore, icon=str(icon.ICO))  # pywebview's WinForms form loads it as its Icon

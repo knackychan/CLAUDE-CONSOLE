@@ -1,5 +1,8 @@
 # Plan 49 - The planner's steps reach the supervisor
 
+> Replaced by plan 52 Task 1 (D7, 2026-10-20): a supervised task now runs the planner's whole chain, so no task
+> gets proposals; this plan's code and tests were removed there.
+
 Status: written 2026-10-20 from the supervision review (items 1 and 2); D1-D4 confirmed by Fred the same day as
 written. Steps 1 to 5 done 2026-10-20 (section 5); Fred's live check open. Lands on plans 36, 44 (backend), 47 and 48.
 

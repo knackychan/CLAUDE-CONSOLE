@@ -282,7 +282,8 @@ class TaskMessageTest(_TaskServerTest):
         task = tasks.new_task(str(self.project), "proj", "Sup", "goal", tasks.plan_steps(
             [{"kind": "scout", "goal": "look"}], 6), "normal", {}, "", "auto", 100.0, id_=f"20260101-00000{n}-abcd")
         task["supervisor"] = supervisor.initial(self.hub.cfg, str(self.project), 100.0, mode or "suggest")
-        task["progression"] = "manual"
+        if not done:  # plan 52 Task 1: a finished task is a chain task (no progression); a boundary is plan 36 manual
+            task["progression"] = "manual"
         s1 = task["steps"][0]
         s1.update(state="done", session="s1", ended=100.0, dir="01-scout", model="haiku", effort="low", attempts=[
             {"session": "s1", "cost": 0.1, "started": 90.0, "ended": 100.0, "why": "", "final": True}])

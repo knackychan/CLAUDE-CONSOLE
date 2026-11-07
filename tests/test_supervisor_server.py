@@ -1440,30 +1440,22 @@ class ReplayTest(SupervisorServerTest):
 
 
 class SupervisedIntakeHubTest(SupervisorServerTest):
-    """Plan 44 T10 (Hub level): create_task builds one manual worker and keeps the rest as proposals."""
+    """Plan 52 Task 1 (Hub level): a supervised create_task keeps the whole chain; no proposals."""
 
     def card(self, prompt="Fix add()"):
         return {"id": "20260102-000000-cafe", "project_dir": str(self.project), "prompt": prompt,
                 "raw": prompt, "route": {"type": "normal"}, "demand": {}, "fields": {"goal": prompt}}
 
-    def test_supervised_intake_keeps_one_step_and_proposals(self):
+    def test_supervised_intake_keeps_the_chain(self):
         tid = self.hub.create_task(self.card(), [{"kind": "scout", "goal": "look"},
                                                  {"kind": "code", "goal": "fix"}], "auto", supervised=True)
         task = self.hub.tasks[tid]
-        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
-        self.assertEqual(task["progression"], "manual")
-        self.assertEqual(task["supervisor"]["proposed"], [{"kind": "code", "goal": "fix", "model": ""}])
-        self.assertEqual(task["supervisor"]["mode"], "suggest")
-        saved = tasks.load(self.folder, tid)
-        self.assertEqual(saved["supervisor"]["proposed"], task["supervisor"]["proposed"])
-        self.assertEqual(saved["progression"], "manual")
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])
+        self.assertIsNone(task.get("progression"))
+        self.assertEqual((task["supervisor"]["proposed"], task["supervisor"]["mode"]), ([], "suggest"))
+        with self.assertRaises(server.runs.RunError):
+            self.hub.create_task(self.card(), [], "auto", supervised=True)
 
-    def test_supervised_intake_no_steps_gets_one_scout(self):
-        tid = self.hub.create_task(self.card("Fix add()"), [], "auto", supervised=True)
-        task = self.hub.tasks[tid]
-        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
-        self.assertEqual(task["steps"][0]["goal"], "Fix add()"[:tasks.STEP_GOAL_MAX])
-        self.assertEqual(task["goal"], "Fix add()")
 
 
 class AcceptanceTest(AutonomyTest):
@@ -1729,7 +1721,9 @@ class LifecycleAcceptanceTest(test_server.TaskServerTest):
     """Plan 44 T12: the whole supervised manual task over real HTTP, with fake_claude workers and a scripted fake
     supervisor pass (no paid provider)."""
 
-    def test_supervised_manual_lifecycle_end_to_end(self):
+    def test_supervised_chain_lifecycle_end_to_end(self):
+        """Plan 52 Task 1: scout, code and verify PASS run as the chain with no Approve; the only wake is the done
+        one after the final brief."""
         self.hub.cfg["supervisor_mode"] = "suggest"
         self.now = 0.0
         self.hub.sup_clock = lambda: self.now
@@ -1737,85 +1731,34 @@ class LifecycleAcceptanceTest(test_server.TaskServerTest):
 
         def fake_run(cfg, exe, task, prompt, model, max_cost):
             prompts.append(prompt)
-            return {"decision": dict(SCRIPT[len(prompts) - 1]), "cost": 0.004, "model": model, "turns": 2,
-                    "error": ""}
+            return {"decision": {"decision": "wait", "reason": "verified", "confidence": "high", "for_fred": ""},
+                    "cost": 0.004, "model": model, "turns": 2, "error": ""}
         card = self.prep_card("fix add")
         with mock.patch.object(supervisor, "run", side_effect=fake_run), \
-                mock.patch.object(self.hub.runs, "start", wraps=self.hub.runs.start) as start, \
-                mock.patch.object(self.hub, "task_lever", wraps=self.hub.task_lever) as lever:
-            status, data = self.call("/api/task", {"prep": card["id"], "prompt": f"{card['prompt']}\nHANDOFF-OK PLAN-OK",
-                                                   "steps": [{"kind": "design", "goal": "plan the fix"}],
+                mock.patch.object(self.hub.runs, "start", wraps=self.hub.runs.start) as start:
+            status, data = self.call("/api/task", {"prep": card["id"], "prompt": f"{card['prompt']}\nHANDOFF-OK",
+                                                   "steps": [{"kind": "scout", "goal": "look"},
+                                                             {"kind": "code", "goal": "fix add"}],
                                                    "effort": "auto", "supervised": True})
             self.assertEqual(status, 200, data)
             tid = data["task"]
-            events = []
-            for wake, (n, kind) in enumerate(((1, "design"), (2, "code"), (3, "verify")), 1):
-                task = self.until(tid, lambda t: t["state"] == "waiting" and t["owner"] == "fred" and any(
-                    s["n"] == n and s["state"] == "done" for s in t["steps"]), f"the {kind} boundary")
-                self.assertEqual((task["why"], len(task["steps"])), ("choose next step", n))
-                events.append(supervisor.boundary(task, tasks.read_chain(self.folder, task))["event"])
-                self.assertIn(tid, self.hub.wakes)
-                self.hub.advance()  # inside the debounce: nothing runs
-                self.assertEqual(len(prompts), wake - 1)
-                self.now += 100.0
-                self.hub.advance()
-                for t in list(self.hub.sup_threads):
-                    t.join(10)
-                pending = self.hub.tasks[tid]["supervisor"]["pending"]
-                self.assertEqual((pending["wake"], pending["status"]), (wake, "suggest"))
-                for _ in range(3):  # suggest mode: nothing starts until Approve
-                    self.hub.poll_once()
-                    self.hub.advance()
-                self.assertEqual((start.call_count, len(self.hub.tasks[tid]["steps"])), (wake, n))
-                self.assertNotIn(tid, self.hub.supervising)
-                status, body = self.call("/api/task/supervisor", {"task": tid, "wake": wake, "action": "approve"})
-                self.assertEqual(status, 200, body)
-                self.assertEqual(self.call("/api/task/supervisor", {"task": tid, "wake": wake,
-                                                                    "action": "approve"})[1].get("repeated"), True)
-            task = self.hub.tasks[tid]
-            self.assertEqual(task["state"], "done")  # Finish went through the shared done lever
-            self.assertEqual([c.args[1:2] for c in lever.call_args_list], [("done",)])
-            self.assertEqual(lever.call_args_list[0].kwargs.get("origin"), "supervisor")
-            self.assertEqual(start.call_count, 3)  # design, then one worker per approved add_next_step
-        # saved lineage and handovers
-        steps = task["steps"]
-        self.assertEqual([(s["kind"], s["state"]) for s in steps], [("design", "done"), ("code", "done"),
-                                                                     ("verify", "done")])
-        self.assertEqual((steps[1]["source_step"], steps[2]["source_step"], steps[2]["verdict"]), (1, 2, "PASS"))
-        self.assertTrue(task["plan"])
-        for s in steps[1:]:
-            for name in ("received-handoff.md", "received.md"):
-                self.assertTrue(tasks.read_step_file(self.folder, task, s, name), (s["n"], name))
-        sessions = [s["session"] for s in steps]
-        self.assertEqual(len(set(sessions)), 3)
-        # no persistent supervisor session, worker or thread
-        self.hub.poll_once()
-        listed = {s["id"] for s in self.hub.snapshot()["sessions"]}
-        self.assertEqual(listed, set(sessions))
-        self.assertEqual((self.hub.supervising, self.hub.wakes), ({}, {}))
-        self.assertFalse(any(t.is_alive() for t in self.hub.sup_threads))
-        # the durable artifacts tell the same story
-        sup = tasks.load(self.folder, tid)["supervisor"]
-        self.assertEqual((sup["wakes"], sup["pending"], sup["epoch"], sup["paused"]), (3, None, 3, False))
-        self.assertAlmostEqual(sup["usd"], 0.012)
+            task = self.until(tid, lambda t: t["state"] == "done" and not t.get("briefing"), "the chain ends")
+            self.assertEqual([(s["kind"], s["state"]) for s in task["steps"]],
+                             [("scout", "done"), ("code", "done"), ("verify", "done")])
+            self.assertEqual(task["steps"][2]["verdict"], "PASS")
+            self.assertEqual(start.call_count, 3)
+            self.assertEqual(prompts, [])  # no pass between good steps
+            self.now += 100.0
+            self.hub.advance()
+            for t in list(self.hub.sup_threads):
+                t.join(10)
+        self.assertEqual(len(prompts), 1)
         records = supervisor.read_log(self.folder, tid)
-        for wake in (1, 2, 3):
-            mine = [r for r in records if r.get("wake") == wake]
-            self.assertEqual([r["phase"] for r in mine], ["claimed", "result", "dispatching", "outcome"], wake)
-            self.assertEqual(mine[0]["events"], [events[wake - 1]])  # the original transition's event id
-            self.assertEqual(mine[0]["prompt_hash"], supervisor.prompt_hash(prompts[wake - 1]))
-            self.assertEqual(mine[-1]["status"], "dispatched")
-        self.assertEqual(sum(r.get("cost") or 0 for r in records if r.get("phase") == "result"), 0.012)
-        whys = [line["why"] for line in tasks.read_chain(self.folder, task)]
-        self.assertEqual(sum(1 for w in whys if w.startswith("supervisor: dispatched")), 3)
-        self.assertNotIn("marked done by Fred", whys)  # the supervisor's Finish is labeled as its own
-        self.assertIn("marked done by the supervisor", whys)
-        self.assertEqual(task["why"], "marked done by the supervisor")
-        ledger = usage.load_supervisor(self.folder)["records"]
-        for wake in (1, 2, 3):
-            self.assertEqual(ledger[supervisor.request_id(tid, wake)]["cost"], 0.004)
-        self.assertEqual(self.hub.usage_report()["supervisor"]["today"]["runs"], 3)
-
+        self.assertEqual([r["phase"] for r in records], ["claimed", "result"])
+        self.assertEqual(records[0]["triggers"], ["done"])
+        sup = tasks.load(self.folder, tid)["supervisor"]
+        self.assertEqual((sup["wakes"], sup["pending"]), (1, None))
+        self.assertAlmostEqual(sup["usd"], 0.004)
 
 class NextMessageTest(DispatchTest):
     """Plan 48: Fred's next-step message wakes the supervisor once and authorizes the one add_next_step it returns."""
@@ -2002,84 +1945,6 @@ class NextMessageTest(DispatchTest):
         self.assertEqual(self.hub.tasks[tid]["messages"][0]["status"], "cancelled")
 
 
-class PlannedStepTest(NextMessageTest):
-    """Plan 49: a step taken from the planner's proposals carries the planner's goal, and every added step trims."""
-
-    PLANNED = [{"kind": "code", "goal": "fix X in app.py", "model": "sonnet"},
-               {"kind": "verify", "goal": "run the tests", "model": ""}]
-    TAKE = {"decision": "add_next_step", "proposal": 1, "model": "auto", "reason": "the plan's next step",
-            "confidence": "high", "for_fred": ""}
-
-    def planned(self, tid="20260101-000000-abcd"):
-        tid = self.at_boundary(tid)
-        task = self.hub.tasks[tid]
-        task["supervisor"]["proposed"] = [dict(p) for p in self.PLANNED]
-        tasks.save(self.folder, task)
-        return tid
-
-    def add(self, tid, kind, rid, origin="fred", **extra):
-        req = {"task": tid, "source_step": 1, "source_session": "s1", "kind": kind, "instructions": "Fred's step",
-               "model": "auto", **extra}
-        code, preview = self.hub.preview_next(req)
-        self.assertEqual(code, 200, preview)
-        req = dict(req, revision=preview["revision"], request_id=rid)
-        return self.hub.request_next(req, origin=origin) + (req,)
-
-    def kinds_left(self, tid):
-        return [p["kind"] for p in self.hub.tasks[tid]["supervisor"]["proposed"]]
-
-    def test_proposal_step_uses_planner_goal_and_trims(self):
-        tid = self.planned()
-        self.pending(tid, dict(self.TAKE, kind="code"))
-        code, body = self.hub._supervisor_dispatch(tid, 1, "fred")
-        self.assertEqual(code, 200, body)
-        task = self.hub.tasks[tid]
-        self.assertEqual([(s["n"], s["kind"]) for s in task["steps"]], [(1, "scout"), (2, "code")])
-        self.assertEqual(task["steps"][1]["goal"], "fix X in app.py")
-        self.assertEqual(self.kinds_left(tid), ["verify"])
-        self.assertEqual(tasks.load(self.folder, tid)["supervisor"]["proposed"], task["supervisor"]["proposed"])
-        intent = [r for r in supervisor.read_log(self.folder, tid) if r.get("phase") == "dispatching"][0]["dispatch"]
-        self.assertEqual(intent["proposal"], 1)
-
-    def test_message_words_win_over_proposal(self):
-        tid = self.planned()
-        self.answer = dict(decision=dict(self.TAKE), cost=0.001, model="haiku", turns=2, error="")  # no kind given
-        self.say(tid)
-        self.run_wake()
-        self.assertIn("p1 code (sonnet): fix X in app.py", self.calls[0]["prompt"])
-        task = self.hub.tasks[tid]
-        self.assertEqual(len(task["steps"]), 2)
-        self.assertEqual((task["steps"][1]["kind"], task["steps"][1]["goal"]), ("code", self.TEXT))
-        self.assertEqual(self.kinds_left(tid), ["verify"])
-
-    def test_menu_add_step_trims_first_same_kind(self):
-        tid = self.planned()
-        code, body, _ = self.add(tid, "verify", "b" * 32, proposal=1)  # Fred's body cannot name a proposal
-        self.assertEqual(code, 200, body)
-        task = self.hub.tasks[tid]
-        self.assertEqual(task["steps"][1]["goal"], "Fred's step")
-        self.assertEqual(self.kinds_left(tid), ["code"])
-
-    def test_repeated_request_id_trims_once(self):
-        tid = self.planned()
-        code, body, req = self.add(tid, "code", "c" * 32, origin="supervisor", proposal=1)
-        self.assertEqual(code, 200, body)
-        again = self.hub.request_next(req, origin="supervisor")
-        self.assertEqual(again[0], 200, again[1])
-        self.assertEqual(len(self.hub.tasks[tid]["steps"]), 2)
-        self.assertEqual(self.kinds_left(tid), ["verify"])
-
-    def test_stale_proposal_refused(self):
-        tid = self.planned()
-        self.pending(tid, dict(self.TAKE, proposal=2))
-        task = self.hub.tasks[tid]
-        task["supervisor"]["proposed"] = task["supervisor"]["proposed"][:1]  # trimmed since the card was saved
-        tasks.save(self.folder, task)
-        with mock.patch.object(self.hub, "request_next") as request:
-            code, body = self.hub._supervisor_dispatch(tid, 1, "fred")
-        self.assertEqual((code, request.call_count), (409, 0), body)
-
-
 class LooseEndsServerTest(NextMessageTest):
     """Plan 51: a model named in a next-step message, the view after Reject, the uncertain card after a restart."""
 
@@ -2240,7 +2105,7 @@ class ModeSwitchTest(ApprovalTest):
 
 # Each class reuses its parent's fixtures; an inherited test runs once, in the class that defines it.
 for _cls in (WakeTest, DispatchTest, ApprovalTest, AutonomyTest, HoldsStallsDoneTest, SupervisedIntakeHubTest,
-              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest, PlannedStepTest,
+              ReplayTest, AcceptanceTest, LifecycleAcceptanceTest, NextMessageTest,
               LooseEndsServerTest, ModeSwitchTest):
     for _name in [n for n in dir(_cls) if n.startswith("test") and n not in vars(_cls)]:
         setattr(_cls, _name, None)

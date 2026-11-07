@@ -1949,14 +1949,10 @@ class Hub:
                 pending["epoch"] = task["supervisor"]["epoch"]
             if kind == "add_next_step":
                 n = decision.get("source_step", task["current"])
-                planned = supervisor.proposal_of(decision, task)  # plan 49 D2: his words, the planner's, the pass's
                 req = {"task": task_id, "source_step": n, "source_session": tasks.step(task, n)["session"],
-                       "kind": decision.get("kind") or planned["kind"],
-                       "instructions": said or (planned["goal"] if planned else decision["instructions"].strip()),
+                       "kind": decision["kind"], "instructions": said or decision["instructions"].strip(),
                        "model": decision.get("model") or "auto"}  # D11: a held card's Approve also carries his words
                 intent = {"call": "request_next", "request_id": supervisor.request_id(task_id, wake), "source_step": n}
-                if planned is not None:
-                    req["proposal"] = intent["proposal"] = decision["proposal"]
             else:
                 intent = {"call": "task_lever", "lever": self._SUP_LEVER[kind]}
             sup = task["supervisor"]
@@ -2050,8 +2046,8 @@ class Hub:
 
     def _next_ok(self, task: dict) -> bool:
         """Plan 48: Fred's words can go to the supervisor as the next step: a supervised manual task at its boundary,
-        or finished with a valid policy that is on."""
-        if task.get("chat") or task.get("progression") != "manual":
+        or any finished task with a valid policy that is on (plan 52 Task 1: a chain task reopens too)."""
+        if task.get("chat"):
             return False
         if self._sup_boundary(task):
             return True
@@ -2652,10 +2648,6 @@ class Hub:
             step.update(request_id=request_id, request_hash=signature, request_status="starting",
                         manual_route=route, requested_model=payload["model"])
             step["attempts"] = []
-            if isinstance(updated.get("supervisor"), dict):  # plan 49 D3: an added step leaves the planned list
-                proposal = request.get("proposal") if origin == "supervisor" else None  # Fred's body never names one
-                updated["supervisor"]["proposed"] = supervisor.trim_proposed(
-                    updated["supervisor"].get("proposed"), payload["kind"], proposal)
             # the reservation waits until the launch records a session, so the hub loop cannot start it too
             updated.update(state="waiting", owner="fred", why=f"starting step {step['n']:02d}")
             if origin == "fred":
@@ -2897,13 +2889,14 @@ class Hub:
 
     def create_task(self, card: dict, steps: list, effort: str, title: str = "", *,
                     supervised: bool = False, supervisor_mode=None) -> str:
-        """A task from a Prep card and the step list Fred edited on it; step 1 starts at once. Supervised intake
-        (plan 44 T10) keeps one manual worker and the rest as proposals, never an automatic tail."""
+        """A task from a Prep card and the step list Fred edited on it; step 1 starts at once. Every task runs the
+        planner's whole chain (plan 52 Task 1); `supervised` is kept for the Board's body and changes nothing, and
+        `supervisor_mode` sets the task's own mode."""
         folder = self.allowed(card.get("project_dir"))
         if not folder:
             raise runs.RunError("runs are off in this project: pick it on the home view and allow runs")
         planned = tasks.plan_steps(steps, self.cfg["task_max_steps"])
-        if not planned and not supervised:
+        if not planned:
             raise runs.RunError("a task needs at least one step")
         # plan_steps keeps tier aliases only; a rung of the ladder that Fred picked on the card is put back
         shown = [i for i in steps if isinstance(i, dict) and i.get("kind") in tasks.PREP_KINDS
@@ -2913,20 +2906,10 @@ class Hub:
                 step["pick"] = item["model"]
         with self.tlock:
             name = redact.clip(title or (card.get("fields") or {}).get("goal") or card.get("raw") or "task", 80)
-            if supervised:
-                task = self._supervised_task(folder, name, card, steps, shown, planned, effort, supervisor_mode)
-                self._prep_files(task, card, task["steps"][0]["goal"])
-                tasks.save(self.folder, task)
-                with self.lock:
-                    self.tasks[task["id"]] = task
-                self.drop_prep(card["id"])
-                self.advance()
-                self.poll_once()
-                return task["id"]
             task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], planned,
                                   (card.get("route") or {}).get("type") or "", card.get("demand") or {},
                                   prep.summary(card), effort, time.time(), id_=self._free_id(card["id"]))
-            task["supervisor"] = supervisor.initial(self.cfg, folder, time.time())  # plan 44: the policy snapshot
+            task["supervisor"] = supervisor.initial(self.cfg, folder, time.time(), mode=supervisor_mode)  # plan 44
             self._prep_files(task, card, planned[0]["goal"])
             tasks.save(self.folder, task)
             with self.lock:
@@ -2935,29 +2918,6 @@ class Hub:
             self.advance()
             self.poll_once()
         return task["id"]
-
-    def _supervised_task(self, folder: str, name: str, card: dict, steps: list, shown: list, planned: list,
-                         effort: str, supervisor_mode=None) -> dict:
-        """Plan 44 T10: one valid worker step plus saved proposals. No verify insert, no automatic tail."""
-        if steps and not shown:
-            raise runs.RunError("a task needs at least one valid step")
-        if shown:
-            first = planned[0]
-            proposed = [{"kind": i["kind"], "goal": redact.clip(i["goal"], tasks.STEP_GOAL_MAX),
-                         "model": i.get("model") or ""} for i in shown[1:]]
-        else:
-            goal = redact.clip(card.get("prompt") or (card.get("fields") or {}).get("goal") or card.get("raw") or "",
-                               tasks.STEP_GOAL_MAX)
-            first = tasks._blank(1, "scout", goal)
-            proposed = []
-        task = tasks.new_task(folder, Path(folder).name, name, card["prompt"], [first],
-                              (card.get("route") or {}).get("type") or "", card.get("demand") or {},
-                              prep.summary(card), effort, time.time(), id_=self._free_id(card["id"]))
-        sup = supervisor.initial(self.cfg, folder, time.time(), mode=supervisor_mode)
-        sup["proposed"] = proposed
-        task["supervisor"] = sup
-        task["progression"] = "manual"
-        return task
 
     def _free_id(self, prep_id: str) -> str:
         """The card's id for its task (plan 29), unless a task already holds it (the same card run twice): "" then."""

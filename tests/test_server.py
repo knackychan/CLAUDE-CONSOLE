@@ -3896,7 +3896,7 @@ class HandoffServerTest(TaskServerTest):
 
 
 class SupervisedIntakeTest(TaskServerTest):
-    """Plan 44 T10: supervised intake through the existing Prep route; one manual worker plus proposals."""
+    """Plan 52 Task 1: supervised intake through the existing Prep route runs the planner's whole chain."""
 
     def post_supervised(self, card, steps=None, mode=None, words="HANDOFF-OK", effort="auto", **extra):
         body = {"prep": card["id"], "prompt": f"{card['prompt']}\n{words}".strip(),
@@ -3907,41 +3907,33 @@ class SupervisedIntakeTest(TaskServerTest):
         body.update(extra)
         return self.call("/api/task", body)
 
-    def test_supervised_intake_starts_one_manual_step_and_preserves_proposals(self):
+    def test_supervised_intake_runs_the_planned_chain(self):
         card = self.prep_card()
         status, data = self.post_supervised(card)
         self.assertEqual(status, 200, data)
         tid = data["task"]
-        task = self.until(tid, self.at(1, "running"), "one worker starts")
-        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
-        self.assertEqual(task["progression"], "manual")
-        self.assertEqual(task["supervisor"]["proposed"],
-                         [{"kind": "code", "goal": "fix add() and its test", "model": ""}])
-        reloaded = self.task(tid)[1]["task"]
-        self.assertEqual(reloaded["supervisor"]["proposed"], task["supervisor"]["proposed"])
-        self.assertEqual(reloaded["progression"], "manual")
+        task = self.hub.tasks[tid]
+        self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "code", "verify"])
+        self.assertIsNone(task.get("progression"))
+        self.assertEqual((task["supervisor"]["mode"], task["supervisor"]["proposed"]), (self.hub.cfg["supervisor_mode"], []))
+        task = self.until(tid, self.at(2), "step 02 starts after the scout with no wake")
+        self.assertNotIn(tid, self.hub.wakes)
+        self.assertFalse((self.folder / "tasks" / tid / "supervisor.jsonl").exists())
 
-    def test_no_step_prep_gets_one_scout_and_full_goal_is_preserved(self):
+    def test_no_step_supervised_card_is_refused(self):
         card = self.prep_card("fix add")
-        text = f"{card['prompt']}\nHANDOFF-OK".strip()
-        status, data = self.post_supervised(card, steps=[])
-        self.assertEqual(status, 200, data)
-        task = self.until(data["task"], self.at(1, "running"), "the scout starts")
-        self.assertEqual([s["kind"] for s in task["steps"]], ["scout"])
-        self.assertEqual(task["steps"][0]["goal"], server.redact.clip(text, tasks.STEP_GOAL_MAX))
-        self.assertEqual(task["goal"], text[:tasks.GOAL_MAX])
-        self.assertTrue((self.folder / "tasks" / data["task"] / "00-prep" / "prompt.md").is_file())
+        self.assertEqual(self.post_supervised(card, steps=[])[0], 409)  # the no-step path is /api/run (plan 48 D2)
 
     def test_supervised_mode_precedence_is_explicit(self):
         self.hub.cfg["supervisor_mode"] = "suggest"
         self.hub.cfg["supervisor_projects"] = {}
         card = self.prep_card("fix add")
-        tid = self.post_supervised(card, steps=[])[1]["task"]
+        tid = self.post_supervised(card, steps=[{"kind": "scout", "goal": "look"}])[1]["task"]
         self.assertEqual(self.hub.tasks[tid]["supervisor"]["mode"], "suggest")
         self.hub.cfg["supervisor_projects"] = {str(self.project): "auto"}
-        tid2 = self.post_supervised(self.prep_card("fix add"), steps=[])[1]["task"]
+        tid2 = self.post_supervised(self.prep_card("fix add"), steps=[{"kind": "scout", "goal": "look"}])[1]["task"]
         self.assertEqual(self.hub.tasks[tid2]["supervisor"]["mode"], "auto")
-        tid3 = self.post_supervised(self.prep_card("fix add"), steps=[], mode="off")[1]["task"]
+        tid3 = self.post_supervised(self.prep_card("fix add"), steps=[{"kind": "scout", "goal": "look"}], mode="off")[1]["task"]
         self.assertEqual(self.hub.tasks[tid3]["supervisor"]["mode"], "off")
         self.assertEqual(self.call("/api/task", {"prep": card["id"], "prompt": "x", "steps": [],
                                                   "supervisor_mode": "auto"})[0], 400)
@@ -3972,18 +3964,6 @@ class SupervisedIntakeTest(TaskServerTest):
         self.assertEqual(status, 200, data)
         self.assertEqual(self.hub.tasks[data["task"]]["chat"], True)
 
-    def test_supervised_design_does_not_rebuild_a_tail(self):
-        card = self.prep_card()
-        steps = [{"kind": "design", "goal": "plan it"}, {"kind": "code", "goal": "do code"}]
-        status, data = self.post_supervised(card, steps=steps, words="HANDOFF-OK PLAN-OK")
-        self.assertEqual(status, 200, data)
-        tid = data["task"]
-        task = self.until(tid, lambda t: t["state"] == "waiting" and t["why"] == "choose next step",
-                          "the manual boundary")
-        self.assertEqual([s["kind"] for s in task["steps"]], ["design"])
-        self.assertTrue(task.get("plan"))
-        self.assertEqual(task["supervisor"]["proposed"], [{"kind": "code", "goal": "do code", "model": ""}])
-        self.assertEqual(self.task(tid)[1]["levers"]["add_next"], "")
 
 
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
