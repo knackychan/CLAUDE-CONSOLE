@@ -16,6 +16,8 @@ Run (--input-format stream-json): per user message prints init / assistant / res
   "HANDOFF-OK" in the message: the assistant text ends with a valid HANDOFF block.
   "HINT-OPUS" with it: the block's Next ends with `Next model: opus/high` (a hint for the step after).
   "LESSON" with it: the block's Next carries a `Lesson:` line (plan 22).
+  "STEP-BLOCKED" in the message: whatever HANDOFF block the reply ends with carries `Status: blocked: the test
+  runner is missing` in its Next (plan 57).
   "VERDICT-PASS" / "VERDICT-FAIL" in the message: it ends with a `VERDICT: PASS` / `VERDICT: FAIL x` line;
   VERDICT-FAIL also waits 1 s before the result line (a test appends the verdict event meanwhile).
   "STOP-ASK" in the message: the assistant text ends with `STOP: which file?`.
@@ -272,6 +274,9 @@ def reply(text):
         body += "\nSTOP: which file?"
     if "DECIDE-NAME" in text:
         body += "\n" + HANDOFF_BLOCK + "\nDECISION: Which name?\n- a) SHEETS_DIR\n- b) PRODUCT_SHEETS_DIR\nDEFAULT: a shorter"
+    if "STEP-BLOCKED" in text and "\nEND HANDOFF" in body:  # the step says it could not do its work (plan 57)
+        head, end, tail = body.rpartition("\nEND HANDOFF")
+        body = head + "\nStatus: blocked: the test runner is missing" + end + tail
     return body
 
 

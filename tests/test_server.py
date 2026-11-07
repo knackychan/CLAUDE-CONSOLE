@@ -2641,6 +2641,81 @@ class TaskServerTest(RunServerTest):
                          (409, {"error": "no plan gap waits"}))
         self.assertFalse((self.folder / "tasks" / tid / "02-design" / "plan.md").exists())
 
+    def blocked_task(self, **kwargs):
+        tid = self.make_task(steps=[{"kind": "test", "goal": "run the suite STEP-BLOCKED"}, {"kind": "code", "goal": "next"}],
+                             **kwargs)
+        return tid, self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the blocked step")
+
+    def test_blocked_step_waits_instead_of_advancing(self):
+        """Plan 57 D2: the run ended cleanly with a valid handoff, but its Next says the step could not do its work.
+        It waits as a plain question does (`asks:`); nothing advances."""
+        tid, task = self.blocked_task()
+        self.assertEqual(task["why"], "asks: Blocked: the test runner is missing")
+        self.assertEqual([s["state"] for s in task["steps"]], ["running"] + ["planned"] * (len(task["steps"]) - 1))
+        self.assertFalse(task.get("last_good"))
+        self.assertNotIn("decision", task)  # a blocked step has no options and no default to take
+        self.hub.advance()
+        self.assertEqual(self.hub.tasks[tid]["steps"][1]["state"], "planned")
+        self.assertIn("asks: Blocked: the test runner is missing", self.whys(tid))
+        self.assertFalse((self.folder / "tasks" / tid / "01-test" / "notes.md").exists())  # not a finished step
+
+    def test_blocked_step_is_a_plain_question_in_actions(self):
+        """Plan 57 D2 and plan 52 Task 6: the `decision` state with the free-text answer box, the options none."""
+        tid, task = self.blocked_task()
+        data = self.task(tid)[1]
+        actions = data["actions"]
+        self.assertEqual((actions["state"], actions["line"]), ("decision", "needs you · Blocked: the test runner is missing"))
+        self.assertEqual((self.ids(actions, "primary"), self.ids(actions, "bar")), ([], ["stop"]))
+        self.assertEqual((data["message"]["mode"], data["message"]["reason"]), ("answer", ""))
+        self.assertEqual(self.ids(actions, "menu")[0], "handoff")
+        row = server.task_row(task)
+        self.assertEqual((row["asks"], row["group"]), ("Blocked: the test runner is missing", "needs"))
+
+    @staticmethod
+    def ids(actions, place):
+        return [a["id"] for a in actions[place]]
+
+    def test_blocked_step_answer_runs_the_step_again_and_it_advances(self):
+        tid, task = self.blocked_task()
+        sid = tasks.current_step(task)["session"]
+        body = {"task": tid, "request_id": "c" * 32, "target": tasks.message_target(task),
+                "text": "The runner is installed now. HANDOFF-OK"}
+        status, data = self.call("/api/task/message", body)
+        self.assertEqual(status, 200, data)
+        self.assertEqual((data["message"]["mode"], data["message"]["session"]), ("answer", sid))
+        self.wait_idle(sid)
+        task = self.until(tid, self.at(2), "the answered step is done and the next one runs")
+        self.assertEqual(task["steps"][0]["state"], "done")
+        self.assertEqual(task["last_good"], 1)
+        self.assertNotIn("asks: Blocked: the test runner is missing", self.whys(tid)[-3:])
+
+    def test_blocked_step_never_takes_a_default_on_auto(self):
+        from console import supervisor
+        tid, task = self.blocked_task()
+        task["supervisor"] = supervisor.initial(self.hub.cfg, task["project_dir"], time.time(), "auto")
+        with self.hub.tlock:
+            self.assertFalse(self.hub._decision_default(task, time.time() + 86400))
+        self.assertIsNone(supervisor.boundary(task, self.chain(tid)))  # no wake: the question is Fred's
+        self.assertEqual(self.hub.tasks[tid]["why"], "asks: Blocked: the test runner is missing")
+
+    def test_blocked_design_step_saves_no_plan_and_meets_no_gate(self):
+        """The plan gate (plan 52 level gated) and the plan checks come after a design step ends well; a blocked
+        one is not that."""
+        self.hub.cfg["plan_hold"] = True
+        tid = self.plan_task(goals={2: "plan it STEP-BLOCKED"})
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the blocked design step")
+        self.assertEqual(task["why"], "asks: Blocked: the test runner is missing")
+        self.assertNotIn("plan", task)
+        self.assertFalse((self.folder / "tasks" / tid / "02-design" / "plan.md").exists())
+        self.assertEqual(self.task(tid)[1]["actions"]["state"], "decision")
+        self.assertNotIn("plan saved", " ".join(self.whys(tid)))
+
+    def test_a_stop_question_wins_over_a_blocked_line(self):
+        """Plan 57 D2: STOP, DECISION and Plan gap lines keep their cards; the Status line only counts without them."""
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look"}, {"kind": "code", "goal": "write PLAN-GAP STEP-BLOCKED"}])
+        task = self.until(tid, lambda t: t["state"] == "waiting", "the task waits on the question")
+        self.assertEqual(task["why"], "asks: Plan gap: which file holds the ladder?")
+
     def test_redo_to_a_single_plan_drops_the_parts(self):
         tid = self.plan_task(words="HANDOFF-OK PLAN-SPLIT", kinds=("scout", "design", "code"))
         self.until(tid, self.at(3), "part 1 runs")
@@ -4319,6 +4394,7 @@ class ActionsServerTest(TaskServerTest):
             ("plan_ready", "waiting", "plan ready: confirm", "service", ["confirm", "confirm_auto"],
              ["edit_plan", "redo", "stop"]),
             ("decision", "waiting", "asks: Plan gap: which folder?", "fred", [], ["redo", "stop"]),
+            ("decision", "waiting", "asks: Blocked: the test runner is missing", "service", [], ["stop"]),  # plan 57
             ("hold", "waiting", "confirm Fable", "service", ["confirm"], ["stop"]),
             ("hold", "waiting", "sonnet over its pace", "service", ["confirm"], ["stop"]),
             ("hold", "waiting", "replanned: scope changed", "service", ["confirm"], ["keep", "stop"]),

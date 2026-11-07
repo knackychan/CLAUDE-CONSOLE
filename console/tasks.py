@@ -343,6 +343,21 @@ def lesson_of(block: str) -> str:
     return "" if text.rstrip(".").lower() in _NO_QUESTION else text
 
 
+_BLOCKED = re.compile(r"^[ \t`*>\-]*Status:\**[ \t]*blocked\b[ \t:\-`*]*(.*?)[ \t`*]*$", re.M | re.I)
+
+
+def blocked_of(block: str) -> str:
+    """Plan 57 D2: why the step says it could not do its work, from the last `Status: blocked: <why>` line in the
+    Next section of its handoff block; "" when there is none (no Status line, `Status: done`, or a line in another
+    section). The reason is masked and cut to 200 characters; a bare `Status: blocked` still blocks."""
+    text = str(block or "")
+    _, found, tail = text.partition("\n## Next")
+    found = _BLOCKED.findall(tail if found else "")
+    if not found:
+        return ""
+    return redact.clip(redact.mask(found[-1].strip()), 200) or "the step could not do its work"
+
+
 STEP_FILES = ("role.md", "received.md", "received-handoff.md", "source-reply.md", "notes.md", "handoff.md", "brief.md",
               "facts.md", "verdict.md", "handed.md", "plan.md", "proposal.json")  # one step's inspectable input and output
 _ATTEMPT_NOTES = re.compile(r"notes\.(\d{1,2})\.md")  # a failed attempt's final message
