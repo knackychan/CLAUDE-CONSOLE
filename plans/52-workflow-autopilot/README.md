@@ -213,7 +213,7 @@ settings) and 51 (supervisor loose ends) were built on `claude/brainstorm-task-a
 plan 52 was implemented. Line numbers in sections 1 to 3 and in the task files are from `759a570`; the current ones are given
 below where a task depends on them.
 
-2026-11-07: Task 1 is closed after `cb63485`; Task 2a is closed in `a48e98d`. Fred approved the lifecycle fixture
+2026-11-07: Task 1 is closed in `c9b9f00` after `cb63485`; Task 2a is closed in `a48e98d`. Fred approved the lifecycle fixture
 correction (scout, design with `PLAN-OK`, code, verify with `VERDICT-PASS`) and a current-date Prep fixture so its
 14-day window does not expire. The focused set passed 507 tests in 546.420 s; the closing full suite passed
 1110 tests in 630.609 s with Listary closed for verification, as Fred approved.
@@ -222,7 +222,13 @@ The earlier corrected full run had one failure and one error involving Access de
 FileIO trace caught Listary.exe holding `task.json` across the denied rename in a single-threaded reproducer.
 A controlled metadata-reader handle reproduced WinError 5; closing it allowed the replacement. With Listary
 closed, the unchanged save code completed 10,000 consecutive writes. No persistence code or retries were added;
-Listary can still interfere when running. Task 2b has not started.
+Listary can still interfere when running.
+
+2026-11-07: Task 2b is closed. The supervisor kind names the exception moves, removes Planned next, and preserves
+plan 51's model-selection sentence. Tests were added first for the kind and the done, hold and stuck wakes,
+including the chain's retry before a sonnet stuck pass. The focused checks passed 9 tests in 14.054 s; the full
+suite passed 1112 tests in 641.012 s, with Listary still closed for verification. Fred applies the supervisor kind
+on the Models page with Reset to repo copy. Task 3 has not started.
 
 ### What plan 52 replaces
 

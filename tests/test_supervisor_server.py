@@ -1763,6 +1763,69 @@ class LifecycleAcceptanceTest(test_server.TaskServerTest):
         self.assertEqual((sup["wakes"], sup["pending"]), (1, None))
         self.assertAlmostEqual(sup["usd"], 0.004)
 
+    def test_chain_task_wakes_only_on_stuck_hold_and_done(self):
+        self.hub.cfg["supervisor_mode"] = "suggest"
+        self.now = 0.0
+        self.hub.sup_clock = lambda: self.now
+        calls = []
+
+        def fake_run(cfg, exe, task, prompt, model, max_cost):
+            calls.append((task["id"], model))
+            return {"decision": {"decision": "wait", "reason": "check the boundary", "confidence": "high",
+                                 "for_fred": ""}, "cost": 0.004, "model": model, "turns": 2, "error": ""}
+
+        for trigger, model in (("done", "haiku"), ("hold", "haiku"), ("stuck", "sonnet")):
+            with self.subTest(trigger=trigger), mock.patch.object(supervisor, "run", side_effect=fake_run):
+                calls.clear()
+                self.hub.cfg["plan_hold"] = trigger == "hold"
+                card = self.prep_card("fix add")
+                status, data = self.call("/api/task", {
+                    "prep": card["id"], "prompt": f"{card['prompt']}\nHANDOFF-OK PLAN-OK VERDICT-PASS",
+                    "steps": [{"kind": "scout", "goal": "look"},
+                              {"kind": "design", "goal": "plan the fix SLOW" if trigger == "stuck" else "plan the fix"},
+                              {"kind": "code", "goal": "fix add"}],
+                    "effort": "auto", "supervised": True})
+                self.assertEqual(status, 200, data)
+                tid = data["task"]
+                if trigger == "stuck":
+                    task = self.until(tid, self.at(2), "design starts")
+                    first = task["steps"][1]["session"]
+                    self.assertNotIn(tid, self.hub.wakes)
+                    self.hub.runs.live[first].kill()
+                    task = self.until(tid, lambda t: t["steps"][1]["retries"] == 1
+                                      and t["steps"][1]["state"] == "running"
+                                      and t["steps"][1]["session"] != first, "the chain retries design")
+                    self.assertNotIn(tid, self.hub.wakes)
+                    self.assertEqual(supervisor.read_log(self.folder, tid), [])
+                    self.hub.runs.live[task["steps"][1]["session"]].kill()
+                state = {"done": "done", "hold": "waiting", "stuck": "stuck"}[trigger]
+                task = self.until(tid, lambda t: t["state"] == state and not t.get("briefing"), state)
+                self.assertEqual([s["kind"] for s in task["steps"]], ["scout", "design", "code", "verify"])
+                if trigger == "done":
+                    self.assertTrue(all(s["state"] == "done" for s in task["steps"]))
+                    self.assertEqual(task["steps"][-1]["verdict"], "PASS")
+                elif trigger == "hold":
+                    self.assertEqual(task["why"], "plan ready: confirm")
+                    self.assertEqual(task["steps"][2]["state"], "planned")
+                else:
+                    self.assertEqual(task["steps"][1]["retries"], 1)
+                    self.assertEqual(len(task["steps"][1]["attempts"]), 2)
+                self.assertEqual(calls, [])
+                self.now += 100.0
+                self.hub.advance()
+                for thread in list(self.hub.sup_threads):
+                    thread.join(10)
+                self.assertEqual(calls, [(tid, model)])
+                records = supervisor.read_log(self.folder, tid)
+                self.assertEqual([r["phase"] for r in records], ["claimed", "result"])
+                self.assertEqual(records[0]["triggers"], [trigger])
+                self.now += 100.0
+                self.hub.advance()
+                for thread in list(self.hub.sup_threads):
+                    thread.join(10)
+                self.assertEqual(calls, [(tid, model)])
+                self.assertEqual(tasks.load(self.folder, tid)["supervisor"]["wakes"], 1)
+
 class NextMessageTest(DispatchTest):
     """Plan 48: Fred's next-step message wakes the supervisor once and authorizes the one add_next_step it returns."""
 

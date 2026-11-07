@@ -364,6 +364,15 @@ class RunnerTest(unittest.TestCase):
     def prompt(self, digest_text="digest SUP-VERIFY"):
         return supervisor.build_prompt(kinds.text(self.home, "supervisor"), self.task, digest_text)
 
+    def test_kind_file_names_the_exception_moves(self):
+        seed = kinds.seed_text("supervisor")
+        self.assertNotIn("Planned next", seed)
+        self.assertNotIn("first write step", seed)
+        self.assertIn("verify failed twice", seed)
+        self.assertIn("escalate_to_fred", seed)
+        self.assertIn("When $you's words name haiku, sonnet or opus, return that word as model; otherwise model auto.",
+                      seed)
+
     def test_one_call_has_project_cwd_timeout_and_tool_free_flags(self):
         seen = []
         real = subprocess.run
