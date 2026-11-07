@@ -1,7 +1,7 @@
 # Plan 52: Workflow autopilot. One prompt, a plan, a run loop, Fred only at real decisions
 
 Status: decided 2026-10-20 (Fred: D1 c, D2 to D6 as recommended). Task files 01 to 07 written the same day;
-nothing implemented. Process only: the visual design of the action bar is another chat's work.
+current progress is recorded in section 6. Process only: the visual design of the action bar is another chat's work.
 
 | # | File | Delivers | Depends on |
 |---|---|---|---|
@@ -209,9 +209,20 @@ The task files at the top of this README carry each decision.
 ## 6. Fit with plans 48 to 51 (checked 2026-10-20, after the merge at `8d4c624`)
 
 This plan was written on a branch that forked at `759a570`, before plans 49 (planner handover), 50 (supervisor
-settings) and 51 (supervisor loose ends) were built on `claude/brainstorm-task-actions`. Nothing of plan 52 is
-implemented. Line numbers in sections 1 to 3 and in the task files are from `759a570`; the current ones are given
+settings) and 51 (supervisor loose ends) were built on `claude/brainstorm-task-actions`. At that check, nothing of
+plan 52 was implemented. Line numbers in sections 1 to 3 and in the task files are from `759a570`; the current ones are given
 below where a task depends on them.
+
+2026-11-07: Task 1 is closed after `cb63485`; Task 2a is closed in `a48e98d`. Fred approved the lifecycle fixture
+correction (scout, design with `PLAN-OK`, code, verify with `VERDICT-PASS`) and a current-date Prep fixture so its
+14-day window does not expire. The focused set passed 507 tests in 546.420 s; the closing full suite passed
+1110 tests in 630.609 s with Listary closed for verification, as Fred approved.
+
+The earlier corrected full run had one failure and one error involving Access denied during saves. The elevated
+FileIO trace caught Listary.exe holding `task.json` across the denied rename in a single-threaded reproducer.
+A controlled metadata-reader handle reproduced WinError 5; closing it allowed the replacement. With Listary
+closed, the unchanged save code completed 10,000 consecutive writes. No persistence code or retries were added;
+Listary can still interfere when running. Task 2b has not started.
 
 ### What plan 52 replaces
 

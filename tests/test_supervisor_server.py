@@ -1718,11 +1718,11 @@ SCRIPT = [dict(ADD, kind="code", instructions="Fix add() as the plan says"),
 
 
 class LifecycleAcceptanceTest(test_server.TaskServerTest):
-    """Plan 44 T12: the whole supervised manual task over real HTTP, with fake_claude workers and a scripted fake
+    """Plan 52: the whole supervised chain over real HTTP, with fake_claude workers and a scripted fake
     supervisor pass (no paid provider)."""
 
     def test_supervised_chain_lifecycle_end_to_end(self):
-        """Plan 52 Task 1: scout, code and verify PASS run as the chain with no Approve; the only wake is the done
+        """Plan 52 Task 1: scout, design, code and verify PASS run with no Approve; the only wake is the done
         one after the final brief."""
         self.hub.cfg["supervisor_mode"] = "suggest"
         self.now = 0.0
@@ -1736,17 +1736,20 @@ class LifecycleAcceptanceTest(test_server.TaskServerTest):
         card = self.prep_card("fix add")
         with mock.patch.object(supervisor, "run", side_effect=fake_run), \
                 mock.patch.object(self.hub.runs, "start", wraps=self.hub.runs.start) as start:
-            status, data = self.call("/api/task", {"prep": card["id"], "prompt": f"{card['prompt']}\nHANDOFF-OK",
+            status, data = self.call("/api/task", {"prep": card["id"],
+                                                   "prompt": f"{card['prompt']}\nHANDOFF-OK PLAN-OK VERDICT-PASS",
                                                    "steps": [{"kind": "scout", "goal": "look"},
+                                                             {"kind": "design", "goal": "plan the fix"},
                                                              {"kind": "code", "goal": "fix add"}],
                                                    "effort": "auto", "supervised": True})
             self.assertEqual(status, 200, data)
             tid = data["task"]
             task = self.until(tid, lambda t: t["state"] == "done" and not t.get("briefing"), "the chain ends")
             self.assertEqual([(s["kind"], s["state"]) for s in task["steps"]],
-                             [("scout", "done"), ("code", "done"), ("verify", "done")])
-            self.assertEqual(task["steps"][2]["verdict"], "PASS")
-            self.assertEqual(start.call_count, 3)
+                             [("scout", "done"), ("design", "done"), ("code", "done"), ("verify", "done")])
+            self.assertEqual(task["plan"]["from"], 2)
+            self.assertEqual(task["steps"][3]["verdict"], "PASS")
+            self.assertEqual(start.call_count, 4)
             self.assertEqual(prompts, [])  # no pass between good steps
             self.now += 100.0
             self.hub.advance()

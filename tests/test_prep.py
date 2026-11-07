@@ -244,11 +244,11 @@ class PrepTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = copy.deepcopy(paths.DEFAULTS)
             self.assertEqual(prep.run_prep(cfg, Path(tmp), tmp, "fix the add function", FAKE)["floors"], {})
-            name = Path(tmp).name
+            name, day = Path(tmp).name, time.strftime("%Y-%m-%d")
             (Path(tmp) / "routing-misses.md").write_text(
-                f"- 2026-10-12 - {name} - code: sonnet/high failed (x); next time start at opus/high.\n", encoding="utf-8")
+                f"- {day} - {name} - code: sonnet/high failed (x); next time start at opus/high.\n", encoding="utf-8")
             card = prep.run_prep(cfg, Path(tmp), tmp, "fix the add function", FAKE)
-            self.assertEqual(card["floors"], {"code": {"route": "opus/high", "date": "2026-10-12"}})
+            self.assertEqual(card["floors"], {"code": {"route": "opus/high", "date": day}})
             self.assertEqual(prep.load(Path(tmp), card["id"])["floors"], card["floors"])
 
     def test_prompt_says_the_reason_is_for_one_run_not_for_the_steps(self):
