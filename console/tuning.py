@@ -37,6 +37,7 @@ TUNING = {
     "planner_max_cost": ("passes", "usd", 0.05, 5),
     # plan 44: the supervisor's own numeric/rung settings (mode and map are enum/map, in KEYS but not TUNING)
     "supervisor_debounce_s": ("supervisor", "s", 0, 300),
+    "decision_timeout_s": ("supervisor", "s", 0, 86400),
     "supervisor_parallel": ("supervisor", "steps", 1, 4),
     "supervisor_timeout_s": ("supervisor", "s", 10, 600),
     "supervisor_stall_s": ("supervisor", "s", 600, 7200),

@@ -101,6 +101,7 @@ DEFAULTS = {
     "supervisor_model": "haiku",  # the Claude alias only: a supervisor pass never runs on opus/fable
     "supervisor_stuck_model": "sonnet",  # one sonnet pass on a stuck/stalled wake
     "supervisor_debounce_s": 20,
+    "decision_timeout_s": 600,
     "supervisor_parallel": 1,
     "supervisor_timeout_s": 90,
     "supervisor_stall_s": 1800,

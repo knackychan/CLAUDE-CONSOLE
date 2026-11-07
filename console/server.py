@@ -519,6 +519,12 @@ class Hub:
             self._sup_stalls()
         except Exception as exc:  # observation only: never stops the loop
             self._log(f"supervisor stall check failed: {type(exc).__name__}: {exc}")
+        with self.tlock:
+            for task in list(self.tasks.values()):
+                try:
+                    self._decision_default(task, time.time())
+                except Exception as exc:
+                    self._log(f"decision default failed: {type(exc).__name__}: {exc}")
 
     def run(self) -> None:
         self.runs.reconcile()
@@ -529,9 +535,9 @@ class Hub:
             self.auto_steps()
             self.advance()
             self.read_costs()
+            self.tick()
             if time.monotonic() - last_tick >= TICK_S:
                 self.runs.reconcile()
-                self.tick()
                 last_tick = time.monotonic()
             self._stop.wait(POLL_S)
 
@@ -1319,6 +1325,7 @@ class Hub:
         text = m["text"]
         reply = self.final_message(sid)[0]
         gap = plan.gap(tasks.parse_handoff(reply) or "") if task.get("plan") else ""
+        decision = task.get("decision") or (tasks.reply_decision(reply) if cs["kind"] != "design" else None)
         question = row["stop_question"] or tasks.reply_question(reply) or ("Plan gap: " + gap if gap else "")
         if question:
             task.update(state="waiting", why="asks: " + question)
@@ -1335,6 +1342,12 @@ class Hub:
         def start():
             if m["mode"] == "answer" and task["why"].startswith("asks: Plan gap:") and task.get("plan"):
                 m["decision"] = self._gap_decision(task, cs, m["text"])
+            elif m["mode"] == "answer" and decision:
+                who = paths.you(self.cfg, start=True)
+                if task.get("plan"):
+                    m["decision"] = plan.add_answer(self.folder, task, f"{decision['q']}: {m['text']}", who=who)
+                self._commit(task, [tasks._line(time.time(), cs, "running", "running",
+                                               f"decision answered by {who}: {redact.clip(redact.mask(m['text']), 200)}")])
             hname = meta.get("harness") or row.get("harness") or "claude"
             return self.runs.start(task["project_dir"], text, model, effort, resume=sid if meta else None, fork="" if meta else sid,
                                    kind="continue", files=files, harness=hname)
@@ -1343,10 +1356,50 @@ class Hub:
                 tasks.start_step(task, cs["n"], m["session"], {"model": cs["model"], "effort": cs["effort"], "notes": ["forked external conversation"]}, "", time.time())
             task.update(state="running", why="")
             cs.pop("asked", None)
+            task.pop("decision", None)
             self._commit(task)
             self.poll_once()
             return "guidance"
         return ""
+
+    def _decision_default(self, task: dict, now: float) -> bool:
+        """Take one timed-out default through Continue, under tlock and the ordinary session gates."""
+        decision, cs = task.get("decision"), tasks.current_step(task)
+        if (task["state"] != "waiting" or task["owner"] != "service" or not decision or decision.get("taken")
+                or not task["why"].startswith("asks: ") or not decision.get("default") or not cs
+                or cs["state"] != "running" or cs["kind"] == "design" or decision.get("step") != cs["n"]
+                or tasks.pending_messages(task)):
+            return False
+        pol = supervisor.policy(self.cfg, task, now)
+        pending = pol["pending"] or {}
+        if pol["mode"] != "auto" or pol["paused"] or pending.get("status") in ("uncertain", "dispatching"):
+            return False
+        if now - decision["asked"] < self.cfg["decision_timeout_s"]:
+            return False
+        option = next((o for o in decision["options"] if o["key"] == decision["default"]), None)
+        if not option or self._base(task) or self.rung_ok(cs["model"], cs["kind"], task["project_dir"]):
+            return False
+        if claude_cli.tier_of(cs["model"], self.cfg) == "fable" and not task["fable_ok"]:
+            return False
+        decision["taken"] = "dispatching"  # reserve before the effect; a restart never sends this answer twice
+        self._commit(task)
+        try:
+            status, _ = self.pull(cs["session"], "continue", option["text"], auto=1)
+        except Exception as exc:
+            decision["taken"] = "uncertain"
+            self._commit(task, [tasks._line(now, cs, "running", "running",
+                                           "decision default dispatch uncertain: " + redact.clip(redact.mask(str(exc)), 200))])
+            return False
+        if status != 200:
+            decision.pop("taken", None)
+            self._commit(task)
+            return False
+        decision["taken"] = "default"
+        if task.get("plan"):
+            plan.add_answer(self.folder, task, f"{decision['q']}: {option['text']}", who="Default")
+        self._commit(task, [tasks._line(now, cs, "running", "running",
+                                       f"decision taken by default: {option['key']}) {option['text']}")])
+        return True
 
     def _next_source(self, task_id, source_n, source_sid):
         """The step a next step may start from, or why not. Plan 39 (D2 a): any done step with a session and a saved
@@ -3300,6 +3353,7 @@ class Hub:
         if s["run_live"]:
             if task["state"] == "waiting":  # Fred answered the question
                 lines = []
+                task.pop("decision", None)
                 tasks._task_to(task, "running", "", now, cs, lines)
                 self._commit(task, lines)
             return ""
@@ -3308,6 +3362,7 @@ class Hub:
             return ""
         if task["state"] == "waiting" and "asked" in cs and cs["asked"] == meta.get("started"):
             return ""  # no answer yet: the turn that asked is still the last one
+        task.pop("decision", None)  # an answer can finish before the loop observes its live turn
         cs["ctx_tokens"] = s["ctx_tokens"]  # plan 25: the context the step reached (None: unknown, plan 5 3.6)
         meta, _, summary = self._turn_summary(sid)
         text = summary["final"]
@@ -3326,11 +3381,14 @@ class Hub:
             except OSError:
                 pass
             cs["limit"] = provider
-        question = "" if hit else s["stop_question"] or tasks.reply_question(text)
+        decision = tasks.reply_decision(text) if not hit else None
+        refused_decision = bool(decision and cs["kind"] == "design")
+        question = "" if hit or refused_decision else s["stop_question"] or tasks.reply_question(text) or (decision["q"] if decision else "")
         if question:
             cs["asked"] = meta.get("started")
             action, lines = tasks.on_step_ended(task, ok=True, block_error="", verdict="", verdict_detail="",
-                                                question=question, now=now)
+                                                question=question, now=now,
+                                                decision=None if question.startswith("Plan gap:") else decision)
             self._commit(task, lines)
             return action
         manual = task.get("progression") == "manual"
@@ -3360,6 +3418,8 @@ class Hub:
         action, lines = tasks.on_step_ended(task, ok=ok, block_error=block_error, verdict=verdict,
                                             verdict_detail=detail if verdict else "", question="", now=now,
                                             cap=self.limited(cs["model"]) or tasks.cap_reason(subtype, meta.get("limits")))
+        if refused_decision:
+            lines.append(tasks._line(now, cs, "done", "done", "decision refused: design step"))
         self.sync_costs(task)
         if found is not None and action in (("manual",) if manual else ("next", "fix", "done")):
             if task.pop("redo", None) is not None:  # plan 27: the old plan's parts go before the new plan is saved
@@ -3918,7 +3978,7 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
             "label": tasks.label(t["id"]), "slug": t.get("slug") or "", "chat": bool(t.get("chat")),
             "prep": prep_row(t),  # plan 30: step 0
-            "group": group, "asks": asks, "hand_off": hand_off,
+            "group": group, "asks": asks, "hand_off": hand_off, "decision": t.get("decision") or None,
             "supervisor": {"mode": sup.get("mode", ""), "attention": attention, "wake": sup.get("wakes", 0),
                            "say": say},
             "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),

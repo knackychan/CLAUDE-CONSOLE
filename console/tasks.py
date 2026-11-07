@@ -285,7 +285,11 @@ def next_hint(block: str):
 # The hook's patterns (cc_events.py runs in the hook and is not imported here). The Stop hook is async and may
 # land after run_ended, so the service reads the verdict and the question in the step's reply itself.
 _VERDICT = re.compile(r"^[\s`*>\-]*VERDICT:\s*(PASS|FAIL)\b[ \t`*:\-]*(.*?)[ \t`*]*$", re.M)
-_STOP = re.compile(r"^[\s`*>\-]*STOP:\s*(.+?)[\s`*]*$", re.M)
+_STOP = re.compile(r"^[\s`*>\-]*(?:STOP|DECISION):\s*(.+?)[\s`*]*$", re.M)
+_DECISION = re.compile(r"^[ \t`*>\-]*DECISION:[ \t]*(.+?)[ \t`*]*$", re.M)
+_OPTION = re.compile(r"^[ \t`*>]*-\s*([a-z])\)[ \t]*(.+?)[ \t]*$", re.M)
+_DEFAULT = re.compile(r"^[ \t`*>\-]*DEFAULT:[ \t]*([a-d])\b[ \t:,\-]*(.*?)[ \t`*]*$", re.M)
+DECISION_MAX = 200
 _NO_QUESTION = {"none", "n/a", "-", ""}
 
 
@@ -299,7 +303,7 @@ def reply_verdict(text: str) -> tuple:
 
 
 def reply_question(text: str) -> str:
-    """A STOP line, or a direct question opening the final paragraph when the marker was omitted."""
+    """A STOP or DECISION line, or a direct question opening the final paragraph without a marker."""
     found = _STOP.findall(str(text or ""))
     question = found[-1].strip() if found else ""
     if found:
@@ -307,6 +311,26 @@ def reply_question(text: str) -> str:
     last = str(text or "").strip().split("\n\n")[-1].strip()
     match = re.match(r"^(?:Shall|Should|Would|Could|Can|Do|Does|Is|Are|Which|What|Where|When|Who|How|May|Will)\b[^?\n]*\?", last, re.I)
     return redact.clip(redact.mask(match.group()), 200) if match else ""
+
+
+def reply_decision(text: str):
+    """The last DECISION block, or None; malformed blocks still wait as plain reply_question questions."""
+    text = str(text or "")
+    found = list(_DECISION.finditer(text))
+    if not found or found[-1][1].strip().rstrip(".").lower() in _NO_QUESTION:
+        return None
+    question, tail = found[-1][1], text[found[-1].end():]
+    options = [{"key": key, "text": redact.clip(redact.mask(value), DECISION_MAX)}
+               for key, value in _OPTION.findall(tail)]
+    keys = {o["key"] for o in options}
+    if not 2 <= len(options) <= 4 or len(keys) != len(options) or not keys <= set("abcd"):
+        return None
+    default = _DEFAULT.findall(tail)
+    key, why = default[-1] if default else ("", "")
+    if key not in keys:
+        key, why = "", ""
+    return {"q": redact.clip(redact.mask(question), DECISION_MAX), "options": options,
+            "default": key, "why": redact.clip(redact.mask(why), DECISION_MAX)}
 
 
 _LESSON = re.compile(r"^[\s`*>\-]*Lesson:\**\s*(.+?)[\s`*]*$", re.M)
@@ -639,7 +663,7 @@ def cap_reason(subtype: str, limits) -> str:
 
 
 def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdict_detail: str,
-                  question: str, now: float, cap: str = ""):
+                  question: str, now: float, cap: str = "", decision=None):
     """The current step's session ended (README 3.7). Returns (action, chain lines); action is "wait",
     "next", "done", "fix" (start `current + 1`, the fix), "retry" or "stuck". Mutates `task`."""
     s = current_step(task)
@@ -647,7 +671,13 @@ def on_step_ended(task: dict, *, ok: bool, block_error: str, verdict: str, verdi
         raise ValueError("the task has no current step")
     lines = []
     if question:
+        if decision:
+            task["decision"] = {**decision, "step": s["n"], "asked": now}
         _task_to(task, "waiting", f"asks: {question}", now, s, lines)
+        if decision and lines:
+            keys = ", ".join(o["key"] for o in decision["options"])
+            default = f"; default {decision['default']}" if decision["default"] else ""
+            lines[-1]["why"] += f" ({keys}{default})"
         return "wait", lines
     reason = ""
     if not ok:
@@ -871,6 +901,8 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
         _manual_back(task, s, now, lines)
     else:
         return False, f"unknown lever: {lever}", []
+    if lever in ("stop", "retry", "done"):
+        task.pop("decision", None)
     return True, "", lines
 
 

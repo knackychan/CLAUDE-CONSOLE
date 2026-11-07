@@ -38,10 +38,18 @@ class ViewTest(unittest.TestCase):
             "supervisor_mode", "supervisor_projects", "supervisor_model", "supervisor_stuck_model",
             "supervisor_debounce_s", "supervisor_parallel", "supervisor_timeout_s", "supervisor_stall_s",
             "supervisor_max_auto_steps", "supervisor_max_retries", "supervisor_work_usd", "supervisor_task_usd",
-            "supervisor_day_usd"})
+            "supervisor_day_usd", "decision_timeout_s"})
 
 
 class NumbersTest(unittest.TestCase):
+    def test_decision_timeout_default_and_bounds(self):
+        self.assertEqual(tuning.view(CFG)["decision_timeout_s"],
+                         {"value": 600, "default": 600, "min": 0, "max": 86400, "unit": "s", "group": "supervisor"})
+        for value in (0, 600, 86400):
+            self.assertEqual(check(decision_timeout_s=value), ({"decision_timeout_s": value}, {}))
+        for value in (-1, 86401, True, 0.5):
+            self.assertIn("decision_timeout_s", check(decision_timeout_s=value)[1])
+
     def test_in_range_is_kept_and_whole_numbers_are_ints(self):
         clean, errors = check(task_max_steps=8.0, balance_margin=0.15, daily_budget_usd=0, plan_hold=True)
         self.assertEqual(errors, {})

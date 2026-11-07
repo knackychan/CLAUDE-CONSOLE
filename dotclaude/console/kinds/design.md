@@ -28,6 +28,9 @@ The task goal in your own words, and what done looks like: the command $you runs
 One line per fork the work meets, closed, with a one-line why: a name, a place, a data shape, an error path, the
 empty case, which existing function to reuse, what a test asserts. Nothing left as "choose", "either", "if
 needed", "could", "consider", or as a question. If you cannot close a fork from what you read, read more.
+An Open question from an earlier step that the project answers (a file, a config value, a script name) is yours to
+answer here, in Decisions, with the path you read. Only a choice of taste, scope or naming that two readings of
+the repo would make differently goes to $you, as a DECISION block (the rule at the end of this prompt).
 A line $you adds later starts with `$You, <date>:`.
 
 ## Out of scope

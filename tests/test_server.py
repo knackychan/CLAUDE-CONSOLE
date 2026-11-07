@@ -2185,6 +2185,130 @@ class TaskServerTest(RunServerTest):
         self.until(tid, lambda t: t["state"] == "running", "the task runs again")
         self.assertEqual(self.call("/api/task/answer", {"task": tid, "text": "again"})[0], 409)
 
+    def decision_task(self):
+        tid = self.plan_task(goals={3: "write it DECIDE-NAME"})
+        self.until(tid, lambda t: t["state"] == "waiting", "the task waits on a decision")
+        return tid, self.hub.tasks[tid]
+
+    def test_decision_card_waits_and_an_answer_joins_the_plan(self):
+        from console import plan
+        self.hub.cfg["user_name"] = "Fred"
+        tid, task = self.decision_task()
+        self.assertEqual(task["why"], "asks: Which name?")
+        self.assertEqual(len(server.task_row(task)["decision"]["options"]), 2)
+        self.assertEqual(len(tasks.load(self.folder, tid)["decision"]["options"]), 2)
+        sid = tasks.current_step(task)["session"]
+        body = {"task": tid, "request_id": "a" * 32, "target": tasks.message_target(task), "text": "PRODUCT_SHEETS_DIR"}
+        status, data = self.call("/api/task/message", body)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["message"]["mode"], "answer")
+        self.assertEqual(data["message"]["session"], sid)
+        self.assertIn("Which name?: PRODUCT_SHEETS_DIR", plan.section(plan.read(self.folder, task), "## Decisions"))
+        self.assertIn("decision answered by Fred: PRODUCT_SHEETS_DIR", self.whys(tid))
+        self.assertNotIn("decision", self.hub.tasks[tid])
+        self.assertEqual(self.call("/api/task/message", body)[0], 200)
+        self.assertEqual(self.whys(tid).count("decision answered by Fred: PRODUCT_SHEETS_DIR"), 1)
+        self.wait_idle(sid)
+        self.assertTrue(any(i["role"] == "you" and i["text"].startswith("PRODUCT_SHEETS_DIR")
+                            for i in self.hub.runs.chat_of(sid)))
+
+    def test_decision_default_after_timeout_on_auto_only(self):
+        from console import plan, supervisor
+        tid, task = self.decision_task()
+        asked = task["decision"]["asked"]
+        task["supervisor"] = supervisor.initial(self.hub.cfg, task["project_dir"], asked, "auto")
+        with self.hub.tlock:
+            self.assertFalse(self.hub._decision_default(task, asked + 599))
+            for mode in ("gated", "suggest", "off"):
+                task["supervisor"]["mode"] = mode
+                self.assertFalse(self.hub._decision_default(task, asked + 601), mode)
+            task["supervisor"]["mode"] = "auto"
+            task["decision"]["default"] = ""
+            self.assertFalse(self.hub._decision_default(task, asked + 601))
+            task["decision"]["default"] = "a"
+            with mock.patch.object(self.hub, "pull", wraps=self.hub.pull) as pull:
+                self.assertTrue(self.hub._decision_default(task, asked + 600))
+                self.assertFalse(self.hub._decision_default(task, asked + 601))
+                pull.assert_called_once_with(tasks.current_step(task)["session"], "continue", "SHEETS_DIR", auto=1)
+        self.assertEqual(task["decision"]["taken"], "default")
+        self.assertEqual(tasks.load(self.folder, tid)["decision"]["taken"], "default")
+        self.assertIn("decision taken by default: a) SHEETS_DIR", self.whys(tid))
+        self.assertIn("- Default,", plan.section(plan.read(self.folder, task), "## Decisions"))
+        self.assertIn("Which name?: SHEETS_DIR", plan.read(self.folder, task))
+        self.wait_idle(tasks.current_step(task)["session"])
+        self.hub.advance()
+        self.assertNotIn("decision", task)
+
+    def test_decision_answer_before_advance_still_joins_the_plan(self):
+        from console import plan
+        tid = self.plan_task(goals={3: "write it DECIDE-NAME"})
+        task = self.until(tid, self.at(3), "code starts")
+        self.wait_idle(tasks.current_step(task)["session"])
+        self.assertNotIn("decision", task)
+        status, data = self.call("/api/task/message", {"task": tid, "request_id": "b" * 32,
+                                "target": tasks.message_target(task), "text": "A different name"})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["message"]["mode"], "answer")
+        self.assertIn("Which name?: A different name", plan.read(self.folder, task))
+
+    def test_decision_default_waits_for_gates(self):
+        from console import supervisor
+        tid, task = self.decision_task()
+        asked = task["decision"]["asked"]
+        task["supervisor"] = supervisor.initial(self.hub.cfg, task["project_dir"], asked, "auto")
+        baseline = copy.deepcopy(task)
+        cases = ({"owner": "fred"}, {"state": "stopped"}, {"why": "confirm Fable"},
+                 {"supervisor": dict(task["supervisor"], paused=True)},
+                 {"supervisor": dict(task["supervisor"], pending={"status": "uncertain"})},
+                 {"messages": [{"status": "queued"}]},
+                 {"decision": dict(task["decision"], step=1)},
+                 {"decision": dict(task["decision"], taken="dispatching")})
+        with self.hub.tlock, mock.patch.object(self.hub, "pull") as pull:
+            for changes in cases:
+                task.clear()
+                task.update(copy.deepcopy(baseline))
+                task.update(changes)
+                self.assertFalse(self.hub._decision_default(task, asked + 601), changes)
+            task.clear()
+            task.update(copy.deepcopy(baseline))
+            for method in ("_base", "rung_ok"):
+                with mock.patch.object(self.hub, method, return_value="held"):
+                    self.assertFalse(self.hub._decision_default(task, asked + 601), method)
+            pull.assert_not_called()
+            with mock.patch.object(self.hub, "_decision_default", return_value=False) as default:
+                self.hub.tick()
+                default.assert_called_once_with(task, mock.ANY)
+
+    def test_decision_default_zero_timeout_and_refused_dispatch(self):
+        from console import supervisor
+        tid, task = self.decision_task()
+        asked = task["decision"]["asked"]
+        task["supervisor"] = supervisor.initial(self.hub.cfg, task["project_dir"], asked, "auto")
+        self.hub.cfg["decision_timeout_s"] = 0
+        with self.hub.tlock, mock.patch.object(self.hub, "pull", return_value=(409, {"error": "cold cache"})) as pull:
+            self.assertFalse(self.hub._decision_default(task, asked))
+            self.assertNotIn("taken", task["decision"])
+            pull.assert_called_once()
+        self.assertNotIn("decision taken by default: a) SHEETS_DIR", self.whys(tid))
+
+    def test_decision_default_uncertain_dispatch_is_not_replayed(self):
+        from console import supervisor
+        tid, task = self.decision_task()
+        asked = task["decision"]["asked"]
+        task["supervisor"] = supervisor.initial(self.hub.cfg, task["project_dir"], asked, "auto")
+        with self.hub.tlock, mock.patch.object(self.hub, "pull", side_effect=OSError("unknown outcome")) as pull:
+            self.assertFalse(self.hub._decision_default(task, asked + 600))
+            self.assertFalse(self.hub._decision_default(task, asked + 601))
+            pull.assert_called_once()
+        self.assertEqual(tasks.load(self.folder, tid)["decision"]["taken"], "uncertain")
+
+    def test_design_step_decision_block_is_refused(self):
+        tid = self.plan_task(goals={2: "plan it DECIDE-NAME"})
+        task = self.until(tid, self.at(3), "step 3 starts")
+        self.assertIn("decision refused: design step", self.whys(tid))
+        self.assertNotIn("decision", task)
+        self.assertIsNotNone(task.get("plan"))
+
     def test_redo_design_keeps_done_steps(self):
         self.hub.cfg["user_name"] = "Fred"  # plan 31: the redo line names the configured person
         tid = self.plan_task(words="HANDOFF-OK PLAN-OK", kinds=("scout", "design", "code", "code"),

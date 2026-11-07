@@ -232,7 +232,7 @@ def reply(text):
     """The assistant text: the user message echoed, the step prompt's own HANDOFF template defanged (a quoted
     marker is not a block), then what the words in the message ask for."""
     lines = [("> " + line) if line.strip() in ("HANDOFF", "END HANDOFF") else line for line in text.splitlines()]
-    body = "\n".join(lines)
+    body = "\n".join(lines).replace("  DECISION:", "  (template) DECISION:")
     if "HANDOFF-OK" in text:
         block = HANDOFF_BLOCK
         if "HINT-OPUS" in text:  # the note asks the next step up: `Next model:` inside the block's Next
@@ -264,6 +264,8 @@ def reply(text):
         body += "\nVERDICT: FAIL x"
     if "STOP-ASK" in text:
         body += "\nSTOP: which file?"
+    if "DECIDE-NAME" in text:
+        body += "\n" + HANDOFF_BLOCK + "\nDECISION: Which name?\n- a) SHEETS_DIR\n- b) PRODUCT_SHEETS_DIR\nDEFAULT: a shorter"
     return body
 
 

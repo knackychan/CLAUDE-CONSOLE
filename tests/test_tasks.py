@@ -281,6 +281,30 @@ class HandoffTest(unittest.TestCase):
         self.assertLess(len(big.encode("utf-8")), tasks.NOTE_MAX + 200)
         self.assertEqual(tasks.NOTE_MAX, 20 * 1024)
 
+    def test_reply_decision_parses_options_and_default(self):
+        text = "DECISION: Which name?\n- a) SHEETS_DIR\n- b) PRODUCT_SHEETS_DIR\nDEFAULT: a shorter"
+        expected = {"q": "Which name?", "options": [{"key": "a", "text": "SHEETS_DIR"},
+                    {"key": "b", "text": "PRODUCT_SHEETS_DIR"}], "default": "a", "why": "shorter"}
+        self.assertEqual(tasks.reply_decision(text), expected)
+        self.assertEqual(tasks.reply_decision(text + "\n- c) OTHER\n- d) LAST")["options"][-1],
+                         {"key": "d", "text": "LAST"})
+        self.assertEqual(tasks.reply_decision(text + "\nDECISION: New?\n- a) X\n- b) Y"),
+                         {"q": "New?", "options": [{"key": "a", "text": "X"}, {"key": "b", "text": "Y"}],
+                          "default": "", "why": ""})
+        self.assertEqual(tasks.reply_decision(text.replace("DEFAULT: a", "DEFAULT: c"))["default"], "")
+        self.assertEqual(len(tasks.reply_decision(text.replace("Which name?", "q" * 250))["q"]), 200)
+        masked = tasks.reply_decision(text.replace("SHEETS_DIR", "sk-abcdefghijkl1234"))
+        self.assertEqual(masked["options"][0]["text"], "***")
+
+    def test_decision_with_one_option_is_a_question(self):
+        for suffix in ("", "\n- a) X", "\n- a) X\n- a) Y", "\n- a) X\n- b) Y\n- c) Z\n- d) W\n- e) V"):
+            text = "DECISION: Which name?" + suffix
+            self.assertIsNone(tasks.reply_decision(text), text)
+            self.assertEqual(tasks.reply_question(text), "Which name?")
+        for text in ("", "DECISION: none\n- a) X\n- b) Y", "DECISION: N/A."):
+            self.assertIsNone(tasks.reply_decision(text))
+            self.assertEqual(tasks.reply_question(text), "")
+
 
 NOW = 1760235300.0
 
@@ -446,6 +470,23 @@ class ChainTest(unittest.TestCase):
         self.assertEqual((action, lines, task["why"]), ("wait", [], "asks: and which one?"))
         action, _ = end(task)  # Fred answered, the step ended well
         self.assertEqual((action, task["state"], task["why"]), ("next", "running", ""))
+
+    def test_on_step_ended_saves_the_decision_and_waits(self):
+        task = make(("scout", "explain"))
+        run(task, 1)
+        decision = {"q": "Which name?", "options": [{"key": "a", "text": "X"}, {"key": "b", "text": "Y"}],
+                    "default": "a", "why": "shorter"}
+        action, lines = end(task, question=decision["q"], decision=decision)
+        self.assertEqual((action, task["state"], task["why"]), ("wait", "waiting", "asks: Which name?"))
+        self.assertEqual(task["decision"], dict(decision, step=1, asked=NOW + 100))
+        self.assertEqual(lines[-1]["why"], "asks: Which name? (a, b; default a)")
+        for lever in ("stop", "done"):
+            other = json.loads(json.dumps(task))
+            self.assertTrue(tasks.fred(other, lever, NOW + 101)[0])
+            self.assertNotIn("decision", other)
+        task.update(state="stuck")
+        self.assertTrue(tasks.fred(task, "retry", NOW + 101)[0])
+        self.assertNotIn("decision", task)
 
     def test_cap_reason_timeout(self):
         self.assertEqual(tasks.cap_reason("error_step_timeout", {"timeout_s": 1800}),
@@ -1077,6 +1118,8 @@ class ChainTest(unittest.TestCase):
         step = tasks.step(task, 2)
         bare = tasks.step_prompt(task, step, "NOTE")
         self.assertNotIn("$", bare)
+        self.assertIn("DECISION: <the question in one line>", bare)
+        self.assertIn("Two to four options", bare)
         self.assertIn("\nWhat the earlier steps left you:\nNOTE\n\nRules for this step:", bare)
         text = tasks.step_prompt(task, step, "NOTE", plan="PLAN TEXT", part="PART TEXT")
         self.assertLess(text.index("PLAN TEXT"), text.index("What the earlier steps left you:"))
@@ -1152,7 +1195,9 @@ class ChainTest(unittest.TestCase):
         self.assertIn("Fred adds for this retry: try again", tasks.step_prompt(task, tasks.step(task, 2), "note", note="try again", you="Fred"))
         self.assertNotIn("adds for this retry", retry)
         long = dict(task, goal="g" * 9000)
-        self.assertLess(len(tasks.step_prompt(long, tasks.step(long, 1), "")), 9000)
+        long_prompt = tasks.step_prompt(long, tasks.step(long, 1), "")
+        self.assertIn("g" * tasks.GOAL_MAX, long_prompt)
+        self.assertNotIn("g" * (tasks.GOAL_MAX + 1), long_prompt)
 
     def test_step_prompt_is_harness_neutral(self):
         task = make(("scout", "code"))

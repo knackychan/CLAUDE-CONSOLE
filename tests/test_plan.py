@@ -211,6 +211,11 @@ class FilesTest(unittest.TestCase):
         self.assertEqual(line, "- Fred, 2026-10-14: config.json")
         self.assertIn(line, plan.read(self.home, self.t))
 
+    def test_with_answer_names_the_default(self):
+        text = plan.with_answer(SPLIT_INDEX, "Which name?: SHEETS_DIR", "2026-11-07", "Default")
+        self.assertEqual(plan.section(text, "## Decisions").splitlines()[-1],
+                         "- Default, 2026-11-07: Which name?: SHEETS_DIR")
+
     def test_part_body_drops_the_head(self):
         self.assertEqual(plan.part_body("# Part 2: Report\n\n## Files\n- a"), "## Files\n- a\n")
         self.assertEqual(plan.part_body("## Files\n- a\n"), "## Files\n- a\n")
@@ -294,6 +299,8 @@ class PromptTest(unittest.TestCase):
         self.assertIn("at most 6", text)
         self.assertIn("within 4 steps", text)
         self.assertNotIn("$", text)
+        self.assertIn("An Open question from an earlier step that the project answers", text)
+        self.assertIn("with the path you read", text)
 
     def test_design_text_on_a_redo_names_the_question_and_the_done_steps(self):
         t = make_task()

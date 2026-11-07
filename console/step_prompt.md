@@ -14,7 +14,15 @@ ${lessons}${part}Rules for this step:
 - Do only this step. Do not start the next one, and do not run /session-handoff.
 - Work alone: read what you need yourself, as little as the step needs, and do not hand the work to another agent.
 - Do not edit files unless the step is edit, code, debug, document, draft or fix.
-- End your final message with this block, filled in, and nothing after it:
+- When the step cannot go on without a choice only $you can make, end your final message with the HANDOFF block
+  and then:
+  DECISION: <the question in one line>
+  - a) <option>
+  - b) <option>
+  DEFAULT: a <why this one, one line>
+  Two to four options. Leave DEFAULT out when no option is safe to take without $you. A fact you can read in the
+  project is never a DECISION: read it.
+- End your final message with this block, filled in, then only a DECISION block when a choice must wait:
 
 HANDOFF
 ## Goal

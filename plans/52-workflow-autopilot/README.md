@@ -221,14 +221,29 @@ correction (scout, design with `PLAN-OK`, code, verify with `VERDICT-PASS`) and 
 The earlier corrected full run had one failure and one error involving Access denied during saves. The elevated
 FileIO trace caught Listary.exe holding `task.json` across the denied rename in a single-threaded reproducer.
 A controlled metadata-reader handle reproduced WinError 5; closing it allowed the replacement. With Listary
-closed, the unchanged save code completed 10,000 consecutive writes. No persistence code or retries were added;
-Listary can still interfere when running.
+closed, the unchanged save code completed 10,000 consecutive writes. No persistence code or retries were added.
+The runtime bug remains unresolved: Listary can still interfere with normal Console saves when running.
 
 2026-11-07: Task 2b is closed. The supervisor kind names the exception moves, removes Planned next, and preserves
 plan 51's model-selection sentence. Tests were added first for the kind and the done, hold and stuck wakes,
 including the chain's retry before a sonnet stuck pass. The focused checks passed 9 tests in 14.054 s; the full
 suite passed 1112 tests in 641.012 s, with Listary still closed for verification. Fred applies the supervisor kind
-on the Models page with Reset to repo copy. Task 3 has not started.
+on the Models page with Reset to repo copy.
+
+2026-11-07: Task 3 is closed. DECISION blocks carry two to four options, an optional default and its reason;
+malformed blocks still wait as plain questions. Task rows expose the structured decision, and answers through
+the existing message route join the plan's Decisions. The design kind closes repo facts, and the service refuses
+a design step's DECISION block. Plan gaps keep their existing answer path.
+
+The default timeout is 600 seconds (0 takes the default at once). Only auto mode may take it, through the existing
+Continue gates, with no pause or pending guidance. The dispatch is reserved before Continue so an uncertain
+outcome or restart cannot send it again. Completed answers clear the decision even when their turn finishes
+before the service observes it live. No new model pass or persistence retry was added. Task 4 has not started.
+
+Tests were added first. The focused modules passed 490 tests in 611.129 s; an additional early-answer regression
+passed 1 test in 3.649 s. The full background suite passed 1124 tests in 731.184 s, with zero failures or errors;
+it emitted one ResourceWarning about implicit cleanup of an HTTP 409 response. Listary was closed throughout
+verification and restarted afterward. Fred applies the changed design kind on Models with Reset to repo copy.
 
 ### What plan 52 replaces
 
