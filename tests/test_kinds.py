@@ -51,6 +51,16 @@ class KindFilesTest(unittest.TestCase):
         self.assertIn("A read-only audit or review that ends in findings is explain", text)
         self.assertIn("PLAN", kinds.seed_text("design"))  # the design contract itself is unchanged
 
+    def test_planner_keeps_audits_out_of_design_too(self):
+        """Plan 57 D4 (default, Fred to confirm): the planner pass rewrites Prep's steps with its own kind table, so it
+        carries the same two rows and rule, or a hard audit would be turned back into a design step."""
+        text = kinds.seed_text("planner")
+        row = lambda kind: next(line for line in text.splitlines() if line.startswith(f"| {kind} |"))
+        self.assertIn("audit or review", row("explain"))
+        self.assertIn("implementation plan", row("design"))
+        self.assertNotIn("research", row("design"))
+        self.assertIn("A read-only audit or review that ends in findings is explain", text)
+
     def test_ensure_seeds_once_and_keeps_an_edit(self):
         self.assertEqual(kinds.ensure(self.home), list(kinds.NAMES))
         path = Path(self.home) / "kinds" / "code.md"
