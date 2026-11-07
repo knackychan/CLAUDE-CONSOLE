@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import claude_cli, fills, kinds, levers, redact, routing
+from . import claude_cli, facts, fills, kinds, levers, redact, routing
 from .fills import RANK_TIER, TIER_RANK, TIERS  # plan 18: the job tiers (the contract names them here)
 
 RULES = {  # kind -> (model, effort, --tools list; "" = the default set). verify and fix are computed.
@@ -564,6 +564,7 @@ def append_step(task: dict, kind: str, goal: str, pick: str = "", now: float = N
     task["steps"].append(new)
     task["progression"] = "manual"
     task.pop("chat", None)
+    task.pop("accepted", None)
     task["current"] = source["n"]
     task["last_good"] = source["n"]
     task["owner"], task["state"], task["why"] = "service", "running", ""
@@ -769,7 +770,7 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
     Confirm is the Fable confirm, or Run anyway for a budget hold of step `next_n` (that step only). Continue is
     Fred's Continue in the session of a stopped task's current step: the task runs on in that session. Handoff is
     Fred's Hand off in the current step's chat: the task is handed over and nothing more starts. Done is Fred's
-    Mark done on a task that waits, is stuck, stopped or handed over."""
+    Mark done on a task that waits, is stuck, stopped or handed over. Accept records Fred's acceptance once on done."""
     state, s, lines = task["state"], current_step(task), []
     if supervised and lever in ("pause", "resume") and manual_boundary(task):  # plan 44 R2: the explicit bit
         sup = task["supervisor"]
@@ -780,7 +781,14 @@ def fred(task: dict, lever: str, now: float, next_n: int = 0, note: str = "", mo
         lines.append(_line(now, s, "task:" + state, "task:" + state, ("paused" if lever == "pause" else "resumed")
                            + " by Fred"))
         return True, "", lines
-    if lever == "stop":
+    if lever == "accept":
+        if state != "done":
+            return False, f"task is {state}", []
+        if task.get("accepted"):
+            return False, "already accepted", []
+        task["accepted"] = task["updated"] = now
+        lines.append(_line(now, s, "task:done", "task:done", "accepted by Fred"))
+    elif lever == "stop":
         if state in ("done", "stopped"):
             return False, f"task is {state}", []
         if s and s["state"] == "running":
@@ -1206,6 +1214,17 @@ def open_questions(task: dict, briefs: dict) -> list:
             if key not in here and not found[key]["closed"]:
                 found[key]["closed"] = n
     return [found[k] for k in order]
+
+
+def summary(home, task: dict) -> dict:
+    """The finish card from saved steps, facts and briefs only; no live reads or model pass."""
+    steps = [{**{k: s[k] for k in ("n", "kind", "model", "verdict")}, "cost": step_cost(s)} for s in task["steps"]]
+    files = list(dict.fromkeys(p for s in task["steps"] for p in (
+        s["touched"] if "touched" in s else facts.files_in(read_facts(home, task, s["n"])))))
+    briefs = {s["n"]: read_brief(home, task, s["n"]) for s in task["steps"]}
+    return {"goal": task["goal"], "steps": steps, "files": files, "cost": round(sum(s["cost"] for s in steps), 6),
+            "questions": [q for q in open_questions(task, briefs) if not q["closed"]],
+            "accepted": task.get("accepted") or 0}
 
 
 def read_chain(home, task: dict, limit: int = 200) -> list:

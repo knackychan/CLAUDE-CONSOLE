@@ -15,7 +15,7 @@ from urllib.parse import quote
 from pathlib import Path
 from unittest import mock
 
-from console import attach, brief, claude_cli, events, guard, levers, limits, paths, server, tasks, usage
+from console import attach, brief, claude_cli, events, guard, levers, limits, paths, server, supervisor, tasks, usage
 from console.harness import codex as codex_adapter
 
 
@@ -4090,8 +4090,95 @@ class SupervisedIntakeTest(TaskServerTest):
 
 
 
+class FinishServerTest(TaskServerTest):
+    def finished_task(self):
+        task = tasks.new_task(str(self.project), "proj", "Finish", "saved goal", tasks.plan_steps(
+            [{"kind": "scout", "goal": "look"}], 6), "normal", {}, "", "auto", time.time())
+        task.update(state="done", owner="fred", current=1, last_good=1)
+        task["steps"][0].update(state="done", session="saved-session", model="haiku", effort="low", cost=0.1,
+                                attempts=[{"session": "saved-session", "cost": 0.1, "started": 1.0, "ended": 2.0,
+                                           "why": "", "final": True}])
+        task["supervisor"] = supervisor.initial(self.hub.cfg, str(self.project), time.time(), "suggest")
+        tasks.save(self.folder, task)
+        tasks.log(self.folder, task["id"], [tasks._line(time.time(), task["steps"][0], "task:running", "task:done")])
+        self.hub.tasks[task["id"]] = task
+        return task
+
+    def test_get_task_summary_on_done_only(self):
+        task = self.finished_task()
+        with mock.patch.object(server.compact, "_ask", side_effect=AssertionError("no model pass")):
+            for state in tasks.TASK_STATES:
+                with self.subTest(state=state):
+                    task["state"] = state
+                    code, data = self.task(task["id"])
+                    self.assertEqual(code, 200)
+                    self.assertIn("summary", data)
+                    if state == "done":
+                        self.assertEqual(data["summary"], tasks.summary(self.folder, task))
+                    else:
+                        self.assertIsNone(data["summary"])
+
+    def test_accept_supersedes_the_done_card_and_groups_done(self):
+        task = self.finished_task()
+        tid = task["id"]
+        answer = {"decision": {"decision": "add_next_step", "kind": "verify", "instructions": "check the result",
+                               "model": "auto", "reason": "one more check", "confidence": "high", "for_fred": ""},
+                  "cost": 0.001, "model": "haiku", "turns": 1, "error": ""}
+        self.hub._sup_hook(task)
+        self.hub.wakes[tid]["due"] = 0
+        with mock.patch.object(supervisor, "run", return_value=answer):
+            self.assertEqual(self.hub._supervisor_tick(), [tid])
+            for thread in list(self.hub.sup_threads):
+                thread.join(10)
+        task = self.hub.tasks[tid]
+        sup = task["supervisor"]
+        self.assertEqual(sup["pending"]["triggers"], ["done"])
+        self.assertEqual(sup["pending"]["status"], "suggest")
+        self.assertEqual(server.task_row(task)["group"], "needs")
+        self.assertFalse(server.task_row(task)["accepted"])
+        self.assertEqual(self.task(tid)[1]["levers"]["accept"], "")
+        sup.update(auto_steps=2, retries={1: 1}, work_usd=0.2)
+        epoch, wakes, usd = sup["epoch"], sup["wakes"], sup["usd"]
+        with mock.patch.object(self.hub.runs, "start") as start, \
+                mock.patch.object(server.compact, "_ask", side_effect=AssertionError("no model pass")):
+            code, body = self.call("/api/task/accept", {"task": tid})
+            self.assertEqual(code, 200, body)
+            start.assert_not_called()
+            self.assertEqual(self.call("/api/task/accept", {"task": tid})[0], 409)
+        saved = tasks.load(self.folder, tid)
+        self.assertGreater(saved["accepted"], 0)
+        self.assertEqual(self.task(tid)[1]["summary"]["accepted"], saved["accepted"])
+        self.assertEqual(self.task(tid)[1]["levers"]["accept"], "already accepted")
+        self.assertIsNone(self.task(tid)[1]["supervisor"]["pending"])
+        self.assertEqual((sup["epoch"], sup["wakes"], sup["usd"]), (epoch + 1, wakes, usd))
+        self.assertEqual((sup["auto_steps"], sup["retries"], sup["work_usd"]), (0, {}, 0))
+        outcome = [r for r in supervisor.read_log(self.folder, tid) if r.get("phase") == "outcome"]
+        self.assertEqual([(r["status"], r["by"], r["action"]) for r in outcome], [("superseded", "fred", "accept")])
+        self.assertEqual([r["why"] for r in self.chain(tid)].count("accepted by Fred"), 1)
+        self.assertEqual((server.task_row(saved)["group"], server.task_row(saved)["accepted"]), ("done", True))
+        for status in ("suggest", "uncertain"):
+            saved["supervisor"]["pending"] = {"status": status, "decision": {"decision": "add_next_step"}}
+            self.assertEqual(server.task_row(saved)["group"], "done")
+
+    def test_accept_preserves_guidance_and_uncertain_dispatch_safeguards(self):
+        task = self.finished_task()
+        tid = task["id"]
+        task["chat"] = True
+        task["messages"] = [{"id": "a" * 32, "mode": "guidance", "status": "uncertain"}]
+        self.assertTrue(self.hub.task_levers(tid)["accept"])
+        self.assertEqual(self.call("/api/task/accept", {"task": tid})[0], 409)
+        self.assertNotIn("accepted", task)
+        task["messages"] = [{"id": "b" * 32, "mode": "next", "status": "queued"}]
+        pending = {"wake": 1, "status": "uncertain", "dispatch": {"call": "request_next"}}
+        task["supervisor"]["pending"] = pending
+        self.assertEqual(self.call("/api/task/accept", {"task": tid})[0], 200)
+        self.assertEqual(task["messages"][0]["status"], "cancelled")
+        self.assertEqual(task["supervisor"]["pending"], pending)
+        self.assertEqual(server.task_row(task)["group"], "done")
+
+
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
-    for _cls in (HandoffServerTest, SupervisedIntakeTest):
+    for _cls in (FinishServerTest, HandoffServerTest, SupervisedIntakeTest):
         if _name.startswith("test_") and _name not in _cls.__dict__:
             setattr(_cls, _name, None)
 

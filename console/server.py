@@ -1027,6 +1027,7 @@ class Hub:
             if task is None:
                 return None
             state, owner, cs, nxt = task["state"], task["owner"], tasks.current_step(task), self._next_step(task)
+            accept = f"task is {state}" if state != "done" else "already accepted" if task.get("accepted") else ""
             if task.get("chat"):  # plan 29: the chat's session has the levers (Hub.levers), the task none
                 off = "a chat: use its session's levers"
                 live = bool(cs and cs["session"] and self.runs.is_live(cs["session"]))
@@ -1038,6 +1039,7 @@ class Hub:
                         "stepdone": self._stepdone_off(task, cs, live),
                         "retry": self._base(task) or ("" if state in ("stuck", "stopped") and cs and cs["state"] == "failed" and not live else off),
                         "done": "still working: wait until it stops" if live else "" if next_step["available"] else next_step["reason"],
+                        "accept": accept,
                         "add_next": "" if next_step["available"] else next_step["reason"],
                         "clear": "still working: wait until it stops" if live else  # plan 30: a finished chat goes too
                         "" if state == "done" else f"task is {state}",
@@ -1099,7 +1101,7 @@ class Hub:
             if not stepdone and base and task.get("progression") != "manual" and cs["n"] < len(task["steps"]):
                 stepdone = base  # the chain would start the next step: it needs the project
             return self._guidance_levers(task, {"start": start, "stop": stop, "pause": pause, "resume": resume, "retry": retry, "stepdone": stepdone,
-                    "confirm": confirm, "clear": clear, "done": done, "answer": answer, "redo": redo, "keep": keep,
+                    "confirm": confirm, "clear": clear, "done": done, "accept": accept, "answer": answer, "redo": redo, "keep": keep,
                     "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
                     "next_route": f"{route['rung']}/{route['effort']}" if route and not route["hold"] else "",
                     "cwd": task["project_dir"], "add_next": "" if next_step["available"] else next_step["reason"]})
@@ -1108,7 +1110,7 @@ class Hub:
     def _guidance_levers(task, info):
         pending = tasks.pending_messages(task)
         if pending:
-            for lever in ("stepdone", "clear", "done", "redo", "confirm", "keep", "add_next"):
+            for lever in ("stepdone", "clear", "done", "accept", "redo", "confirm", "keep", "add_next"):
                 current = tasks.current_step(task)
                 if lever == "confirm" and (not current or current["state"] == "planned") and all(m["status"] == "queued" for m in pending):
                     continue
@@ -2136,8 +2138,9 @@ class Hub:
             sup["paused"] = False
         if action == "stop":
             self.wakes.pop(task["id"], None)
-        gone = {"stop": "the task was stopped", "done": "the task was finished", "handoff": "the task was handed off"}
-        if action in ("stop", "done", "handoff", "retry", "confirm", "keep", "stepdone", "add_next"):
+        gone = {"stop": "the task was stopped", "done": "the task was finished", "accept": "the task was finished",
+                "handoff": "the task was handed off"}
+        if action in ("stop", "done", "accept", "handoff", "retry", "confirm", "keep", "stepdone", "add_next"):
             for m in self._next_open(task):  # plan 48 D15: Fred moved the task himself; his earlier words are dropped
                 m.update(status="cancelled", error=gone.get(action, "you moved the task yourself"))
         pending = sup.get("pending")
@@ -3799,7 +3802,7 @@ class Hub:
             return 200, {"task": task_id, "file": rel, "words": task["plan"]["words"], "kb": task["plan"]["kb"]}
 
     def task_lever(self, task_id, lever: str, note="", model=None, pending="", *, origin: str = "fred") -> tuple:
-        """Fred's Stop, Pause, Resume, Retry, Confirm, Clear and Mark done. task_levers decides first; Stop is the run's
+        """Fred's Stop, Pause, Resume, Retry, Confirm, Clear, Mark done and Accept. task_levers decides first; Stop is the run's
         interrupt (runs.stop), never a kill. `note` (Retry only, plan 33) joins the retry's prompt; `model` (Retry
         only, plan 40) is "" for auto or a known model. `origin` (plan 44, private) is "supervisor" when an approved or
         automatic supervisor decision calls it: the gates are the same. Returns (status, body)."""
@@ -3815,7 +3818,7 @@ class Hub:
             task, now = self.tasks[task_id], time.time()
             cs = tasks.current_step(task)
             messages = tasks.pending_messages(task)
-            if messages and lever in ("retry", "stepdone", "done", "clear", "redo", "confirm", "keep"):
+            if messages and lever in ("retry", "stepdone", "done", "accept", "clear", "redo", "confirm", "keep"):
                 starting = lever == "confirm" and (not cs or cs["state"] == "planned") and all(m["status"] == "queued" for m in messages)
                 if not starting and (lever != "retry" or pending != "carry" or any(m["status"] not in ("queued", "failed") for m in messages)):
                     return 409, {"error": "Resolve pending guidance first. Cancel it, or explicitly Retry with queued guidance."}
@@ -3975,13 +3978,15 @@ def task_row(t: dict, live=lambda sid: "", sessions=None) -> dict:
                           f"{decision.get('reason') or pending.get('error') or ''}", 120)
     if t.get("chat") and r is not None:  # plan 30: a chat task sits where its session would (needs, replied, working)
         group = r["group"] if r["group"] in ("needs", "replied", "working") else "working" if r["group"] == "empty" else "done"  # stale, verified, idle: its turn is over
+    if t.get("accepted"):
+        group = "done"
     return {"id": t["id"], "title": t["title"], "project": t["project"], "project_dir": t["project_dir"],
             "label": tasks.label(t["id"]), "slug": t.get("slug") or "", "chat": bool(t.get("chat")),
             "prep": prep_row(t),  # plan 30: step 0
             "group": group, "asks": asks, "hand_off": hand_off, "decision": t.get("decision") or None,
             "supervisor": {"mode": sup.get("mode", ""), "attention": attention, "wake": sup.get("wakes", 0),
                            "say": say},
-            "state": t["state"], "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
+            "state": t["state"], "accepted": bool(t.get("accepted")), "owner": t["owner"], "current": t["current"], "count": len(t["steps"]),
             "why": t["why"], "updated": t["updated"], "effort": t["effort"],
             "cost": round(sum(tasks.step_cost(s) for s in t["steps"]), 4),
             "route": f"{cs['model']}/{cs['effort']}" if cs and cs["model"] else "",
@@ -4127,7 +4132,7 @@ class Handler(BaseHTTPRequestHandler):
         routes["/api/task/supervisor"] = self._task_supervisor
         routes["/api/task/supervisor/replay"] = self._task_supervisor_replay
         routes["/api/task/handoff/preview"], routes["/api/task/handoff"] = self._task_handoff_preview, self._task_handoff
-        for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "redo", "keep"):
+        for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "accept", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
         path = urlparse(self.path).path
         handler = routes.get(path)
@@ -4556,6 +4561,7 @@ class Handler(BaseHTTPRequestHandler):
         sent = dict(task, steps=[{k: v for k, v in s.items() if k not in ("git_base", "touched")}  # plan 27 K6
                                  for s in task["steps"]])
         return self._json({"task": sent, "levers": self.hub.task_levers(task_id),
+                           "summary": tasks.summary(self.hub.folder, task) if task["state"] == "done" else None,
                            "message": self.hub.message_availability(task),
                            "next_step": self.hub.next_availability(task),
                            "sources": self.hub.next_sources(task),

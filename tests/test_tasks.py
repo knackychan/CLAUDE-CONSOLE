@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from console import claude_cli, kinds, levers, paths, prep, tasks
+from console import claude_cli, facts, kinds, levers, paths, prep, tasks
 
 GOOD = ("## Goal\nAdd the export; this step: fix add()\n## Findings\nadd() is in calc.py:2\n## Files touched\n"
         "- calc.py (fixed add)\n## Troubleshooting\n- (none)\n## Open questions\n- (none)\n## Next\nRun the tests")
@@ -1519,6 +1519,55 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(tasks.open_questions(task, {}), [])
         self.assertEqual(tasks.section_items(brief("a", "b"), tasks.QUESTIONS_HEAD), ["a", "b"])
 
+    def test_summary_lists_steps_files_cost_and_open_questions(self):
+        task = make()
+        task.update(state="done", current=3, last_good=3)
+        one, two, three = task["steps"]
+        one.update(model="haiku", session="s1", cost=9, attempts=[
+            {"session": "s0", "cost": 0.01}, {"session": "s1", "cost": 0.02}])
+        two.update(model="sonnet", session="s2", cost=0.2)
+        three.update(model="opus", session="s3", cost=0.3, verdict="PASS")
+        touched = [f"src/file{i}.py" for i in range(35)]
+        two["touched"] = touched
+        three["touched"] = ["legacy.py", touched[-1], "last.py"]
+        with tempfile.TemporaryDirectory() as home:
+            tasks.save(home, task)
+            tasks.write_facts(home, task, one, facts.text("a123456", "b123456", {"legacy.py": [1, 0]}, None))
+            tasks.write_facts(home, task, two, facts.text("a123456", "b123456", dict.fromkeys(touched, [1, 0]), None))
+            tasks.write_brief(home, task, one, brief("Resolved?", "Still open?"))
+            tasks.write_brief(home, task, two, brief("Still open?", "Ship when?"))
+            saved = tasks.load(home, task["id"])
+            got = tasks.summary(home, saved)
+            self.assertEqual(got, {"goal": task["goal"], "steps": [
+                {"n": 1, "kind": "scout", "model": "haiku", "verdict": "", "cost": 0.03},
+                {"n": 2, "kind": "code", "model": "sonnet", "verdict": "", "cost": 0.2},
+                {"n": 3, "kind": "verify", "model": "opus", "verdict": "PASS", "cost": 0.3}],
+                "files": ["legacy.py", *touched, "last.py"], "cost": 0.53, "questions": [
+                    {"q": "Still open?", "opened": 1, "closed": 0},
+                    {"q": "Ship when?", "opened": 2, "closed": 0}], "accepted": 0})
+            saved["accepted"] = NOW
+            self.assertEqual(tasks.summary(home, saved)["accepted"], NOW)
+            self.assertEqual(tasks.summary(Path(home) / "missing", make())["files"], [])
+            self.assertEqual(tasks.summary(Path(home) / "missing", make())["questions"], [])
+
+    def test_accept_only_once_on_done(self):
+        for state in tasks.TASK_STATES:
+            if state == "done":
+                continue
+            task = make()
+            task["state"] = state
+            self.assertEqual(tasks.fred(task, "accept", NOW), (False, f"task is {state}", []))
+            self.assertNotIn("accepted", task)
+        task = make()
+        run(task, 1)
+        task.update(state="done", owner="fred")
+        ok, why, lines = tasks.fred(task, "accept", NOW + 1)
+        self.assertEqual((ok, why, task["accepted"], task["updated"]), (True, "", NOW + 1, NOW + 1))
+        self.assertEqual(lines, [tasks._line(NOW + 1, tasks.current_step(task), "task:done", "task:done", "accepted by Fred")])
+        self.assertEqual((task["state"], task["owner"]), ("done", "fred"))
+        self.assertEqual(tasks.fred(task, "accept", NOW + 2), (False, "already accepted", []))
+        self.assertEqual(task["accepted"], NOW + 1)
+
     def test_read_chain_skips_broken_lines(self):
         with tempfile.TemporaryDirectory() as home:
             task = make()
@@ -1610,6 +1659,7 @@ class NextStepTest(unittest.TestCase):
 
     def test_append_step_numbers_the_successor_and_keeps_the_task(self):
         task = self.manual()
+        task["accepted"] = NOW + 100
         before = {k: task[k] for k in ("id", "goal", "project_dir", "project", "title", "created", "prep")}
         task["steps"][0]["cost"] = 0.25
         new = tasks.append_step(task, "verify", " Check what step 01 changed ", now=NOW + 200)
@@ -1622,6 +1672,7 @@ class NextStepTest(unittest.TestCase):
         self.assertEqual((new["checked"], new["source_step"], new["source_session"]), (1, 1, "s1"))
         self.assertEqual(new["pick"], "")
         self.assertEqual(task["progression"], "manual")
+        self.assertNotIn("accepted", task)
         self.assertEqual((task["state"], task["owner"], task["current"], task["last_good"]),
                          ("running", "service", 1, 1))
         self.assertEqual(task["updated"], NOW + 200)

@@ -245,6 +245,30 @@ passed 1 test in 3.649 s. The full background suite passed 1124 tests in 731.184
 it emitted one ResourceWarning about implicit cleanup of an HTTP 409 response. Listary was closed throughout
 verification and restarted afterward. Fred applies the changed design kind on Models with Reset to repo copy.
 
+2026-11-07: Task 4 is closed. GET /api/task exposes a finish summary only on a done task, built from saved steps,
+facts and briefs: goal, kinds, models, verdicts, costs, deduplicated files in step order, still-open questions and
+the accepted timestamp. The saved full file list is used when present; older steps use their saved facts text.
+No new model pass is used.
+
+Accept records acceptance once on done, supersedes the pending done suggestion through the existing supervisor
+bookkeeping, and groups the task as done. Lifetime wakes and spend stay; unresolved guidance still blocks the
+action, and an uncertain supervisor dispatch is preserved. Accept cancels unused next-step messages as Finish
+does. Reopen keeps the existing next-step message path and one request_next call; append_step clears accepted,
+and the reopened task uses manual progression. DECISION, Plan gaps and their message paths are unchanged.
+No kind file changed, so Task 4 needs no Models page Reset to repo copy. Task 5 and the visual UI work were not started.
+
+Tests were added first. The focused modules passed 542 tests in 511.116 s with zero failures or errors; an
+additional chat-task safeguard check passed 1 test in 0.528 s. The closing full background suite passed 1130 tests
+in 554.940 s, with zero failures or errors and one ResourceWarning about implicit cleanup of an HTTP 409 response.
+Listary was closed for the focused checks and throughout the monitored closing full run, then restarted afterward.
+Its normal-runtime WinError 5 persistence bug remains unresolved; no persistence fix or retries were added.
+
+An earlier full run passed 1128 tests in 574.125 s, with zero failures or errors and the same cleanup warning.
+Listary had restarted at 14:34 Taipei time during that run, so it was not used as the Listary-closed verification.
+The test class loop now preserves its original final class alias, keeping existing unittest discovery intact;
+the closing count includes six new Task 4 tests. An intermediate rerun was stopped after Listary was found running,
+then Listary was closed again before the closing full run began.
+
 ### What plan 52 replaces
 
 | Built | Replaced by | Why |

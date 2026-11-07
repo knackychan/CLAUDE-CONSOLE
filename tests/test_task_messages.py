@@ -352,6 +352,38 @@ class TaskMessageTest(_TaskServerTest):
         self.assertEqual(code, 200, body)
         self.assertEqual(self.hub.wakes[tid]["triggers"], ["message"])
 
+    def test_reopen_a_done_chain_task_with_a_next_message(self):
+        tid = self.boundary_task(done=True)
+        task = self.hub.tasks[tid]
+        task["accepted"] = 101.0
+        tasks.save(self.folder, task)
+        self.assertIsNone(task.get("progression"))
+        words = "verify only the 340 px case HANDOFF-OK VERDICT-PASS"
+        code, body = self.message(tid, words)
+        self.assertEqual(code, 200, body)
+        self.assertEqual(body["message"]["mode"], "next")
+        self.hub.wakes[tid]["due"] = 0
+        answer = {"decision": {"decision": "add_next_step", "kind": "verify", "instructions": "verify",
+                               "model": "auto", "reason": "Fred reopened it", "confidence": "high", "for_fred": ""},
+                  "cost": 0.001, "model": "haiku", "turns": 1, "error": ""}
+        with mock.patch.object(supervisor, "run", return_value=answer), \
+                mock.patch.object(self.hub, "request_next", wraps=self.hub.request_next) as request:
+            self.assertEqual(self.hub._supervisor_tick(), [tid])
+            for thread in list(self.hub.sup_threads):
+                thread.join(10)
+            self.assertEqual(request.call_count, 1)
+        task = self.hub.tasks[tid]
+        self.assertEqual((len(task["steps"]), task["progression"]), (2, "manual"))
+        self.assertNotIn("accepted", task)
+        self.assertNotIn("accepted", tasks.load(self.folder, tid))
+        self.assertEqual(task["steps"][1]["goal"], words)
+        self.assertNotEqual(task["steps"][1]["session"], "s1")
+        task = self.until(tid, tasks.manual_boundary, "reopened step stops at choose next step")
+        self.assertEqual(task["why"], "choose next step")
+        self.assertTrue(self.hub.task_levers(tid)["accept"])
+        self.assertEqual(self.call("/api/task/done", {"task": tid})[0], 200)
+        self.assertEqual(self.call("/api/task/accept", {"task": tid})[0], 200)
+
     def test_fred_moving_the_task_cancels_next_messages(self):  # D15
         for n, action in enumerate(("retry", "confirm", "keep", "stepdone", "add_next", "handoff"), start=1):
             with self.subTest(action=action):
