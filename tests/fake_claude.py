@@ -56,9 +56,15 @@ def result(sid, subtype="success", denials=()):
 def supervisor(raw):
     """Plan 44: the supervisor pass (its schema has a `decision` property). SUP-VERIFY / SUP-CODE add a step,
     SUP-FINISH finishes, SUP-ESCALATE escalates, SUP-BAD answers a malformed decision, SUP-ERROR an error envelope
-    that still reports its cost, SUP-EXIT a plausible decision with exit code 3; else wait."""
+    that still reports its cost, SUP-EXIT a plausible decision with exit code 3; else wait.
+    Plan 52 Task 7: SUP-RETRY retries the stuck step with a note, SUP-CONFIRM confirms a plan hold."""
     base = {"reason": "fake supervisor", "confidence": "high", "for_fred": ""}
-    if "SUP-VERIFY" in raw:
+    if "SUP-RETRY" in raw:
+        fields = dict(base, decision="retry", note="Two attempts were cut off. Start the step again from the plan.",
+                      model="")
+    elif "SUP-CONFIRM" in raw:
+        fields = dict(base, decision="confirm")
+    elif "SUP-VERIFY" in raw:
         fields = dict(base, decision="add_next_step", kind="verify", instructions="Check the last step", model="auto")
     elif "SUP-CODE" in raw:
         fields = dict(base, decision="add_next_step", kind="code", instructions="Fix the failing line", model="auto")
