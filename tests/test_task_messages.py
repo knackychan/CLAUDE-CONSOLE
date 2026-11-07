@@ -4,11 +4,36 @@ import threading
 import time
 from unittest import mock
 
-from console import plan, server, supervisor, tasks
+from console import paths, plan, server, supervisor, tasks
 from tests.test_server import TaskServerTest as _TaskServerTest
 
 
 class TaskMessageTest(_TaskServerTest):
+    def test_answer_with_remember_auto_takes_the_default_and_switches(self):
+        tid, task = self.decision_task()
+        for text, level in (("PRODUCT_SHEETS_DIR", "auto"), ("SHEETS_DIR", "turbo")):
+            self.assertEqual(self.message(tid, text, remember=level)[0], 400)
+            self.assertFalse(self.hub.tasks[tid].get("messages"))
+        with mock.patch.object(paths, "set_config", side_effect=ValueError("bad config")):
+            self.assertEqual(self.message(tid, "SHEETS_DIR", remember="auto")[0], 400)
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["mode"], "off")
+        status, data = self.message(tid, "SHEETS_DIR", remember="auto")
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["message"]["mode"], "answer")
+        saved = self.hub.tasks[tid]
+        self.assertEqual(saved["supervisor"]["mode"], "auto")
+        self.assertIn("Which name?: SHEETS_DIR", plan.read(self.folder, saved))
+        self.assertEqual(set(json.loads((self.folder / "config.json").read_text())["supervisor_projects"].values()), {"auto"})
+        self.assertEqual(self.message(tid, "SHEETS_DIR", remember="auto")[0], 200)
+        self.assertEqual(self.whys(tid).count("supervisor mode: off -> auto by Fred (project)"), 1)
+
+    def test_remember_answer_refuses_plain_questions_and_guidance(self):
+        tid = self.plan_task(goals={3: "write it PLAN-GAP"})
+        self.until(tid, lambda t: t["state"] == "waiting", "plan gap waits")
+        self.assertEqual(self.message(tid, "SHEETS_DIR", remember="auto")[0], 400)
+        other = self.make_task()
+        self.assertEqual(self.message(other, "guidance", remember="auto")[0], 400)
+
     def message(self, tid, text="correction HANDOFF-OK", **changes):
         body = {"task": tid, "text": text, "request_id": "a" * 32,
                 "target": tasks.message_target(self.hub.tasks[tid])}

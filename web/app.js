@@ -1140,8 +1140,10 @@ function plannerLine(p) {  // plan 47: one muted line above the steps; the scope
 // plan 48: the supervisor mode a Start gets, as supervisor._project_mode reads it: the project's entry, else the global mode
 function supMode(projectDir) {
   const sc = (cfg && cfg.supervisor_config) || {};
-  const hit = Object.entries(sc.projects || {}).find(([dir, mode]) => ["off", "suggest", "auto"].includes(mode) && sameDir(dir, projectDir));
-  return hit ? hit[1] : ["off", "suggest", "auto"].includes(sc.mode) ? sc.mode : "suggest";
+  const modes = sc.modes || ["off", "suggest", "gated", "auto"];
+  const hit = Object.entries(sc.projects || {}).find(([dir]) => sameDir(dir, projectDir));
+  const mode = hit ? hit[1] : sc.mode == null ? "gated" : sc.mode;
+  return modes.includes(mode) ? mode : "off";
 }
 function cardSteps(c) { return (c.steps || []).filter((s) => s.kind !== "verify" && s.goal); }
 function startLine(c, n = cardSteps(c).length) {
@@ -2408,7 +2410,7 @@ function resetModels() {
     tiers: Object.fromEntries(Object.entries(cfg.tiers || {}).map(([t, rows]) => [t, rows.map((r) => ({ rung: r.rung, effort: r.effort }))])),
     supMode: supSaved().mode, supProjects: clone(supSaved().projects) };
 }
-function supSaved() { const sc = cfg.supervisor_config || {}; return { mode: sc.mode || "suggest", projects: sc.projects || {} }; }  // plan 50
+function supSaved() { const sc = cfg.supervisor_config || {}; return { mode: sc.mode || "gated", projects: sc.projects || {} }; }  // plan 50
 function savedTiers() { return Object.fromEntries(Object.entries(cfg.tiers || {}).map(([t, rows]) => [t, rows.map((r) => ({ rung: r.rung, effort: r.effort }))])); }
 function pinOf(pins, k) { const p = pins[k] || {}; return { rung: p.rung || "auto", effort: p.effort || "auto" }; }
 function cleanPins(pins) {  // a kind on auto and auto is the code's rule: nothing to keep (the service drops it too)
@@ -2608,9 +2610,9 @@ function supSeg(spec, modes, pick, label) {
 }
 function supProjectMode(path) { const k = Object.keys(medit.supProjects).find((x) => sameDir(x, path)); return k ? medit.supProjects[k] : "default"; }
 function supRows() {
-  const modes = (cfg.supervisor_config || {}).modes || ["off", "suggest", "auto"], pick = medit.supMode, ed = pick !== "suggest";
+  const modes = (cfg.supervisor_config || {}).modes || ["off", "suggest", "gated", "auto"], pick = medit.supMode, ed = pick !== "gated";
   const mode = `<div class="tf${ed ? " ed" : ""}"><span class="nm">Mode for new tasks</span><span class="v">${supSeg("mode", modes, pick, "Supervisor mode")}</span>
-    <span class="sub">supervisor_mode · default suggest${ed ? ' · <button class="rs" data-msup="mode:suggest">reset</button>' : ""}</span></div>`;
+    <span class="sub">supervisor_mode · default gated${ed ? ' · <button class="rs" data-msup="mode:gated">reset</button>' : ""}</span></div>`;
   const projects = cfg.projects || [], set = projects.filter((p) => supProjectMode(p) !== "default").length;
   const rows = projects.map((p, i) => { const m = supProjectMode(p); return `<div class="tf${m !== "default" ? " ed" : ""}"><span class="nm" title="${esc(p)}">${esc(p.split(/[\\/]/).filter(Boolean).pop() || p)}</span>
     <span class="v">${supSeg("proj:" + i, ["default", ...modes], m, "Supervisor mode for " + p)}</span><span class="sub">${m === "default" ? "the mode for new tasks" : "this project only"}</span></div>`; }).join("");
@@ -3741,7 +3743,7 @@ function taskMenu(t, d, srow) {  // plan 48: everything that is not a moment; ea
   if (lv.redo === "") m.push(item("redo", "Redo design", "", ' title="Runs the design step again"'));
   if (sl.terminal === "") m.push(item("terminal", "Open in terminal"));
   if (srow && srow.rules_warn && t.project_dir) m.push(item("review", "Review rules"));
-  if (sup) m.push(`<span class="lbl grp">Supervisor for this task</span><span class="seg" role="group" aria-label="Supervisor mode for this task">${["off", "suggest", "auto"].map((md) =>
+  if (sup) m.push(`<span class="lbl grp">Supervisor for this task</span><span class="seg" role="group" aria-label="Supervisor mode for this task">${((cfg && cfg.supervisor_config || {}).modes || ["off", "suggest", "gated", "auto"]).map((md) =>
     `<button class="btn sm" data-tact="supmode" data-tid="${tid}" data-mode="${md}" aria-pressed="${sup.mode === md}">${md}</button>`).join("")}</span>`);
   m.push("<hr>", item("folder", "Open task folder", "", ` title="${esc(taskDir(t.id))}"`));
   if (lv.clear === "") m.push(item("clear", "Delete task", "", ` title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays"`, " stop"));

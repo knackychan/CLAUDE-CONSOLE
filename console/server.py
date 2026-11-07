@@ -1243,6 +1243,15 @@ class Hub:
                 return 400, {"error": "This harness cannot receive attachments. Remove the files or Retry on Claude."}
             if available["cold"] and body.get("confirm") is not True:
                 return 409, {"error": "Cold cache: confirm the re-read cost before sending.", **available}
+            remember = body.get("remember")
+            if remember is not None:
+                cs = tasks.current_step(task)
+                decision = task.get("decision") or (tasks.reply_decision(self.final_message(cs["session"])[0])
+                                                      if cs and cs["kind"] != "design" else None)
+                default = next((o["text"] for o in (decision or {}).get("options", [])
+                                if o["key"] == decision.get("default")), None)
+                if available["mode"] != "answer" or default is None or payload["text"] != default:
+                    return 400, {"error": "remember applies only to an answer taking the decision's default"}
             now = time.time()
             message = {"id": request_id, "task": task["id"], **payload, "files": attach.summary(files),
                        "hash": signature, "mode": available["mode"], "status": "queued", "created": now,
@@ -1253,6 +1262,10 @@ class Hub:
                 if files:
                     tasks.message_files(self.folder, task, message, files)
                 updated = copy.deepcopy(task)
+                if remember is not None:
+                    why = self.remember_level(updated, remember)
+                    if why:
+                        return 400, {"error": why}
                 updated.setdefault("messages", []).append(message)
                 self._supervisor_fred(updated, now, "message")
                 self._commit(updated, [line] if line else ())
@@ -2161,7 +2174,7 @@ class Hub:
         keys = set(body)
         if keys == {"task", "mode"}:
             if body["mode"] not in supervisor.MODES:
-                return 400, {"error": "mode must be off, suggest or auto"}
+                return 400, {"error": "mode must be off, suggest, gated or auto"}
         elif keys in ({"task", "wake", "action"}, {"task", "wake", "action", "note"}):
             wake = body["wake"]
             if isinstance(wake, bool) or not isinstance(wake, int) or wake < 1:
@@ -3440,7 +3453,7 @@ class Hub:
             if meta["kb"] > self.cfg["plan_max_kb"]:
                 tasks._task_to(task, "waiting", f"plan {meta['kb']:.0f} KB, over {self.cfg['plan_max_kb']}", now, cs, lines)
                 action = "wait"
-            elif self.cfg["plan_hold"] and action == "next":
+            elif (self.cfg["plan_hold"] or self._level(task) == "gated") and action == "next":
                 tasks._task_to(task, "waiting", "plan ready: confirm", now, cs, lines)
                 action = "wait"
         ended = action in ("next", "fix", "done", "manual") or (found is not None and action == "wait")
@@ -3730,13 +3743,17 @@ class Hub:
                 tasks.write_brief(self.folder, task, s, prev)  # the pass adds nothing a later step reads
             except OSError:
                 pass
-            if self.cfg["replan_auto"]:
+            level = self._level(task)
+            auto = (level in ("gated", "auto") or level == "off" and self.cfg["replan_auto"]) and task["owner"] == "service" \
+                and not supervisor.policy(self.cfg, task, now)["paused"]
+            if auto:
                 lines += replan.apply(task, now)
+                lines.append(tasks._line(now, s, "done", "done", "replanned: applied (level auto)"))
                 tasks._task_to(task, "running", "", now, s, lines)
             else:
                 tasks._task_to(task, "waiting", replan.summary(task), now, s, lines)
             self._commit(task, lines)
-            if self.cfg["replan_auto"] and task["owner"] == "service":
+            if auto:
                 self._go_on(task)
 
     def answer_gap(self, task_id: str, text: str) -> tuple:
@@ -3801,7 +3818,36 @@ class Hub:
                          + [x for x in [self._mirror(task, cs, now)] if x])
             return 200, {"task": task_id, "file": rel, "words": task["plan"]["words"], "kb": task["plan"]["kb"]}
 
-    def task_lever(self, task_id, lever: str, note="", model=None, pending="", *, origin: str = "fred") -> tuple:
+    def _level(self, task: dict) -> str:
+        return supervisor.policy(self.cfg, task, time.time())["mode"]
+
+    def remember_level(self, task: dict, level: str) -> str:
+        """Under tlock, save the project setting before passing Fred's gate; never wake or dispatch here."""
+        if level not in supervisor.MODES:
+            return "mode must be off, suggest, gated or auto"
+        project = os.path.normcase(os.path.normpath(os.path.abspath(task["project_dir"])))
+        projects = {path: mode for path, mode in (self.cfg.get("supervisor_projects") or {}).items()
+                    if not tasks.same_dir(path, project)}
+        projects[project] = level
+        try:
+            errors = self.save_models({"supervisor_projects": projects})
+        except (OSError, ValueError) as exc:
+            return f"the project level was not saved: {exc}"
+        if errors:
+            return errors["supervisor_projects"]
+        now = time.time()
+        sup = task.setdefault("supervisor", supervisor.initial(self.cfg, task["project_dir"], now))
+        old = sup["mode"]
+        sup["mode"] = level
+        try:
+            self._commit(task, [tasks._line(now, tasks.current_step(task), task["state"], task["state"],
+                                          f"supervisor mode: {old} -> {level} by Fred (project)")])
+        except OSError as exc:
+            sup["mode"] = old
+            return f"the project level was saved, but the task level was not: {exc}"
+        return ""
+
+    def task_lever(self, task_id, lever: str, note="", model=None, pending="", *, origin: str = "fred", remember=None) -> tuple:
         """Fred's Stop, Pause, Resume, Retry, Confirm, Clear, Mark done and Accept. task_levers decides first; Stop is the run's
         interrupt (runs.stop), never a kill. `note` (Retry only, plan 33) joins the retry's prompt; `model` (Retry
         only, plan 40) is "" for auto or a known model. `origin` (plan 44, private) is "supervisor" when an approved or
@@ -3816,6 +3862,8 @@ class Hub:
             if info[lever]:
                 return 409, {"error": info[lever]}
             task, now = self.tasks[task_id], time.time()
+            if remember is not None and (lever != "confirm" or task["why"] != "plan ready: confirm"):
+                return 409, {"error": "remember applies to the plan confirm only"}
             cs = tasks.current_step(task)
             messages = tasks.pending_messages(task)
             if messages and lever in ("retry", "stepdone", "done", "accept", "clear", "redo", "confirm", "keep"):
@@ -3840,6 +3888,10 @@ class Hub:
             supervised = lever in ("pause", "resume") and self._sup_boundary(task)
             if supervised and not isinstance(task.get("supervisor"), dict):  # a legacy policy, resolved here
                 task["supervisor"] = supervisor.initial(self.cfg, task["project_dir"], now)
+            if remember is not None:
+                why = self.remember_level(task, remember)
+                if why:
+                    return 400, {"error": why}
             ok, why, lines = tasks.fred(task, lever, now, next_n=(self._next_step(task) or {}).get("n", 0), note=note,
                                         model=model if lever == "retry" else None, supervised=supervised)
             if not ok:
@@ -4058,7 +4110,7 @@ class Handler(BaseHTTPRequestHandler):
                 "kind_pins": cfg.get("kinds") or {}, "tuning": tuning.view(cfg),
                 "kind_rules": {k: {"rank": r[0], "effort": r[1], "tools": r[2]} for k, r in tasks.RULES.items()},
                 # plan 44 backend: mode/map and choices; the Models page's Supervisor card edits them (plan 50)
-                "supervisor_config": {"modes": list(supervisor.MODES), "mode": cfg.get("supervisor_mode", "suggest"),
+                "supervisor_config": {"modes": list(supervisor.MODES), "mode": cfg.get("supervisor_mode", "gated"),
                                       "projects": cfg.get("supervisor_projects") or {},
                                       "models": {"supervisor_model": cfg.get("supervisor_model", "haiku"),
                                                  "supervisor_stuck_model": cfg.get("supervisor_stuck_model", "sonnet")}},
@@ -4379,7 +4431,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "supervised must be true or false")
         supervisor_mode = body.get("supervisor_mode")
         if supervisor_mode is not None and supervisor_mode not in supervisor.MODES:
-            return self._error(400, "supervisor_mode must be off, suggest or auto")
+            return self._error(400, "supervisor_mode must be off, suggest, gated or auto")
         if supervisor_mode is not None and not supervised:
             return self._error(400, "supervisor_mode needs supervised intake")
         for n, item in enumerate(steps, 1):
@@ -4392,7 +4444,8 @@ class Handler(BaseHTTPRequestHandler):
                                                         supervised=supervised, supervisor_mode=supervisor_mode)})
 
     def _task_lever(self, body, lever):
-        code, data = self.hub.task_lever(body.get("task"), lever, body.get("note") or "", body.get("model"), body.get("pending"))
+        code, data = self.hub.task_lever(body.get("task"), lever, body.get("note") or "", body.get("model"), body.get("pending"),
+                                         remember=body.get("remember"))
         return self._json(data, code)
 
     def _terminal(self, body):

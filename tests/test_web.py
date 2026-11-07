@@ -1550,9 +1550,33 @@ class SupervisorSettingsTest(unittest.TestCase):
 
     def setup(self, projects=None):
         cfg = {"projects": ["D:\\a", "D:\\b"], "models": ["haiku"], "ladder": {}, "tiers": {"think": [], "write": [], "read": []}, "kind_pins": {},
-               "tuning": SUP_TUNING, "supervisor_config": {"modes": ["off", "suggest", "auto"], "mode": "suggest",
+               "tuning": SUP_TUNING, "supervisor_config": {"modes": ["off", "suggest", "gated", "auto"], "mode": "suggest",
                                                            "projects": projects or {}}}
         return f"cfg = {json.dumps(cfg)}; resetModels(); "
+
+    def test_models_card_has_four_levels_and_defaults_to_gated(self):
+        setup = self.setup() + "cfg.supervisor_config = {modes: ['off', 'suggest', 'gated', 'auto'], projects: {}}; resetModels(); "
+        html = render(setup + "supRows()")
+        for mode in ("off", "suggest", "gated", "auto"):
+            self.assertIn(f'data-msup="mode:{mode}"', html)
+        self.assertIn('data-msup="mode:gated" aria-pressed="true"', html)
+        self.assertIn("default gated", html)
+        self.assertEqual(render(setup + "supPick('mode:suggest'); modelChanges()"), {"supervisor_mode": "suggest"})
+        changed = render(setup + "supPick('mode:suggest'); supRows()")
+        self.assertIn('class="rs" data-msup="mode:gated"', changed)
+        self.assertEqual(render(setup + "supPick('mode:suggest'); supPick('mode:gated'); modelChanges()"), {})
+
+    def test_start_mode_falls_back_to_gated(self):
+        for sc in ("undefined", "{projects: {}}", "{modes: ['off', 'suggest', 'gated', 'auto'], projects: {}}"):
+            self.assertEqual(render(self.setup() + f"cfg.supervisor_config = {sc}; supMode('repo')"), "gated")
+        self.assertEqual(render(self.setup() + "cfg.supervisor_config = {modes: ['off', 'suggest', 'gated', 'auto'], mode: 'auto', projects: {repo: 'gated'}}; supMode('repo')"), "gated")
+        for sc in ("{mode: 'turbo'}", "{mode: 'auto', projects: {repo: 'turbo'}}"):
+            self.assertEqual(render(self.setup() + f"cfg.supervisor_config = {sc}; supMode('repo')"), "off")
+
+    def test_mode_segment_has_four_levels(self):
+        html = render(OpenedTaskTest.setup + "cfg = {supervisor_config: {modes: ['off', 'suggest', 'gated', 'auto']}}; taskMenu(t, d)")
+        for mode in ("off", "suggest", "gated", "auto"):
+            self.assertIn(f'data-mode="{mode}"', html)
 
     def test_tuning_has_a_supervisor_card(self):
         html = render(self.setup() + "tuningTab()")

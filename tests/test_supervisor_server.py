@@ -947,11 +947,11 @@ class AutonomyTest(DispatchTest):
         self.tick(self.now + 100.0)
         self.drain()
 
-    def test_only_auto_mode_dispatches_eligible_action(self):
+    def test_only_auto_and_gated_dispatch_eligible_action(self):
         finish = dict(decision="finish", reason="done", confidence="high", for_fred="")
-        for mode, want in (("off", None), ("suggest", "suggest"), ("auto", "done")):
+        for mode, want in (("off", None), ("suggest", "suggest"), ("gated", "done"), ("auto", "done")):
             with self.subTest(mode):
-                tid = self.supervised_task(f"20260101-000000-{ {'off': 'a0a0', 'suggest': 'a1a1', 'auto': 'a2a2'}[mode]}")
+                tid = self.supervised_task(f"20260101-000000-{ {'off': 'a0a0', 'suggest': 'a1a1', 'auto': 'a2a2', 'gated': 'a3a3'}[mode]}")
                 self.hub.tasks[tid]["supervisor"]["mode"] = mode
                 self.hub.sup_recovered = True
                 self.run_wake(tid, finish)

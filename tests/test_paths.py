@@ -53,7 +53,7 @@ class PlanKeysTest(unittest.TestCase):
                     "supervisor_max_auto_steps", "supervisor_max_retries", "supervisor_work_usd",
                     "supervisor_task_usd", "supervisor_day_usd"):
             self.assertIn(key, cfg, key)
-        self.assertEqual(cfg["supervisor_mode"], "suggest")
+        self.assertEqual(cfg["supervisor_mode"], "gated")
         self.assertEqual((cfg["supervisor_model"], cfg["supervisor_stuck_model"]), ("haiku", "sonnet"))
         self.assertEqual((cfg["supervisor_projects"], cfg["supervisor_debounce_s"], cfg["supervisor_parallel"]),
                          ({}, 20, 1))

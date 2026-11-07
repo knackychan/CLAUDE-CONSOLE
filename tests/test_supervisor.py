@@ -21,6 +21,17 @@ def cfg(**over):
 
 
 class PolicyTest(unittest.TestCase):
+    def test_unknown_level_fails_closed_to_off(self):
+        for changes, task in (({"supervisor_mode": "turbo"}, {}),
+                              ({"supervisor_projects": {"D:/work": "turbo"}}, {}),
+                              ({}, {"supervisor": dict(supervisor.initial(cfg(), "D:/work", 0), mode="turbo")})):
+            pol = supervisor.policy(cfg(**changes), dict(project_dir="D:/work", **task), 0)
+            self.assertEqual(pol["mode"], "off")
+            self.assertTrue(pol["reason"])
+        for mode in ("off", "suggest", "gated", "auto"):
+            saved = supervisor.initial(cfg(), "D:/work", 0, mode)
+            self.assertEqual(supervisor.policy(cfg(), {"supervisor": saved}, 1)["mode"], mode)
+
     def test_default_suggest_and_task_project_global_precedence(self):
         c = cfg(supervisor_projects={"d:/work": "auto"})  # Windows spelling: drive letter and slash differ
         # global default -> suggest; project override -> auto; explicit task mode wins
@@ -540,6 +551,17 @@ class RunnerTest(unittest.TestCase):
 
 
 class AutoReasonTest(unittest.TestCase):
+    def test_gated_dispatches_everything_but_the_plan_confirm(self):
+        pol = dict(supervisor.policy(cfg(), {"project_dir": "D:/work"}, 0), mode="gated", room=2, work_usd=0)
+        task = {"current": 1, "steps": [{"n": 1, "kind": "code", "state": "done"}], "why": "replanned: changed"}
+        for kind in ("confirm", "keep", "finish", "retry", "add_next_step"):
+            self.assertEqual(supervisor.auto_reason({"decision": kind}, task, pol), "", kind)
+        task["why"] = "plan ready: confirm"
+        self.assertEqual(supervisor.auto_reason({"decision": "confirm"}, task, pol), "gated: you confirm the plan")
+        for extra in ({"work_usd": 99}, {"auto_steps_left": 0}, {"room": 0}, {"triggers": ["stalled"]}):
+            self.assertTrue(supervisor.auto_reason({"decision": "add_next_step"}, task, dict(pol, **extra)))
+        self.assertTrue(supervisor.auto_reason({"decision": "retry"}, task, dict(pol, retries={1: 1})))
+
     def test_auto_table(self):
         pol = dict(supervisor.policy(cfg(), {"project_dir": "D:\\work"}, 0.0), mode="auto", room=2, work_usd=0.0)
         task = {"current": 1, "steps": [{"n": 1, "kind": "code", "state": "done"}]}

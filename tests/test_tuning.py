@@ -165,6 +165,13 @@ class TiersTest(unittest.TestCase):
 
 
 class SupervisorTuningTest(unittest.TestCase):
+    def test_supervisor_levels_accept_gated(self):
+        self.assertEqual(tuning.SUPERVISOR_MODES, ("off", "suggest", "gated", "auto"))
+        clean, errors = check(supervisor_mode="gated", supervisor_projects={"D:/work": "gated"})
+        self.assertEqual(errors, {})
+        self.assertEqual(clean, {"supervisor_mode": "gated", "supervisor_projects": {self.norm("D:/work"): "gated"}})
+        self.assertEqual(paths.DEFAULTS["supervisor_mode"], "gated")
+
     def norm(self, path):
         return os.path.normcase(os.path.normpath(os.path.abspath(path)))
 
@@ -175,15 +182,15 @@ class SupervisorTuningTest(unittest.TestCase):
         self.assertEqual(check(supervisor_projects={"C:/other": "off"})[1], {})
         self.assertEqual(check(supervisor_projects={})[1], {})
         self.assertEqual(check(supervisor_mode="off")[1], {})
-        self.assertEqual(check(supervisor_mode="turbo")[1], {"supervisor_mode": "off, suggest or auto"})
+        self.assertEqual(check(supervisor_mode="turbo")[1], {"supervisor_mode": "off, suggest, gated or auto"})
         self.assertEqual(check(supervisor_projects={"C:/nope": "auto"})[1],
                          {"supervisor_projects": "not a project listed in config.json: C:/nope"})
         self.assertEqual(check(supervisor_projects={"D:/work": "turbo"})[1],
-                         {"supervisor_projects": "D:/work: off, suggest or auto"})
+                         {"supervisor_projects": "D:/work: off, suggest, gated or auto"})
         self.assertEqual(check(supervisor_projects={"D:/work": "auto", "d:\\WORK": "off"})[1],
                          {"supervisor_projects": "d:\\WORK: listed twice"})
         self.assertEqual(check(supervisor_projects=[])[1],
-                         {"supervisor_projects": "an object: project path -> off, suggest or auto"})
+                         {"supervisor_projects": "an object: project path -> off, suggest, gated or auto"})
 
     def test_supervisor_models_refuse_external_and_higher_tiers(self):
         self.assertEqual(check(supervisor_model="haiku")[1], {})

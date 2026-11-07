@@ -12,7 +12,7 @@ from string import Template
 
 from . import compact, kinds, plan, redact, tasks
 
-MODES = ("off", "suggest", "auto")
+MODES = ("off", "suggest", "gated", "auto")
 
 # The supervisor's own pass is fixed to one Claude alias per role; a hand edit can never move it to opus/fable.
 MODEL_ALIASES = {"supervisor_model": "haiku", "supervisor_stuck_model": "sonnet"}
@@ -39,8 +39,8 @@ def _project_mode(cfg: dict, project_dir: str) -> str:
     proj = cfg.get("supervisor_projects")
     if isinstance(proj, dict) and isinstance(project_dir, str):
         for path, mode in proj.items():
-            if isinstance(mode, str) and mode in MODES and tasks.same_dir(path, project_dir):
-                return mode
+            if tasks.same_dir(path, project_dir):
+                return mode if mode in MODES else "invalid"
     return ""
 
 
@@ -57,11 +57,7 @@ def _money(value):
 def initial(cfg: dict, project_dir: str, now: float, mode=None) -> dict:
     """README 4.3 defaults for a new task's `supervisor` dict: global/project/task mode precedence, empty
     pending/proposed/retries, zero counters. No IO and no mutation of `cfg`."""
-    picked = mode if mode in MODES else ""
-    if not picked:
-        picked = _project_mode(cfg, project_dir)
-    if not picked:
-        picked = cfg.get("supervisor_mode", "suggest")
+    picked = mode if mode is not None else _project_mode(cfg, project_dir) or cfg.get("supervisor_mode", "gated")
     if picked not in MODES:
         picked = "off"
     return {"mode": picked, "wakes": 0, "auto_steps": 0, "retries": {}, "usd": 0.0, "work_usd": 0.0,
@@ -79,12 +75,12 @@ def policy(cfg: dict, task: dict, now: float) -> dict:
     if has_sup and "mode" in sup:
         mode = sup["mode"]
         if mode not in MODES:
-            errors.append("supervisor mode must be off, suggest or auto")
+            errors.append("supervisor mode must be off, suggest, gated or auto")
             mode = "off"
     else:
-        mode = _project_mode(cfg, task.get("project_dir")) or cfg.get("supervisor_mode", "suggest")
+        mode = _project_mode(cfg, task.get("project_dir")) or cfg.get("supervisor_mode", "gated")
         if mode not in MODES:
-            errors.append("supervisor_mode must be off, suggest or auto")
+            errors.append("supervisor_mode must be off, suggest, gated or auto")
             mode = "off"
 
     settings = {}
@@ -706,8 +702,10 @@ def auto_reason(decision: dict, task: dict, policy: dict) -> str:
     supervisor.policy() plus the Hub's live facts: room (steps the supervisor may still append), work_usd (current
     window) and the source step of an add."""
     kind = decision.get("decision")
-    if policy.get("mode") != "auto":
+    if policy.get("mode") not in ("auto", "gated"):
         return f"the supervisor mode is {policy.get('mode', 'off')}"
+    if policy["mode"] == "gated" and kind == "confirm" and task.get("why") == "plan ready: confirm":
+        return "gated: you confirm the plan"
     if any(t in REPORT_ONLY for t in policy.get("triggers") or ()):
         return "report only: Fred approves this one"
     if kind not in AUTO_KINDS:

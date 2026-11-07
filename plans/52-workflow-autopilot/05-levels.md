@@ -24,9 +24,12 @@ word (`policy()` as today); an unknown word fails closed to `off` with the reaso
 
 - `Hub._ended` (server.py:3405): `elif (self.cfg["plan_hold"] or self._level(task) == "gated") and action == "next":`.
   `Hub._level(task) -> str` = `supervisor.policy(self.cfg, task, time.time())["mode"]`.
-- `Hub._replan_done` (server.py:3695, 3701): `auto = self.cfg["replan_auto"] or self._level(task) in ("gated", "auto")`
+- `Hub._replan_done` (server.py:3695, 3701): `level = self._level(task)` then
+  `auto = level in ("gated", "auto") or (level == "off" and self.cfg["replan_auto"])`
   and the proposal still waits when the task is paused; the chain line says `replanned: applied (level auto)`.
   No supervisor pass is spent on a replan hold at gated/auto: the chain applies it itself (plan 24's apply).
+  Fred resolved the conflicting old formula on 2026-11-07: follow the table, so suggest always waits and only off
+  consults `replan_auto`.
 - `supervisor.auto_reason(decision, task, policy)`: `if policy.get("mode") not in ("auto", "gated"): return ...`;
   then, for `gated` only: `if kind == "confirm" and task.get("why") == "plan ready: confirm": return "gated: you
   confirm the plan"`. Every cap check stays.

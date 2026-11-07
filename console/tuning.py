@@ -50,7 +50,7 @@ TUNING = {
     "supervisor_stuck_model": ("supervisor", "rung", None, None),
 }
 KEYS = tuple(TUNING) + ("kinds", "tiers", "supervisor_mode", "supervisor_projects")  # the whitelist of POST /api/config/models
-SUPERVISOR_MODES = ("off", "suggest", "auto")
+SUPERVISOR_MODES = ("off", "suggest", "gated", "auto")
 SUPERVISOR_MODELS = {"supervisor_model": "haiku", "supervisor_stuck_model": "sonnet"}  # never opus/fable/external
 WHOLE = frozenset({"steps", "s", "turns", "kb", "parts", "words", "tokens"})
 CLAUDE_ONLY = frozenset({"prep_model", "brief_model", "review_model", "planner_model"})  # their passes run on the Claude CLI
@@ -176,10 +176,10 @@ def _tiers(value, cfg: dict) -> tuple:
 
 
 def _supervisor_projects(value, cfg) -> tuple:
-    """The supervisor_projects map: normalized configured-project path -> off|suggest|auto. Replaces the map on save;
+    """The supervisor_projects map: normalized configured-project path -> off|suggest|gated|auto. Replaces the map on save;
     an unknown project, an invalid mode or a normalized duplicate key is refused (nothing is written)."""
     if not isinstance(value, dict):
-        return None, "an object: project path -> off, suggest or auto"
+        return None, "an object: project path -> off, suggest, gated or auto"
     clean, seen = {}, {}
     for key, mode in value.items():
         if not isinstance(key, str) or not key:
@@ -190,7 +190,7 @@ def _supervisor_projects(value, cfg) -> tuple:
         if not any(tasks.same_dir(key, p) for p in (cfg.get("projects") or [])):
             return None, f"not a project listed in config.json: {key}"
         if mode not in SUPERVISOR_MODES:
-            return None, f"{key}: off, suggest or auto"
+            return None, f"{key}: off, suggest, gated or auto"
         seen[norm] = True
         clean[norm] = mode
     return clean, ""
@@ -214,7 +214,7 @@ def validate(changes, cfg: dict) -> tuple:
         elif key == "allowances":
             value, why = _allowances(value)
         elif key == "supervisor_mode":
-            why = "" if value in SUPERVISOR_MODES else "off, suggest or auto"
+            why = "" if value in SUPERVISOR_MODES else "off, suggest, gated or auto"
         elif key == "supervisor_projects":
             value, why = _supervisor_projects(value, cfg)
         else:

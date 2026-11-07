@@ -269,6 +269,33 @@ The test class loop now preserves its original final class alias, keeping existi
 the closing count includes six new Task 4 tests. An intermediate rerun was stopped after Listary was found running,
 then Listary was closed again before the closing full run began.
 
+2026-11-07: Task 5 is closed. The four levels are off, suggest, gated and auto across policy, config validation,
+project settings and the existing mode controls. New tasks default to gated; saved tasks keep their own valid
+mode and unknown modes fail closed to off. Gated holds the design plan for Fred's confirmation, then the chain
+runs on. Its other supervisor dispatches use the same caps, reservations, guidance gates and uncertain-dispatch
+safeguards as auto. Pause remains a gate.
+
+Gated and auto apply replans directly in the chain without a supervisor pass; a paused proposal waits. Fred
+resolved the task file's conflicting formula: suggest always waits, even with replan_auto enabled, and off follows
+replan_auto. Decision defaults remain auto-only. Task 3's DECISION and Plan gap paths and Task 4's summary,
+Accept and Reopen remain on their existing paths.
+
+The plan-confirm and structured-default answer routes accept remember: "auto" through the existing tuning
+validation and config lock. They save the project level and task mode before passing the gate. Other confirms,
+plain questions and non-default answers refuse remembering. If the task save fails after the project setting is
+saved, the refusal reports that partial save and restores the task's old mode, leaving its gate waiting.
+
+Tests were added first. The focused modules (including test_paths) passed 557 tests in 528.378 s with zero
+failures or errors. The added task-save refusal regression passed separately, with its closing run passing 1 test
+in 2.301 s. JavaScript syntax and diff whitespace checks passed. The full background suite passed 1146 tests in
+581.957 s with zero failures, errors or warnings in the completed output.
+
+Listary's app and hook hosts stayed closed throughout the focused and full runs, monitored by one-second polling
+with 525 and 578 checks respectively and zero detections. ListaryService remained running. The app and hook hosts
+were restarted afterward and verified running. The normal-runtime WinError 5 bug remains unresolved; tasks.save
+was not changed and no retries were added. No kind file changed, so Task 5 needs no Models page Reset to repo copy.
+Task 6 and the later visual UI work were not started.
+
 ### What plan 52 replaces
 
 | Built | Replaced by | Why |

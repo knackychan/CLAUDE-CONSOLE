@@ -96,8 +96,8 @@ DEFAULTS = {
     "handoff_timeout_s": 90,
     # plan 44: the event-driven supervisor's own policy (backend). Numeric/rung keys ride the Models page whitelist;
     # supervisor_mode and supervisor_projects are enum/map, validated separately and never shown as numeric tuning.
-    "supervisor_mode": "suggest",  # off, suggest or auto
-    "supervisor_projects": {},  # normalized configured-project path -> off|suggest|auto
+    "supervisor_mode": "gated",  # off, suggest, gated or auto
+    "supervisor_projects": {},  # normalized configured-project path -> off|suggest|gated|auto
     "supervisor_model": "haiku",  # the Claude alias only: a supervisor pass never runs on opus/fable
     "supervisor_stuck_model": "sonnet",  # one sonnet pass on a stuck/stalled wake
     "supervisor_debounce_s": 20,

@@ -4090,6 +4090,124 @@ class SupervisedIntakeTest(TaskServerTest):
 
 
 
+class AutonomyLevelsTest(TaskServerTest):
+    def test_level_default_is_gated_for_a_new_task(self):
+        self.hub.cfg["supervisor_mode"] = paths.DEFAULTS["supervisor_mode"]
+        tid = self.make_task()
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["mode"], "gated")
+        self.hub.cfg["supervisor_mode"] = "auto"
+        self.assertEqual(server.supervisor.policy(self.hub.cfg, self.hub.tasks[tid], time.time())["mode"], "gated")
+
+    def held_plan(self):
+        self.hub.cfg["supervisor_mode"] = "gated"
+        tid = self.plan_task(words="HANDOFF-OK PLAN-OK VERDICT-PASS", kinds=("scout", "design", "code"))
+        task = self.until(tid, lambda t: t["state"] in ("waiting", "done") and not t.get("briefing"), "plan gate")
+        self.assertEqual(task["why"], "plan ready: confirm")
+        return tid, task
+
+    def test_gated_task_holds_the_plan_once_then_runs(self):
+        self.hub.sup_clock = lambda: 0
+        tid, task = self.held_plan()
+        result = {"decision": {"decision": "confirm", "reason": "plan checked", "confidence": "high", "for_fred": ""},
+                  "cost": 0.001, "model": "haiku", "turns": 1, "error": ""}
+        with mock.patch.object(server.supervisor, "run", return_value=result) as run:
+            self.hub.sup_clock = lambda: 100
+            self.hub.advance()
+            for thread in list(self.hub.sup_threads):
+                thread.join(10)
+            pending = task["supervisor"]["pending"]
+            self.assertEqual((pending["status"], pending["error"]), ("suggest", "gated: you confirm the plan"))
+            self.assertEqual(task["steps"][2]["state"], "planned")
+            self.assertEqual(self.call("/api/task/confirm", {"task": tid})[0], 200)
+            self.until(tid, lambda t: t["state"] == "done" and not t.get("briefing"), "the rest of the chain ends")
+            self.assertEqual(run.call_count, 1)
+            result["decision"] = {"decision": "wait", "reason": "done", "confidence": "high", "for_fred": ""}
+            self.hub.sup_clock = lambda: 200
+            self.hub.advance()
+            for thread in list(self.hub.sup_threads):
+                thread.join(10)
+            self.assertEqual(run.call_count, 2)
+        self.assertEqual(self.whys(tid).count("plan confirmed by Fred"), 1)
+        self.assertEqual([r["triggers"] for r in server.supervisor.read_log(self.folder, tid) if r["phase"] == "claimed"],
+                         [["hold"], ["done"]])
+
+    def test_confirm_with_remember_auto_sets_the_project_level_once(self):
+        tid, task = self.held_plan()
+        self.hub.cfg["supervisor_projects"] = {str(self.project).replace("\\", "/").upper(): "gated"}
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid, "remember": "turbo"})[0], 400)
+        self.assertEqual(task["why"], "plan ready: confirm")
+        with mock.patch.object(paths, "set_config", side_effect=OSError("disk full")):
+            self.assertEqual(self.call("/api/task/confirm", {"task": tid, "remember": "auto"})[0], 400)
+        self.assertEqual(task["supervisor"]["mode"], "gated")
+        self.assertEqual(task["why"], "plan ready: confirm")
+        status, data = self.call("/api/task/confirm", {"task": tid, "remember": "auto"})
+        self.assertEqual(status, 200, data)
+        key = os.path.normcase(os.path.normpath(os.path.abspath(self.project)))
+        self.assertEqual(json.loads((self.folder / "config.json").read_text())["supervisor_projects"], {key: "auto"})
+        self.assertEqual(task["supervisor"]["mode"], "auto")
+        self.assertEqual(self.call("/api/task/confirm", {"task": tid, "remember": "auto"})[0], 409)
+        self.assertEqual(self.whys(tid).count("supervisor mode: gated -> auto by Fred (project)"), 1)
+        other = self.plan_task(words="HANDOFF-OK PLAN-OK VERDICT-PASS", kinds=("scout", "design", "code"))
+        self.assertEqual(self.hub.tasks[other]["supervisor"]["mode"], "auto")
+        self.until(other, self.at(3), "the next task passes the design gate")
+
+    def test_remember_is_refused_on_a_fable_confirm(self):
+        task = self.loose_task()
+        task["steps"][0]["pick"] = "fable"
+        self.hub.advance()
+        self.assertEqual(task["why"], "confirm Fable")
+        self.assertEqual(self.call("/api/task/confirm", {"task": task["id"], "remember": "auto"}),
+                         (409, {"error": "remember applies to the plan confirm only"}))
+        self.assertFalse(task["fable_ok"])
+        self.assertFalse((self.folder / "config.json").exists())
+
+    def test_remember_task_save_failure_keeps_the_plan_gated(self):
+        tid, task = self.held_plan()
+        with mock.patch.object(tasks, "save", side_effect=PermissionError("task is open")):
+            status, data = self.call("/api/task/confirm", {"task": tid, "remember": "auto"})
+        self.assertEqual(status, 400, data)
+        self.assertEqual(task["supervisor"]["mode"], "gated")
+        self.assertEqual(task["why"], "plan ready: confirm")
+        self.assertEqual(task["steps"][2]["state"], "planned")
+
+    def test_auto_task_applies_a_replan_without_confirm(self):
+        for mode in ("auto", "gated"):
+            with self.subTest(mode):
+                self.hub.cfg.update(supervisor_mode=mode, task_max_steps=8, replan_auto=False)
+                tid = self.replan_task()
+                self.until(tid, self.at(3), f"{mode} applies the replan")
+                self.assertIn("replanned: applied (level auto)", self.whys(tid))
+                self.assertNotIn(tid, self.hub.wakes)
+                self.assertEqual(server.supervisor.read_log(self.folder, tid), [])
+
+    def test_suggest_replan_waits_even_with_replan_auto(self):
+        self.hub.cfg.update(supervisor_mode="suggest", task_max_steps=8, replan_auto=True)
+        tid = self.replan_task()
+        task = self.until(tid, lambda t: t["state"] == "waiting", "suggest waits for replan approval")
+        self.assertEqual(task["why"], "replanned: 1 steps added")
+        self.assertIn("replan", task)
+
+    def test_gated_replan_waits_while_paused(self):
+        self.hub.cfg.update(supervisor_mode="gated", task_max_steps=8)
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        original = server.replan.run_replan
+        def run(*args):
+            entered.set()
+            release.wait(10)
+            return original(*args)
+        with mock.patch.object(server.replan, "run_replan", side_effect=run):
+            tid = self.replan_task()
+            self.until(tid, self.at(2), "replan starts")
+            self.assertTrue(entered.wait(5))
+            self.assertEqual(self.call("/api/task/pause", {"task": tid})[0], 200)
+            release.set()
+            task = self.until(tid, lambda t: t["why"].startswith("replanned:"), "the paused proposal waits")
+        self.assertIn("replan", task)
+        self.assertEqual(task["owner"], "fred")
+        self.assertNotIn("replanned: applied (level auto)", self.whys(tid))
+
+
 class FinishServerTest(TaskServerTest):
     def finished_task(self):
         task = tasks.new_task(str(self.project), "proj", "Finish", "saved goal", tasks.plan_steps(
@@ -4178,7 +4296,7 @@ class FinishServerTest(TaskServerTest):
 
 
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
-    for _cls in (FinishServerTest, HandoffServerTest, SupervisedIntakeTest):
+    for _cls in (AutonomyLevelsTest, FinishServerTest, HandoffServerTest, SupervisedIntakeTest):
         if _name.startswith("test_") and _name not in _cls.__dict__:
             setattr(_cls, _name, None)
 
