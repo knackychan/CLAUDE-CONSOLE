@@ -281,6 +281,22 @@ class CodexTest(unittest.TestCase):
                     mock.patch.object(codex, "_owned_by_me", return_value=True):
                 self.assertEqual(codex.write_block(tmp), "")
 
+    def test_nested_error_keeps_its_message_masked(self):
+        """Plan 57 D3: the missing-host item of the incident; a recoverable item error does not fail the turn."""
+        lines = CODEX_LINES[:2] + [{"type": "item.completed", "item": {
+            "type": "error", "message": "codex-code-mode-host.exe could not start: not found token=sk-abcdefghijklmnopqrstuv "
+                                       + "x" * 400}}] + CODEX_LINES[2:]
+        items = codex.chat(lines, "/w")
+        self.assertEqual([i["role"] for i in items], ["note", "tool", "claude", "result"])
+        self.assertTrue(items[0]["text"].startswith("codex-code-mode-host.exe could not start: not found"))
+        self.assertNotIn("sk-abcdefghijklmnopqrstuv", items[0]["text"])
+        self.assertEqual(len(items[0]["text"]), 300)
+        self.assertEqual(codex.summary(lines)["subtype"], "success")
+        self.assertEqual(codex.chat([{"type": "item.completed", "item": {"type": "error"}}], "/w"),
+                         [{"role": "note", "text": "error"}])
+        secret = codex.chat([{"type": "error", "message": "failed token=sk-abcdefghijklmnopqrstuv"}], "/w")
+        self.assertNotIn("sk-abcdefghijklmnopqrstuv", secret[0]["text"])  # the top-level error line masks too
+
     def test_write_block_reads_the_sandbox_mode_and_the_owner(self):
         with tempfile.TemporaryDirectory() as home:
             config = Path(home, "config.toml")

@@ -264,10 +264,12 @@ def chat(lines: list, cwd: str) -> list:
             item = d.get("item") or {}
             if item.get("type") == "agent_message":
                 items.append({"role": "claude", "text": _item_text(item)[:CHAT_TEXT], "files": []})
+            elif item.get("type") == "error":  # plan 57 D3: a tool error inside the turn keeps its message
+                items.append({"role": "note", "text": redact.clip(redact.mask(str(item.get("message") or "error")), 300)})
             else:
                 items.append({"role": "tool", "text": _tool_text(item)})
         elif kind == "error":
-            items.append({"role": "note", "text": redact.clip(str(d.get("message", "error")), 300)})
+            items.append({"role": "note", "text": redact.clip(redact.mask(str(d.get("message", "error"))), 300)})
         elif kind == "turn.completed":
             turns += 1
             status = "error" if summary(turn_lines)["subtype"] in ("error_shell_start", "error_write_denied") else "success"
