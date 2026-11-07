@@ -162,8 +162,8 @@ passes. The task menu's level segment switches back down at any time.
 
 ## 3. User actions per task state
 
-The service already computes most of these (`Hub.task_levers`, `message_availability`, `supervisor_view`); the
-UI places them. Primary = the one button in sight; secondary = the bar; menu = the task menu. Every state has the
+Served by `actions` in GET /api/task, built by `Hub.actions` from `task_levers`, `message_availability`,
+`supervisor_view`, recovery, handoff and next-step availability. The UI places them. Primary = the one button in sight; secondary = the bar; menu = the task menu. Every state has the
 message box (plan 42: guidance while running, answer at a question, next step at done).
 
 | State | Row says | Primary | Secondary (bar) | Menu | Box mode |
@@ -186,6 +186,44 @@ Observed chats (VS Code, terminal, Codex, OpenCode: `source != window`): read on
 Levers as forks only (plan 03, plan 37): Continue as a fork, Verify as a fork, Hand off, Escalate as a fork, Open in
 terminal. No Stop, Pause, message, decision card or supervisor; the status says `observed · VS Code`. Nothing is ever
 written to another process's stdin (plan 42).
+
+The field contains `state`, `line`, `primary`, `bar` and `menu`. Each action has `id`, `label`, `post`, `body`,
+`off` (empty when available, otherwise its existing gate's reason) and `confirm` (the two-click actions: Stop,
+Delete, Confirm Fable and Finish). Task actions also carry `message` unchanged, including its mode, target,
+reason and timing. A nonempty `post` names an existing route and its `body` is ready for that route; the server
+still rechecks its gates when clicked. An empty `post` opens the existing editor, composer, model picker or
+handoff preview. These forms collect their inputs and use their existing POST routes; GET starts none of them.
+Action ids are unique across the three lists. The level menu lists `level_off`, `level_suggest`, `level_gated`
+and `level_auto`, each using POST /api/task/supervisor with `{task, mode}`.
+
+Fred confirmed the route choices on 2026-11-07: Prep's preparing and ready cards stay on the existing Prep API;
+GET /api/task still takes saved task ids only. A saved planned draft is `ready`, with `start` using the existing
+Resume route and its availability. `Hub.actions` also accepts an observed session row, and a saved task whose
+current session is external gets that same observed projection. Open in terminal uses POST /api/terminal and
+keeps its existing off reason for an observed session. No new launch route or external-session control is added.
+Fred also chose a direct observed Continue POST with the fixed text "Continue the task.", satisfying the existing
+route's nonempty-text requirement. Continue, Verify, Hand off and Escalate bodies carry `session` and `fork: true`.
+
+`plan_ready` has `confirm` and `confirm_auto`; the latter adds `remember: "auto"` with the label "Confirm, and run
+plans automatically from now on". Decision options use their keys as ids and POST /api/task/message in `answer`
+mode. Their bodies include the task, option text, current target and a deterministic UUID request id per saved
+question and option. Repeated reads and reloads keep that identity, so repeat clicks deduplicate. A structured
+default adds `default_auto`, with `remember: "auto"` and label "Take the default from now on". Both remember-auto
+actions use Task 5's existing routes and disappear when the project's effective level is already auto. Plain
+questions and Plan gaps have no option actions; Plan gaps retain Redo design and the free-text answer box.
+Replans remain `hold` with Confirm and Keep old plan. Usage holds offer Retry on a model; a stopped session may
+offer Resume through Continue when that session lever permits it. Accept uses POST /api/task/accept; Reopen opens
+the existing next-step box. A linked handed task's Start uses the follow-up draft's Resume gate.
+
+A supervisor card is `suggestion`: Approve and Reject carry the saved `wake`; an uncertain dispatch has Dismiss
+and never Approve. After Reject, there is no primary, `line` says "You rejected wake N", and `hint` says "Write
+what to do instead", adding "your note goes with it" when a note was saved. When the message mode is not `next`,
+the hint points to the bar's `add_step` and `finish` actions instead. The gate reasons still apply.
+
+When recovery is present, `actions.recovery` carries the existing `{done, cut, orphan}` unchanged. Retry,
+Accept step result, Resume and an orphan's Stop are listed only where the existing recovery levers permit them.
+The other fields of GET /api/task are preserved. Reading `actions` runs no model, starts no run, emits no wake
+and leaves task.json unchanged. The web renderer is a later task.
 
 ## 4. Cost of the target on the same task
 
@@ -295,6 +333,34 @@ with 525 and 578 checks respectively and zero detections. ListaryService remaine
 were restarted afterward and verified running. The normal-runtime WinError 5 bug remains unresolved; tasks.save
 was not changed and no retries were added. No kind file changed, so Task 5 needs no Models page Reset to repo copy.
 Task 6 and the later visual UI work were not started.
+
+2026-11-07: Task 6 is closed. GET /api/task adds the read-only `actions` projection, with one aligned state,
+row text and primary/bar/menu set built from the existing availability methods. It includes structured decision
+options, both remember-auto actions, Accept, supervisor Approve/Reject/Dismiss with the saved wake, the Reject
+hint and the unchanged recovery data with its permitted levers. Observed sessions expose only session forks and
+the terminal action's existing off reason. Section 3 records Fred's route clarifications and the wire contract.
+
+Tests were added first. The four requested focused modules passed 506 tests in 548.522 s with zero failures or
+errors. The final action checks and the synchronized legacy chat fixture passed 11 tests in 12.968 s. The closing
+full background suite passed 1156 tests in 601.030 s with zero failures or errors and one ResourceWarning about
+implicit cleanup of an HTTP 409 response. Diff whitespace checks passed.
+
+The first full background run completed 1156 tests in 600.932 s with one failure, zero errors and the same cleanup
+warning. The legacy chat fixture observed its second filed turn before the run-ended event reached the session
+view; next-step preview correctly refused it as still running. The fixture now uses the existing wait_idle helper
+before requesting the next step. No production gate or persistence code changed for that failure.
+
+Listary restarted at 16:29:32 Taipei time during that first full run, so it was not used as the Listary-closed
+verification. The app and hook hosts were closed again. The closing monitoring phase completed 788 one-second
+checks, including 613 from the closing suite's start through monitor shutdown, with zero app or hook-host
+detections. ListaryService.exe remained running throughout. Listary.exe, ListaryHookHost32.exe and
+ListaryHookHost64.exe were restarted afterward and verified running. The normal-runtime WinError 5 bug remains
+unresolved; no save retries were added.
+
+GET starts no run or model pass, emits no wake, and leaves task.json unchanged. Existing GET fields, DECISION,
+Plan gaps, summary/Accept/Reopen, message delivery and progression gates remain on their existing paths. No kind
+file changed, so Task 6 needs no Models page Reset to repo copy. web/app.js, Task 7 and later visual work were not
+changed by this task. PLAN.md and plans/53-build/ were left untouched and unstaged.
 
 ### What plan 52 replaces
 

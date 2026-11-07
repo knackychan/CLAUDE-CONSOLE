@@ -3330,6 +3330,7 @@ class NextStepServerTest(TaskServerTest):
         self.assertEqual(self.hub.levers(sid)["continue"], "")  # the single chat keeps its own levers
         self.assertEqual(self.call("/api/continue", {"session": sid, "text": "one more"})[0], 200)
         self.until(tid, lambda t: t["steps"][0].get("turns") == 2, "turn 2 is filed")
+        self.wait_idle(sid)  # filing can precede the run-ended event observed by the next-step gate
         notes = self.folder / "tasks" / tid / "01-chat" / "notes.md"
         self.assertTrue(notes.read_text(encoding="utf-8").startswith("# Turn 2\n\n"))
         self.start_next(tid, "code", "now change calc.py")  # an explicit append converts it
@@ -4295,8 +4296,287 @@ class FinishServerTest(TaskServerTest):
         self.assertEqual(server.task_row(task)["group"], "done")
 
 
+class ActionsServerTest(TaskServerTest):
+    def saved_task(self, state="running", why="", owner="service"):
+        task = tasks.new_task(str(self.project), "proj", "Actions", "saved goal", tasks.plan_steps(
+            [{"kind": "design", "goal": "plan"}, {"kind": "code", "goal": "implement"}], 6),
+            "normal", {}, "", "auto", time.time())
+        task.update(state=state, why=why, owner=owner, current=2, last_good=1)
+        task["steps"][0].update(state="done", session="design-session", model="opus", effort="high")
+        task["steps"][1].update(state="running", session="code-session", model="sonnet", effort="medium")
+        task["supervisor"] = supervisor.initial(self.hub.cfg, str(self.project), time.time(), "gated")
+        self.hub.tasks[task["id"]] = task
+        return task
+
+    @staticmethod
+    def ids(actions, place):
+        return [a["id"] for a in actions[place]]
+
+    def test_actions_per_state(self):
+        cases = (
+            ("ready", "planned", "", "fred", ["start"], ["edit_steps", "drop"]),
+            ("running", "running", "", "service", [], ["stop", "pause"]),
+            ("plan_ready", "waiting", "plan ready: confirm", "service", ["confirm", "confirm_auto"],
+             ["edit_plan", "redo", "stop"]),
+            ("decision", "waiting", "asks: Plan gap: which folder?", "fred", [], ["redo", "stop"]),
+            ("hold", "waiting", "confirm Fable", "service", ["confirm"], ["stop"]),
+            ("hold", "waiting", "sonnet over its pace", "service", ["confirm"], ["stop"]),
+            ("hold", "waiting", "replanned: scope changed", "service", ["confirm"], ["keep", "stop"]),
+            ("failed_twice", "stuck", "verify failed twice", "service", ["retry"], ["stepdone", "handoff", "finish"]),
+            ("stuck", "stuck", "no handoff", "service", ["retry"], ["stepdone", "finish"]),
+            ("paused", "running", "", "fred", ["resume"], ["stop"]),
+            ("stopped", "stopped", "stopped by Fred", "fred", ["retry"], ["finish"]),
+            ("done", "done", "", "fred", ["accept"], ["reopen"]),
+            ("handed", "handed", "", "fred", ["start_next"], []),
+        )
+        for state, saved, why, owner, primary, bar in cases:
+            with self.subTest(state=state, why=why):
+                task = self.saved_task(saved, why, owner)
+                if state == "ready":
+                    task["handoff_from"] = "source-task"
+                    task["current"] = 0
+                if state in ("failed_twice", "stuck", "stopped"):
+                    task["steps"][1]["state"] = "failed"
+                if state == "done":
+                    task["steps"][1]["state"] = "done"
+                actions = self.task(task["id"])[1]["actions"]
+                self.assertEqual(actions["state"], state)
+                self.assertEqual(self.ids(actions, "primary"), primary)
+                self.assertEqual(self.ids(actions, "bar"), bar)
+                self.assertTrue(actions["line"])
+                all_ids = sum((self.ids(actions, p) for p in ("primary", "bar", "menu")), [])
+                self.assertEqual(len(all_ids), len(set(all_ids)))
+                for place in ("primary", "bar", "menu"):
+                    for a in actions[place]:
+                        self.assertEqual(set(a), {"id", "label", "post", "body", "off", "confirm"})
+                        self.assertIsInstance(a["off"], str)
+                        self.assertIsInstance(a["confirm"], bool)
+                gates = self.hub.task_levers(task["id"])
+                for a in sum((actions[p] for p in ("primary", "bar", "menu")), []):
+                    lever = a["post"].removeprefix("/api/task/")
+                    if lever in gates:
+                        self.assertEqual(a["off"], gates[lever])
+                    if a["id"] in ("stop", "delete", "finish") or why == "confirm Fable" and a["id"] == "confirm":
+                        self.assertTrue(a["confirm"])
+
+    def test_actions_after_reject_and_in_recovery(self):
+        task = self.saved_task("done", owner="fred")
+        task["steps"][1]["state"] = "done"
+        sup = task["supervisor"]
+        sup["pending"] = {"wake": 3, "status": "suggest", "decision": {"decision": "retry"}}
+        supervisor.append_log(self.folder, task["id"], {"wake": 3, "phase": "result", "decision": {"decision": "retry"}})
+        self.assertEqual(self.call("/api/task/supervisor", {"task": task["id"], "wake": 3,
+                                                           "action": "reject", "note": "use sonnet"})[0], 200)
+        actions = self.task(task["id"])[1]["actions"]
+        self.assertEqual(actions["primary"], [])
+        self.assertEqual(actions["line"], "You rejected wake 3")
+        self.assertIn("Write what to do instead", actions["hint"])
+        self.assertIn("your note goes with it", actions["hint"])
+        task["supervisor"]["mode"] = "off"
+        actions = self.task(task["id"])[1]["actions"]
+        self.assertEqual(actions["primary"], [])
+        self.assertEqual(self.ids(actions, "bar"), ["add_step", "finish"])
+        self.assertIn("Add step", actions["hint"])
+        task.update(state="stuck", why="no handoff")
+        task["steps"][1].update(state="failed", attempts=[{"session": "code-session", "cost": 0,
+            "started": 1.0, "ended": 2.0, "cause": "interrupted", "why": "no handoff", "final": False}])
+        data = self.task(task["id"])[1]
+        self.assertEqual(data["actions"]["recovery"], data["recovery"])
+        acts = sum((data["actions"][p] for p in ("primary", "bar", "menu")), [])
+        recovery_ids = {"retry", "stepdone", "resume", "stop"}
+        self.assertEqual({a["id"] for a in acts if a["id"] in recovery_ids}, {"retry", "stepdone"})
+        self.assertTrue(all(not a["off"] for a in acts if a["id"] in recovery_ids))
+        task["steps"][1]["state"] = "running"
+        task.update(state="running", owner="service")
+        with mock.patch.object(self.hub.runs, "meta", return_value={"pid": 123, "started": 1}), \
+                mock.patch.object(server.claude_cli, "run_alive", return_value=True):
+            actions = self.hub.actions(task)
+        self.assertIsNotNone(actions["recovery"]["orphan"])
+        self.assertNotIn("retry", self.ids(actions, "menu"))
+        self.assertIn("stop", self.ids(actions, "bar"))
+
+    def test_actions_never_start_anything(self):
+        task = self.saved_task("waiting", "plan ready: confirm")
+        tasks.save(self.folder, task)
+        path = self.folder / "tasks" / task["id"] / "task.json"
+        before, stamp, saved = path.read_bytes(), path.stat().st_mtime_ns, copy.deepcopy(task)
+        with mock.patch.object(self.hub.runs, "start") as start, \
+                mock.patch.object(self.hub, "wake_supervisor") as wake, \
+                mock.patch.object(self.hub, "_commit") as commit, \
+                mock.patch.object(server.compact, "_ask") as ask:
+            first = self.task(task["id"])[1]
+            second = self.task(task["id"])[1]
+        self.assertEqual(first["actions"], second["actions"])
+        self.assertEqual(task, saved)
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (before, stamp))
+        for effect in (start, wake, commit, ask):
+            effect.assert_not_called()
+        self.assertTrue({"task", "levers", "message", "supervisor", "recovery", "next_step", "summary",
+                         "handoff_available", "step_levers", "plan", "chain"} <= first.keys())
+
+    def test_observed_chat_actions_are_forks_only(self):
+        for source in ("vscode", "terminal", "codex", "opencode"):
+            with self.subTest(source=source):
+                sid = "observed-" + source
+                for event, extra in (("UserPromptSubmit", {"prompt": "fix add", "entrypoint": source}),
+                                     ("Stop", {"model": "claude-sonnet-5-5", "effort": "medium", "entrypoint": source})):
+                    events.append(self.folder, dict(event=event, ts=time.time(), session_id=sid,
+                        project="proj", project_dir=str(self.project), cwd=str(self.project),
+                        harness=source if source in ("codex", "opencode") else "claude", **extra))
+                self.hub.poll_once()
+                row = next(r for r in self.hub.snapshot()["sessions"] if r["id"] == sid)
+                actions = self.hub.actions(row)
+                self.assertEqual((actions["state"], actions["primary"], actions["bar"]), ("observed", [], []))
+                self.assertEqual(self.ids(actions, "menu"), ["continue", "verify", "handoff", "escalate", "terminal"])
+                lv = self.hub.levers(sid)
+                for a in actions["menu"]:
+                    self.assertEqual(a["post"], "/api/" + a["id"])
+                    self.assertEqual(a["body"]["session"], sid)
+                    self.assertTrue(a["body"]["fork"])
+                    self.assertEqual(a["off"], lv[a["id"]])
+                self.assertTrue(actions["menu"][-1]["off"])
+                self.assertIn("observed ·", actions["line"])
+                self.assertEqual(actions["menu"][0]["body"]["text"], "Continue the task.")
+                if source == "vscode":
+                    code, data = self.call(actions["menu"][0]["post"], actions["menu"][0]["body"])
+                    self.assertEqual(code, 200, data)
+                    self.assertNotEqual(data["session"], sid)
+                    self.assertEqual(self.session(data["session"])["forked_from"], sid)
+                    self.wait_idle(data["session"])
+                task = self.saved_task()
+                task["steps"][1]["session"] = sid
+                self.assertEqual(self.task(task["id"])[1]["actions"], actions)
+
+    def test_decision_actions_have_valid_deduplicated_bodies(self):
+        tid, task = self.decision_task()
+        self.hub.cfg["supervisor_mode"] = "gated"
+        task["supervisor"]["mode"] = "gated"
+        first = self.task(tid)[1]["actions"]
+        second = self.task(tid)[1]["actions"]
+        self.assertEqual(first, second)
+        self.hub.tasks[tid] = tasks.load(self.folder, tid)
+        self.assertEqual(self.task(tid)[1]["actions"], first)
+        self.assertEqual(self.ids(first, "primary"), ["a", "b", "default_auto"])
+        for action, option in zip(first["primary"], task["decision"]["options"]):
+            self.assertEqual(action["post"], "/api/task/message")
+            self.assertEqual(action["body"]["mode"], "answer")
+            self.assertEqual(action["body"]["text"], option["text"])
+            self.assertEqual(action["body"]["target"], tasks.message_target(task))
+            self.assertRegex(action["body"]["request_id"], r"^[0-9a-f-]{36}$")
+        action = first["primary"][-1]
+        self.assertEqual(action["body"]["remember"], "auto")
+        with mock.patch.object(self.hub, "_guidance_tick"):
+            code, data = self.call(action["post"], action["body"])
+            self.assertEqual(code, 200, data)
+            self.assertEqual(self.call(action["post"], action["body"])[0], 200)
+        self.assertEqual(len(self.hub.tasks[tid]["messages"]), 1)
+
+    def test_remember_actions_follow_project_level_and_default(self):
+        task = self.saved_task("waiting", "plan ready: confirm")
+        self.assertEqual(self.ids(self.hub.actions(task), "primary"), ["confirm", "confirm_auto"])
+        self.hub.cfg["supervisor_projects"] = {str(self.project): "auto"}
+        self.assertEqual(self.ids(self.hub.actions(task), "primary"), ["confirm"])
+        task.update(why="asks: choose", owner="fred", decision={"q": "choose", "asked": 1, "step": 2,
+            "options": [{"key": "a", "text": "one"}, {"key": "b", "text": "two"}], "default": "a"})
+        self.assertEqual(self.ids(self.hub.actions(task), "primary"), ["a", "b"])
+        self.hub.cfg["supervisor_projects"] = {}
+        self.assertEqual(self.ids(self.hub.actions(task), "primary"), ["a", "b", "default_auto"])
+        task["decision"]["default"] = ""
+        self.assertEqual(self.ids(self.hub.actions(task), "primary"), ["a", "b"])
+        task.pop("decision")
+        self.assertEqual(self.hub.actions(task)["primary"], [])
+
+    def test_suggestion_and_uncertain_actions_keep_the_wake(self):
+        task = self.saved_task("stuck", "no handoff")
+        task["steps"][1]["state"] = "failed"
+        for status, primary, bar in (("suggest", ["approve"], ["reject", "stop"]),
+                                     ("uncertain", [], ["dismiss", "stop"])):
+            task["supervisor"]["pending"] = {"wake": 7, "status": status,
+                "decision": {"decision": "retry", "reason": "try sonnet"}}
+            actions = self.hub.actions(task)
+            self.assertEqual(actions["state"], "suggestion")
+            self.assertEqual(self.ids(actions, "primary"), primary)
+            self.assertEqual(self.ids(actions, "bar"), bar)
+            for action in actions["primary"] + actions["bar"][:-1]:
+                self.assertEqual(action["post"], "/api/task/supervisor")
+                self.assertEqual(action["body"], {"task": task["id"], "wake": 7,
+                    "action": "approve" if action["id"] == "approve" else "reject"})
+            self.assertIn("try sonnet", actions["line"])
+        task["supervisor"]["paused"] = True
+        self.assertEqual(self.hub.actions(task)["primary"], [])
+
+    def test_action_posts_use_existing_routes(self):
+        def echo(handler, body, *args):
+            return handler._json(body)
+
+        names = ("_task_lever", "_task_message", "_task_supervisor", "_task_folder", "_lever", "_terminal")
+        with mock.patch.multiple(server.Handler, **{name: echo for name in names}):
+            for state, why in (("planned", ""), ("running", ""), ("waiting", "plan ready: confirm"),
+                               ("waiting", "confirm Fable"), ("waiting", "replanned: scope changed"),
+                               ("stuck", "verify failed twice"), ("stopped", ""), ("done", ""), ("handed", "")):
+                task = self.saved_task(state, why)
+                actions = self.hub.actions(task)
+                for a in actions["primary"] + actions["bar"] + actions["menu"]:
+                    if a["post"]:
+                        with self.subTest(state=state, id=a["id"]):
+                            self.assertEqual(self.call(a["post"], a["body"]), (200, a["body"]))
+                            if a["post"].startswith("/api/task/"):
+                                self.assertEqual(a["body"]["task"], task["id"])
+                task["supervisor"]["pending"] = {"wake": 9, "status": "suggest",
+                    "decision": {"decision": "retry", "reason": "test"}}
+                for a in self.hub.actions(task)["primary"] + self.hub.actions(task)["bar"]:
+                    if a["post"]:
+                        self.assertEqual(self.call(a["post"], a["body"]), (200, a["body"]))
+
+    def test_action_gates_for_guidance_usage_pause_and_live_recovery(self):
+        task = self.saved_task("waiting", "plan ready: confirm")
+        task["messages"] = [{"id": "a" * 32, "status": "uncertain", "mode": "queued"}]
+        actions = self.hub.actions(task)
+        self.assertTrue(all(a["off"] == "Resolve pending task guidance first" for a in actions["primary"]))
+        task.pop("messages")
+        task.update(state="stuck", why="usage limit until 18:00")
+        task["steps"][1].update(state="failed", limit="anthropic")
+        actions = self.hub.actions(task)
+        self.assertEqual((actions["state"], self.ids(actions, "primary")), ("hold", ["retry"]))
+        self.assertNotIn("retry", self.ids(actions, "menu"))
+        task["steps"][1].pop("limit")
+        task.update(state="waiting", why="choose next step", owner="fred", progression="manual")
+        task["steps"][1]["state"] = "done"
+        self.assertNotEqual(self.hub.actions(task)["state"], "paused")
+        task["supervisor"]["paused"] = True
+        self.assertEqual(self.hub.actions(task)["state"], "paused")
+        task.pop("progression")
+        task.update(state="stopped", owner="fred")
+        task["steps"][1].update(state="failed", attempts=[{"session": "code-session", "cost": 0,
+            "started": 1.0, "ended": 2.0, "cause": "interrupted", "final": False}])
+        with mock.patch.object(self.hub.runs, "is_live", return_value=True):
+            actions = self.hub.actions(task)
+        acts = actions["primary"] + actions["bar"] + actions["menu"]
+        self.assertFalse(any(a["id"] in ("retry", "stepdone", "resume", "stop") for a in acts))
+
+    def test_stopped_session_resume_and_linked_follow_up_start(self):
+        tid = self.make_task(steps=[{"kind": "scout", "goal": "look SLOW"}])
+        self.assertEqual(self.call("/api/task/stop", {"task": tid})[0], 200)
+        task = self.until(tid, lambda t: t["steps"][0]["state"] == "failed", "the stopped step ends")
+        self.wait_idle(task["steps"][0]["session"])
+        task["steps"][0]["attempts"][-1]["cause"] = "ok"  # a result saved before the stop needs no cut recovery
+        self.assertEqual(self.hub.levers(task["steps"][0]["session"])["continue"], "")
+        actions = self.task(tid)[1]["actions"]
+        self.assertEqual(self.ids(actions, "primary"), ["resume"])
+        resume = actions["primary"][0]
+        self.assertEqual(resume["post"], "/api/continue")
+        self.assertEqual(resume["body"]["session"], task["steps"][0]["session"])
+        self.assertTrue(resume["body"]["text"])
+        follow = self.saved_task("planned", owner="fred")
+        follow["handoff_from"] = tid
+        task.update(state="handed", handoff_to=follow["id"])
+        start = self.hub.actions(task)["primary"][0]
+        self.assertEqual((start["id"], start["post"], start["body"], start["off"]),
+                         ("start_next", "/api/task/resume", {"task": follow["id"]}, ""))
+
+
 for _name in dir(TaskServerTest):  # the subclass reuses the setUp and helpers, not the tests of its parents
-    for _cls in (AutonomyLevelsTest, FinishServerTest, HandoffServerTest, SupervisedIntakeTest):
+    for _cls in (ActionsServerTest, AutonomyLevelsTest, FinishServerTest, HandoffServerTest, SupervisedIntakeTest):
         if _name.startswith("test_") and _name not in _cls.__dict__:
             setattr(_cls, _name, None)
 

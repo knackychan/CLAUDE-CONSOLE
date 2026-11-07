@@ -1106,6 +1106,181 @@ class Hub:
                     "next_route": f"{route['rung']}/{route['effort']}" if route and not route["hold"] else "",
                     "cwd": task["project_dir"], "add_next": "" if next_step["available"] else next_step["reason"]})
 
+    def actions(self, task: dict) -> dict:
+        """README 52 section 3 as read-only data. Empty posts open a form; every POST uses an existing route."""
+        cs = tasks.current_step(task) if "steps" in task else None
+        sid = cs["session"] if cs else task.get("id", "")
+        row = self.session(sid) if "steps" in task else task
+        session_levers = self.levers(sid) or {}
+
+        def action(id_, label, post="", body=None, off="", confirm=False):
+            return {"id": id_, "label": label, "post": post, "body": body or {}, "off": off, "confirm": confirm}
+
+        if row and not row.get("window"):
+            with self.lock:
+                session = self.state.sessions.get(sid)
+                source = row.get("source") or (session.source if session else "") or row.get("harness") or "external chat"
+            source = {"vscode": "VS Code", "terminal": "terminal", "opencode": "OpenCode", "codex": "Codex"}.get(source, source)
+            menu = [action(k, label, "/api/" + k, {"session": sid, "fork": True},
+                           session_levers.get(k, "Session unavailable")) for k, label in (
+                ("continue", "Continue as a fork"), ("verify", "Verify as a fork"), ("handoff", "Hand off"),
+                ("escalate", "Escalate as a fork"), ("terminal", "Open in terminal"))]
+            menu[0]["body"]["text"] = "Continue the task."
+            return {"state": "observed", "line": "observed · " + source, "primary": [], "bar": [], "menu": menu}
+
+        tid, state, why = task["id"], task["state"], task["why"]
+        lv, message = self.task_levers(tid), self.message_availability(task)
+        sup, recovery, nxt = self.supervisor_view(task), self.recovery(task), self.next_availability(task)
+        pending, rejected = sup["pending"], sup["rejected"]
+        primary, bar, menu = [], [], []
+        result = {"state": "running", "line": "running", "primary": primary, "bar": bar, "menu": menu,
+                  "message": message}
+
+        def lever(id_, label, name=None, confirm=False):
+            name = name or id_
+            return action(id_, label, "/api/task/" + name, {"task": tid}, lv[name], confirm)
+
+        def form(id_, label, off="", **body):
+            return action(id_, label, body={"task": tid, **body}, off=off)
+
+        stop = lever("stop", "Stop", confirm=True)
+        delete = lever("delete", "Delete", "clear", True)
+        finish = lever("finish", "Finish", "done", True)
+        retry = form("retry", "Retry on a model", lv["retry"])
+        handoff = form("handoff", "Hand off", self.handoff_available(task))
+        add_step = form("add_step", "Add step on a model", lv["add_next"],
+                        source_step=nxt["source_step"], source_session=nxt["source_session"])
+        common_menu = [handoff, retry, action("terminal", "Open in terminal", "/api/terminal", {"session": sid},
+                                             session_levers.get("terminal", "Session unavailable"))]
+        common_menu.extend(action("level_" + mode, mode, "/api/task/supervisor", {"task": tid, "mode": mode})
+                           for mode in supervisor.MODES)
+        folder = action("folder", "Open folder", "/api/task/folder", {"task": tid})
+        common_menu.extend((folder, delete))
+
+        if state == "planned":
+            result.update(state="ready", line=f"ready · {len(task['steps'])} steps · Start")
+            primary.append(lever("start", "Start", "resume"))
+            bar.extend((form("edit_steps", "Edit steps"), lever("drop", "Drop", "clear", True)))
+            menu.extend((form("edit_prompt", "Edit prompt"), form("review", "Review rules")))
+        elif state == "waiting" and why.startswith("asks: "):
+            decision = task.get("decision") or {}
+            result.update(state="decision", line="needs you · " + (decision.get("q") or why[6:]))
+            if not decision.get("taken"):
+                for option in decision.get("options", []):
+                    body = {"task": tid, "mode": "answer", "text": option["text"], "target": message["target"]}
+                    # One identity per saved question/option, including repeated GETs and service restarts.
+                    body["request_id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(
+                        [tid, message["target"], decision, option["key"]], sort_keys=True)))
+                    primary.append(action(option["key"], option["text"], "/api/task/message", body,
+                                          message["reason"] or ("" if message["mode"] == "answer" else "Answer unavailable")))
+                default = next((a for a in primary if a["id"] == decision.get("default")), None)
+                if default and supervisor.initial(self.cfg, task["project_dir"], 0)["mode"] != "auto":
+                    primary.append(action("default_auto", "Take the default from now on", default["post"],
+                                          dict(default["body"], remember="auto"), default["off"]))
+            if why.startswith("asks: Plan gap:"):
+                bar.append(lever("redo", "Redo design"))
+            bar.append(stop)
+            menu.extend(common_menu)
+        elif state == "waiting" and why == "plan ready: confirm":
+            result.update(state="plan_ready", line="plan ready · confirm")
+            primary.append(lever("confirm", "Confirm plan"))
+            if supervisor.initial(self.cfg, task["project_dir"], 0)["mode"] != "auto":
+                primary.append(action("confirm_auto", "Confirm, and run plans automatically from now on",
+                                      "/api/task/confirm", {"task": tid, "remember": "auto"}, lv["confirm"]))
+            bar.extend((form("edit_plan", "Edit plan"), lever("redo", "Redo design"), stop))
+            menu.extend(common_menu)
+        elif sup["mode"] != "off" and pending and pending["status"] in supervisor.VISIBLE + ("uncertain",):
+            decision = pending["decision"]
+            result.update(state="suggestion", line=f"needs you · {decision.get('decision') or pending['status']}: "
+                          + (pending["reason"] or pending["error"]))
+            body = {"task": tid, "wake": pending["wake"]}
+            if pending["can_approve"]:
+                primary.append(action("approve", "Approve", "/api/task/supervisor", dict(body, action="approve"),
+                                      "the task is paused" if sup["paused"] else ""))
+            if pending["can_reject"]:
+                dismiss = pending["status"] in ("uncertain", "escalate", "refused")
+                bar.append(action("dismiss" if dismiss else "reject", "Dismiss" if dismiss else "Reject",
+                                  "/api/task/supervisor", dict(body, action="reject")))
+            bar.append(stop)
+            menu.extend(common_menu)
+        elif state == "handed":
+            result.update(state="handed", line="handed off")
+            follow = task.get("handoff_to")
+            if follow:
+                gates = self.task_levers(follow) or {}
+                primary.append(action("start_next", "Start next task", "/api/task/resume", {"task": follow},
+                                      gates.get("resume", "Follow-up task unavailable")))
+            else:
+                primary.append(form("start_next", "Start next task", "" if task.get("handoff_note") else "No handoff saved"))
+            menu.append(delete)
+        elif state == "done":
+            cost = sum(tasks.step_cost(s) for s in task["steps"])
+            result.update(state="done", line=f"done · {len(task['steps'])} steps · ${cost:.2f}")
+            primary.append(lever("accept", "Accept"))
+            bar.append(form("reopen", "Reopen", message["reason"]))
+            menu.extend((handoff, folder, delete))
+        elif (state == "waiting" and (lv["confirm"] == "" or why.startswith(("plan ", "replanned:"))
+                                      or tasks.held(task) or why == "confirm Fable")) or (cs and cs.get("limit")):
+            result.update(state="hold", line="held · " + why)
+            limited = bool(cs and cs.get("limit"))
+            primary.append(retry if limited else lever("confirm", "Run anyway" if tasks.held(task) else "Confirm",
+                                                       confirm=why == "confirm Fable"))
+            if why.startswith("replanned:"):
+                bar.append(lever("keep", "Keep old plan"))
+            bar.append(stop)
+            menu.extend(common_menu)
+        elif state in ("stuck", "stopped"):
+            twice = state == "stuck" and why.startswith("verify failed twice")
+            result.update(state="failed_twice" if twice else state,
+                          line=("failed twice · " if twice else "stuck · " if state == "stuck" else "") +
+                          (why if state == "stuck" else "stopped"))
+            if state == "stopped" and session_levers.get("continue") == "" and row and row["window"]:
+                primary.append(action("resume", "Resume", "/api/continue", {"session": sid,
+                    "text": "You were interrupted. Check `git diff` first, then finish the task."}))
+            else:
+                primary.append(retry)
+            if state == "stuck":
+                bar.append(lever("stepdone", "Accept step result"))
+            if twice:
+                bar.append(handoff)
+            bar.append(finish)
+            menu.append(delete)
+        elif sup["paused"] or task["owner"] == "fred" and state in ("running", "waiting") and not tasks.manual_boundary(task):
+            result.update(state="paused", line=f"paused · after {cs['n']:02d}" if cs else "paused")
+            primary.append(lever("resume", "Resume"))
+            bar.append(stop)
+            menu.extend(common_menu)
+        else:
+            if cs:
+                elapsed = max(0, int(time.time() - (cs.get("started") or time.time())))
+                age = f"{elapsed // 60}m" if elapsed >= 60 else f"{elapsed}s"
+                result["line"] = f"running · {cs['n']:02d} {cs['kind']} · {cs['model'] or cs['pick']} · {age}"
+            bar.extend((stop, lever("pause", "Pause")))
+            menu.extend(common_menu)
+
+        if rejected:
+            primary.clear()
+            result["line"] = f"You rejected wake {rejected['wake']}"
+            result["hint"] = ("Write what to do instead" + (", your note goes with it" if rejected["note"] else "")
+                              if message["mode"] == "next" else "Add step on a model or Finish task")
+            if message["mode"] != "next":
+                bar[:] = [add_step, finish]
+        if recovery is not None:
+            result["recovery"] = recovery
+            recovery_actions = {"retry": retry, "stepdone": lever("stepdone", "Accept step result"),
+                                "resume": lever("resume", "Resume"), "stop": stop}
+            permitted = {k for k in recovery_actions if lv[k] == "" and
+                         (k != "stop" or recovery["orphan"]) and (k not in ("retry", "stepdone") or recovery["cut"])}
+            for place in (primary, bar, menu):
+                place[:] = [a for a in place if a["id"] not in recovery_actions or a["id"] in permitted]
+            listed = {a["id"] for a in primary + bar + menu}
+            for k, a in recovery_actions.items():
+                if k in permitted and k not in listed:
+                    (bar if k == "stop" else menu).append(a)
+        visible = {a["id"] for a in primary + bar}
+        menu[:] = [a for a in menu if a["id"] not in visible]
+        return result
+
     @staticmethod
     def _guidance_levers(task, info):
         pending = tasks.pending_messages(task)
@@ -4614,6 +4789,7 @@ class Handler(BaseHTTPRequestHandler):
         sent = dict(task, steps=[{k: v for k, v in s.items() if k not in ("git_base", "touched")}  # plan 27 K6
                                  for s in task["steps"]])
         return self._json({"task": sent, "levers": self.hub.task_levers(task_id),
+                           "actions": self.hub.actions(task),
                            "summary": tasks.summary(self.hub.folder, task) if task["state"] == "done" else None,
                            "message": self.hub.message_availability(task),
                            "next_step": self.hub.next_availability(task),
