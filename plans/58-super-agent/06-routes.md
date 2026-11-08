@@ -12,84 +12,62 @@ Commit boundary: `feat: GET and POST /api/super (plan 58 T6)`.
 
 ## 6.1 `console/server.py`
 
-In the plan 58 section of `Hub`, after `_super_done`:
+This recipe replaces the old source block. Required:
+[review R2-R5 and R7-R9](08-review-and-jev.md#1-required-corrections).
+
+**Hub.super_view (GET, pure projection).**
+
+- Read settings and snapshot under the existing lock order; copy current super state/busy/wake. Describe all
+  live items, not only the last 30 submitted, and filter advice against current basis/policy without mutating
+  Hub state or disk. Do not wait for a tick to remove a resolved question or changed answer contract.
+- Load and validate the super ledger once. Use that same result for totals, status and today's run count.
+  A read/validation error makes state unranked, names the error and returns `spend.today: null` plus
+  `spend.error`; it must not display zero. Storage/input errors and the latest refusal are also visible.
+- Queue from the filtered projection. Expiry and always rules apply even when a pass is running or GET arrives
+  before the next tick. Mask/cut notes and display metadata. Preserve opaque IDs; no raw prompt, token or
+  external credential may appear in the API.
+- Keep README 3.9 fields. Add `coverage: {live, last_submitted, never_reviewed}`, derived from the live
+  set, last handles count and reviewed map. Report `due` using the monotonic clock; `since` stays wall time.
+  A missing seen entry is new whenever ranked, including equal timestamps.
+- If files/brief evidence are read outside tlock, bound that work and compare the copied basis again before
+  returning. Changed evidence is unknown/stale, never a reason to show an old recommendation.
+- Do not call sync on live state, save/log, arm wakes, start a thread or invoke a provider from GET.
+
+**Hub.super_action (POST).**
+
+- Accept exactly `{action: pause|resume|sort}`, otherwise 400. Keep 409 for Sort while paused.
+- Pause/resume build a candidate state under tlock and persist it before acknowledging; log the action with
+  the existing redaction rules. If either required write fails, return 503 with a masked error and retain a
+  local admission block until reconciliation succeeds. A durable Pause stays paused even if its log write fails.
+- Pause drops pending work only after its saved state takes effect. A launched pass may finish and settle;
+  its advice remains invisible while paused. A claimed but not invoked pass rechecks Pause and settles zero.
+- Resume, once durably saved/logged, arms one immediate wake. Sort durably logs acceptance, then arms its
+  in-memory wake. Duplicate clicks coalesce, never start parallel passes.
+- Notify changed only for visible changes. Return 200 with super_view only after required persistence succeeds.
+  No action may bypass input, executable, storage or accounting gates.
+
+**HTTP wiring.** Add the GET branch beside /api/usage, the POST route beside /api/task/supervisor/replay and
+the small handler below. Existing Host/loopback/X-CC guards apply unchanged.
 
 ```python
-    def super_view(self) -> dict:
-        """GET /api/super (README 58 3.9): the queue as the last ok pass ranked it, or unranked with why. Starts
-        nothing and writes nothing."""
-        now = self.super_clock()
-        limits, errors = superagent.settings(self.cfg)
-        with self.tlock:
-            snap = self.snapshot()
-            live = superagent.items(snap, self.tasks)
-            rows = {r["id"]: r for r in snap.get("tasks") or []}
-            sessions = {r["id"]: r for r in snap.get("sessions") or []}
-            described = [self._super_describe(item, rows, sessions, now) for item in live]
-            state = copy.deepcopy(self.super)
-            busy, wake = self.super_busy, self.super_wake
-        day = usage.day_of(now)
-        settled, active = usage.super_spent(self.folder, day)
-        ranked, why = superagent.status(limits, errors, state, settled + active, bool(self.runs.exe))
-        q = superagent.queue(described, state, now, ranked)
-        queued = [i for card in q["queue"] for i in card["items"]]
-        today = supervisor.spend_view(usage.load_super(self.folder)["records"])["days"].get(day, {})
-        return {"state": "ranked" if ranked else "unranked", "why": why, "paused": state["paused"],
-                "sorting": {"n": busy["n"], "items": len(busy["handles"]), "since": busy["at"]} if busy else None,
-                "due": max(0, round(wake["due"] - now)) if wake else None,
-                "queue": q["queue"], "later": q["later"], "digest": state["digest"] if ranked else [],
-                "notes": superagent.read_notes(self.folder), "orders": superagent.read_orders(self.folder),
-                "last": state["last"],
-                "spend": {"today": round(settled + active, 6), "passes": today.get("runs", 0),
-                          "day_limit": limits["super_day_usd"], "pass_limit": limits["super_pass_usd"]},
-                "counts": {"queue": len(queued), "later": len(q["later"]),
-                           "always": sum(1 for i in queued + q["later"] if i["always"]),
-                           "new": sum(1 for i in queued if i["new"])}}
+# Handler.do_GET:
+if url.path == "/api/super":
+    return self._json(self.hub.super_view())
 
-    def super_action(self, body) -> tuple:
-        """POST /api/super (README 58 3.10): pause, resume or sort. (status, data); data is the GET view on 200."""
-        action = body.get("action") if isinstance(body, dict) and set(body) == {"action"} else None
-        if action not in ("pause", "resume", "sort"):
-            return 400, {"error": "action: pause, resume or sort"}
-        now = self.super_clock()
-        with self.tlock:
-            if action == "sort" and self.super["paused"]:
-                return 409, {"error": "paused: resume first"}
-            if action == "pause":
-                self.super["paused"] = True
-                self.super_wake = None  # a running pass finishes; its answer is kept
-            else:
-                self.super["paused"] = False
-                self._super_arm(now, [("asked", action)], at_once=True)
-            self._super_log({"phase": action, "by": "fred"})
-            self._super_save()
-        with self.lock:
-            self.version += 1
-            self.changed.notify_all()
-        return 200, self.super_view()
+# Handler.do_POST routes:
+routes["/api/super"] = self._super
+
+# Handler method:
+def _super(self, body):
+    status, data = self.hub.super_action(body)
+    return self._json(data, status)
 ```
-
-`Handler.do_GET`, after the `/api/usage` line:
-
-```python
-        if url.path == "/api/super":  # plan 58: the super agent's queue, read only
-            return self._json(self.hub.super_view())
-```
-
-`Handler.do_POST`, after `routes["/api/task/supervisor/replay"] = ...`: `routes["/api/super"] = self._super`, and in
-the POST handlers after `_task_supervisor_replay`:
-
-```python
-    def _super(self, body):
-        status, data = self.hub.super_action(body)
-        return self._json(data, status)
-```
-
-`super_view` reads the task rows through `snapshot()` and each task's card line through `Hub.actions` (read only, as
-GET /api/task does); it holds `tlock` only to copy the state and describe the items, then reads the ledger and the
-two text files outside it.
 
 ## 6.2 Tests first (red before the code)
+
+Add regression cases for unreadable/malformed ledger (null spend plus error), failed Pause save (503, no paid
+start, no false durable acknowledgement), changed decision before a tick, hand-edited secret notes, coverage for
+65 items and new item at an equal clock. Mock every write/model entry point in the GET purity check.
 
 `SuperRouteTest(test_server.RunServerTest)` in `tests/test_superagent_server.py` (`from tests import
 test_server`): the real fake claude, the hub loop not started; `setUp` calls `super().setUp()` and sets

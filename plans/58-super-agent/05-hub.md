@@ -14,273 +14,80 @@ Commit boundary: `feat: super agent wakes, admission and pass results in the Hub
 
 ## 5.1 `console/server.py`
 
-**Import** (line 16-17): `superagent` joins the list, alphabetical: `..., replan, review, routing, runs, superagent,
-supervisor, tasks, transcript, tuning, usage)`.
+This revised recipe replaces the former source block. Implement
+[review R1-R9](08-review-and-jev.md#1-required-corrections), especially the persistence sequence in R4.
+Do not restore logging-only claim saves, whole-ann replacement, wall-clock debounce or new-items-only routing.
 
-**Constant**, after `TICK_S = 15.0`:
+**Wiring.** Import superagent beside supervisor. Add SUPER_POLL_S = 5.0 and call `_super_tick` on that monotonic
+cadence from Hub.run, preserving its other calls. The tick contains exceptions, reports a masked visible failure
+and never stops the main loop.
 
-```python
-SUPER_POLL_S = 5.0  # plan 58: the super agent's tick in Hub.run (items, wakes, admission)
-```
+**State at start.** Load state strictly; on error keep a raw queue and set a storage error that blocks admissions.
+Initialize one pending wake, one busy job, injectable wall and monotonic clocks, running-task IDs, sweep time and
+prior admission-block reason/day. Keep only live threads (tests can join them). Reconcile before any admission,
+under tlock; start/restart never calls a paid provider merely because an old claim exists.
 
-**`Hub.__init__`**, after `self.sup_unsettled = {}` and before `self.probing = ...`:
+**Tick and wakes.**
 
-```python
-        # plan 58: the super agent, one pass at a time over every item that needs Fred (no acts)
-        self.super = superagent.load_state(self.folder)  # state.json: seen, annotations, the last pass, Pause
-        self.super_wake = None  # the one pending wake {first, due, events, asked}; memory only
-        self.super_busy = None  # the running pass's snapshot, or None
-        self.super_threads = []  # the pass threads (tests join them)
-        self.super_clock = time.time  # wall clock: seen, until and the debounce (tests pass their own)
-        self.super_running = None  # ids of the tasks running at the last tick; None before the first tick
-        self.super_swept = 0.0  # when a sweep was last considered
-        self._super_recover()
-```
+1. Under tlock, snapshot coherently using the existing lock order. Build live items, sync seen/ann/reviewed and
+   compare decision bases/policy. Save changed state before admitting a pass. A failed save blocks admission.
+2. Coalesce new/back/changed-input/ended events into one wake. Expired Later returns once even with no running
+   task. Do not accumulate duplicate events. Track running-to-done/stopped/stuck/handed after the first tick.
+3. Use monotonic first/due/sweep times. Debounce is 20 seconds with a 120-second ceiling from first event;
+   Sort/Resume are due immediately. A running pass or closed gate can delay admission beyond that ceiling.
+4. Eligible sweeps retain the fingerprint check and existing running-task restriction. A local-day rollover or
+   an observed blocking config/executable/storage gate becoming eligible arms one wake if items remain.
+   A stable restart is not a transition wake. Model failure itself is not a retry event.
+5. Keep persistence, ledger and input errors visible to super_view. A refusal must not leave the last successful
+   pass looking current. Recovery can clear the error only after the failed read/write/settlement succeeds.
 
-**`Hub.run`**: `last_super = 0.0  # plan 58: the first loop ticks the super agent` after `last_tick =
-time.monotonic()`, and after `self.tick()`:
+**Admission and immutable job.**
 
-```python
-            if time.monotonic() - last_super >= SUPER_POLL_S:
-                last_super = time.monotonic()
-                self._super_tick()
-```
+1. Require a due wake, no busy pass, valid settings/storage, enabled/unpaused service, executable and live items.
+   Build input and reserve/save/log the claim in review R4's order. No paid thread starts on any failed write.
+2. Describe items from Hub.actions, exact effective levels and decision deadlines. Choose candidates by
+   select_items, not display order. Read bounded brief evidence for selected candidates only; copy the required
+   task data under tlock and perform file/prompt work outside locks, then revalidate before claiming.
+   Missing/clipped evidence sets incomplete; never equate it to no open questions.
+3. Digest yields the submitted handles. Select Haiku/Sonnet from **those** items, including stuck subjects
+   whose visible kind is suggestion. Preserve the immutable handle map, bases, policy hash, prompt/hash/bytes,
+   pass UUID, admission day, timeout, reservation, wall claim time and copied settings in the job.
+4. Save last-prompt.md, claimed state and audit claim durably. Required writes raise to admission; do not call
+   _super_save/_super_log wrappers that only swallow exceptions. Before-run failure settles zero, retains
+   recovery evidence if settlement fails, clears busy and exposes the cause.
+5. Start one thread outside the critical section once the claim is durable. Catch Thread.start failure explicitly.
+   Avoid a race with Pause between claim and invocation: recheck the admitted job/gates before invocation.
+   If Pause wins before launch, settle zero; a call already started can finish while the queue stays unranked.
 
-**The section**, inserted immediately before the line `    # -- plan 44: supervisor wakes (Task 5) ----...`:
+**Completion and publication.**
 
-```python
-    # -- plan 58: the super agent (one pass at a time sorts what needs Fred across every task; no acts) -----------
+1. Exactly one run outside locks, with try/finally cleanup. Keep busy until the result has entered the durable
+   result/settlement path. Never clear it early enough to overlap another admission.
+2. Persist result with pid, cost/unknown and masked bounded output; settle once. A failed result/ledger write
+   retains the claim and blocks new admissions until recovered. No successful result status on a partial save.
+3. Rebuild live items/bases under tlock without waiting for another tick. Validate/trim untrusted output using
+   the submitted immutable handle map. Filter stale keys/bases and reapply live hard-forward rules. Changed
+   policy discards all advice. Even discarded advice retains its reported provider charge.
+4. Scope batch IDs by pid; merge only current valid annotations. Keep still-valid advice for unseen/rejected
+   entries, remove departed/stale entries, and revalidate groups. Update reviewed only for actual submitted
+   handles after a current structurally valid response with usable items.
+5. If any submitted item is stale, do not publish that response's global digest or notes. Otherwise save bounded
+   notes and the candidate state. Retain recovery evidence and report an error on either failure. A successful
+   notes save followed by a failed state save is reconciled from the journal before those notes are reused;
+   do not promise atomicity across two files or attempt an unsafe overwrite rollback.
+   Final state clears claimed only after durable accounting. Publish last.ok only after required writes succeed.
+6. Notify changed once the visible state changes. Always release busy in cleanup, keeping storage-error admission
+   blocking when publication failed. Prune completed threads.
 
-    def _super_save(self) -> None:
-        try:
-            superagent.save_state(self.folder, self.super)
-        except OSError as exc:
-            self._log(f"super agent: state.json not saved: {exc}")
+**Recovery.** Scan state.claimed, both audit files and all reserved super ledger records by UUID. A durable result
+settles once, an already-settled record is preserved, an orphan becomes unknown with its reservation held.
+Conflicting evidence blocks. Never run a provider during recovery. Repeated restart is idempotent. If a known
+result's settlement failed, preserve/retry that cost, not an unknown replacement. Persist recovery state; failure
+continues to block. Do not simulate a crash in tests by leaving the original worker active against the same files.
 
-    def _super_log(self, record: dict) -> None:
-        try:
-            superagent.append_log(self.folder, record)
-        except OSError as exc:
-            self._log(f"super agent: super.jsonl: {exc}")
-
-    def _super_recover(self) -> None:
-        """README 58 3.11, once at start: a pass claimed before a restart settles as unknown in the ledger (its
-        reservation stays held), gets its result line and becomes the last pass, failed. seen and ann stay."""
-        claimed = self.super.get("claimed")
-        if not isinstance(claimed, dict):
-            return
-        pid, n, at = claimed.get("pid"), claimed.get("n"), claimed.get("at")
-        if isinstance(pid, str) and pid:
-            usage.record_super(self.folder, pid, {"cost": None})
-        n = n if isinstance(n, int) and not isinstance(n, bool) else self.super["n"]
-        handles = claimed.get("handles") if isinstance(claimed.get("handles"), dict) else {}
-        error = "the service restarted during the pass"
-        self.super["last"] = {"n": n, "at": float(at) if isinstance(at, (int, float)) and not isinstance(at, bool)
-                              else 0.0, "ok": False, "error": error, "model": str(claimed.get("model") or ""),
-                              "cost": None, "turns": 0, "ms": 0, "items": len(handles),
-                              "trigger": str(claimed.get("trigger") or ""), "fingerprint": ""}
-        self.super["claimed"] = None
-        self._super_log({"phase": "result", "n": n, "ok": False, "error": error, "cost": None, "turns": 0, "ms": 0,
-                         "kept": 0, "dropped": [], "trimmed": [], "out": None})
-        self._super_save()
-
-    def _super_arm(self, now: float, events: list, at_once: bool = False) -> None:
-        """The one pending wake (README 58 3.6): each event pushes it super_debounce_s later, never past MAX_WAIT_S
-        after its first event; Resume and Sort make it due at once."""
-        wake = self.super_wake
-        if wake is None:
-            wake = self.super_wake = {"first": now, "due": now, "events": [], "asked": False}
-        wake["events"].extend(events)
-        wake["asked"] = wake["asked"] or at_once
-        debounce = superagent.settings(self.cfg)[0]["super_debounce_s"]
-        wake["due"] = wake["first"] if wake["asked"] else min(now + debounce, wake["first"] + superagent.MAX_WAIT_S)
-
-    def _super_tick(self, now=None) -> bool:
-        """README 58 3.6, every SUPER_POLL_S from run(): bring the item memory to the live needs set, arm the wake on
-        events (new items, items back from later, tasks that ended) or on a sweep, and admit a due pass. Never
-        raises (a failure is logged; the next tick tries again). True when a pass started."""
-        now = self.super_clock() if now is None else now
-        try:
-            with self.tlock:
-                snap = self.snapshot()
-                live = superagent.items(snap, self.tasks)
-                new, back, changed = superagent.sync(self.super, live, now)
-                running = {tid for tid, t in self.tasks.items() if t.get("state") == "running"}
-                ended = [tid for tid in sorted(self.super_running or ())
-                         if (self.tasks.get(tid) or {}).get("state") in ("done", "stopped", "stuck", "handed")]
-                self.super_running = running
-                events = [("new", k) for k in new] + [("back", k) for k in back] + [("ended", t) for t in ended]
-                if events:
-                    self._super_arm(now, events)
-                elif self.super_wake is None and running and live:
-                    self._super_sweep(now, live)
-                if changed:
-                    self._super_save()
-                return self._super_admit(now, snap, live)
-        except Exception as exc:  # the super agent never stops the hub loop
-            self._log(f"super agent tick failed: {type(exc).__name__}: {redact.clip(redact.mask(str(exc)), 200)}")
-            return False
-
-    def _super_sweep(self, now: float, live: list) -> None:
-        """README 58 3.6 step 4: every super_sweep_s while a task runs; a wake only when the fingerprint moved."""
-        since = max(self.super_swept, superagent.last_at(self.super))
-        if now - since < superagent.settings(self.cfg)[0]["super_sweep_s"]:
-            return
-        self.super_swept = now
-        sigs = superagent.signals(self.tasks, now)
-        last = self.super.get("last") if isinstance(self.super.get("last"), dict) else {}
-        if superagent.fingerprint(live, self.tasks, sigs) != last.get("fingerprint"):
-            self._super_arm(now, [("sweep", "")])
-
-    def _super_admit(self, now: float, snap: dict, live: list) -> bool:
-        """README 58 3.7, under tlock: a due wake, no pass running, every gate open and a reservation; then the
-        snapshot, the claim (state.json and the claimed line) and the pass thread. A blocked wake is dropped."""
-        wake = self.super_wake
-        if wake is None or wake["due"] > now or self.super_busy is not None:
-            return False
-        limits, errors = superagent.settings(self.cfg)
-        if superagent.blocked(limits, errors, self.super, bool(self.runs.exe)) or not live:
-            self.super_wake = None  # Resume, Sort or the next event arms another
-            return False
-        pid = uuid.uuid4().hex
-        got = usage.reserve_super(self.folder, pid, usage.day_of(now), limits["super_pass_usd"],
-                                  limits["super_day_usd"])
-        self.super_wake = None
-        if got["status"] != "reserved":
-            self._super_log({"phase": "refused", "status": got["status"], "error": got.get("error", "")})
-            return False
-        self.super["n"] += 1
-        n = self.super["n"]
-        try:
-            job = self._super_snapshot(n, pid, got["reserved"], wake, snap, live, now, limits)
-        except Exception as exc:  # nothing was launched: the reservation settles at no cost
-            usage.record_super(self.folder, pid, {"cost": 0.0})
-            error = f"the digest failed: {type(exc).__name__}: {redact.clip(redact.mask(str(exc)), 200)}"
-            self.super["last"] = {"n": n, "at": now, "ok": False, "error": error, "model": "", "cost": 0.0,
-                                  "turns": 0, "ms": 0, "items": len(live),
-                                  "trigger": superagent.trigger_words(wake["events"]), "fingerprint": ""}
-            self._super_log({"phase": "result", "n": n, "ok": False, "error": error, "cost": 0.0, "turns": 0,
-                             "ms": 0, "kept": 0, "dropped": [], "trimmed": [], "out": None})
-            self._super_save()
-            return False
-        self.super["claimed"] = {"n": n, "pid": pid, "at": now, "model": job["model"], "handles": job["handles"],
-                                 "trigger": job["trigger"]}
-        self._super_log({"phase": "claimed", "n": n, "pid": pid, "trigger": job["trigger"], "model": job["model"],
-                         "handles": job["handles"], "bytes": len(job["prompt"].encode("utf-8")),
-                         "prompt_hash": job["prompt_hash"], "reserved": got["reserved"]})
-        self._super_save()
-        self.super_busy = job
-        thread = threading.Thread(target=self._super_job, args=(job,), name="super-pass", daemon=True)
-        self.super_threads.append(thread)
-        thread.start()
-        return True
-
-    def _super_describe(self, item: dict, rows: dict, sessions: dict, now: float) -> dict:
-        """One item with its card fields (superagent.describe): a task's from Hub.actions (read only) and its
-        effective level; a session's from its snapshot row, at level observed."""
-        if item["type"] == "session":
-            return superagent.describe(item, None, sessions.get(item["id"]) or {}, {}, "observed", 0, now)
-        task = self.tasks[item["id"]]
-        try:
-            view = self.actions(task)
-        except Exception:  # the card line is a nicety, never a failed pass
-            view = {}
-        return superagent.describe(item, task, rows.get(item["id"]) or {}, view,
-                                   supervisor.policy(self.cfg, task, now)["mode"], self.cfg["decision_timeout_s"], now)
-
-    def _super_snapshot(self, n: int, pid: str, reserved: float, wake: dict, snap: dict, live: list, now: float,
-                        limits: dict) -> dict:
-        """Everything the pass reads, built once under tlock: the items described in the order the last ok pass
-        left (then the later ones), each task item with its open questions, the live lines, the signals, the head,
-        the digest and the prompt (saved as last-prompt.md; the same string is hashed and run)."""
-        rows = {r["id"]: r for r in snap.get("tasks") or []}
-        sessions = {r["id"]: r for r in snap.get("sessions") or []}
-        described = [self._super_describe(item, rows, sessions, now) for item in live]
-        placed = superagent.queue(described, self.super, now, ranked=True)
-        ordered = [i for card in placed["queue"] for i in card["items"]] + placed["later"]
-        for item in ordered:
-            task = self.tasks.get(item["id"]) if item["type"] == "task" else None
-            if task is not None:
-                briefs = {s["n"]: tasks.read_brief(self.folder, task, s["n"]) for s in task["steps"]}
-                item["questions"] = [q["q"] for q in tasks.open_questions(task, briefs) if not q["closed"]]
-        new_keys = {key for what, key in wake["events"] if what == "new"}
-        model = superagent.pass_model(limits, [i for i in ordered if i["key"] in new_keys])
-        lines = [superagent.task_line(t, supervisor.policy(self.cfg, t, now)["mode"], now)
-                 for t in superagent.live_tasks(self.tasks)]
-        sigs = superagent.signals(self.tasks, now)
-        trigger = superagent.trigger_words(wake["events"])
-        spent = sum(usage.super_spent(self.folder, usage.day_of(now))) - reserved  # this pass's own hold left out
-        head = {"n": n, "trigger": trigger, "spent": max(0.0, spent), "day_usd": limits["super_day_usd"],
-                "levels": superagent.levels(self.cfg)}
-        you = paths.you(self.cfg)
-        notes = superagent.cut_notes(superagent.read_notes(self.folder), limits["super_notes_lines"])
-        text, handles = superagent.digest(head, ordered, superagent.read_orders(self.folder), notes, lines, sigs,
-                                          you, now)
-        prompt = superagent.build_prompt(kinds.text(self.folder, "super"), text, you, limits["super_notes_lines"])
-        superagent.save_prompt(self.folder, prompt)
-        return {"n": n, "pid": pid, "reserved": reserved, "model": model, "prompt": prompt,
-                "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(), "handles": handles,
-                "items": {i["key"]: {"kind": i["kind"], "always": i["always"]} for i in live},
-                "trigger": trigger, "at": now, "cwd": str(superagent.folder(self.folder)),
-                "fingerprint": superagent.fingerprint(live, self.tasks, sigs),
-                "cfg": dict(copy.deepcopy(self.cfg), super_timeout_s=limits["super_timeout_s"]),
-                "notes_lines": limits["super_notes_lines"]}
-
-    def _super_job(self, job: dict) -> None:
-        """Exactly one superagent.run outside every lock; completion always runs."""
-        result = {"out": None, "cost": None, "model": job["model"], "turns": 0, "error": "the pass did not run",
-                  "ms": 0}
-        try:
-            result = superagent.run(job["cfg"], self.runs.exe, job["cwd"], job["prompt"], job["model"],
-                                    job["reserved"])
-        except Exception as exc:
-            result = dict(result, error="the pass failed: " + redact.clip(redact.mask(str(exc)), 200))
-        finally:
-            self._super_done(job, result)
-
-    def _super_done(self, job: dict, result: dict) -> None:
-        """Settle the spend once, check the answer (README 58 3.7), keep it when ok, and write the result line and
-        state.json. A failed pass changes no annotation, digest or notes, and unranks the queue."""
-        with self.tlock:
-            self.super_busy = None
-            settled = usage.record_super(self.folder, job["pid"], {"cost": result.get("cost")})
-            if settled.get("status") not in ("settled", "unknown"):
-                self._log(f"super agent pass {job['n']}: the ledger kept its reservation: {settled.get('error', '')}")
-            ok = not result.get("error") and isinstance(result.get("out"), dict)
-            kept, dropped, trimmed = 0, [], []
-            if ok:
-                try:
-                    got = superagent.check(result["out"], job["handles"], job["items"], self.super_clock(),
-                                           job["notes_lines"])
-                except Exception as exc:  # a check bug is a failed pass, never a dead thread
-                    ok = False
-                    result = dict(result, error=f"the pass gave no answer (the check failed: {type(exc).__name__})")
-                else:
-                    self.super["ann"] = {k: a for k, a in got["ann"].items() if k in self.super["seen"]}
-                    self.super["digest"] = got["digest"]
-                    kept, dropped, trimmed = len(self.super["ann"]), got["dropped"], got["trimmed"]
-                    try:
-                        superagent.save_notes(self.folder, got["notes"])
-                    except OSError as exc:
-                        self._log(f"super agent: notes.md not saved: {exc}")
-            self.super["last"] = {"n": job["n"], "at": job["at"], "ok": ok, "error": result.get("error") or "",
-                                  "model": result.get("model") or job["model"], "cost": result.get("cost"),
-                                  "turns": result.get("turns") or 0, "ms": result.get("ms") or 0,
-                                  "items": len(job["handles"]), "trigger": job["trigger"],
-                                  "fingerprint": job["fingerprint"]}
-            self.super["claimed"] = None
-            self._super_log({"phase": "result", "n": job["n"], "ok": ok, "error": result.get("error") or "",
-                             "cost": result.get("cost"), "turns": result.get("turns") or 0,
-                             "ms": result.get("ms") or 0, "kept": kept, "dropped": dropped, "trimmed": trimmed,
-                             "out": result.get("out")})
-            self._super_save()
-        with self.lock:
-            self.version += 1
-            self.changed.notify_all()
-```
-
-`last.at` is the claim time: an item first seen during the pass (after the claim) is new in the next ranked queue,
-since that pass never saw it.
+**Evidence APIs.** Keep _super_describe and _super_snapshot as small assembly helpers using existing functions.
+No new action dispatcher, no import from superagent into supervisor, no task-file changes. All error messages are
+masked before logs/HTTP, including unexpected errors in the worker and at thread start.
 
 ## 5.2 Tests first (red before the code)
 
@@ -339,7 +146,7 @@ class SuperHubTest(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CC_CONSOLE_HOME": str(data)})
         env.start()
         self.addCleanup(env.stop)
-        self.now, self.calls, self.answer = T0, [], None
+        self.now, self.mono, self.calls, self.answer = T0, 1000.0, [], None
         self.gate = threading.Event()
         self.gate.set()
 
@@ -363,6 +170,7 @@ class SuperHubTest(unittest.TestCase):
                          folder, exe=FAKE)
         hub.user_home = Path(self.tmp.name)
         hub.super_clock = lambda: self.now
+        hub.super_mono = lambda: self.mono
         return hub
 
     def drain(self, hub=None):
@@ -374,6 +182,7 @@ class SuperHubTest(unittest.TestCase):
         return make_task(hub or self.hub, self.project, n, state, why, **extra)
 
     def tick(self, at, hub=None):
+        self.mono += at - self.now
         self.now = at
         return (hub or self.hub)._super_tick()
 
@@ -385,7 +194,10 @@ class SuperHubTest(unittest.TestCase):
         return next(i["key"] for i in superagent.items(hub.snapshot(), hub.tasks) if i["id"] == tid)
 ```
 
-`SuperHubTest` (each assertion exact; `day = usage.day_of(T0)`):
+`SuperHubTest` (`day = usage.day_of(T0)`; update shapes for reviewed/basis and translate due assertions to the
+injected monotonic clock. Preserve wall-time claim/seen assertions):
+- Include every regression in review section 5: stale completion without a tick, policy changes mid-pass,
+  65-item coverage/merge, cap rollover/off-to-on exactly once, wall-clock jumps, no retry storm and bounded threads.
 - `test_new_items_arm_one_debounced_pass`: task 1 waiting (`plan ready: confirm`). `tick(T0)` is False and
   `super_wake["due"]` is T0+20; `state.json` holds `seen` `{key1: T0}`. `tick(T0+19)` is False; `tick(T0+20)` is
   True; drain. One call: `max_cost` 0.2, `model` `haiku`, `cwd` `str(home / "super")`, `cfg["super_timeout_s"]` 120;
@@ -415,17 +227,17 @@ class SuperHubTest(unittest.TestCase):
   `[("sweep", "")]`; `tick(T0+1840)` True and its prompt holds `"Triggers: sweep"`. With task 2 done instead, no
   sweep is considered at all (`super_swept` unchanged).
 - `test_an_item_back_from_later_wakes_a_pass`: `self.answer` puts `I1` later with `until` `time.strftime(
-  "%Y-%m-%dT%H:%M", time.localtime(T0 + 600))`; pass 1 at T0+20, drained: `ann[key1]["do"]` is `later` and its
-  `until` T0+600. `tick(T0+599)` arms nothing; `tick(T0+600)` arms a wake with events `[("back", key1)]` and sets
+  "%Y-%m-%dT%H:%M", time.localtime(T0 + 600))` and why `waits for the other task`; pass 1 at T0+20, drained: `ann[key1]["do"]` is `later` and its
+  `until` T0+600 and a nonblank reason. `tick(T0+599)` arms nothing; `tick(T0+600)` arms a wake with events `[("back", key1)]` and sets
   `ann[key1]["back"]` True; `tick(T0+605)` adds no second back event (the wake's events stay `[("back", key1)]`);
   `tick(T0+620)` True with `"Triggers: 1 back from later"`.
-- `test_restart_settles_a_claimed_pass_and_keeps_the_order`: pass 1 over task 1 ok (drained). Gate cleared; task 2
-  at T0+30; `tick(T0+50)` True (pass 2 claimed, blocked). `hub2 = self.make_hub(home)`: `hub2.super["claimed"]` is
-  None; `hub2.super["last"]` has `n` 2, `ok` False, `error` `"the service restarted during the pass"`, `cost` None,
-  `items` 2, `at` T0+50; `hub2.super["ann"]` equals pass 1's annotations and `hub2.super["seen"]` holds both keys
-  at T0 and T0+30; the ledger record of pass 2 is `unknown` with `reserved` 0.2, so `usage.super_spent(home, day)` is
-  `(0.003, 0.2)`; the log has a `result` line with `n` 2 and that error. `tick(T0+60, hub2)` is False and
-  `hub2.super_wake` is None (a restart does not cause a pass by itself).
+- `test_restart_reconciles_each_durable_boundary`: use persisted fixtures or a terminated isolated fake process,
+  never two active Hubs against one folder. Inject interruption after reserve, claim save/log, result log,
+  settlement, notes save and final state save. Known cost is preserved; only missing results become unknown;
+  orphan reservations remain charged; recovery twice is identical; no model call is replayed.
+- `test_save_and_thread_start_failures_block_cleanly`: claim/state/log failures never start a process; a failed
+  thread start settles zero and clears busy. Result/settlement/publication failure retains recoverable evidence,
+  exposes a storage error and blocks new admission. Retrying persistence cannot double-charge.
 - `test_pause_off_no_exe_and_bad_settings_start_nothing`: subTests, each on a fresh hub in its own folder with task
   1: paused (`hub.super["paused"] = True`), `super_day_usd` 0, `super_pass_usd` 0, `hub.runs.exe = None`,
   `super_debounce_s` `"20"`, `super_model` `"opus"`. `tick(T0)` and `tick(T0+20)` start nothing, `super_wake` is
@@ -434,7 +246,7 @@ class SuperHubTest(unittest.TestCase):
   `tick(T0+100k+20)` and a drain: the calls' `max_cost` are 0.008, 0.005 and 0.002 (`assertAlmostEqual`, 6 places);
   the fourth admission is False and the last `refused` line is `{"status": "cap", "error": "super agent day limit
   reached"}` (plus `ts` and `phase`); `superagent.status(*superagent.settings(hub.cfg), hub.super,
-  sum(usage.super_spent(home, day)), True)` is `(False, "over the day limit ($0.01)")`.
+  sum(usage.super_spent(usage.load_super(home)["records"], day)), True)` is `(False, "over the day limit ($0.01)")`.
 - `test_failed_pass_keeps_the_last_answer_and_unranks`: pass 1 over task 1 ok. `self.answer` returns `{"out": None,
   "cost": 0.02, "model": "haiku", "turns": 6, "error": "the pass failed: error_max_turns", "ms": 9}`; task 2 at T0+30,
   pass 2 at T0+50: `ann`, `digest` and `notes.md` are pass 1's; `last` has `n` 2, `ok` False, that `error`, `cost`
@@ -459,8 +271,8 @@ class SuperHubTest(unittest.TestCase):
   style.css 2) app.js · default style.css, taken in 9 min"` (600 s from T0, seen at T0+20), `"open questions: Keep the
   old class names?"` and `"Live tasks (1):\n0115-a001 proj · waiting · step 1/2 code sonnet/medium · done · $0.10 ·
   retries 0 · FAILs 0 · level auto"`.
-- `test_judge_model_for_a_new_stuck_item`: task 1 stuck (`step 01 failed`) at T0: pass 1's model is `sonnet`; task 2
-  waiting at T0+100: pass 2's model is `haiku` (the stuck item is no longer new).
+- `test_judge_model_for_submitted_stuck_work`: task 1 stuck at T0 selects Sonnet. Another task event, Sort and sweep
+  still select Sonnet when that stuck subject is submitted; repeat with its visible kind suggestion.
 - `test_a_failing_tick_is_logged_never_raised`: with `superagent.items` patched to raise `RuntimeError("boom")`,
   `tick(T0)` is False and `home / "console.log"` holds `"super agent tick failed: RuntimeError: boom"`.
 - `test_hub_loop_ticks_the_super_agent`: with `poll_once`, `auto_steps`, `advance`, `read_costs`, `tick`,

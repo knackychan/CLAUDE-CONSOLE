@@ -16,74 +16,35 @@ Commit boundary: `feat: super agent spend ledger and Usage block (plan 58 T4)`.
 
 ## 4.1 `console/usage.py`
 
-`load_supervisor` and `record_supervisor` take the section by keyword; the default keeps every message as it is:
+Required review: [R4/R5 persistence and accounting](08-review-and-jev.md#r4r5-persistence-and-accounting-order).
+Keep the existing FILE_LOCK and whole-file atomic writer. Reuse existing section mechanics, but not permissive
+record validation that could make a corrupt ledger look like free allowance.
 
-```python
-def load_supervisor(folder, *, section: str = "supervisor") -> dict:
-    """The supervisor ledger (or plan 58's `super` section) from usage-days.json as {pass_id: record}. A missing
-    section is valid empty; an unreadable or malformed section is an explicit error, never a free empty allowance."""
-    data = _read(folder)
-    if data is None:
-        return {"error": "usage-days.json is unreadable", "records": {}}
-    sup = data.get(section)
-    if sup is None:
-        return {"error": "", "records": {}}
-    if not isinstance(sup, dict):
-        return {"error": f"usage-days.json {section} is not an object", "records": {}}
-    return {"error": "", "records": sup}
-```
+Implement these small interfaces; no new ledger file:
 
-In `record_supervisor(folder, pass_id: str, result: dict, *, section: str = "supervisor")`: `sup =
-data.get(section, {})`, the not-an-object error reads `f"usage-days.json {section} is not an object"`, and the write
-is `data[section] = sup`. Nothing else in it changes.
+- `load_supervisor(folder, *, section="supervisor")` and
+  `record_supervisor(folder, pass_id, result, *, section="supervisor")`: parameterize only the section lookup,
+  error label and assignment. Keep default callers' behavior. Grep all callers before changing either signature.
+- `load_super(folder)`: return `{error, records}` from section super. An absent section is empty; unreadable JSON,
+  a nonobject section or **any invalid record** is an explicit error. Validate each record against review R5 before
+  returning totals. Do not silently skip malformed rows or filter them out of the budget.
+- `reserve_super(folder, pass_id, day, pass_limit, day_limit)`: under FILE_LOCK, read and validate the full super
+  section, refuse duplicates/errors, compute settled + reserved/unknown for the admission day, and atomically
+  reserve the lesser of the pass limit and day remainder. Round money to six decimals; a remainder rounding to
+  zero is a cap, never a model invocation without a budget. Validate finite positive limits at this boundary too.
+  Preserve every other file section. Return reserved/reserved_amount/day or a specific refusal.
+- `record_super(folder, pass_id, result)`: validate the existing record, then use section-aware settlement.
+  A reported finite nonnegative number is known; bool, negative, NaN, infinity or missing is unknown.
+  Preserve the reservation for unknown cost. Known costs settle in full, including above the reservation.
+  Identical repeated settlement is harmless; conflicting settlement refuses. Never overwrite settled with unknown.
+- `super_spent(records, day)`: pure totals from an already-validated records mapping. Callers must check
+  load_super's error before calling it. GET loads once and derives its complete spend view from that result;
+  an error never becomes (0, 0). No folder-based overload.
 
-After `supervisor_spent`:
-
-```python
-# -- plan 58: the super agent's own passes, in a section of their own ------------------------------------------
-# Apart from the supervisor's section: neither role spends the other's allowance. A uuid4 pass id is the identity.
-
-def load_super(folder) -> dict:
-    return load_supervisor(folder, section="super")
-
-
-def reserve_super(folder, pass_id: str, day: str, pass_limit: float, day_limit: float) -> dict:
-    """Atomically reserve one super agent pass: the lesser of `pass_limit` and what `day` has left (settled plus
-    held). A remainder that rounds to nothing is a cap (a zero max_cost would mean no budget flag); a duplicate pass
-    id, a cap or an unreadable ledger refuses admission. Never calls a model."""
-    with FILE_LOCK:
-        data = _read(folder)
-        if data is None:
-            _set_aside(folder)
-            return {"status": "error", "error": "usage-days.json is unreadable"}
-        sec = data.get("super", {})
-        if not isinstance(sec, dict):
-            return {"status": "error", "error": "usage-days.json super is not an object"}
-        if pass_id in sec:
-            return {"status": "duplicate", "error": "pass already reserved", "record": sec[pass_id]}
-        settled, active = _supervisor_used(sec, day=day)
-        remaining = round(min(pass_limit, day_limit - settled - active), 6)
-        if remaining <= 0:
-            return {"status": "cap", "error": "super agent day limit reached", "reserved": 0.0}
-        sec[pass_id] = {"day": day, "kind": "super", "reserved": remaining, "cost": 0.0, "status": "reserved"}
-        data["super"] = sec
-        try:
-            _write(folder, data)
-        except OSError as exc:
-            return {"status": "error", "error": f"cannot write usage-days.json: {exc}"}
-        return {"status": "reserved", "reserved": remaining, "day": day}
-
-
-def record_super(folder, pass_id: str, result: dict) -> dict:
-    """Settle one super agent pass (record_supervisor's rules: once, an unknown cost keeps its reservation)."""
-    return record_supervisor(folder, pass_id, result, section="super")
-
-
-def super_spent(folder, day: str) -> tuple:
-    """(settled cost, held reservations) of one day's super agent passes; (0.0, 0.0) for an unreadable ledger (the
-    next reservation refuses then)."""
-    return _supervisor_used(load_super(folder)["records"], day=day)
-```
+New records remain `{day, kind: "super", reserved, cost, status}`, keyed by UUID. Reservations/unknown have cost 0
+and positive reserved; settled has a finite nonnegative cost and retains the recorded admission day. R4 defines how
+the Hub reconciles these records with claims/results after interruption. A ledger write failure stays an error
+and keeps the last durable reservation; do not launch new work until reconciliation succeeds.
 
 ## 4.2 `console/server.py`, `Hub.usage_report`
 
@@ -129,12 +90,17 @@ counted from usage-days.json, apart from the transcripts.`
   (one record settled through `record_super`), the next reserves 0.05; the record is `{"day": DAY, "kind": "super",
   "reserved": 0.05, "cost": 0.0, "status": "reserved"}`; a reservation on another day ignores this day's spend.
 - `test_unknown_cost_keeps_its_reservation`: `record_super(pid, {"cost": None})` gives status `unknown` and
-  `super_spent(folder, DAY)` counts the reservation; a known cost settles in full, even above the reservation (0.3 on
+  `super_spent(load_super(folder)["records"], DAY)` counts the reservation; a known cost settles in full, even above the reservation (0.3 on
   a 0.2 reservation is 0.3); settling twice with the same cost is `settled`, with another cost `conflict`.
 - `test_cap_and_a_tiny_remainder`: day limit 0.008 with 0.008 settled gives `{"status": "cap", "error": "super agent
   day limit reached", "reserved": 0.0}`; day limit 0.0080004 with 0.008 settled (a remainder of 0.0000004, which
   rounds to nothing) is a cap too (settled costs are rounded to a millionth, so the remainder comes from the limit);
   a duplicate pass id gives `duplicate`.
+- `test_invalid_records_and_costs_fail_closed`: nonobject record, invalid day/status, negative/bool/NaN/infinite
+  amounts refuse admission and surface an error in load_super. Invalid reported cost retains unknown spend.
+  Failure to write settlement leaves the reservation; already-settled records cannot be reset to unknown.
+- `test_midnight_and_concurrent_sections`: a pass finishing after midnight settles on its admission day;
+  concurrent supervisor/super saves preserve both sections under FILE_LOCK.
 - `test_sections_are_apart`: a supervisor reservation (`reserve_supervisor`) and a super reservation in one file:
   `load_supervisor(folder)["records"]` holds only the first, `load_super(folder)["records"]` only the second; a
   super spend of 0.9 leaves the supervisor's day allowance whole.

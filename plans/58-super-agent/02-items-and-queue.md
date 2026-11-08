@@ -1,6 +1,8 @@
 # Task 2: the needs items, their keys, the always list, sync and the queue order
 
 > Contract: [README.md](README.md) 3.3, 3.4, 3.6 (sync), 3.8; golden tables 4.1 and 4.2. Decision D10.
+> Review: [R1-R3 and R8](08-review-and-jev.md). The revised queue contract in 2.1a is required alongside
+> these examples; input selection and display ordering are different operations.
 > Reads the snapshot exactly as `Hub.snapshot` counts it (`console/server.py:575-580`); never rebuilds a group.
 
 **Files**
@@ -15,8 +17,9 @@ Commit boundary: `feat: super agent items, always list and queue order (plan 58 
 # -- items and the queue (Task 2) ---------------------------------------------------------------------------
 
 def _event(values) -> str:
-    """8 hex of the SHA-1 of a JSON list: the part of a key that changes with the state that raised the item."""
-    return hashlib.sha1(json.dumps(values, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()[:8]
+    """16 hex of canonical JSON SHA-256, stable until the decision evidence changes."""
+    raw = json.dumps(values, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 def always_reason(task: dict) -> str:
@@ -84,9 +87,10 @@ def items(snap: dict, by_id: dict) -> list:
         cs = tasks.current_step(task) if task.get("current") else None
         event = _event([kind, task.get("state"), task.get("why") or "", task.get("current") or 0,
                         len(tasks.attempts(cs)) if cs else 0, row.get("asks") or "", row.get("hand_off") or "",
-                        pending.get("wake") if kind == "suggestion" else 0, decision.get("taken") or ""])
+                        [pending.get(k) for k in ("wake", "status", "decision", "error")], decision,
+                        cs.get("limit") if cs else None, always_reason(task)])
         out.append({"key": f"task:{task['id']}:{event}", "type": "task", "id": task["id"], "kind": kind,
-                    "always": always_reason(task), "project": row.get("project") or "",
+                    "always": always_reason(task), "subject_state": task.get("state"), "project": row.get("project") or "",
                     "project_dir": row.get("project_dir") or "", "title": row.get("title") or "",
                     "label": row.get("label") or task["id"]})
     for row in snap.get("sessions") or []:
@@ -94,7 +98,8 @@ def items(snap: dict, by_id: dict) -> list:
             continue
         kind = (row["state"] if row.get("state") in NEEDS_YOU else "context" if row.get("ctx_tone") == "red"
                 else "handed")
-        event = _event([kind, row.get("state"), row.get("turn_ts"), row.get("handoff_by") or ""])
+        event = _event([kind, row.get("state"), row.get("turn_ts"), row.get("handoff_by") or "",
+                        row.get("stop_question") or ""])
         out.append({"key": f"session:{row['id']}:{event}", "type": "session", "id": row["id"], "kind": kind,
                     "always": "", "project": row.get("project") or "", "project_dir": row.get("project_dir") or "",
                     "title": row.get("title") or "", "label": str(row["id"])[:8]})
@@ -113,6 +118,10 @@ def sync(state: dict, live: list, now: float) -> tuple:
     gone = [k for k in seen if k not in keys]
     for key in gone:
         del seen[key]
+    reviewed = state.setdefault("reviewed", {})
+    reviewed_gone = [key for key in reviewed if key not in keys]
+    for key in reviewed_gone:
+        del reviewed[key]
     stale = [k for k in ann if k not in keys]
     for key in stale:
         del ann[key]
@@ -122,7 +131,7 @@ def sync(state: dict, live: list, now: float) -> tuple:
         if a.get("do") == "later" and _num(until) and until <= now and not a.get("back"):
             a["back"] = True
             back.append(key)
-    return new, back, bool(new or gone or stale or back)
+    return new, back, bool(new or gone or stale or back or reviewed_gone)
 
 
 def _when(ts) -> str:
@@ -138,61 +147,30 @@ def last_at(state: dict) -> float:
     return float(at) if _num(at) else 0.0
 
 
-def queue(items_: list, state: dict, now: float, ranked: bool) -> dict:
-    """README 3.8 as cards: {"queue": [{"batch", "rank", "items"}], "later": [item]}; every item comes back with
-    age_s, new, do, rank, say, why, batch and until added. Ranked: always items first, oldest first; then annotated
-    items by rank (ties oldest first); then unannotated items first seen before the last pass, oldest first; then
-    newer ones, oldest first, marked new. A later item that is not always and whose until has not passed leaves for
-    `later`. A batch is one card where its best-placed member sits; an always item is forward and never in a batch.
-    Unranked: always items first, then the rest, both oldest first, no annotation field set. Pure."""
-    seen = state.get("seen") or {}
-    ann = (state.get("ann") or {}) if ranked else {}
-    at = last_at(state)
+# queue: implement the revised contract below; do not reuse the indefinite-Later recipe.
 
-    def first(row):
-        return seen.get(row["key"], now), row["key"]
-
-    rows, later = [], []
-    for item in items_:
-        a = ann.get(item["key"]) or {}
-        until = a.get("until")
-        rank = a.get("rank")
-        row = dict(item, age_s=max(0, int(now - seen.get(item["key"], now))), new=False, do="", rank=None, say="",
-                   why="", batch="", until="")
-        if a:
-            row.update(do="forward" if item["always"] else str(a.get("do") or ""),
-                       rank=rank if isinstance(rank, int) and not isinstance(rank, bool) else None,
-                       say=a["say"] if isinstance(a.get("say"), str) else "",
-                       why=a["why"] if isinstance(a.get("why"), str) else "",
-                       batch="" if item["always"] or not isinstance(a.get("batch"), str) else a["batch"],
-                       until=_when(until))
-        elif ranked and seen.get(item["key"], now) > at:
-            row["new"] = True
-        if row["do"] == "later" and not (_num(until) and until <= now):
-            later.append(row)
-        else:
-            rows.append(row)
-
-    def place(row):
-        if row["always"]:
-            return (0, 0) + first(row)
-        if row["rank"] is not None:
-            return (1, row["rank"]) + first(row)
-        return (3 if row["new"] else 2, 0) + first(row)
-
-    rows.sort(key=place)
-    cards, batches = [], {}
-    for row in rows:
-        if row["batch"] and row["batch"] in batches:
-            batches[row["batch"]]["items"].append(row)
-            continue
-        card = {"batch": row["batch"], "rank": row["rank"], "items": [row]}
-        if row["batch"]:
-            batches[row["batch"]] = card
-        cards.append(card)
-    later.sort(key=lambda row: (row["until"] or "9999",) + first(row))
-    return {"queue": cards, "later": later}
 ```
+
+## 2.1a Queue and selection contracts
+
+Implement `queue(items_, state, now, ranked)` with README 3.8's public shape and golden table order. It is pure.
+Every live item appears exactly once, either inside a queue card or in Later, regardless of submission coverage.
+
+- The caller supplies current-basis-filtered annotations. Always-forward rules are rechecked against live data.
+  Unranked mode exposes individual oldest-first cards with no advice; always items remain first.
+- Ranked mode uses valid rank then first_seen/key ties, followed by old unannotated and new items as in table 4.2.
+  Only a complete non-auto-default item with nonblank why and a valid future until can leave for Later.
+  An expired or malformed Later is forward immediately, including on GET before a tick.
+- A batch joins only compatible answer contracts, within a pass-scoped batch identity. After filtering stale or
+  departed members, revalidate; singleton/incompatible groups become individual forward cards.
+- `new` compares first_seen to the claim time, but a missing seen entry is always new in ranked mode, even when
+  the clock equals the claim timestamp. GET never persists a newly discovered seen entry.
+- Add pure `select_items(items_, state)` using review R2: least recently reviewed first, then always-first,
+  first_seen and key. Task 3 applies the item/byte bound. Do not use ranked queue order to select input.
+
+Tests: retain golden table 4.2 (give D/E compatible answer contracts and one pass identity); add 65-item fairness,
+31 always items, invalid Later, expiring Later without running tasks, incompatible same-kind batches, stale
+singleton, new-before-tick and equal-clock cases. `sync` removes reviewed entries for departed keys.
 
 ## 2.2 Tests first (red before the code)
 
@@ -235,7 +213,7 @@ Task ids are `2027011N-080000-a0NN` (valid `tasks.safe_id` ids). A pending card 
   a task, the first 8 characters for a session) come from the row.
 - `test_keys_follow_the_state_never_time_or_cost`: row 1 built twice gives equal keys; changing `updated` or the step
   attempt's `cost` keeps the key; changing `why`, appending a second attempt to the current step, or moving row 10's
-  pending card to wake 4 each change it; every key matches `^(task|session):[^:]+:[0-9a-f]{8}$`.
+  pending card to wake 4 each change it; every key matches `^(task|session):[^:]+:[0-9a-f]{16}$`.
 - `test_tasks_come_first_and_a_task_session_counts_once`: a snapshot with a session row whose `task` is set and a
   needs task gives the task item only; with a loose needs session as well, the task item comes before the session item.
 - `test_items_never_change_their_inputs`: `copy.deepcopy` of the snapshot and of `by_id` before, equal after.
@@ -260,5 +238,5 @@ Task ids are `2027011N-080000-a0NN` (valid `tasks.safe_id` ids). A pending card 
 ## 2.3 Steps and acceptance
 
 - [ ] 1. Write the tests; run `py -m unittest tests.test_superagent`: red for the missing functions.
-- [ ] 2. Append 2.1 to `console/superagent.py`. Focused tests green.
+- [ ] 2. Implement 2.1 and 2.1a in `console/superagent.py`. Focused tests and the review regressions green.
 - [ ] 3. Full suite green (report the count). Commit with the message above.

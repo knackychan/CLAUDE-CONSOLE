@@ -2,9 +2,10 @@
 
 > Contract: [README.md](README.md) section 1 (done when), 3.13 (the behaviour change). Decisions D1, D2.
 > Runs after Tasks 1 to 6 are committed and the full suite is green. Fred drives the window; the commands below are
-> copied from here. Every pass in this check is a real paid Haiku pass. For scale: plan 44's four real Haiku passes
+> copied from here. Passes in this check are real paid Haiku or Sonnet passes according to submitted work. For scale: plan 44's four real Haiku passes
 > settled at $0.0015 to $0.0028 each (usage-days.json, 2026-10-20); a super agent pass reads more (every item and
-> every live task), so expect a few tenths of a cent. The day limit holds the total at $1.00.
+> every live task), so neither its cost nor latency is established by those samples. The day allowance gates admission;
+> reported provider overshoot is recorded and stops further admissions. Close D1-D11 before this check.
 
 **Files**
 - Modify: `plans/58-super-agent/README.md` (status, section 7), `PLAN.md` (row 58), `CLAUDE.md` (one paragraph),
@@ -15,14 +16,21 @@ Commit boundary: `docs: plan 58 live-checked, super agent v1 (no acts)`.
 
 ## 7.1 Live check (Fred)
 
+Before paid work: run the [review acceptance additions](08-review-and-jev.md#5-acceptance-additions) with fake
+providers. Record the installed Claude version and verify the exact pass command. Safe mode does not remove
+managed policy; confirm the intended isolation on this installation without changing other CLIs' configuration.
+JEV is not part of this check; D12 needs a separate, explicitly enabled evaluation and its own budget.
+
 - [ ] 1. Restart the service: `py -m console`. In the window, set up items in two projects: a task waiting on a plan
       confirm, a task stuck or failed twice, a finished task with a supervisor suggestion, and a VS Code chat that
       stopped on a question. `~/.claude/console/super/orders.md` exists with its two comment lines; add one order, for
       example `Rank Claude Console items before other projects.`
-- [ ] 2. Within about two minutes (20 s after the last new item, at most 120 s after the first), the first pass runs
+- [ ] 2. With no pass already running and all gates open, within debounce plus one polling interval (20 s after
+      the last new item, debounce at most 120 s after the first), the first pass runs
       by itself. Read the queue:
       `Invoke-RestMethod http://127.0.0.1:47770/api/super | ConvertTo-Json -Depth 8`
-      Expect `state` `ranked`, a `say` line on every item, always items first, the stuck task above the finished one.
+      Expect `state` `ranked`, current advice on submitted items, truthful coverage, always items first and the stuck
+      task routed to Sonnet even when Sort sees it again. Confirm the stuck task's priority is useful.
 - [ ] 3. Sort by hand (D6):
       `Invoke-RestMethod -Method Post -Headers @{"X-CC"="1"} -ContentType application/json -Body '{"action":"sort"}' http://127.0.0.1:47770/api/super`
       Then `sorting` is set until the pass ends; read the queue again.
@@ -32,15 +40,17 @@ Commit boundary: `docs: plan 58 live-checked, super agent v1 (no acts)`.
 - [ ] 5. Answer one item in the window (or in VS Code); after the next tick (5 s) the queue no longer shows it.
 - [ ] 6. Pause and Resume: the same command with `{"action":"pause"}` gives `state` `unranked`, `why` `paused`;
       `{"action":"resume"}` runs a pass at once.
-- [ ] 7. A failure: set `"super_pass_usd": 0.0001` in `~/.claude/console/config.json`, open the window's Models page
-      (its GET /api/config rereads the file), sort. The queue comes back `unranked` with the pass's error as `why`,
-      and `last.cost` is what the CLI reported. Set `super_pass_usd` back to 0.2 (or remove the key).
+- [ ] 7. A budget-boundary observation: set `"super_pass_usd": 0.0001` in `~/.claude/console/config.json`, open the window's Models page
+      (its GET /api/config rereads the file), sort. Record whether it completes or reports a budget error; a tiny budget does not guarantee rejection before spend.
+      If it fails, the queue must be unranked with the reason and its reported/unknown cost retained. Set `super_pass_usd` back to 0.2 (or remove the key).
 - [ ] 8. Measure the cost per pass (run after a few hours of normal work):
       `py -c "import json,statistics,pathlib; p=pathlib.Path.home()/'.claude'/'console'/'super'/'super.jsonl'; r=[json.loads(l) for l in p.read_text(encoding='utf-8').splitlines() if l.strip()]; c=[x['cost'] for x in r if x.get('phase')=='result' and x.get('ok') and isinstance(x.get('cost'),(int,float))]; print(f'{len(c)} ok passes, median {statistics.median(c):.4f} USD' if c else 'no ok pass yet')"`
 - [ ] 9. The Usage page shows a "Super agent passes" block under the supervisor's: today's passes and spend of $1.00
       a day.
 - [ ] 10. Note for the record: the median cost per pass, the passes in a day, any rank that was wrong (which item,
       what it should have been), whether the say lines helped, and anything the window (slice 2) must show.
+      Separate Haiku/Sonnet results and input sizes; include p50/p95 latency, failure/unknown-cost counts and
+      overflow coverage. Exercise Sort with more than 30 items without expecting an automatic drain loop.
 
 ## 7.2 Docs (after the check)
 
