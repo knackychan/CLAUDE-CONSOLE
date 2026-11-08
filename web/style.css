@@ -1072,3 +1072,29 @@ select.in { min-width: 0; max-width: 100%; font: 13px var(--ui); color: var(--in
 .v-right .sess .ipane { padding: 16px; }
 .v-right .sess .proc { margin-top: 0; min-height: 0; }
 .v-right .sess .pane { padding: 14px 16px; }
+
+/* plan 55: the page head (UI-3), design/rework/locked/workflow-autopilot.html; one layout on the task, step and observed pages */
+.p-hd { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 16px; align-items: end; padding-bottom: 12px; }
+.p-hl { min-width: 0; }
+.p-eb { display: block; max-width: 100%; font: 600 11px var(--mono); letter-spacing: .04em; color: var(--mut); margin-bottom: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.p-eb { background: none; border: 0; padding: 0; min-height: 24px; cursor: pointer; text-align: left; }
+button.p-eb:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.p-hd h2 { margin: 0 0 6px; font: 600 17px/1.3 var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-meta { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 16px; font: 12px var(--ui); white-space: nowrap; overflow: hidden; }
+.p-pill { flex: none; font: 600 12px var(--ui); padding: 2px 9px; border-radius: 10px; background: var(--raise); }
+.p-pill.g { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--raise)); }
+.p-pill.y { color: var(--you); background: color-mix(in srgb, var(--you) 12%, var(--raise)); }
+.p-pill.r { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--raise)); }
+.p-pill.q { color: var(--mut); }
+.p-fact { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.p-fact i { font-style: normal; color: var(--mut); }
+.p-right { display: grid; justify-items: end; gap: 4px; text-align: right; }
+.p-cost { font: 700 28px/1 var(--dot); font-variant-numeric: tabular-nums; }
+.p-csub { font: 12px var(--ui); color: var(--mut); }
+.p-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.p-seg button { min-height: 24px; min-width: 24px; padding: 0 8px; border: 0; background: transparent; color: var(--mut); font: 600 11px var(--mono); cursor: pointer; }
+.p-seg button:hover:not(:disabled) { color: var(--ink); background: var(--raise); }
+.p-seg button[aria-pressed="true"] { background: var(--ink); color: var(--win); }
+.p-seg button:disabled { opacity: .4; cursor: default; }
+@container (max-width: 520px) { .p-hd { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; } .p-cost { font-size: 24px; } }

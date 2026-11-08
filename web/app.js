@@ -252,6 +252,7 @@ async function api(path, body) {
 function focusKey(el) {
   if (el.id) return `[id="${el.id}"]`;
   if (el.dataset.tact) return `[data-tact="${el.dataset.tact}"][data-tid="${el.dataset.tid}"]`;
+  if (el.dataset.aid) return `[data-aid="${el.dataset.aid}"]`;
   for (const k of ["tab", "itab", "min", "open", "eff"]) if (el.dataset[k] !== undefined) return `[data-${k}="${el.dataset[k]}"]`;
   return "";
 }
@@ -1860,6 +1861,89 @@ function taskRowSig(row) {  // what changed in a task's row: the Board fetches G
 let tArmTimer = null;
 function actMsg() { return $("b-msg"); }  // where a failed lever says why
 function actRedraw() { boardData = null; renderBoard(); }
+// -- plan 55: the page places GET /api/task `actions` (plan 52 Task 6); it never rebuilds a gate -----------------
+// A control exists because `actions` lists it and is enabled because its `off` is "". The state word only picks words
+// and tones. The parts below take any actions-shaped object, so plan 53's build page reuses them with its own `fn`.
+const ACT_COPY = { confirm_auto: "Confirm and auto accept", default_auto: "Take default and auto accept", edit_plan: "Read or edit the plan",
+  continue: "Continue (fork)", verify: "Verify (fork)", escalate: "Escalate (fork)" };  // README 4.1: the locked mock's words
+const ACT_TIP = { confirm_auto: "Confirm this plan, and set the project to auto: later plans run without asking",
+  reject: "Turns it down; a note in the box below says why", continue: "Continue as a fork: a new Console run with its levers" };
+const ARM = { stop: "Stop the task? Click again", delete: "Delete the task folder? Click again", drop: "Drop this task? Click again",
+  finish: "Finish this task? History stays. Click again" };
+const PILL = { ready: ["Ready to start", "y"], running: ["▸ Running", "n"], plan_ready: ["? Plan to confirm", "y"], decision: ["? Needs you", "y"],
+  suggestion: ["? Needs you", "y"], hold: ["? Held", "y"], failed_twice: ["✕ Failed twice", "r"], stuck: ["✕ Stuck", "r"], paused: ["Paused", "q"],
+  stopped: ["Stopped", "q"], done: ["✓ Done", "g"], handed: ["Handed off", "q"], observed: ["Observed", "q"], preparing: ["Preparing", "q"] };
+function acts(d) {  // the opened task's actions; an empty set until GET /api/task answers
+  const a = d && d.actions;
+  return a && a.state ? a : { state: "", line: "", primary: [], bar: [], menu: [], message: null };
+}
+function actFind(d, id) { const a = acts(d); return [...a.primary, ...a.bar, ...a.menu].find((x) => x.id === id) || null; }
+function actLabel(a, state) {
+  if (state === "plan_ready" && a.id === "confirm") return "Confirm";
+  if (state === "hold" && a.id === "confirm" && a.confirm) return "Confirm " + (fableName() || "Fable");
+  return ACT_COPY[a.id] || a.label;
+}
+function actTip(a) {
+  if (a.off) return a.off;
+  if (a.id === "default_auto") {
+    const s = Number(((cfg && cfg.tuning && cfg.tuning.decision_timeout_s) || {}).value);
+    return `Take the default here, and set the project to auto${s ? `: later defaults are taken after ${Math.round(s / 60)} min` : ""}`;
+  }
+  return ACT_TIP[a.id] || "";
+}
+function actBtn(a, cls = "", o = {}) {  // one served action as a button; greyed with its off reason, never hidden here
+  const tip = o.tip || actTip(a), label = o.label || actLabel(a, o.state || "");
+  return `<button class="btn${cls ? " " + cls : ""}" data-aid="${esc(a.id)}" data-afn="${esc(o.fn || "runAction")}"${a.off ? " disabled" : ""}${tip ? ` title="${esc(tip)}"` : ""}>${o.html || esc(label)}</button>`;
+}
+function armBtn(button, text) {  // two clicks: the first only says what the second does
+  button.dataset.armed = "1";
+  button.dataset.label = button.innerHTML;
+  button.textContent = text;
+  clearTimeout(tArmTimer);
+  tArmTimer = setTimeout(() => { delete button.dataset.armed; button.innerHTML = button.dataset.label; }, 3000);
+}
+function sayAct(text, button) { const msg = actMsg(); if (msg) msg.innerHTML = `<span class="r">${esc(text)}</span>`; else button.textContent = "Failed: " + text; }
+async function runAction(button) {  // the one click path of a task action: confirm twice, open its form, or post its body as served
+  const d = boardData && boardData.id === boardTask ? boardData.data : null, a = actFind(d, button.dataset.aid);
+  if (!a || a.off) return;
+  if (a.confirm && !button.dataset.armed) { armBtn(button, ARM[a.id] || `${actLabel(a, acts(d).state)}? Click again`); return; }
+  if (!a.post) return openActionForm(a, button, d);
+  button.disabled = true;
+  try {
+    await api(a.post, actBody(a));
+    if (a.id === "delete" || a.id === "drop") { boardTask = ""; boardPick = ""; boardData = boardChat = null; renderBoard(); return; }
+    actRedraw();
+  } catch (e) { button.disabled = false; sayAct(e.message, button); }
+}
+function actBody(a) { return { ...a.body }; }  // Task 2 adds the box text as Reject's note
+function openActionForm(a, button, d) {}  // Task 2 fills the forms (post "": Retry, Hand off, Add step, Edit plan, Reopen, Start next task)
+
+function pageHead(o) {  // UI-3, one layout on the task, step and observed pages (plan 53 Task 4 reuses it)
+  const eb = o.back ? `<button class="p-eb" data-bpick="t" data-btask="${esc(o.back.tid)}" title="Back to the task (Esc)">← ${esc(o.back.title)}</button>`
+    : `<span class="p-eb">${esc(o.eyebrow || "")}</span>`;
+  const facts = (o.facts || []).filter((f) => f && f[1]).map(([k, v, html]) => `<span class="p-fact"><i>${esc(k)}</i>${html ? v : esc(v)}</span>`).join("");
+  return `<div class="p-hd"><div class="p-hl">${eb}<h2 title="${esc(o.tip || o.title)}">${esc(o.title)}</h2>
+    <div class="p-meta"><span class="p-pill ${o.pill[1]}">${esc(o.pill[0])}</span>${facts}</div></div>
+    <div class="p-right">${o.right || ""}<b class="p-cost" title="${esc(o.costTip || "")}">${esc(o.cost)}</b>${o.costSub ? `<span class="p-csub">${esc(o.costSub)}</span>` : ""}</div></div>`;
+}
+function levelSeg(d) {  // D4 a: gated and auto, plus the task's own word when it is off or suggest; each one a served action
+  const mode = d && d.supervisor ? d.supervisor.mode : "", want = ["gated", "auto"];
+  if (mode && !want.includes(mode)) want.unshift(mode);
+  const items = want.map((m) => actFind(d, "level_" + m)).filter(Boolean);
+  if (!items.length) return "";
+  return `<span class="p-seg" role="group" aria-label="Autonomy level of this task">${items.map((a) => `<button data-aid="${esc(a.id)}" data-afn="runAction" aria-pressed="${a.body.mode === mode}"${a.off ? ` disabled title="${esc(a.off)}"` : ""}>${esc(a.body.mode)}</button>`).join("")}</span>`;
+}
+function taskHead(t, d, row) {
+  const A = acts(d), cs = t.steps.find((x) => x.n === t.current), first = t.steps.find((x) => x.started);
+  const pill = t.accepted ? ["✓ Accepted", "g"] : PILL[A.state] || PILL.running, facts = [];
+  if (A.state === "running" && cs && cs.state === "running") facts.push(["Now", `${two(cs.n)} ${cs.kind} on ${modelText(rungOf(cs.harness, cs.model), cs.effort)}, ${stepTime(cs)}`]);
+  if (t.state === "done" && first) facts.push(["Took", elapsed(t.updated - first.started)]);
+  if (t.handoff_from) facts.push(["Follow-up of", `<button class="olink" data-task="${esc(t.handoff_from)}">${esc(labelOf(t.handoff_from))}</button>`, true]);
+  if (t.handoff_to) facts.push(["Handed to", `<button class="olink" data-task="${esc(t.handoff_to)}">${esc(labelOf(t.handoff_to))}</button>`, true]);
+  return pageHead({ eyebrow: t.project, title: t.title, tip: `${t.title} · ${taskDir(t.id)} · C copies ${labelOf(t.id)}`, pill, facts,
+    right: levelSeg(d), cost: "$" + money(row.cost), costTip: "Spent on this task" });
+}
+
 async function taskAct(name, button) {
   const id = button.dataset.tid || boardTask;
   if (name === "resendmessage") {  // plan 48 D11: his words back in the box; Enter sends them as a new message
@@ -1894,7 +1978,7 @@ async function taskAct(name, button) {
   if (name === "nextverify") return openNextForm(id, "verify", Number(button.dataset.n) || 0);
   if (name === "retryopen") { retryOpen = id; boardPick = "t"; renderBoard(); return; }  // the form is in the opened task's body
   if (name === "retrycancel") { retryOpen = ""; renderBoard(); return; }
-  if (["supapprove", "supreject", "supmode"].includes(name)) return supAct(name, button, id);
+  if (["supapprove", "supreject"].includes(name)) return supAct(name, button, id);
   if (name === "gochat") return goChat(id, Number(button.dataset.n) || 0);
   if (name === "nextcancel") { cancelNextForm(); return; }
   if (name === "nextstart") return startNextStep(button);
@@ -1941,8 +2025,7 @@ async function taskAct(name, button) {
 async function supAct(name, button, id) {  // plan 48: Approve, Reject (the second click sends the note), Dismiss and the task's mode
   const wake = Number(button.dataset.wake), key = id + "|" + wake;
   let body;
-  if (name === "supmode") body = { task: id, mode: button.dataset.mode };
-  else if (name === "supapprove") body = { task: id, wake, action: "approve" };
+  if (name === "supapprove") body = { task: id, wake, action: "approve" };
   else if (button.dataset.dismiss) body = { task: id, wake, action: "reject" };
   else if (supNote !== key) { supNote = key; await renderBoard(); const f = $("b-supnote"); if (f && f.focus) f.focus({ preventScroll: true }); return; }
   else {
@@ -1952,7 +2035,7 @@ async function supAct(name, button, id) {  // plan 48: Approve, Reject (the seco
   button.disabled = true;
   try {
     await api("/api/task/supervisor", body);
-    if (name !== "supmode") supNote = "";
+    supNote = "";
     actRedraw();
   } catch (e) {
     button.disabled = false;
@@ -3730,7 +3813,7 @@ function taskButtons(t, d) {  // plan 48: Stop or Resume, Pause, then the task m
   return `<div class="task-actions">${p.join("")}${taskMenu(t, d, srow)}</div>`;
 }
 function taskMenu(t, d, srow) {  // plan 48: everything that is not a moment; each entry only where its lever is ""
-  const lv = d.levers || {}, sl = d.step_levers || {}, ns = d.next_step || {}, tid = esc(t.id), sup = d.supervisor;
+  const lv = d.levers || {}, sl = d.step_levers || {}, ns = d.next_step || {}, tid = esc(t.id);
   const cs = t.steps.find((x) => x.n === t.current), last = latestStep(t);
   const n = ns.source_step || (cs ? cs.n : (last ? last.n : 0));
   const item = (name, label, hint = "", extra = "", cls = "") => `<button class="btn sm${cls}" data-tact="${name}" data-tid="${tid}"${extra}><span>${label}</span>${hint ? `<span class="m" aria-hidden="true">${hint}</span>` : ""}</button>`;
@@ -3743,8 +3826,6 @@ function taskMenu(t, d, srow) {  // plan 48: everything that is not a moment; ea
   if (lv.redo === "") m.push(item("redo", "Redo design", "", ' title="Runs the design step again"'));
   if (sl.terminal === "") m.push(item("terminal", "Open in terminal"));
   if (srow && srow.rules_warn && t.project_dir) m.push(item("review", "Review rules"));
-  if (sup) m.push(`<span class="lbl grp">Supervisor for this task</span><span class="seg" role="group" aria-label="Supervisor mode for this task">${((cfg && cfg.supervisor_config || {}).modes || ["off", "suggest", "gated", "auto"]).map((md) =>
-    `<button class="btn sm" data-tact="supmode" data-tid="${tid}" data-mode="${md}" aria-pressed="${sup.mode === md}">${md}</button>`).join("")}</span>`);
   m.push("<hr>", item("folder", "Open task folder", "", ` title="${esc(taskDir(t.id))}"`));
   if (lv.clear === "") m.push(item("clear", "Delete task", "", ` title="Deletes tasks/${tid} with its runs; a plan mirrored into the project stays"`, " stop"));
   m.push("<hr>", `<button class="btn sm" data-go="models"><span>Models and tuning</span></button>`, `<button class="btn sm" data-go="usage"><span>Usage</span></button>`);
@@ -3902,22 +3983,17 @@ function handoffForm(t) {  // plan 44 nav T3: the Hand off task form; Save docum
       <button class="btn" data-tact="handoffcancel" data-tid="${tid}">Cancel</button></div></section>`;
 }
 function inspTask(t, d, row) {  // plan 48 3.4: the head, the forms the menu opened, the gate, the supervisor, the route, the gauge, closed folds
-  const shown = taskShown(row), [word, tn] = TASK_WORD[shown] || TASK_WORD.running, tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
-  const sup = d.supervisor, mode = sup ? (sup.mode === "off" ? "supervisor off" : "supervised · " + sup.mode) : "";
-  const head = `<div class="ihead"><div class="ln1"><span class="st ${tn}">${sprite(taskSprite(row))}${word}</span><h2 title="${esc(taskDir(t.id))}">${esc(t.title)}</h2></div>
-    <div class="meta"><span>${esc(t.project)}</span><span>cost <b>${money(row.cost)}</b></span>${mode ? `<span>${esc(mode)}</span>` : ""}${DONE_STATES.has(t.state) ? `<span>${esc(t.state)} <b>${hhmm(t.updated)}</b></span>` : ""}<span>task ${labHtml(t.id)}</span></div></div>`;
-  const links = [];
-  if (t.handoff_from) links.push(`<span>Follow-up of <button class="olink" data-task="${esc(t.handoff_from)}">${esc(labelOf(t.handoff_from))}</button></span>`);
-  if (t.handoff_to) links.push(`<span>Handed off to follow-up <button class="olink" data-task="${esc(t.handoff_to)}">${esc(labelOf(t.handoff_to))}</button></span>`);
+  const tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
+  const head = taskHead(t, d, row);
   const handed = t.state === "handed" && !t.handoff_to;  // the handed box carries its own retry form
   const retry = retryOpen === t.id && (d.levers || {}).retry === "" && !handed
     ? `<section class="askbox cont retry-open" role="group" aria-label="Retry on a model"><span class="lbl">Retry on a model${cur ? ` · step ${two(cur.n)} ${esc(cur.kind)}` : ""}</span>${retryForm(t, cur, tid)}
       <div class="lr"><button class="btn sm" data-tact="retrycancel" data-tid="${tid}">Cancel</button></div></section>` : "";
   const [, src] = nextOpen && nextOpen.tid === t.id ? nextSource(d) : [null, null];
-  const body = `${links.length ? `<div class="m hlinks">${links.join(" · ")}</div>` : ""}${handoffForm(t)}${retry}${src ? nextFormHtml(t, src, row, d) : ""}
+  const body = `${handoffForm(t)}${retry}${src ? nextFormHtml(t, src, row, d) : ""}
     ${attentionArea(t, d, row)}${supCard(t, d)}${routeHtml(t, d, row)}${gaugeHtml(t, row)}
     ${fold("Goal", "", `<pre class="text goal">${esc(t.goal)}</pre>`, { key: "tgoal" })}${questionsFold(d)}`;
-  return dock(`${taskBreadcrumb(t)}${head}`, `<div class="ipane">${body}</div>`, taskButtons(t, d), t.id, stepFooter(t, cur, d));
+  return dock(head, `<div class="ipane">${body}</div>`, taskButtons(t, d), t.id, stepFooter(t, cur, d));
 }
 function inspPrep(t, d, row) {  // step 00 of a task that ran: the card Prep left (task.prep, plan 29) and its 00-prep/ files
   const p = t.prep && typeof t.prep === "object" ? t.prep : null, pf = d.prep_files || {};
@@ -4043,7 +4119,7 @@ document.addEventListener("click", async (e) => {
     else if (b.dataset.tfile) openStepFile(b);
     return;
   }
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],[data-nverify],#brief");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],[data-aid],[data-nverify],#brief");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
   if (t.dataset.open || t.dataset.task) {  // a session opened from the Board returns to it, a task opened from a session too
@@ -4062,6 +4138,7 @@ document.addEventListener("click", async (e) => {
   } else if (t.dataset.itab) { itab = t.dataset.itab; saveDraft(); renderBoard(); }
   else if (t.dataset.eff) setEffort(t.dataset.eff);
   else if (t.dataset.task) openTask(t.dataset.task);
+  else if (t.dataset.aid) { const fn = t.dataset.afn === "runAction" ? runAction : window[t.dataset.afn]; if (typeof fn === "function") fn(t); }
   else if (t.dataset.tact) taskAct(t.dataset.tact, t);
   else if (t.dataset.nverify) verifyNext(t.dataset.nverify);
   else if (t.dataset.attach) { pickFor = t.dataset.attach; $("filepick").value = ""; $("filepick").click(); }

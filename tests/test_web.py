@@ -1145,7 +1145,7 @@ class HandoffFormTest(unittest.TestCase):
         self.assertEqual(old[0], "handed off · Start next task")
         html = render(self.setup + "t.state = 'handed'; t.handoff_note = 'task-handoff.md'; t.handoff_to = 'f1'; row.state = 'handed'; row.handoff_note = 'task-handoff.md'; row.handoff_to = 'f1'; d.handoff = 'old note'; inspTask(t, d, row)")
         self.assertNotIn("Start next task", html)
-        self.assertIn("Handed off to follow-up", html)
+        self.assertIn("Handed to", html)
         self.assertIn('data-task="f1"', html)
         session_level = render(self.setup + "t.state = 'handed'; t.handoff_note = 'steps/01-handoff.md'; row.state = 'handed'; row.handoff_note = 'steps/01-handoff.md'; d.handoff = 'the note'; inspTask(t, d, row)")
         self.assertIn("Start next task", session_level)
@@ -1381,7 +1381,6 @@ class OpenedTaskTest(unittest.TestCase):
           const opened = supCard(t, d).includes('id="b-supnote"'), sent = calls.length;
           await taskAct('supreject', {dataset: {tid: 't', wake: '3'}});
           await taskAct('supreject', {dataset: {tid: 't', wake: '3', dismiss: '1'}});
-          await taskAct('supmode', {dataset: {tid: 't', mode: 'auto'}});
           return {calls, opened, sent};
         })()""")
         self.assertTrue(posts["opened"])
@@ -1389,8 +1388,7 @@ class OpenedTaskTest(unittest.TestCase):
         self.assertEqual(posts["calls"], [
             ["/api/task/supervisor", {"task": "t", "wake": 3, "action": "approve"}],
             ["/api/task/supervisor", {"task": "t", "wake": 3, "action": "reject", "note": "not yet"}],
-            ["/api/task/supervisor", {"task": "t", "wake": 3, "action": "reject"}],
-            ["/api/task/supervisor", {"task": "t", "mode": "auto"}]])
+            ["/api/task/supervisor", {"task": "t", "wake": 3, "action": "reject"}]])
 
     def test_route_lists_proposed_steps_dim(self):
         html = render(self.setup + "t.supervisor = {proposed: [{kind: 'verify', goal: 'check it', model: ''}, {kind: 'code', goal: 'more', model: ''}]}; routeHtml(t, d, row)")
@@ -1415,7 +1413,7 @@ class OpenedTaskTest(unittest.TestCase):
         html = render(self.setup + "inspTask(t, d, row)")
         for gone in ('data-tact="taskview"', "Overview", "Current progress", "Latest result", "Original prompt"):
             self.assertNotIn(gone, html)
-        self.assertIn("supervised · suggest", html)
+        self.assertIn('class="p-hd"', html)
         self.assertIn('data-bpick="s1"', html)
         self.assertIn("Supervisor suggests", html)
         self.assertLess(html.index("Supervisor suggests"), html.index('data-bpick="s1"'))
@@ -1434,11 +1432,9 @@ class OpenedTaskTest(unittest.TestCase):
         for gone in ("nextopen", 'data-tact="done"', 'data-tact="retry', "verify", "escalate", 'data-tact="cont"', "Mark done", "resume"):
             self.assertNotIn(gone, bar)
         for item in ('data-tact="handofftask"', 'data-tact="done"', 'data-tact="nextopen"', 'data-tact="retryopen"',
-                     'data-tact="stepdone"', 'data-tact="redo"', 'data-tact="terminal"', 'data-tact="supmode" data-tid="t" data-mode="off"',
-                     'data-tact="supmode" data-tid="t" data-mode="auto"', 'data-tact="folder"', 'data-tact="clear"',
+                     'data-tact="stepdone"', 'data-tact="redo"', 'data-tact="terminal"', 'data-tact="folder"', 'data-tact="clear"',
                      'data-go="models"', 'data-go="usage"', "Add step on a model", "Retry on a model", "Finish task"):
             self.assertIn(item, menu)
-        self.assertIn('data-mode="suggest" aria-pressed="true"', menu)
         for gone in ("escalate", "Use a stronger model", "Verify", "Continue"):
             self.assertNotIn(gone, menu)
         self.assertLess(menu.index("Hand off task"), menu.index("Finish task"))
@@ -1573,10 +1569,11 @@ class SupervisorSettingsTest(unittest.TestCase):
         for sc in ("{mode: 'turbo'}", "{mode: 'auto', projects: {repo: 'turbo'}}"):
             self.assertEqual(render(self.setup() + f"cfg.supervisor_config = {sc}; supMode('repo')"), "off")
 
-    def test_mode_segment_has_four_levels(self):
-        html = render(OpenedTaskTest.setup + "cfg = {supervisor_config: {modes: ['off', 'suggest', 'gated', 'auto']}}; taskMenu(t, d)")
-        for mode in ("off", "suggest", "gated", "auto"):
-            self.assertIn(f'data-mode="{mode}"', html)
+    def test_head_level_switch_follows_d4(self):
+        html = render(AutopilotHeadTest.setup + "d.supervisor = {mode: 'off'}; levelSeg(d)")
+        for mode in ("off", "gated", "auto"):
+            self.assertIn(f'data-aid="level_{mode}"', html)
+        self.assertNotIn("level_suggest", html)
 
     def test_tuning_has_a_supervisor_card(self):
         html = render(self.setup() + "tuningTab()")
@@ -1666,3 +1663,58 @@ class LooseEndsWebTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class AutopilotHeadTest(unittest.TestCase):
+    """Plan 55 Task 1: the head reads actions.state for its pill and actions.menu for the level switch; no gate in JS."""
+    LEVELS = ("d.actions = {state: 'running', line: 'running', primary: [], bar: [], menu: ['off', 'suggest', 'gated', 'auto'].map((m) => "
+              "({id: 'level_' + m, label: m, post: '/api/task/supervisor', body: {task: 't', mode: m}, off: '', confirm: false})), message: null}; ")
+    setup = OpenedTaskTest.setup + LEVELS
+
+    def test_head_has_eyebrow_title_pill_and_cost(self):
+        html = render(self.setup + "taskHead(t, d, row)")
+        self.assertIn('class="p-eb">Console<', html)
+        self.assertIn(">Task</h2>", html)
+        self.assertIn('class="p-pill n">▸ Running<', html)
+        self.assertIn('class="p-cost"', html)
+        self.assertIn("$1.00", html)
+        for gone in ("task-crumb", "supervised · ", "v-lab"):
+            self.assertNotIn(gone, html)
+        for state, word in (("plan_ready", "? Plan to confirm"), ("decision", "? Needs you"), ("failed_twice", "✕ Failed twice"),
+                            ("done", "✓ Done"), ("hold", "? Held"), ("ready", "Ready to start"), ("stuck", "✕ Stuck")):
+            with self.subTest(state):
+                self.assertIn(f">{word}<", render(self.setup + f"d.actions.state = '{state}'; taskHead(t, d, row)"))
+        self.assertIn("✓ Accepted", render(self.setup + "d.actions.state = 'done'; t.accepted = 5; taskHead(t, d, row)"))
+
+    def test_level_switch_is_the_served_level_actions(self):
+        gated = render(self.setup + "d.supervisor = {mode: 'gated'}; levelSeg(d)")
+        self.assertIn('data-aid="level_gated" data-afn="runAction" aria-pressed="true"', gated)
+        self.assertIn('data-aid="level_auto"', gated)
+        self.assertNotIn("level_off", gated)
+        self.assertNotIn("level_suggest", gated)
+        sug = render(self.setup + "d.supervisor = {mode: 'suggest'}; levelSeg(d)")
+        self.assertLess(sug.index("level_suggest"), sug.index("level_gated"))  # D4 a: the task's own word shows, pressed
+        self.assertIn('data-aid="level_suggest" data-afn="runAction" aria-pressed="true"', sug)
+        self.assertEqual(render(self.setup + "d.supervisor = {mode: 'gated'}; d.actions.menu = []; levelSeg(d)"), "")
+        off = render(self.setup + "d.supervisor = {mode: 'gated'}; d.actions.menu[3].off = 'Pause first'; levelSeg(d)")
+        self.assertIn('disabled title="Pause first"', off)
+
+    def test_run_action_posts_the_served_body_and_arms_confirm(self):
+        got = render(self.setup + """(async () => {
+          const calls = []; api = async (p, b) => { calls.push([p, b]); return {}; }; actRedraw = () => {};
+          boardTask = 't'; boardData = {id: 't', data: d};
+          d.actions.bar = [{id: 'stop', label: 'Stop', post: '/api/task/stop', body: {task: 't'}, off: '', confirm: true},
+                           {id: 'pause', label: 'Pause', post: '/api/task/pause', body: {task: 't'}, off: 'not running', confirm: false}];
+          const b = (aid) => ({dataset: {aid}, textContent: '', innerHTML: '', disabled: false});
+          await runAction(b('level_auto'));
+          const stop = b('stop'); await runAction(stop); const armed = calls.length; await runAction(stop);
+          await runAction(b('pause')); await runAction(b('nothing'));
+          return {calls, armed};
+        })()""")
+        self.assertEqual(got["armed"], 1)  # the first click on a confirm action only arms it
+        self.assertEqual(got["calls"], [["/api/task/supervisor", {"task": "t", "mode": "auto"}],
+                                        ["/api/task/stop", {"task": "t"}]])  # an off action and an unknown id post nothing
+
+    def test_menu_has_no_mode_segment(self):
+        self.assertNotIn("supmode", render(self.setup + "d.supervisor = {mode: 'gated'}; taskMenu(t, d)"))
