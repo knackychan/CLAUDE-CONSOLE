@@ -418,7 +418,8 @@ def digest(home, task: dict, context: dict) -> str:
     if levers.get("add_next") == "" and sources:
         gates.append("- add_next_step from " + ", ".join(sources) + " (kinds " + ", ".join(tasks.NEXT_KINDS) +
                      ", model auto)")
-    gates.append(f"- mode {pol.get('mode', 'off')}; auto steps left {pol.get('auto_steps_left', 0)}; retries left "
+    gates.append(f"- mode {pol.get('mode', 'off')}; auto steps left {pol.get('auto_steps_left', 0)}; "
+                 f"chain retry used {cs.get('retries', 0) if cs else 0} of 1; supervisor retries left "
                  f"{context.get('retries_left', 0)}; work USD left {pol.get('work_usd_left', 0.0)}; "
                  f"own USD left task {budget.get('task_left', 0.0)} day {budget.get('day_left', 0.0)}")
     mandatory = ["\n".join(head), "\n".join(table), "\n".join(gates)]

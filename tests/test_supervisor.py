@@ -182,6 +182,21 @@ def context(task, **over):
 
 
 class DigestTest(unittest.TestCase):
+    def test_digest_distinguishes_chain_and_supervisor_retries(self):
+        with tempfile.TemporaryDirectory() as home:
+            task = evidence_task(home)
+            for chain_used in (0, 1):
+                for supervisor_left in (0, 1):
+                    with self.subTest(chain_used=chain_used, supervisor_left=supervisor_left):
+                        task["steps"][0]["retries"] = chain_used
+                        task["supervisor"]["retries"] = {"1": 1 - supervisor_left}
+                        before = json.loads(json.dumps(task))
+                        text = supervisor.digest(home, task, context(task, retries_left=supervisor_left))
+                        self.assertIn(f"chain retry used {chain_used} of 1; "
+                                      f"supervisor retries left {supervisor_left}", text)
+                        self.assertNotIn("; retries left ", text)
+                        self.assertEqual(task, before)
+
     def test_saved_evidence_and_allowed_actions_only(self):
         with tempfile.TemporaryDirectory() as home:
             task = evidence_task(home)
