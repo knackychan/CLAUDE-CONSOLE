@@ -268,7 +268,7 @@ class Hub:
         if name != "claude":
             if not harness.is_on(self.cfg, name):
                 return f"{name} is off"
-            if not self.found.get(name):
+            if not self.found.get(name) or not self.runs.exe_for(name):
                 return f"{name}: not found on PATH"
             if bare not in claude_cli._rung_models(self.cfg, name):  # review G5: README 3.2b of plan 5
                 return f"model gone from models.json: {rung}"
@@ -962,15 +962,24 @@ class Hub:
         and the gate on rungs (rung_ok: harness off or not found, not on this kind)."""
         last = tasks.step(task, task["last_good"]) if task["last_good"] else None
         ended = last.get("ended") if last else None
-        return tasks.step_route(
-            s["kind"], pick=s["pick"], checked=tasks.checked_route(task, s, self.cfg), demand=task["demand"],
+        checked = tasks.checked_route(task, s, self.cfg)
+        retry = (s["state"] == "planned" and s["retries"] == 1 and bool(task["why"])
+                 and claude_cli.split_rung(s["model"])[0] != "claude")
+        pick = tasks.step_route(s["kind"], checked=checked, effort=task["effort"])["rung"] if retry else s["pick"]
+        route = tasks.step_route(
+            s["kind"], pick=pick, checked=checked, demand=task["demand"],
             misses=routing.fresh(levers.read_misses(self.folder, task["project"]), self.cfg["miss_floor_days"]),
             prev=tasks.read_note(self.folder, task, task["last_good"]),
             budget=self.budget(), warn_at=self.cfg["budget_warn_at"], effort=task["effort"], cfg=self.cfg,
             prev_rung=last["model"] if last else "", prev_age=time.time() - ended if ended else None,
             hard=s["kind"] not in tasks.NO_HARD_KINDS  # plan 46 D4: a writer never takes an Opus-rank rung
             and ((task["demand"] or {}).get("reasoning") == "high" or bool(s.get("hard"))),
-            refuse=lambda rung: self.rung_ok(rung, s["kind"], task["project_dir"]) or self._avoided(rung, s), pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
+            refuse=lambda rung: self.rung_ok(rung, s["kind"], task["project_dir"]) or self._avoided(rung, s)
+            or (f"chain retry uses rule Claude rung {pick}" if retry and rung != pick else ""),
+            pin=(self.cfg.get("kinds") or {}).get(s["kind"]))
+        if retry:
+            route["notes"].append(f"chain retry: {s['model']} failed -> rule Claude rung {pick}")
+        return route
 
     def _base(self, task: dict) -> str:
         """Why nothing may run in the task's folder now ("" = it may): the project left the list, no claude.exe, or
@@ -3260,6 +3269,8 @@ class Hub:
         s, now, lines = tasks.step(task, n), time.time(), []
         s.pop("limit", None)
         self.reload_models()  # review B12: a models.json edit reaches this step's route, not the next one
+        if s["retries"] == 1 and task["why"] and claude_cli.split_rung(s["model"])[0] != "claude":
+            s.pop("manual_route", None)
         manual = s.get("manual_route")
         refused = (self.limited(manual["rung"]) or self._avoided(manual["rung"], s)) if manual else ""
         if refused:

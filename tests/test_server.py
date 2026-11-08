@@ -2762,6 +2762,57 @@ FAKE_OPENCODE = [sys.executable, str(Path(__file__).resolve().parent / "fake_ope
 class HarnessServerTest(TaskServerTest):
     """Plan 5 Task 5: the probe, the harness switch, harness rungs on runs and task steps, the levers."""
 
+    def test_balance_skips_opencode_without_a_resolved_executable(self):
+        rung = "opencode:opencode-go/deepseek-v4.1-flash"
+        self.hub.cfg["harnesses"]["opencode"] = {"on": True, "exe": ""}
+        self.hub.cfg["models"]["opencode"] = {rung.split(":", 1)[1]: "haiku"}
+        self.hub.cfg["tiers"]["read"] = ["haiku", rung]
+        self.hub.probe(["opencode"])
+        task = tasks.new_task(str(self.project), self.project.name, "look", "look",
+                              [tasks._blank(1, "scout", "look")], "lookup", {}, "", "auto", time.time())
+        budget = {"haiku": {"share": None, "day": {"used_tokens": 1000}},
+                  "deepseek-v4.1-flash": {"share": None, "day": {"used_tokens": 0}}}
+        with mock.patch.object(self.hub, "budget", return_value=budget):
+            for found in (False, True):  # even a stale probe must agree with RunManager's launch gate
+                with self.subTest(found=found):
+                    self.hub.found["opencode"] = found
+                    route = self.hub._route_for(task, task["steps"][0])
+                    self.assertEqual(route["rung"], "haiku")
+                    self.assertIn("opencode: not found", " ".join(route["notes"]))
+
+    def test_non_claude_chain_retry_uses_the_rule_claude_rung(self):
+        self.turn_on("opencode", FAKE_OPENCODE, {"opencode-go/deepseek-v4.1-flash": "haiku"})
+        self.hub.cfg["models"]["codex"]["gpt-6-luna"] = "haiku"
+        self.hub.cfg["tiers"]["read"] = ["haiku", "codex:gpt-6-luna",
+                                                  "opencode:opencode-go/deepseek-v4.1-flash"]
+        self.hub.usage_ready = True
+        self.hub.usage_days = {usage.day_of(time.time()): {"model_tokens": {"haiku": 1_000_000}}}
+        tid = self.make_task(words="", steps=[{"kind": "scout", "goal": "look"}])
+        task = self.until(tid, lambda t: t["state"] == "stuck", "both attempts end without a handoff")
+        step = task["steps"][0]
+        self.assertEqual(len(step["attempts"]), 2)
+        self.assertEqual(self.hub.runs.meta(step["attempts"][0]["session"])["harness"], "codex")
+        self.assertEqual((step["model"], step["effort"], step["retries"]), ("haiku", "low", 1))
+        self.assertIn("retry", " ".join(step["notes"]))
+
+    def test_chain_retry_keeps_fred_choices_and_refuses_an_unavailable_rule_rung(self):
+        task = tasks.new_task(str(self.project), self.project.name, "look", "look",
+                              [tasks._blank(1, "scout", "look")], "lookup", {}, "", "auto", time.time())
+        step = task["steps"][0]
+        step.update(model="codex:gpt-6.1-sol", pick="codex:gpt-6.1-sol", retries=1)
+        task["why"] = "failed attempt"
+        self.hub.cfg["kinds"]["scout"] = {"rung": "codex:gpt-6.1-sol"}
+        self.assertEqual(self.hub._route_for(task, step)["rung"], "haiku")
+        task["why"] = ""  # Fred's Retry clears the failure reason and keeps his choice
+        self.assertEqual(self.hub._route_for(task, step)["rung"], "codex:gpt-6.1-sol")
+        task["why"] = "failed attempt"
+        step["kind"] = "design"
+        self.hub.cfg["tiers"]["think"] = ["haiku", "opus", "codex:gpt-6.1-sol"]
+        self.hub.limits["opus"] = {"until": time.time() + 60, "why": "unavailable"}
+        route = self.hub._route_for(task, step)
+        self.assertEqual(route["rung"], "opus")
+        self.assertIn("unavailable", self.hub.rung_ok(route["rung"]))
+
     def test_auto_chat_balances_tokens_but_an_explicit_model_is_kept(self):
         self.hub.usage_ready = True
         self.hub.usage_days = {usage.day_of(time.time()): {"models": {"sonnet": 10},
@@ -3174,8 +3225,12 @@ class HarnessServerTest(TaskServerTest):
         self.hub.cfg["step_timeout_s"] = 1
         steps = [{"kind": "scout", "goal": "SLOW look", "model": "codex:gpt-6.1-sol"}]
         tid = self.make_task(steps=steps)
-        task = self.until(tid, lambda t: "step timeout" in t["why"], "the timeout is the reason", seconds=40)
-        self.assertIn("it hit the step timeout (1 s)", task["why"])
+        task = self.until(tid, lambda t: any("step timeout" in a["why"] for a in t["steps"][0]["attempts"]),
+                          "the timeout reaches the retry", seconds=40)
+        step = task["steps"][0]
+        self.assertIn("it hit the step timeout (1 s)", step["attempts"][0]["why"])
+        received = tasks.read_step_file(self.folder, task, step, "received.md")
+        self.assertIn("retry: it hit the step timeout (1 s)", received)
 
     def test_probe_never_raises(self):
         self.hub.exes.pop("codex")
@@ -3449,6 +3504,7 @@ class NextStepServerTest(TaskServerTest):
         self.assertEqual((status, data["error"]), (409, "codex is off"))  # an error, never Auto
         self.hub.cfg["harnesses"]["codex"]["on"] = True  # on, but the model is not in its list
         self.hub.found["codex"] = True
+        self.hub.runs.exes["codex"] = FAKE_CODEX
         self.hub.cfg["models"]["codex"] = {"gpt-6.1-sol": "sonnet"}
         status, data = self.preview(other, "code", "x", "codex:gpt-6-astra")
         self.assertEqual((status, data["error"]), (409, "model gone from models.json: codex:gpt-6-astra"))

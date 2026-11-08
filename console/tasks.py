@@ -167,7 +167,12 @@ def step_route(kind: str, *, pick: str = "", checked=None, demand=None, misses=(
     share = None
     if cfg is not None and not rung:  # 7. balance (plan 18): the emptiest model of the tier, from the first step
         check = kind in ("verify", "fix")
-        rungs = fills.pool(cfg, model, check=check, hard=hard and not check, refuse=refuse)
+        def usable(rung):
+            why = refuse(rung)
+            if why:
+                notes.append(f"balance: skipped {rung}: {why}")
+            return why
+        rungs = fills.pool(cfg, model, check=check, hard=hard and not check, refuse=usable if refuse else None)
         tier = RANK_TIER.get(model, "")
         if rungs:
             pickd = fills.balance(rungs, budget or {}, cfg, tier=tier, prev_rung="" if check else prev_rung,
