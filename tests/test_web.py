@@ -129,7 +129,7 @@ class ChatCopyTest(unittest.TestCase):
 
     def test_board_chat_shows_the_answer_prompt_for_a_question(self):
         setup = "snap = {sessions: [{id: 's', state: 'stop', run_live: false, stop_question: 'Shall I fix it?'}], tasks: []}; boardChat = {sid: 's', chat: {items: [], source: 'window'}};"
-        html = render(setup + "stepFooter({id: 't', chat: true, state: 'running'}, {n: 1, session: 's', state: 'running'}, {step_levers: {continue: ''}})")
+        html = render(setup + "stepFooter({id: 't', chat: true, state: 'running'}, {n: 1, session: 's', state: 'running'}, {actions: {state: 'decision', primary: [], bar: [], menu: [], message: {mode: 'answer', reason: ''}}})")
         self.assertIn("Shall I fix it?", html)
         self.assertIn('data-tact="answer"', html)
         self.assertIn("Send answer", html)
@@ -268,77 +268,23 @@ class NextStepUITest(unittest.TestCase):
         self.assertNotIn("Finish task", enabled)
         off = render(self._setup() + "nextActions({id: 't', current: 1}, {n: 1, session: 's', state: 'done'}, {levers: {add_next: 'still working', done: ''}})")
         self.assertEqual(off, "")
-        t = "{id: 't', current: 1, steps: [{n: 1, session: 's', state: 'done'}]}"
-        menu = render(self._setup() + f"taskMenu({t}, {{levers: {{add_next: ''}}, next_step: {{source_step: 1}}}}, null)")
-        self.assertIn('data-tact="nextopen" data-tid="t" data-n="1" data-at="task"', menu)  # plan 48: in the task menu
-        self.assertIn("Add step on a model", menu)
-        self.assertNotIn("nextopen", render(self._setup() + f"taskMenu({t}, {{levers: {{add_next: 'still working'}}}}, null)"))
 
     def test_replied_chat_footer_offers_send_and_the_task_action_area(self):
-        snap = {"sessions": [{"id": "s", "state": "stop", "run_live": False}],
-                "tasks": [], "versions": {}, "projects": []}
-        html = render(self._setup(snap=snap) +
-                      "stepFooter({id: 't', chat: true, state: 'running', current: 1, "
-                      "steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
-                      "{n: 1, session: 's', state: 'running', kind: 'chat'}, "
-                      "{levers: {add_next: '', done: ''}, step_levers: {handoff: '', next: ''}}, null)")
-        self.assertIn(">Send<", html)
-        self.assertIn('data-tact="cont"', html)
-        self.assertNotIn("Add step", html)  # the composer never duplicates the action area
-        dock = render(self._setup(snap=snap) +
-                      "stepButtons({id: 't', chat: true, state: 'running', current: 1, "
-                      "steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
-                      "{n: 1, session: 's', state: 'running', kind: 'chat'}, "
-                      "{levers: {add_next: '', done: '', handoff: '', next: ''}}, null)")
-        bar, menu = dock.split("<details", 1)
-        self.assertNotIn("nextopen", bar)  # plan 48: Add step on a model and Finish task are in the task menu
-        self.assertIn('data-tact="nextopen"', menu)
-        self.assertIn("Finish task", menu)
-        self.assertNotIn("Hand off", dock)  # the service did not allow the whole-task handoff here
+        html = render(UnifiedTaskChatTest.setup + "stepFooter(t, t.steps[0], d)")
+        self.assertIn('>Send<', html)
+        self.assertNotIn('data-aid=', html)
 
     def test_step_dock_reads_the_task_action_area_where_the_service_allows_it(self):
-        """Plan 48: the current step's dock is the task's bar (Stop prominent, Retry on a model and Accept step result
-        in the menu); Stop is not offered on a chat whose turn is over, and the failed-step recovery only on the current step."""
-        snap = {"sessions": [{"id": "s", "state": "stop", "run_live": False}], "tasks": [], "versions": {}, "projects": []}
-        chat = "{id: 't', chat: true, state: 'running', current: 1, steps: [{n: 1, session: 'gone', state: 'running', kind: 'chat'}]}"
-        stuck = render(self._setup(snap=snap) + f"stepButtons({chat}, {{n: 1, session: 'gone', state: 'running', kind: 'chat'}}, "
-                       "{levers: {stop: '', stepdone: 'no stopped or stuck step'}}, null)")
-        self.assertIn('data-tact="stop"', stuck)  # a chat step with no session row is writing as far as the service knows
-        self.assertNotIn("Accept step result", stuck)
-        replied = render(self._setup(snap=snap) + "stepButtons({id: 't', chat: true, state: 'running', current: 1, steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
-                         "{n: 1, session: 's', state: 'running', kind: 'chat'}, {levers: {stop: ''}}, null)")
-        self.assertNotIn('data-tact="stop"', replied)
-        t = "{id: 't', state: 'stopped', current: 2, steps: [{n: 1, session: 's1', state: 'done', kind: 'scout'}, {n: 2, session: 's2', state: 'failed', kind: 'code'}]}"
-        failed = render(self._setup() + f"stepButtons({t}, {{n: 2, session: 's2', state: 'failed', kind: 'code'}}, {{levers: {{retry: '', stepdone: ''}}}}, {{state: 'failed'}})")
-        menu = failed.split("<details", 1)[1]
-        self.assertIn('data-tact="retryopen" data-tid="t"', menu)
-        self.assertIn('data-tact="stepdone" data-tid="t"', menu)
-        self.assertIn("Accept step result", menu)
-        old = render(self._setup() + f"stepButtons({t}, {{n: 1, session: 's1', state: 'done', kind: 'scout'}}, {{levers: {{retry: '', stepdone: ''}}}}, {{state: 'done'}})")
-        self.assertNotIn("Accept step result", old)
-        self.assertNotIn("retryopen", old)
-        off = render(self._setup() + f"stepButtons({t}, {{n: 2, session: 's2', state: 'failed', kind: 'code'}}, {{levers: {{retry: 'task is stopped', stepdone: 'still working'}}}}, {{state: 'failed'}})")
-        self.assertNotIn("Retry", off)
-        self.assertNotIn("Accept step result", off)
+        html = render(UnifiedTaskChatTest.setup + "stepButtons(t, t.steps[0], d, row)")
+        self.assertIn('data-aid="stop"', html)
+        off = render(UnifiedTaskChatTest.setup + "d.actions.bar[0].off = 'finished'; stepButtons(t, t.steps[0], d, row)")
+        self.assertIn('disabled title="finished"', off)
 
     def test_task_actions_show_only_where_the_service_allows_it(self):
-        """Plan 48: the task menu reads task_levers for Add step on a model, Finish task and Delete, step_levers for
-        terminal, and handoff_available for Hand off task; no Verify, Continue or Escalate (D10)."""
-        snap = {"sessions": [{"id": "s2", "state": "idle", "run_live": False}], "tasks": [], "versions": {}, "projects": []}
-        t = "{id: 't', current: 2, steps: [{n: 1, session: 's1', state: 'done', kind: 'scout'}, {n: 2, session: 's2', state: 'running', kind: 'chat'}]}"
-        html = render(self._setup(snap=snap) + f"taskButtons({t}, {{levers: {{add_next: '', done: '', clear: ''}}, "
-                      "step_levers: {continue: '', terminal: '', escalate: ''}, next_step: {source_step: 2}, handoff_available: ''})")
-        menu = html.split("<details", 1)[1]
-        for text in ('data-tact="nextopen" data-tid="t" data-n="2"', 'data-tact="done"', 'data-tact="clear"',
-                     'data-tact="handofftask"', 'data-tact="terminal"'):
-            self.assertIn(text, menu)
-        self.assertLess(menu.index("Finish task"), menu.index("Add step on a model"))
-        for text in ("Verify", "Continue", "Mark done", "Mark step done", "escalate", "Use a stronger model"):
-            self.assertNotIn(text, html)
-        off = render(self._setup(snap=snap) + f"taskButtons({t}, {{levers: {{add_next: 'task is stuck', done: '', clear: 'task is stuck'}}, step_levers: {{}}}})")
-        self.assertIn('data-tact="done"', off.split("<details", 1)[1])  # Finish task stays while allowed
-        for text in ("Verify", "Continue", "Delete task", "Add step"):
-            self.assertNotIn(text, off)
+        html = render(AutopilotDockTest.setup + "d.actions = A('running', [], []); taskBar(t, d, row)")
+        self.assertIn('data-aid="handoff"', html)
+        self.assertIn('data-aid="delete"', html)
+        self.assertNotIn('data-aid="retry"', html)
 
     def test_stuck_box_retry_form_lists_models_and_hides_a_limited_rung(self):
         """Plan 40 Task 3: the stuck box has a note, a Model select (auto first) and Retry; a limited rung is not listed."""
@@ -351,16 +297,10 @@ class NextStepUITest(unittest.TestCase):
                      'value="opus"', 'value="sonnet"'):
             self.assertIn(text, html)
         self.assertNotIn("kimi-k3", html)
-        stuck = (f"cfg = {json.dumps(cfg)}; " + TaskOverviewTest.setup + "t.state = 'stuck'; t.why = 'no HANDOFF block'; "
-                 "t.steps[0].state = 'failed'; t.steps[0].kind = 'code'; row.state = 'stuck'; d.levers = {retry: ''}; ")
-        box = render(stuck + "attentionArea(t, d, row)")
-        self.assertIn("no HANDOFF block", box)
-        self.assertNotIn("b-retrymodel", box)  # plan 48: the stuck box shows the reason; Retry on a model is in the menu
-        self.assertIn('data-tact="retryopen"', render(stuck + "taskButtons(t, d)"))
-        opened = render(stuck + "retryOpen = 't'; inspTask(t, d, row)")
+        expr = AutopilotDockTest.setup + "d.actions = A('stuck', [fixtureAct('retry', 'Retry on a model', '')], []); retryOpen = 't'; "
+        opened = render(f"cfg = {json.dumps(cfg)}; " + expr + "taskCard(t, d, row)")
         self.assertEqual(opened.count('id="b-retrymodel"'), 1)
-        self.assertIn('data-tact="retrycancel"', opened)
-        self.assertNotIn("b-retrymodel", render(stuck + "retryOpen = ''; inspTask(t, d, row)"))
+        self.assertNotIn("kimi-k3", opened)
 
     def test_tier_card_offers_clear_on_a_limited_rung(self):
         """Plan 45 D3: the hidden line and a limited hidden row carry a clear link with the limit's key."""
@@ -386,12 +326,9 @@ class NextStepUITest(unittest.TestCase):
         self.assertNotIn("b-retrymodel", off)
 
     def test_hand_off_task_reads_the_task_availability(self):
-        """Plan 44 nav T2/T3: Hand off task is gated by the task-level handoff_available, never the session levers."""
-        html = render(self._setup() + "taskButtons({id: 't', steps: []}, {levers: {}, step_levers: {handoff: '', next: ''}, handoff_available: ''})")
-        self.assertIn("Hand off task", html.split("<details", 1)[1])  # plan 48: in the task menu
-        off = render(self._setup() + "taskButtons({id: 't', steps: []}, {levers: {}, step_levers: {handoff: '', next: ''}, handoff_available: 'still working'})")
-        self.assertNotIn("Hand off task", off)
-        self.assertNotIn("Start new task", off)
+        html = render(AutopilotDockTest.setup + "d.actions = A('running', [], []); d.actions.menu[0].off = 'still working'; taskBar(t, d, row)")
+        self.assertIn('title="Hand off: still working"', html)
+        self.assertRegex(html, r'data-aid="handoff"[^>]* disabled')
 
     def test_older_done_step_offers_a_branch_where_the_service_allows_it(self):
         """Plan 44 nav T2: the dock of an older step reads sources[NN]; the Board reproduces no rule of its own."""
@@ -450,7 +387,7 @@ class NextStepUITest(unittest.TestCase):
         html = render(self._setup(snap=snap) +
                       "stepFooter({id: 't', chat: true, state: 'running', current: 1, "
                       "steps: [{n: 1, session: 's', state: 'running', kind: 'chat'}]}, "
-                      "{n: 1, session: 's', state: 'running', kind: 'chat'}, {}, null)")
+                      "{n: 1, session: 's', state: 'running', kind: 'chat'}, {actions: {state: 'running', primary: [], bar: [], menu: [], message: {mode: 'queued', reason: 'Add step is available when this turn finishes'}}}, null)")
         self.assertIn("Add step is available when this turn finishes", html)
         self.assertNotIn("Continue", html)
 
@@ -523,7 +460,10 @@ class UnifiedTaskChatTest(unittest.TestCase):
         next: '', terminal: '', after_verify: ['handoff', 'escalate', 'done']}};
       boardTask = 't'; boardPick = 's1'; boardData = {id: 't', data: d};
       row = {id: 't', state: 'running', steps: t.steps}; snap.tasks = [row];
-      boardChat = {sid: 's', chat: {items: []}}; """
+      boardChat = {sid: 's', chat: {items: []}}; d.actions = {state: 'running', line: 'running', primary: [], bar: [
+        {id: 'stop', label: 'Stop', post: '/api/task/stop', body: {task: 't'}, off: '', confirm: true},
+        {id: 'pause', label: 'Pause', post: '/api/task/pause', body: {task: 't'}, off: '', confirm: false}], menu: [],
+        message: {mode: 'queued', reason: '', timing: 'Queued', target: {step: 1, session: 's', attempt: 1}}}; """
 
     def test_task_entry_opens_overview_and_step_links_open_the_step(self):
         result = render(self.setup + """(async () => {
@@ -567,30 +507,20 @@ class UnifiedTaskChatTest(unittest.TestCase):
                      'data-tact="vbrief"', 'data-tact="next"', 'data-tact="resume"', 'data-tact="verify"',
                      'data-tact="escalate"', 'Brief a new task', 'Verify in a new task', 'Terminal', 'Hand off'):
             self.assertNotIn(gone, html)
-        cold = render(self.setup + "snap.sessions[0].state = 'interrupted'; d.step_levers.cold = {cost: 1, tokens: 1000, idle_s: 3600}; stepFooter(t, t.steps[0], d)")
+        cold = render(self.setup + "snap.sessions[0].state = 'interrupted'; d.actions.message.cold = {cost: 1, tokens: 1000, idle_s: 3600}; stepFooter(t, t.steps[0], d)")
         self.assertIn('Cold cache', cold)
 
     def test_table_states_keep_editable_input_and_honest_delivery_gate(self):
-        cases = [('planned', 'planned', None, {}, 'not started'),
-                 ('running', 'running', 'running', {'continue': 'still working'}, 'Working'),
-                 ('waiting', 'running', 'stop', {'continue': ''}, 'Send answer'),
-                 ('running', 'running', 'idle', {'continue': ''}, '>Send<'),
-                 ('stopped', 'failed', 'interrupted', {'continue': ''}, 'Retry'),
-                 ('stuck', 'failed', 'failed', {'continue': 'usage limit'}, 'usage limit'),
-                 ('done', 'done', 'done', {'continue': ''}, 'Add step'),
-                 ('running', 'running', 'idle', {'continue': 'runs are off'}, 'runs are off')]
-        for state, step_state, session_state, levers, text in cases:
-            with self.subTest(state=state, session=session_state):
-                html = render(self.setup + f"t.state = {json.dumps(state)}; t.steps[0].state = {json.dumps(step_state)}; "
-                              f"snap.sessions[0].state = {json.dumps(session_state)}; d.step_levers = {json.dumps(levers)}; "
-                              "if (t.state === 'planned') t.steps[0].session = ''; "
-                              "if (t.state === 'waiting') snap.sessions[0].stop_question = 'Which?'; "
-                              "stepFooter(t, t.steps[0], d)")
+        for mode, reason in (("queued", "Task not started"), ("queued", "runs are off"), ("answer", ""), ("next", "Task is stopped")):
+            with self.subTest(mode=mode, reason=reason):
+                msg = {"mode": mode, "reason": reason}
+                html = render(self.setup + f"d.actions.message = {json.dumps(msg)}; stepFooter(t, t.steps[0], d)")
                 self.assertIn('id="b-tcont"', html)
-                self.assertNotIn('id="b-tcont" disabled', html)
-                self.assertIn(text, html)
-                if state not in ('waiting',) and session_state != 'idle':
-                    self.assertIn('disabled', html)
+                self.assertIn(reason or "Send answer", html)
+                self.assertEqual('data-tact="answer"' in html, mode == "answer")
+                self.assertEqual('data-tid="t" disabled' in html, bool(reason))
+        html = render(self.setup + "d.actions.message = null; d.message = {mode: 'queued', reason: ''}; stepFooter(t, t.steps[0], d)")
+        self.assertIn("Reading delivery availability. Draft kept.", html)
 
     def test_history_targets_current_and_stale_draft_requires_explicit_retarget(self):
         html = render(self.setup + "t.steps.push({n: 2, session: 's2', kind: 'code', state: 'running'}); t.current = 2; stepFooter(t, t.steps[0], d)")
@@ -611,7 +541,7 @@ class UnifiedTaskChatTest(unittest.TestCase):
           renderBoard = async () => {};
           let calls = []; api = async (path, body) => {calls.push([path, body]); throw Error('offline');};
           const b = {dataset: {tid: 't'}, textContent: 'Send'};
-          d.step_levers.cold = {cost: 1};
+          d.actions.message.cold = {cost: 1};
           await taskChatAct('cont', b); const first = calls.length;
           await taskChatAct('cont', b);
           return {first, calls, text: draft.text, files: att[key].length, error: draft.error};
@@ -640,13 +570,13 @@ class UnifiedTaskChatTest(unittest.TestCase):
                               ('planned', 'Saved for the first step. Sending does not start the task.'),
                               ('stopped', 'Sending saves this guidance; nothing runs. Retry asks whether to carry it into the next run.')]:
             with self.subTest(state=state):
-                html = render(self.setup + f"t.state = {json.dumps(state)}; d.message = {{mode: 'queued', reason: '', timing: {json.dumps(timing)}}}; stepFooter(t, t.steps[0], d)")
+                html = render(self.setup + f"t.state = {json.dumps(state)}; d.actions.message = {{mode: 'queued', reason: '', timing: {json.dumps(timing)}}}; stepFooter(t, t.steps[0], d)")
                 self.assertIn(timing, html)
                 self.assertIn('data-tid="t">Send</button>', html)
 
     def test_message_retry_reuses_request_id_and_pending_actions_are_explicit(self):
         result = render(self.setup + """(async () => {
-          d.message = {reason: '', target: {step: 1, session: 's', attempt: 1}};
+          d.actions.message = {reason: '', target: {step: 1, session: 's', attempt: 1}};
           taskDraftFor(t).text = 'keep this'; renderBoard = () => {};
           let calls = []; api = async (p, b) => {calls.push(b); throw Error('offline');};
           const button = {dataset: {tid: 't'}};
@@ -763,7 +693,7 @@ class UnifiedTaskChatTest(unittest.TestCase):
           const a = taskDraftFor(t); a.text = 'draft A'; a.start = 2; a.end = 3;
           att[taskAttachKey(t.id)] = [{name: 'a.txt', data: 'YQ=='}];
           const other = {...t, id: 'other'}; taskDraftFor(other).text = 'draft B';
-          const again = taskDraftFor(t); d.step_levers.fork = true;
+          const again = taskDraftFor(t); d.actions.message.timing = 'Sends in a window copy'; d.step_levers.fork = true;
           return {same: a === again, text: again.text, selection: [again.start, again.end],
             files: att[taskAttachKey('t')].length, others: att[taskAttachKey('other')].length,
             html: stepFooter(t, t.steps[0], d)};
@@ -775,9 +705,9 @@ class UnifiedTaskChatTest(unittest.TestCase):
         self.assertIn('a.txt', html)
 
     def test_paused_missing_tools_and_disconnected_states_disable_only_delivery(self):
-        for change, reason in [("t.owner = 'fred'", "Resume or Retry"),
-                               ("d.step_levers.continue = 'folder is gone'", "folder is gone"),
-                               ("d.step_levers.continue = 'CLI not found'", "CLI not found"),
+        for change, reason in [("d.actions.message.reason = 'Resume or Retry'", "Resume or Retry"),
+                               ("d.actions.message.reason = 'folder is gone'", "folder is gone"),
+                               ("d.actions.message.reason = 'CLI not found'", "CLI not found"),
                                ("streamLost = true", "Disconnected")]:
             with self.subTest(change=change):
                 html = render(self.setup + change + "; taskDraftFor(t).text = 'retained'; stepFooter(t, t.steps[0], d)")
@@ -797,9 +727,9 @@ class UnifiedTaskChatTest(unittest.TestCase):
         self.assertIn('Remove the files', result['html'])
 
     def test_task_recovery_remains_reachable_from_current_conversation(self):
-        html = render(self.setup + "d.levers.pause = ''; d.levers.stepdone = ''; stepButtons(t, t.steps[0], d, row)")
+        html = render(self.setup + "d.actions.bar.push({id: 'stepdone', label: 'Accept step result', post: '/api/task/stepdone', body: {}, off: ''}); stepButtons(t, t.steps[0], d, row)")
         for action in ('stop', 'pause', 'stepdone'):
-            self.assertIn(f'data-tact="{action}"', html)
+            self.assertIn(f'data-aid="{action}"', html)
         result = render(self.setup + """(async () => {
           openId = 's'; let name;
           goChat = async () => {}; taskAct = async action => {name = action;};
@@ -840,7 +770,10 @@ class SelectionTest(unittest.TestCase):
       boardTask = 't'; boardPick = 't';
       boardData = {id: 't', data: d};
       row = {id: 't', state: 'running', steps: t.steps}; snap.tasks = [row];
-      boardChat = {sid: 's', chat: {items: []}}; """
+      boardChat = {sid: 's', chat: {items: []}}; d.actions = {state: 'running', line: 'running', primary: [], bar: [
+        {id: 'stop', label: 'Stop', post: '/api/task/stop', body: {task: 't'}, off: '', confirm: true},
+        {id: 'pause', label: 'Pause', post: '/api/task/pause', body: {task: 't'}, off: '', confirm: false}], menu: [],
+        message: {mode: 'queued', reason: '', timing: 'Queued', target: {step: 1, session: 's', attempt: 1}}}; """
 
     def test_task_entry_points_open_the_task_not_a_step(self):
         result = render(self.setup + """(async () => {
@@ -889,10 +822,13 @@ class TaskOverviewTest(unittest.TestCase):
         {n: 2, session: '', kind: 'code', state: 'planned', goal: 'Write tests'}]};
       d = {task: t, levers: {stop: '', done: '', add_next: ''}, step_levers: {continue: ''},
         notes: {'1': 'HANDOFF\\n## Goal\\ng\\n## Next\\nn\\nEND HANDOFF'}, chain: [], files: {}, questions: []};
-      boardTask = 't'; boardPick = 't'; doneConfirm = '';
+      boardTask = 't'; boardPick = 't';
       boardData = {id: 't', data: d};
       row = {id: 't', state: 'running', cost: 1, steps: t.steps}; snap.tasks = [row];
-      boardChat = {sid: 's', chat: {items: []}}; """
+      boardChat = {sid: 's', chat: {items: []}}; d.actions = {state: 'running', line: 'running', primary: [], bar: [
+        {id: 'stop', label: 'Stop', post: '/api/task/stop', body: {task: 't'}, off: '', confirm: true},
+        {id: 'pause', label: 'Pause', post: '/api/task/pause', body: {task: 't'}, off: '', confirm: false}], menu: [],
+        message: {mode: 'queued', reason: '', timing: 'Queued', target: {step: 1, session: 's', attempt: 1}}}; """
 
     def test_task_page_has_no_views_and_its_route_opens_the_steps(self):
         html = render(self.setup + "inspTask(t, d, row)")
@@ -902,70 +838,11 @@ class TaskOverviewTest(unittest.TestCase):
         self.assertIn('data-bpick="s2"', html)
         self.assertIn("Goal", html)
 
-    def test_finish_task_is_in_the_menu_and_its_confirm_is_inline_and_green(self):
-        html = render(self.setup + "taskButtons(t, d)")
-        self.assertIn('data-tact="done"', html.split("<details", 1)[1])
-        self.assertIn("Finish task", html)
-        armed = render(self.setup + "doneConfirm = 't'; taskButtons(t, d)")
-        self.assertIn("done-confirm", armed)
-        self.assertIn('class="btn sm complete" data-tact="confirmdone"', armed)
-        self.assertIn("Finish this task? History stays available.", armed)
-        self.assertIn('data-tact="confirmdone"', armed)
-        self.assertIn('data-tact="canceldone"', armed)
 
-    def test_accept_step_result_is_recovery_only(self):
-        html = render(self.setup + "d.levers.stepdone = ''; d.levers.stop = 'task is running'; taskButtons(t, d)")
-        self.assertIn("Accept step result", html)
-        self.assertIn('data-tact="stepdone"', html)
-        self.assertIn("incomplete", html)  # it names accepting incomplete or failed output
-        self.assertLess(html.index("<details"), html.index("Accept step result"))  # in More, never prominent
 
-    def test_retry_is_drawn_once_and_only_when_the_menu_opened_it(self):
-        failed = ("cfg = {models: ['opus'], ladder: {opus: ['opus']}, tiers: {think: [], write: [], read: []}}; "
-                  "t.state = 'stopped'; t.why = 'stopped by Fred'; t.steps[0].state = 'failed'; row.state = 'stopped'; "
-                  "d.levers = {retry: '', stop: 'task is stopped', done: ''}; ")
-        shut = render(self.setup + failed + "inspTask(t, d, row)")
-        self.assertNotIn('data-tact="retry"', shut)
-        self.assertIn('data-tact="retryopen"', shut)
-        opened = render(self.setup + failed + "retryOpen = 't'; inspTask(t, d, row)")
-        self.assertEqual(opened.count('data-tact="retry"'), 1)
-        self.assertIn('id="b-retrynote"', opened)
-        result = render(self.setup + failed + """(async () => {
-          renderBoard = async () => {}; boardPick = 's1';
-          await taskAct('retryopen', {dataset: {tid: 't'}}); const open = [retryOpen, boardPick];
-          await taskAct('retrycancel', {dataset: {tid: 't'}}); return [open, retryOpen];
-        })()""")
-        self.assertEqual(result, [["t", "t"], ""])
 
-    def test_manual_boundary_does_not_say_to_resume(self):
-        """A manual task between steps waits for Add step or Mark done; the Overview must not tell Fred to Resume."""
-        boundary = ("t.state = 'waiting'; t.why = 'choose next step'; row.state = 'waiting'; row.paused_after = 1; "
-                    "d.levers = {resume: 'choose a next step or finish the task', done: '', add_next: ''}; ")
-        html = render(self.setup + boundary + "inspTask(t, d, row)")
-        self.assertNotIn("Nothing starts until you Resume", html)
-        paused = render(self.setup + "row.paused_after = 1; d.levers = {resume: ''}; inspTask(t, d, row)")
-        self.assertIn("Nothing starts until you Resume", paused)
 
-    def test_no_paused_note_unless_resume_is_open(self):
-        """Plan 52 Task 2a: a supervised boundary is not paused, whatever its resume lever text says."""
-        boundary = ("t.state = 'waiting'; t.why = 'choose next step'; row.state = 'waiting'; row.paused_after = 1; "
-                    "d.levers = {resume: 'not paused', done: ''}; ")
-        self.assertNotIn("Nothing starts until you Resume", render(self.setup + boundary + "inspTask(t, d, row)"))
 
-    def test_resume_renders_from_the_lever_after_a_pause(self):
-        paused = ("t.state = 'waiting'; t.owner = 'fred'; row.state = 'waiting'; row.paused_after = 1; "
-                  "d.levers = {resume: '', stop: 'task is waiting'}; taskButtons(t, d)")
-        html = render(self.setup + paused)
-        self.assertEqual(html.count('data-tact="resume"'), 1)
-        self.assertIn(">Resume<", html)
-        self.assertNotIn("Start task", html)
-        boundary = render(self.setup + "t.state = 'waiting'; t.owner = 'fred'; "
-                          "d.levers = {resume: 'choose a next step or finish the task'}; taskButtons(t, d)")
-        self.assertNotIn('data-tact="resume"', boundary)
-        follow = render(self.setup + "t.state = 'planned'; t.handoff_from = 'src'; "
-                        "t.steps = [{n: 1, kind: 'code', state: 'planned', goal: 'x'}]; "
-                        "d.levers = {resume: ''}; taskButtons(t, d)")
-        self.assertIn("Start task", follow)
 
     def test_replan_approval_renders_on_overview(self):
         expr = self.setup + """t.state = 'waiting'; t.why = 'replanned: 1 steps added';
@@ -974,27 +851,14 @@ class TaskOverviewTest(unittest.TestCase):
           t.replan = {before: [{kind: 'scout', goal: 'g1'}], after: [{kind: 'scout', goal: 'g1'}, {kind: 'search', goal: 'g2'}], added: [1], dropped: []};
           d.levers = {confirm: '', keep: '', stop: 'task is waiting'};
           d.replan_note = '## Why\\na search step is needed first';
-          inspTask(t, d, row)"""
+          d.actions = {state: 'hold', line: 'held', primary: [{id: 'confirm', label: 'Confirm plan', post: '/api/task/confirm', body: {}, off: ''}], bar: [{id: 'keep', label: 'Keep old plan', post: '/api/task/keep', body: {}, off: ''}], menu: []}; taskCard(t, d, row)"""
         html = render(expr)
         self.assertEqual(html.count("Confirm plan"), 1)
         self.assertEqual(html.count("Keep old plan"), 1)
         self.assertIn("search", html)
         self.assertNotIn("Open step 2", html)
 
-    def test_verify_is_inside_add_step_not_standalone(self):
-        html = render(self.setup + "taskButtons(t, d)")
-        self.assertEqual(html.count('data-tact="nextopen"'), 1)
-        self.assertIn("Add step", html)
-        self.assertNotIn("nextverify", html)
-        self.assertNotIn(">Verify<", html)
 
-    def test_question_and_confirm_share_one_attention_area(self):
-        q = render(self.setup + "row.asks = 'Which step?'; inspTask(t, d, row)")
-        self.assertEqual(q.count("task-attention"), 1)
-        self.assertEqual(q.count("Which step?"), 1)  # never in a heading plus the composer
-        c = render(self.setup + "t.state = 'waiting'; t.why = 'confirm Fable'; d.levers.confirm = ''; row.state = 'waiting'; inspTask(t, d, row)")
-        self.assertEqual(c.count("task-attention"), 1)
-        self.assertIn('data-tact="confirm"', c)
 
     def test_brief_a_new_task_and_delegate_hint_are_gone(self):
         result = render("""(async () => {
@@ -1147,7 +1011,7 @@ class HandoffFormTest(unittest.TestCase):
         self.assertNotIn("Start next task", html)
         self.assertIn("Handed to", html)
         self.assertIn('data-task="f1"', html)
-        session_level = render(self.setup + "t.state = 'handed'; t.handoff_note = 'steps/01-handoff.md'; row.state = 'handed'; row.handoff_note = 'steps/01-handoff.md'; d.handoff = 'the note'; inspTask(t, d, row)")
+        session_level = render(self.setup + "t.state = 'handed'; t.handoff_note = 'steps/01-handoff.md'; row.state = 'handed'; row.handoff_note = 'steps/01-handoff.md'; d.handoff = 'the note'; d.actions.state = 'handed'; d.actions.primary = [{id: 'start_next', label: 'Start next task', post: '', off: ''}]; inspTask(t, d, row)")
         self.assertIn("Start next task", session_level)
 
     def test_a_follow_up_task_id_has_a_label_like_every_other_task(self):
@@ -1319,13 +1183,13 @@ class PrepCardTest(unittest.TestCase):
 class NextMessageComposerTest(unittest.TestCase):
     """Plan 48 D3 and D8: at a boundary the box tells the supervisor what to do next, text only."""
     setup = UnifiedTaskChatTest.setup + """t.state = 'done'; t.steps[0].state = 'done';
-      d.message = {mode: 'next', reason: '', attachments: false,
+      d.actions.message = {mode: 'next', reason: '', attachments: false,
         timing: 'Goes to the supervisor. The step it adds from your words starts without Approve.'}; """
 
     def test_composer_next_mode_label_and_no_attach(self):
         html = render(self.setup + "stepFooter(t, t.steps[0], d)")
         self.assertIn("Tell the supervisor what to do next", html)
-        self.assertIn('placeholder="For example: verify only the 340 px case, then finish"', html)
+        self.assertIn('placeholder="Ask for something more: it becomes the next step"', html)
         self.assertIn("Goes to the supervisor.", html)
         self.assertRegex(html, r'data-attach="task:t" disabled title="The supervisor reads text only\. Remove the files\."')
         self.assertNotIn("messagenext", html)
@@ -1333,7 +1197,7 @@ class NextMessageComposerTest(unittest.TestCase):
         with_files = render(self.setup + "att[taskAttachKey('t')] = [{name: 'a.png'}]; stepFooter(t, t.steps[0], d)")
         self.assertIn("The supervisor reads text only. Remove the files.", with_files.split('id="b-delivery"')[1])
         self.assertIn('data-tid="t" disabled>Send</button>', with_files)
-        guidance = render(UnifiedTaskChatTest.setup + "d.message = {mode: 'queued', reason: '', timing: 'Queued'}; stepFooter(t, t.steps[0], d)")
+        guidance = render(UnifiedTaskChatTest.setup + "d.actions.message = {mode: 'queued', reason: '', timing: 'Queued'}; stepFooter(t, t.steps[0], d)")
         self.assertIn("Message current step 01: chat", guidance)
         self.assertNotIn("Tell the supervisor", guidance)
 
@@ -1349,46 +1213,6 @@ class OpenedTaskTest(unittest.TestCase):
                {ts: 200, wake: 3, phase: 'decided', status: 'suggest', decision: 'add_next_step', cost: 0.003, error: ''}];
       d.supervisor = {mode: 'suggest', pending: PEND, audit: AUDIT}; """
 
-    def test_sup_card_shows_approve_only_where_allowed(self):
-        html = render(self.setup + "supCard(t, d)")
-        self.assertIn('data-tact="supapprove" data-tid="t" data-wake="3"', html)
-        self.assertIn('data-tact="supreject" data-tid="t" data-wake="3"', html)
-        self.assertIn("Add 03 verify from 01&#39;s handover", html)  # esc()
-        self.assertIn("a verify checks the 340 px case", html)
-        self.assertIn("$0.003", html)
-        no = render(self.setup + "PEND.can_approve = false; supCard(t, d)")
-        self.assertNotIn("supapprove", no)
-        self.assertIn('data-tact="supreject"', no)
-        for status in ("uncertain", "escalate", "refused"):
-            with self.subTest(status=status):
-                odd = render(self.setup + f"PEND.status = '{status}'; PEND.can_approve = false; PEND.error = 'the dispatch did not answer'; supCard(t, d)")
-                self.assertIn(">Dismiss<", odd)
-                self.assertIn('data-tact="supreject" data-tid="t" data-wake="3" data-dismiss="1"', odd)
-                self.assertNotIn("supapprove", odd)
-                self.assertIn("a verify checks the 340 px case", odd)
-        quiet = render(self.setup + "d.supervisor.pending = null; supCard(t, d)")
-        self.assertIn("askbox quiet", quiet)
-        self.assertIn("wake 3", quiet)
-        self.assertNotIn("supapprove", quiet)
-        self.assertNotIn("supreject", quiet)
-        self.assertEqual(render(self.setup + "d.supervisor.mode = 'off'; supCard(t, d)"), "")
-        self.assertEqual(render(self.setup + "delete d.supervisor; supCard(t, d)"), "")
-        posts = render(self.setup + """(async () => {
-          const calls = []; api = async (p, b) => { calls.push([p, b]); return {}; }; renderBoard = async () => {};
-          const els = {'b-supnote': {value: ' not yet '}}; document = {getElementById: (id) => els[id] || null};
-          await taskAct('supapprove', {dataset: {tid: 't', wake: '3'}});
-          await taskAct('supreject', {dataset: {tid: 't', wake: '3'}});
-          const opened = supCard(t, d).includes('id="b-supnote"'), sent = calls.length;
-          await taskAct('supreject', {dataset: {tid: 't', wake: '3'}});
-          await taskAct('supreject', {dataset: {tid: 't', wake: '3', dismiss: '1'}});
-          return {calls, opened, sent};
-        })()""")
-        self.assertTrue(posts["opened"])
-        self.assertEqual(posts["sent"], 1)  # the first Reject click only opens the note
-        self.assertEqual(posts["calls"], [
-            ["/api/task/supervisor", {"task": "t", "wake": 3, "action": "approve"}],
-            ["/api/task/supervisor", {"task": "t", "wake": 3, "action": "reject", "note": "not yet"}],
-            ["/api/task/supervisor", {"task": "t", "wake": 3, "action": "reject"}]])
 
     def test_route_lists_proposed_steps_dim(self):
         html = render(self.setup + "t.supervisor = {proposed: [{kind: 'verify', goal: 'check it', model: ''}, {kind: 'code', goal: 'more', model: ''}]}; routeHtml(t, d, row)")
@@ -1400,14 +1224,6 @@ class OpenedTaskTest(unittest.TestCase):
         self.assertIn("proposed", tail)
         self.assertNotIn("data-bpick", html.split('class="v-sr pl proposed"', 1)[1])  # a proposed row opens nothing
         self.assertNotIn("proposed", render(self.setup + "routeHtml(t, d, row)").replace("Route", ""))
-        gauge = render(self.setup + "t.steps[0].ctx_tokens = 92000; gaugeHtml(t, row)")
-        self.assertEqual(gauge.count("<i"), 30)
-        self.assertIn("92K", gauge)
-        self.assertIn("150K", gauge)
-        self.assertIn("300K", gauge)
-        unknown = render(self.setup + "t.steps[0].harness = 'codex'; gaugeHtml(t, row)")
-        self.assertIn("<b>?</b>", unknown)
-        self.assertIn("codex reports a turn&#39;s spend", unknown)
 
     def test_opened_task_has_no_tabs_and_closed_folds(self):
         html = render(self.setup + "inspTask(t, d, row)")
@@ -1415,42 +1231,9 @@ class OpenedTaskTest(unittest.TestCase):
             self.assertNotIn(gone, html)
         self.assertIn('class="p-hd"', html)
         self.assertIn('data-bpick="s1"', html)
-        self.assertIn("Supervisor suggests", html)
-        self.assertLess(html.index("Supervisor suggests"), html.index('data-bpick="s1"'))
         self.assertRegex(html, r'data-fkey="tgoal" aria-expanded="false"')
         self.assertNotIn("Implement the thing</pre>", html.split('data-fkey="tgoal"')[0])
 
-    def test_task_bar_is_stop_or_resume_pause_and_menu(self):
-        allowed = ("t.steps[0].state = 'running'; t.state = 'running'; d.levers = {stop: '', pause: '', add_next: '', done: '', retry: '', "
-                   "stepdone: '', redo: '', clear: '', resume: 'task is running'}; d.step_levers = {terminal: '', escalate: ''}; "
-                   "d.handoff_available = ''; snap.sessions[0].state = 'running'; snap.sessions[0].run_live = true; ")
-        html = render(self.setup + allowed + "taskButtons(t, d)")
-        bar, menu = html.split("<details", 1)
-        self.assertIn('data-tact="stop"', bar)
-        self.assertIn('data-tact="pause"', bar)
-        self.assertLess(bar.index('data-tact="stop"'), bar.index('data-tact="pause"'))
-        for gone in ("nextopen", 'data-tact="done"', 'data-tact="retry', "verify", "escalate", 'data-tact="cont"', "Mark done", "resume"):
-            self.assertNotIn(gone, bar)
-        for item in ('data-tact="handofftask"', 'data-tact="done"', 'data-tact="nextopen"', 'data-tact="retryopen"',
-                     'data-tact="stepdone"', 'data-tact="redo"', 'data-tact="terminal"', 'data-tact="folder"', 'data-tact="clear"',
-                     'data-go="models"', 'data-go="usage"', "Add step on a model", "Retry on a model", "Finish task"):
-            self.assertIn(item, menu)
-        for gone in ("escalate", "Use a stronger model", "Verify", "Continue"):
-            self.assertNotIn(gone, menu)
-        self.assertLess(menu.index("Hand off task"), menu.index("Finish task"))
-        self.assertLess(menu.index("Finish task"), menu.index("Add step on a model"))
-        off = render(self.setup + "d.levers = {stop: 'x', pause: 'x', add_next: 'x', done: 'x', retry: 'x', stepdone: 'x', redo: 'x', clear: 'x', resume: 'x'}; "
-                     "d.step_levers = {terminal: 'x'}; d.handoff_available = 'x'; taskButtons(t, d)")
-        for gone in ("stop", "pause", "handofftask", 'data-tact="done"', "nextopen", "retryopen", "stepdone", "redo", "terminal", "clear", "resume"):
-            self.assertNotIn(gone, off)
-        self.assertIn('data-tact="folder"', off)
-        resume = render(self.setup + "d.levers = {resume: '', stop: 'task is waiting', pause: ''}; taskButtons(t, d)")
-        bar = resume.split("<details", 1)[0]
-        self.assertIn('data-tact="resume"', bar)
-        self.assertNotIn('data-tact="stop"', bar)
-        self.assertLess(bar.index('data-tact="resume"'), bar.index('data-tact="pause"'))
-        nosup = render(self.setup + "delete d.supervisor; taskButtons(t, d)")
-        self.assertNotIn("supmode", nosup)
 
 
 @unittest.skipUnless(NODE, "Node is not installed")
@@ -1460,66 +1243,65 @@ class RecoveryBoxTest(unittest.TestCase):
     setup = TaskOverviewTest.setup + """t.state = 'stuck'; t.why = 'the run did not finish cleanly (after one retry)';
       t.current = 2; t.steps[1].state = 'failed'; t.steps[1].session = 's2';
       d.levers = {retry: '', stepdone: '', resume: 'not paused', stop: 'task is stuck'};
-      d.recovery = {done: {step: 1, kind: 'chat', how: 'finished', verdict: '', handoff: '01-chat/handoff.md', facts: '01-chat/facts.md', ended: 50},
+      d.actions.recovery = {done: {step: 1, kind: 'chat', how: 'finished', verdict: '', handoff: '01-chat/handoff.md', facts: '01-chat/facts.md', ended: 50},
         cut: {step: 2, kind: 'code', attempt: 2, cause: 'interrupted', why: 'the run did not finish cleanly', ended: 90}, orphan: null};
-      row.state = 'stuck'; """
+      d.actions.menu = [{id: 'retry', off: ''}, {id: 'stepdone', off: ''}]; row.state = 'stuck'; """
 
     def test_recovery_box_names_done_and_cut(self):
-        html = render(self.setup + "attentionArea(t, d, row)")
+        html = render(self.setup + "recoveryBox(t, d)")
         box = html.split('class="askbox recovery"', 1)[1]
         self.assertIn('data-bpick="s1" data-btask="t">Step 01 chat</button> finished with a saved handoff.', box)
         self.assertIn('data-bpick="s2" data-btask="t">Step 02 code</button>, attempt 2, was interrupted: the run ended without a result (a restart or a crash).', box)
         self.assertIn("Its file edits or other actions may already have happened. Nothing is undone", box)
         self.assertIn("Git and test facts are as recorded when step 01 ended, not a fresh check.", box)
-        self.assertLess(html.index("askbox recovery"), html.index("Stuck"))  # above the stuck box
-        first = render(self.setup + "d.recovery.done = null; attentionArea(t, d, row)")
+        first = render(self.setup + "d.actions.recovery.done = null; recoveryBox(t, d)")
         self.assertIn("No completed step recorded.", first)
         self.assertNotIn("not a fresh check", first)
         for cause, text in (("stopped", "was stopped."), ("unknown", "did not finish; the cause is not recorded."),
                             ("failed", "failed: it hit the turn cap (40 turns)."), ("timeout", "failed: it hit the turn cap (40 turns).")):
             with self.subTest(cause=cause):
-                out = render(self.setup + f"d.recovery.cut.cause = '{cause}'; d.recovery.cut.why = 'it hit the turn cap (40 turns)'; attentionArea(t, d, row)")
+                out = render(self.setup + f"d.actions.recovery.cut.cause = '{cause}'; d.actions.recovery.cut.why = 'it hit the turn cap (40 turns)'; recoveryBox(t, d)")
                 self.assertIn("attempt 2, " + text, out)
-        verdict = render(self.setup + "d.recovery.done.verdict = 'PASS'; d.recovery.done.kind = 'verify'; attentionArea(t, d, row)")
+        verdict = render(self.setup + "d.actions.recovery.done.verdict = 'PASS'; d.actions.recovery.done.kind = 'verify'; recoveryBox(t, d)")
         self.assertIn("Step 01 verify</button> finished: VERDICT PASS.", verdict)
-        bare = render(self.setup + "d.recovery.done.handoff = ''; attentionArea(t, d, row)")
+        bare = render(self.setup + "d.actions.recovery.done.handoff = ''; recoveryBox(t, d)")
         self.assertIn("finished; no handoff was saved.", bare)
-        accepted = render(self.setup + "d.recovery.done.how = 'accepted'; attentionArea(t, d, row)")
+        accepted = render(self.setup + "d.actions.recovery.done.how = 'accepted'; recoveryBox(t, d)")
         self.assertIn("was accepted by you as it was on disk.", accepted)
-        long = render(self.setup + "d.recovery.cut.cause = 'failed'; d.recovery.cut.why = '<b>' + 'x'.repeat(400); attentionArea(t, d, row)")
+        long = render(self.setup + "d.actions.recovery.cut.cause = 'failed'; d.actions.recovery.cut.why = '<b>' + 'x'.repeat(400); recoveryBox(t, d)")
         self.assertIn("&lt;b&gt;", long)  # esc(): a reason is text
-        self.assertEqual(render(self.setup + "d.recovery = null; t.state = 'running'; t.why = ''; t.steps[1].state = 'running'; attentionArea(t, d, row)"), "")
+        self.assertEqual(render(self.setup + "d.actions.recovery = null; t.state = 'running'; t.why = ''; t.steps[1].state = 'running'; recoveryBox(t, d)"), "")
 
     def test_recovery_box_offers_only_open_levers(self):
-        html = render(self.setup + "attentionArea(t, d, row)")
-        self.assertIn("Retry on a model (task menu) runs step 02 again; attempt 2&#39;s edits stay.", html)
-        self.assertIn("Accept step result (task menu) marks step 02 done with the files as they are now.", html)
+        html = render(self.setup + "recoveryBox(t, d)")
+        self.assertIn("Retry on a model (card) runs step 02 again; attempt 2&#39;s edits stay.", html)
+        self.assertIn("Accept step result (card) marks step 02 done with the files as they are now.", html)
         self.assertNotIn("Resume lets", html)
         self.assertNotIn("data-tact", html.split('class="askbox recovery"', 1)[1].split("</div>", 1)[0])  # no new button
-        none = render(self.setup + "d.levers = {retry: 'still working: wait until it stops', stepdone: 'x', resume: 'x', stop: 'x'}; attentionArea(t, d, row)")
+        none = render(self.setup + "d.actions.bar = []; d.actions.menu = [{id: 'retry', off: 'still working: wait until it stops'}]; recoveryBox(t, d)")
         self.assertIn("No recovery action is open: still working: wait until it stops.", none)
-        self.assertNotIn("Retry on a model (task menu)", none)
+        self.assertNotIn("Retry on a model (card)", none)
         orphan = render(self.setup + """t.state = 'running'; t.why = ''; t.steps[1].state = 'running';
-          d.recovery = {done: d.recovery.done, cut: null, orphan: {step: 2, attempt: 2}};
-          d.levers = {retry: 'task is running', stepdone: 'x', resume: 'not paused', stop: ''}; attentionArea(t, d, row)""")
+          d.actions.recovery = {done: d.actions.recovery.done, cut: null, orphan: {step: 2, attempt: 2}};
+          d.actions.menu = []; d.actions.bar = [{id: 'stop', off: ''}]; recoveryBox(t, d)""")
         self.assertIn("Step 02&#39;s run from an earlier service is still running; nothing else runs on this step until it ends.", orphan)
         self.assertIn("Stop (bar) ends that run.", orphan)
-        self.assertNotIn("Retry on a model (task menu)", orphan)
+        self.assertNotIn("Retry on a model (card)", orphan)
         self.assertNotIn("No recovery action is open", orphan)
 
     def test_recovery_box_points_to_uncertain_without_repeating_it(self):
         extra = """d.supervisor = {mode: 'suggest', pending: {wake: 4, status: 'uncertain', decision: null, error: 'Service restarted during dispatch; it will not be replayed.', can_approve: false, can_reject: true}, audit: []};
           t.messages = [{id: 'm', status: 'uncertain', text: 'carry on', target: {step: 2, attempt: 2}, error: 'Service restarted during dispatch.'}]; """
-        html = render(self.setup + extra + "attentionArea(t, d, row)")
+        html = render(self.setup + extra + "recoveryBox(t, d)")
         self.assertIn("The supervisor&#39;s wake 4 dispatch has an unknown outcome (card below). It is never replayed; Dismiss does not mean it failed.", html)
         self.assertIn("Your message to step 02 has an unknown delivery (message box). It is never replayed; Dismiss does not mean it was not delivered.", html)
         self.assertNotIn("carry on", html)  # the composer shows the message
         self.assertNotIn("Service restarted during dispatch", html)  # the card shows the error
         self.assertNotIn("supreject", html)
-        alone = render(self.setup + extra + "d.recovery = null; t.state = 'waiting'; t.why = ''; attentionArea(t, d, row)")
+        alone = render(self.setup + extra + "d.actions.recovery = null; t.state = 'waiting'; t.why = ''; recoveryBox(t, d)")
         self.assertIn("askbox recovery", alone)
         self.assertNotIn("No completed step recorded", alone)
-        off = render(self.setup + extra + "d.supervisor.mode = 'off'; attentionArea(t, d, row)")
+        off = render(self.setup + extra + "d.supervisor.mode = 'off'; recoveryBox(t, d)")
         self.assertNotIn("wake 4", off)
 
     def test_recovery_refresh_keeps_draft_and_focus(self):
@@ -1640,29 +1422,11 @@ class SupervisorSettingsTest(unittest.TestCase):
 class LooseEndsWebTest(unittest.TestCase):
     """Plan 51: the card after Reject says what to do next; the recovery box names the uncertain decision."""
 
-    def test_sup_card_after_reject_points_to_the_box(self):
-        base = OpenedTaskTest.setup + "d.supervisor.pending = null; d.supervisor.rejected = {wake: 3, decision: 'add_next_step', note: true}; "
-        html = render(base + "d.message = {mode: 'next'}; supCard(t, d)")
-        self.assertIn("You rejected wake 3", html)
-        self.assertIn('class="act was"', html)
-        self.assertIn("Write what to do instead in the box below", html)
-        self.assertIn("your note goes with it", html)
-        self.assertNotIn("supapprove", html)
-        self.assertNotIn("supreject", html)
-        self.assertNotIn("your note goes with it",
-                         render(base + "d.supervisor.rejected.note = false; d.message = {mode: 'next'}; supCard(t, d)"))
-        menu = render(base + "d.message = {mode: 'queued'}; supCard(t, d)")
-        self.assertIn("Add step on a model or Finish task is in the task menu", menu)
-        self.assertNotIn("You rejected", render(OpenedTaskTest.setup + "supCard(t, d)"))
 
     def test_recovery_box_names_the_uncertain_decision(self):
         extra = """d.supervisor = {mode: 'suggest', pending: {wake: 4, status: 'uncertain', decision: {decision: 'add_next_step', kind: 'code', source_step: 1, model: 'auto'}, error: 'x', can_approve: false, can_reject: true}, audit: []}; """
-        html = render(RecoveryBoxTest.setup + extra + "attentionArea(t, d, row)")
+        html = render(RecoveryBoxTest.setup + extra + "recoveryBox(t, d)")
         self.assertIn("wake 4 dispatch (Add 03 code from 01", html)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 @unittest.skipUnless(NODE, "Node is not installed")
@@ -1717,4 +1481,138 @@ class AutopilotHeadTest(unittest.TestCase):
                                         ["/api/task/stop", {"task": "t"}]])  # an off action and an unknown id post nothing
 
     def test_menu_has_no_mode_segment(self):
-        self.assertNotIn("supmode", render(self.setup + "d.supervisor = {mode: 'gated'}; taskMenu(t, d)"))
+        self.assertNotIn("function taskMenu(", APP.read_text(encoding="utf-8"))
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class AutopilotDockTest(unittest.TestCase):
+    """Plan 55 Task 2: the dock card, the box and the bar place GET /api/task actions; no gate is rebuilt in JS."""
+    A = """const fixtureAct = (id, label, post, body, o = {}) => Object.assign({id, label, post, body: Object.assign({task: 't'}, body || {}), off: '', confirm: false}, o);
+      const icons = [fixtureAct('handoff', 'Hand off', ''), fixtureAct('terminal', 'Open in terminal', '/api/terminal', {session: 's'}),
+        fixtureAct('folder', 'Open folder', '/api/task/folder'), fixtureAct('delete', 'Delete', '/api/task/clear', {}, {confirm: true}),
+        fixtureAct('retry', 'Retry on a model', '', {}, {off: 'still running'}), fixtureAct('level_gated', 'gated', '/api/task/supervisor', {mode: 'gated'})];
+      const A = (state, primary, bar, o = {}) => Object.assign({state, line: state, primary, bar, menu: icons, message: {mode: 'queued', reason: '', timing: 'Queued', target: {step: 1, attempt: 1}}}, o); """
+    setup = OpenedTaskTest.setup + "cfg = {models: [], tiers: {}, ladder: {}}; " + A
+
+    def card(self, expr):
+        return render(self.setup + expr + "; taskCard(t, d, row)")
+
+    def bar(self, expr):
+        return render(self.setup + expr + "; taskBar(t, d, row)")
+
+    def test_plan_ready_card_and_bar(self):
+        x = ("d.actions = A('plan_ready', [fixtureAct('confirm', 'Confirm plan', '/api/task/confirm'), fixtureAct('confirm_auto', 'Confirm, and run plans automatically from now on', '/api/task/confirm', {remember: 'auto'})], "
+             "[fixtureAct('edit_plan', 'Edit plan', ''), fixtureAct('redo', 'Redo design', '/api/task/redo'), fixtureAct('stop', 'Stop', '/api/task/stop', {}, {confirm: true})])")
+        card = self.card(x)
+        self.assertIn("Plan to confirm", card)
+        self.assertLess(card.index('data-aid="edit_plan"'), card.index('data-aid="confirm_auto"'))
+        self.assertLess(card.index('data-aid="confirm_auto"'), card.index('data-aid="confirm"'))
+        self.assertIn(">Read or edit the plan<", card)
+        self.assertIn(">Confirm and auto accept<", card)
+        self.assertRegex(card, r'class="btn you" data-aid="confirm"[^>]*>Confirm<')
+        bar = self.bar(x)
+        for gone in ('data-aid="edit_plan"', 'data-aid="confirm"', 'data-aid="confirm_auto"', 'data-aid="level_gated"', 'data-aid="retry"'):
+            self.assertNotIn(gone, bar)
+        for there in ('data-aid="redo"', 'data-aid="stop"', 'data-aid="handoff"', 'data-aid="terminal"', 'data-aid="folder"', 'data-aid="delete"'):
+            self.assertIn(there, bar)
+        self.assertLess(bar.index('data-aid="delete"'), bar.index('data-aid="redo"'))  # icons left, words right
+
+    def test_decision_card_preselects_the_default_and_confirms_the_pick(self):
+        x = ("t.decision = {q: 'Which folder name?', options: [{key: 'a', text: 'PRODUCT_SHEETS_DIR'}, {key: 'b', text: 'SHEETS_DIR'}], default: 'a', asked: 90}; "
+             "d.actions = A('decision', [fixtureAct('a', 'PRODUCT_SHEETS_DIR', '/api/task/message', {mode: 'answer', text: 'PRODUCT_SHEETS_DIR'}), "
+             "fixtureAct('b', 'SHEETS_DIR', '/api/task/message', {mode: 'answer', text: 'SHEETS_DIR'}), fixtureAct('default_auto', 'Take the default from now on', '/api/task/message', {mode: 'answer', text: 'PRODUCT_SHEETS_DIR', remember: 'auto'})], "
+             "[fixtureAct('stop', 'Stop', '/api/task/stop', {}, {confirm: true})])")
+        card = self.card(x)
+        self.assertIn('data-optpick="a" data-tid="t" aria-pressed="true"', card)
+        self.assertIn('data-optpick="b" data-tid="t" aria-pressed="false"', card)
+        self.assertIn(">default<", card)
+        self.assertIn('data-aid="a" data-afn="runAction">Confirm a<', card)
+        self.assertIn(">Take default and auto accept<", card)
+        self.assertIn("The task waits for you.", card)
+        self.assertIn('data-aid="b" data-afn="runAction">Confirm b<', self.card(x + "; optPick.t = 'b'"))
+        auto = self.card(x + "; d.supervisor = {mode: 'auto'}; cfg = {tuning: {decision_timeout_s: {value: 600}}}")
+        self.assertIn("Console takes the default in 10 min if you do not choose.", auto)  # snap.now 100, asked 90
+        plain = self.card("t.why = 'asks: Which database?'; row.asks = 'Which database?'; d.actions = A('decision', [], [])")
+        self.assertIn("Which database?", plain)
+        self.assertNotIn("data-aid", plain)
+
+    def test_suggestion_card_and_the_card_after_reject(self):
+        x = ("d.supervisor = {mode: 'suggest', pending: {wake: 3, status: 'suggest', reason: 'a verify checks 340 px', error: '', decision: {decision: 'add_next_step', kind: 'verify', source_step: 1, model: 'auto'}}, audit: []}; "
+             "d.actions = A('suggestion', [fixtureAct('approve', 'Approve', '/api/task/supervisor', {wake: 3, action: 'approve'})], "
+             "[fixtureAct('reject', 'Reject', '/api/task/supervisor', {wake: 3, action: 'reject'}), fixtureAct('stop', 'Stop', '/api/task/stop', {}, {confirm: true})])")
+        card = self.card(x)
+        self.assertIn("Supervisor suggests", card)
+        self.assertIn("Add 03 verify from 01&#39;s handover.", card)
+        self.assertLess(card.index('data-aid="reject"'), card.index('data-aid="approve"'))
+        self.assertNotIn('data-aid="reject"', self.bar(x))
+        after = self.card("d.supervisor = {mode: 'suggest', pending: null, rejected: {wake: 3, decision: 'add_next_step', note: true}}; "
+                          "d.actions = A('running', [], [], {line: 'You rejected wake 3', hint: 'Write what to do instead, your note goes with it'})")
+        self.assertIn("You rejected wake 3", after)
+        self.assertIn("Write what to do instead, your note goes with it", after)
+        self.assertNotIn("data-aid", after)
+
+    def test_hold_failed_twice_and_done(self):
+        fable = self.card("t.why = 'confirm Fable'; d.actions = A('hold', [fixtureAct('confirm', 'Confirm', '/api/task/confirm', {}, {confirm: true})], [])")
+        self.assertIn("Confirm Fable<", fable)
+        failed = ("t.state = 'stuck'; t.steps[0].state = 'failed'; d.actions = A('failed_twice', [fixtureAct('retry', 'Retry on a model', '')], "
+                  "[fixtureAct('stepdone', 'Accept step result', '/api/task/stepdone'), fixtureAct('finish', 'Finish', '/api/task/done', {}, {confirm: true})], {line: 'failed twice · verify failed twice'})")
+        card = self.card(failed)
+        self.assertIn('data-bpick="s1" data-btask="t">See the failure<', card)
+        self.assertIn('data-aid="stepdone"', card)
+        self.assertIn('class="btn you" data-aid="retry"', card)
+        self.assertNotIn("b-retrymodel", card)
+        self.assertIn('id="b-retrymodel"', self.card(failed + "; retryOpen = 't'"))
+        self.assertNotIn('data-aid="stepdone"', self.bar(failed))
+        self.assertIn('data-aid="finish"', self.bar(failed))
+        done = ("t.state = 'done'; d.summary = {steps: [{n: 1, kind: 'code', verdict: ''}, {n: 2, kind: 'verify', verdict: 'PASS'}], files: ['a.ts', 'b.ts'], questions: []}; "
+                "d.actions = A('done', [fixtureAct('accept', 'Accept', '/api/task/accept')], [fixtureAct('reopen', 'Reopen', '')])")
+        self.assertIn("2 steps passed. 2 files written.", self.card(done))
+        self.assertRegex(self.bar(done), r'class="btn go" data-aid="accept"')
+        self.assertIn('data-aid="reopen"', self.bar(done))
+
+    def test_bar_draws_menu_words_only_when_open_and_forms_only_when_the_page_has_them(self):
+        x = ("d.actions = A('ready', [fixtureAct('start', 'Start', '/api/task/resume')], [fixtureAct('edit_steps', 'Edit steps', ''), fixtureAct('drop', 'Drop', '/api/task/clear', {}, {confirm: true})])")
+        bar = self.bar(x)
+        self.assertNotIn("edit_steps", bar)  # D3 a: no editor for a saved planned task
+        self.assertRegex(bar, r'class="btn you" data-aid="start"')
+        self.assertIn('class="p-ib dz" data-aid="delete"', bar)
+        self.assertNotIn('data-aid="retry"', bar)  # a menu word that is off is not drawn
+        self.assertIn('title="Hand off"', bar)
+
+    def test_box_hint_per_mode_and_hidden_where_no_words(self):
+        hints = {"A('running', [], [])": "Message the agent while it works",
+                 "A('decision', [], [], {message: {mode: 'answer', reason: ''}})": "Or write your own answer",
+                 "A('done', [], [], {message: {mode: 'next', reason: ''}})": "Ask for something more: it becomes the next step",
+                 "A('suggestion', [], [])": "Why not, or what to do instead",
+                 "A('failed_twice', [], [])": "Tell the agent what to try differently on the retry"}
+        for expr, hint in hints.items():
+            with self.subTest(expr):
+                self.assertIn(hint, render(self.setup + f"d.actions = {expr}; stepFooter(t, t.steps[0], d)"))
+        for state in ("ready", "handed"):
+            self.assertNotIn('id="b-tcont"', render(self.setup + f"d.actions = A('{state}', [], []); inspTask(t, d, row)"))
+        off = render(self.setup + "d.actions = A('running', [], [], {message: {mode: 'queued', reason: 'Task not started'}}); stepFooter(t, t.steps[0], d)")
+        self.assertIn("Task not started", off)
+        self.assertRegex(off, r'data-tact="cont"[^>]* disabled')
+
+    def test_reject_sends_the_box_text_as_its_note(self):
+        got = render(self.setup + """(async () => {
+          const calls = []; api = async (p, b) => { calls.push([p, b]); return {}; }; actRedraw = () => {};
+          d.actions = A('suggestion', [], [fixtureAct('reject', 'Reject', '/api/task/supervisor', {wake: 3, action: 'reject'})]);
+          boardTask = 't'; boardData = {id: 't', data: d}; taskDraft.t = {text: ' not yet ', target: '', start: 0, end: 0};
+          const els = {'b-tcont': {value: ' not yet '}}; document = {getElementById: (id) => els[id] || null};
+          await runAction({dataset: {aid: 'reject'}, innerHTML: '', textContent: '', disabled: false});
+          return {calls, left: taskDraft.t.text};
+        })()""")
+        self.assertEqual(got["calls"], [["/api/task/supervisor", {"task": "t", "wake": 3, "action": "reject", "note": "not yet"}]])
+        self.assertEqual(got["left"], "")
+
+    def test_no_client_gate_is_left(self):
+        src = APP.read_text(encoding="utf-8")
+        for gone in ("function taskButtons(", "function taskMenu(", "function attentionArea(", "function confirmLabel(", "function supAct(",
+                     "function gaugeHtml(", "function replanBox(", "doneConfirm", "supNote", 'lv.stop === ""', 'lv.pause === ""',
+                     "d.handoff_available === \"\"", "details class=\"action-more\" data-key=\"more\""):
+            self.assertNotIn(gone, src)
+
+
+if __name__ == "__main__":
+    unittest.main()

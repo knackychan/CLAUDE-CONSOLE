@@ -1098,3 +1098,53 @@ button.p-eb:hover { color: var(--ink); text-decoration: underline; text-underlin
 .p-seg button[aria-pressed="true"] { background: var(--ink); color: var(--win); }
 .p-seg button:disabled { opacity: .4; cursor: default; }
 @container (max-width: 520px) { .p-hd { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; } .p-cost { font-size: 24px; } }
+
+/* plan 55: the needs-you dock card (UI-7), the box and the bar (UI-8) */
+.idock[data-p] .iscroll { padding: 14px 18px 18px; scrollbar-gutter: stable; }
+.p-dock { flex: none; max-height: 300px; overflow-y: auto; padding: 0 12px 8px; }
+.p-card { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); padding: 10px 12px; border-radius: 8px;
+  background: color-mix(in srgb, var(--you) 9%, var(--win)); border: 1px solid color-mix(in srgb, var(--you) 40%, transparent); }
+.p-card.r { background: color-mix(in srgb, var(--bad) 8%, var(--win)); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.p-card.g, .p-card.q { background: var(--raise); border-color: var(--line); }
+.p-card .q { font-size: 14px; font-weight: 600; }
+.p-card .why { font-size: 13px; color: var(--mut); }
+.lbl.g { color: var(--ok); }
+.p-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.p-acts .sp, .p-bar .sp { flex: 1; }
+.p-opts { display: grid; gap: 6px; }
+.p-opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; min-height: 32px; padding: 8px 10px;
+  border-radius: 6px; border: 1px solid var(--line); background: var(--win); color: var(--ink); font: 13px var(--ui); text-align: left; cursor: pointer; }
+.p-opt:hover:not(:disabled) { border-color: var(--ink); }
+.p-opt .k { font: 600 12px var(--mono); color: var(--mut); }
+.p-opt .def { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); padding: 1px 5px; border-radius: 3px; }
+.p-opt.isdef { border-color: color-mix(in srgb, var(--you) 55%, transparent); }
+.p-opt.sel { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--you); }
+.p-retry { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.p-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font: 12px var(--mono); overflow-wrap: anywhere; }
+.lnk { justify-self: start; min-height: 24px; background: none; border: 0; padding: 0; color: var(--ink); font: 12.5px var(--ui);
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); cursor: pointer; }
+.lnk:hover { text-decoration-color: var(--ink); }
+.p-box { flex: none; border-top: 1px solid var(--line); padding: 12px 12px 4px; display: grid; gap: 6px; }
+.p-steer { display: flex; gap: 8px; align-items: center; }
+.p-steer textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 120px; resize: none; padding: 8px 12px; font-size: 13.5px; }
+.p-steer .btn { min-height: 40px; padding: 0 16px; }
+.p-bar { flex: none; border-top: 1px solid var(--line); padding: 8px 12px 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.p-tools { display: inline-flex; gap: 2px; }
+.p-tools:empty { display: none; }
+.p-ib { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--mut); cursor: pointer; }
+.p-ib:hover:not(:disabled) { color: var(--ink); border-color: var(--line); background: var(--raise); }
+.p-ib.dz:hover:not(:disabled) { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.p-ib:disabled { opacity: .4; cursor: default; }
+.p-use { display: inline-flex; align-items: center; gap: 6px; margin: 0 4px 0 8px; font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.p-use .cells { grid-template-columns: repeat(15, 4px); }
+.p-use b { font-weight: 400; color: var(--ink); }
+.p-use .dv { width: 1px; height: 14px; background: var(--line); }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@container (max-width: 560px) { .p-use .cells { display: none; } }
+
+.p-card .lbl, .p-card .car { font-size: 11px; }
+.p-card button { min-height: 24px; min-width: 24px; }
+
+.idock[data-p] { display: flex; flex-direction: column; }
+.idock[data-p] .iscroll { flex: 1; }

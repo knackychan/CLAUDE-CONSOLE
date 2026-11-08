@@ -279,7 +279,7 @@ def check_gated_chain(ctx):
         rig.wait_says(tid, "plan ready: confirm")
         # Moment 3: one Confirm on the opened task, then nothing of Fred's until the finish.
         rig.open(tid)
-        confirm = page.get_by_role("button", name="Confirm plan", exact=True)
+        confirm = page.locator('.p-card [data-aid="confirm"]')
         confirm.wait_for()
         assert rig.find(rig.get(tid)["actions"], "confirm")["post"] == "/api/task/confirm"
         confirm.click()
