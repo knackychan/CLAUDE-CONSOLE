@@ -9,7 +9,7 @@
 > Tasks 1 to 3). Replaces plan 55 Task 4 (the list, UI-1 and UI-2). Reuses plan 52's
 > [design lock](../52-workflow-autopilot/08-design-lock.md) (head, sections, dock card, box, bar).
 
-Status: **written 2026-11-08, plan only, decisions open for Fred** (section 7; written for each recommended option
+Status: **written 2026-11-08, plan only, decisions closed 2026-11-08** (D1 b with a Task 0, the rest a) (section 7; written for each recommended option
 (a), the task files mark the lines another answer changes). Baseline `a627264` (docs only since `9b6f988`, 1167 tests
 OK). Nothing is implemented and no product file was touched by writing this plan. Fred chose to plan slice 2 now;
 design section 9 says each slice's plan follows the build of the one before, so **this plan is written against the
@@ -19,7 +19,7 @@ documented contracts of plans 58 and 55, not against code** (section 2 lists eve
 
 1. Plan 58 is built, its Task 7 live check passed, and its D2, D6, D9, D10 are closed (this plan marks where each
    one changes a line: `[58 Dn]`).
-2. Plan 55 Tasks 1 to 3 are built and its Stop 1 passed (the seam, head, dock card, box, bar, sections, plan timeline;
+2. Plan 55 Tasks 0 to 3 are built ([D1 b, Fred 2026-11-08]: and this plan's Task 0) and its Stop 1 passed (the seam, head, dock card, box, bar, sections, plan timeline;
    `[55 Dn]` marks the open decisions). Plan 55 Task 4 is **not** built: this plan replaces it (section 6, D7). Plan 55
    Tasks 5 to 7 follow this plan unchanged.
 3. Fred has answered section 7, or accepted the recommended column.
@@ -29,6 +29,7 @@ the one task named in its row, never a redesign.
 
 | # | File | Delivers | Depends on |
 |---|---|---|---|
+| 0 | (no file yet; [D1 b, Fred 2026-11-08]) | server: `Hub.actions` serves `hint_dismiss` ("Let it continue") on a task with a hand-off hint, which clears that hint so its item leaves the queue; tests first in `tests/test_server.py`. `retry_up` and `run_instead` come from plan 55 Task 0 (55 D3 b), not here | plan 55 Task 0 |
 | 1 | [01-state-and-count.md](01-state-and-count.md) | `console/superwin.py` part 1 (pure): state v2 (Later by hand, Bring back, Since you looked log, messages), the `accept` item (D10), the window queue, the one count, the mode, the row line, the controls; `snap["super"]`, `counts.for_you`, the tray; the tick writes the log | plan 58 built |
 | 2 | [02-served-cards.md](02-served-cards.md) | `GET /api/super` grows: per-card served actions (`acts`), facts, `incomplete`, `back`, `open`, own-answer, batch answer, `controls`, `since`, `rev`, session cards from `Hub.levers`; read only | 1 |
 | 3 | [03-writes.md](03-writes.md) | `POST /api/super` grows: `later`, `bring_back`, `seen`, `message` (wakes a pass), `orders`; the message block in the prompt; durable before the answer | 1, 2 |
@@ -115,6 +116,8 @@ Open decisions of other plans this plan is **written against**:
 - `[55 D2 a]` button words come from `ACT_COPY`; `[55 D3 a]` the buttons `actions` does not serve are not drawn (D1 here);
   `[55 D5 a]` Reject takes the box's text; `[55 D10 a]` the list beyond the mock (D7 here); `[55 D11 a]` the queue spans
   all projects (D8 here); `[55 D13 a]` the observed page keeps `GET /api/levers`.
+  [D1 b, Fred 2026-11-08] Plan 55 D3 was answered (b): its Task 0 serves `retry_up` and `run_instead`, and this plan's
+  Task 0 serves `hint_dismiss`; the cards draw them (Task 2 note above `CARD_ACTS`). Plan 58 D4 was answered (b).
 
 ## 3. Facts checked 2026-11-08 (at `a627264`)
 
@@ -418,19 +421,33 @@ under the selected task. Tasks 5 to 7 of plan 55 build unchanged after this plan
 Recommended option first; the plan is written for it. The brainstorm closed D1 to D6 and D-a to D-f; plan 58 left D1 to
 D12; these are what the window adds.
 
-| # | Question | (a) recommended | (b) |
-|---|---|---|---|
-| D1 | The one-click buttons the mock draws that `actions` does not serve: `Retry on a stronger model`, `Run on opus instead`, `Let it continue` | not drawn; the card draws the served `Retry on a model`, which opens the task's retry form (plan 55 D3 a); the three can be added later as served actions with no web change | a Task 0 adds `retry_up` and `run_instead` (a `model: "up"` on the retry route) and a dismiss for hand-off hints to `Hub.actions`, then the cards draw them (plan 55 D3 b) |
-| D2 | What a batch button may answer | accept only (`BATCH_ANSWERS`); other batches show as one card with Review one by one | any identical served primary: the same option of identical decisions, identical approvals |
-| D3 | An observed chat's card | `Open` = Console's read-only page, plus `Answer it in VS Code` | a later plan adds a way to focus the other app (a new capability) and the mock's `Open in terminal` / `Open in VS Code` |
-| D4 | A message to the super agent | kept as a note for the next sort(s), read once, no reply text, no order made; the log line says so | no box on the super agent row until slice 3 can reply |
-| D5 | Since you looked wording | code-known events: finished, failed, settled, sorted, spend | also write a line for each answer made through a card (`You chose b`), a write step in every answer path |
-| D6 | Edit orders in the window | yes, `POST /api/super {orders}`: Fred's own write to `super/orders.md`, durable before the answer | file only; the section lists the lines and names the file |
-| D7 | The rest of the list under the roll-up (Done today, Done earlier, Older, Select done tasks, empty chats) | plan 55 D10 a inside each opened project; the quiet line counts `N done` | only what the mock draws; done tasks reachable by `+ N more` alone |
-| D8 | The queue and the project scope filter | the queue spans all projects (plan 55 D11 a); the scope filters the project groups only | the queue and its count follow the scope |
-| D9 | The word on the header button and in the tray | `N for you` (the mock's word) in both; the tray tooltip reads `2 for you, 1 working` | change the button only; the tray keeps `need you` |
-| D10 | Do finished tasks waiting for Accept reach the queue (the mock's Accept cards and the Accept batch)? | yes: every finished task the snapshot still shows (`DONE_DAYS`) and that is not accepted becomes an `accept` item (4.1a); no window of its own, so no item ever leaves because time passed and no false "settled" line is written | no: the queue holds only what plan 58 counts (waiting, stuck, asks, hints, handoffs, suggestions); Accept stays on the task page, and Accept cards wait for jobs (slice 4) |
-| D11 | The New work box | the page box's `New work` chip is a second entry to the existing composer: its text becomes the shared draft and `doPrep` runs (files and effort stay in the left composer, which stays visible) | the left composer moves into the page box (attachments, effort and draft re-homed; a bigger change to plan 48's moment 1) |
+| # | Question | (a) recommended | (b) | Taken |
+|---|---|---|---|---|
+| D1 | The one-click buttons the mock draws that `actions` does not serve: `Retry on a stronger model`, `Run on opus instead`, `Let it continue` | not drawn; the card draws the served `Retry on a model`, which opens the task's retry form (plan 55 D3 a); the three can be added later as served actions with no web change | a Task 0 adds `retry_up` and `run_instead` (a `model: "up"` on the retry route) and a dismiss for hand-off hints to `Hub.actions`, then the cards draw them (plan 55 D3 b) | (b) |
+| D2 | What a batch button may answer | accept only (`BATCH_ANSWERS`); other batches show as one card with Review one by one | any identical served primary: the same option of identical decisions, identical approvals | (a) |
+| D3 | An observed chat's card | `Open` = Console's read-only page, plus `Answer it in VS Code` | a later plan adds a way to focus the other app (a new capability) and the mock's `Open in terminal` / `Open in VS Code` | (a) |
+| D4 | A message to the super agent | kept as a note for the next sort(s), read once, no reply text, no order made; the log line says so | no box on the super agent row until slice 3 can reply | (a) |
+| D5 | Since you looked wording | code-known events: finished, failed, settled, sorted, spend | also write a line for each answer made through a card (`You chose b`), a write step in every answer path | (a) |
+| D6 | Edit orders in the window | yes, `POST /api/super {orders}`: Fred's own write to `super/orders.md`, durable before the answer | file only; the section lists the lines and names the file | (a) |
+| D7 | The rest of the list under the roll-up (Done today, Done earlier, Older, Select done tasks, empty chats) | plan 55 D10 a inside each opened project; the quiet line counts `N done` | only what the mock draws; done tasks reachable by `+ N more` alone | (a) |
+| D8 | The queue and the project scope filter | the queue spans all projects (plan 55 D11 a); the scope filters the project groups only | the queue and its count follow the scope | (a) |
+| D9 | The word on the header button and in the tray | `N for you` (the mock's word) in both; the tray tooltip reads `2 for you, 1 working` | change the button only; the tray keeps `need you` | (a) |
+| D10 | Do finished tasks waiting for Accept reach the queue (the mock's Accept cards and the Accept batch)? | yes: every finished task the snapshot still shows (`DONE_DAYS`) and that is not accepted becomes an `accept` item (4.1a); no window of its own, so no item ever leaves because time passed and no false "settled" line is written | no: the queue holds only what plan 58 counts (waiting, stuck, asks, hints, handoffs, suggestions); Accept stays on the task page, and Accept cards wait for jobs (slice 4) | (a) |
+| D11 | The New work box | the page box's `New work` chip is a second entry to the existing composer: its text becomes the shared draft and `doPrep` runs (files and effort stay in the left composer, which stays visible) | the left composer moves into the page box (attachments, effort and draft re-homed; a bigger change to plan 48's moment 1) | (a) |
+
+Decided by Fred, 2026-11-08:
+
+- D10: (a) finished tasks waiting for Accept become accept items, no time window.
+- D1: (b) retry_up and run_instead from plan 55 Task 0 (55 D3 b); this plan's Task 0 serves hint_dismiss (Let it continue).
+- D11: (a) the New work chip is a second entry to the composer; both inputs stay visible (the review's one-visible-input variant not taken).
+- D2: (a) a batch button answers Accept only.
+- D3: (a) Open shows Console's read-only page; the card says Answer it in VS Code.
+- D4: (a) a message is a note for the next sort, read once, no reply.
+- D5: (a) Since you looked lists code-known events only.
+- D6: (a) orders edited in the window through POST /api/super {orders}.
+- D7: (a) plan 55 D10 a inside each opened project; settled by Fred's plan 55 D10 answer.
+- D8: (a) the queue spans all projects; settled by Fred's plan 55 D11 answer.
+- D9: (a) N for you on the header button and in the tray.
 
 Review notes (2026-11-08, plan review before the build; Fred decides):
 

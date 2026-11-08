@@ -63,3 +63,19 @@ rule's own Claude rung. A retry should not try a second untested harness. Keep F
 | D11 needs-you under a scope | (a) always all projects | |
 | D12 step page | (a) four tabs, Add step from here kept | |
 | D13 observed page | (a) new look, levers route | |
+
+## Plan 59
+
+| Decision | Choice | Reason |
+|---|---|---|
+| D10 Accept items | (a) in the queue | |
+| D1 unserved one-click buttons | (b) retry_up, run_instead via 55 Task 0; hint_dismiss via 59 Task 0 | settled by 55 D3 b; Let it continue added |
+| D11 New work box | (a) second entry, both visible | review variant not taken |
+| D2 batch answers | (a) accept only | |
+| D3 observed chat card | (a) read-only page | |
+| D4 message to the super agent | (a) note for the next sort | |
+| D5 Since you looked | (a) code-known events | |
+| D6 edit orders | (a) in the window | |
+| D7 rest of the list | (a) | settled by 55 D10 a |
+| D8 queue and scope | (a) | settled by 55 D11 a |
+| D9 header and tray word | (a) for you in both | |

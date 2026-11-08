@@ -312,6 +312,9 @@ CARD_ACTS = {
     "session_stall": (("done",), (), ()),
 }
 HAND_OFF_CARD = ((), ("handoff",), ())               # a hand-off hint: the task's own Hand off form, in the bar (a card draws primary and bar)
+# [D1 b, Fred 2026-11-08] with plan 55 Task 0 and this plan's Task 0 served: "failed_twice" and "stuck" put "retry_up"
+# first in primary (the orange primary), "hold" adds "run_instead" to primary, and HAND_OFF_CARD becomes
+# ((), ("hint_dismiss", "handoff"), ()). Nothing else changes; a card still draws only what Hub.actions serves.
 OWN_KINDS = frozenset({"decision", "question", "suggestion", "failed_twice", "stuck", "stop", "chat"})  # chat: a window-run chat task's STOP question
 BATCH_ANSWERS = frozenset({"accept"})                # D2 a
 
