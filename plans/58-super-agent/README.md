@@ -6,7 +6,7 @@
 > Lands on plans 17 (tasks), 44 (the supervisor pass, its ledger and `compact._ask`), 50 (the Usage block), 52 (the
 > levels, the decision card, `Hub.actions`), 54 (`paths.write_text_atomic`).
 
-Status: **reviewed 2026-11-08, plan only, decisions open for Fred** (section 5; written for each recommended option
+Status: **reviewed 2026-11-08, plan only, decisions closed 2026-11-08** (section 5: D4 b, the rest a; written for each recommended option
 (a), the task files mark the lines another answer changes). Baseline `84b9260` (docs only since `9b6f988`, 1167 tests
 OK). Nothing is implemented and no product file was touched by writing this plan. Building waits for D1.
 
@@ -398,6 +398,8 @@ admission locally; it never returns 200 for an unsaved Pause. R4 specifies order
    add both without a Reset of an edited `super.md` (plan 56's precedent).
 2. Items are the Needs you set only; the four job items join with slices 4 and 5.
 3. Two watchdog signals of design 3.6 (D4); the no-file-change spend signal comes with the pause act (slice 3).
+   [D4 b, Fred 2026-11-08] All of design 3.6 in slice 1, with a timed git read per running task on each sweep
+   (Task 3 note above `signals`).
 4. No message wake (slice 2); Sort stands in (D6). No Since you looked or `seen` mark (slice 2). No replay (D5).
 5. The digest names items by handle (I1, I2, ...), not by key.
 6. A pass never runs with no item; `MAX_WAIT_S` bounds debounce, not time waiting behind a running pass or a closed
@@ -458,23 +460,38 @@ question, T0+300. Last pass ok at T0+200. Annotations: A later rank 9; B forward
 Recommended option first; the plan is written for it. The brainstorm closed D1 to D6 and D-a to D-f; these are what it
 did not.
 
-| # | Question | (a) recommended | (b) |
-|---|---|---|---|
-| D1 | When to build | after plan 52's live check, as design section 9 says: the queue stands on plan 52's levels, decision card and finish card, and a pass ranks what those produce | now: this plan reads `Hub.actions` and changes no plan 52 path, so it could be built and checked on scratch services first |
-| D2 | Passes at the upgrade | on: `super_pass_usd` $0.20, `super_day_usd` $1.00 admission allowance; Haiku or Sonnet by submitted work; actual capacity must be measured in Task 7; `super_day_usd: 0` turns them off | off (`super_day_usd` 0) until you set a limit by hand |
-| D3 | The pass's folder (cwd) | `<home>/super`: no project of yours is the cwd of a pass that reads every project, and safe mode loads no CLAUDE.md anyway | the first project in `config.json` `projects` |
-| D4 | Watchdog signals in slice 1 | two, from data the service keeps: a running step in it for more than twice the median of its kind's ended steps (3 or more), and the same verify failure twice. Spend with no file changed needs per-step git timing the service does not keep; it comes with the pause act (slice 3) | all of design 3.6 now, adding a timed git read per running task to every sweep |
-| D5 | Replay (`py -m console --super-replay PASS`) | slice 3, with the acts it is there to check; slice 1 keeps the last prompt in `last-prompt.md` and each pass's prompt hash and byte size | now, which needs every pass's digest archived |
-| D6 | A way to run a pass by hand | `POST /api/super {"action": "sort"}`, for the live check now and the window's Sort button later | none until the box (slice 2) |
-| D7 | The Usage page | its own block "Super agent passes", drawn by plan 50's function with a `key` argument | one block with a second row for the super agent |
-| D8 | `super.jsonl` growth | moved to `super.1.jsonl` at 5 MB (one older copy kept) | never rotated |
-| D9 | The settings in the window | none in slice 1: `config.json` by hand, reread on the window's GET /api/config or at start; a Models page card with slice 2 | a card now, like plan 50's |
-| D10 | A STOP question with no options | always forwarded, like a decision without a default: nothing else ever answers it | rankable, and a pass may put it later |
-| D11 | `act` and `order` in the answer now | no (slice 3; the contract reminder is code, so no Reset is needed then) | in the schema now and ignored |
-| D12 | JEV for decisions/routing | corrected slice 1 first, then an explicitly enabled Command Code shadow evaluation with human labels; see [assessment](08-review-and-jev.md#4-recommendation-and-implementation-gate) | no JEV experiment |
+| # | Question | (a) recommended | (b) | Taken |
+|---|---|---|---|---|
+| D1 | When to build | after plan 52's live check, as design section 9 says: the queue stands on plan 52's levels, decision card and finish card, and a pass ranks what those produce | now: this plan reads `Hub.actions` and changes no plan 52 path, so it could be built and checked on scratch services first | (a) |
+| D2 | Passes at the upgrade | on: `super_pass_usd` $0.20, `super_day_usd` $1.00 admission allowance; Haiku or Sonnet by submitted work; actual capacity must be measured in Task 7; `super_day_usd: 0` turns them off | off (`super_day_usd` 0) until you set a limit by hand | (a) |
+| D3 | The pass's folder (cwd) | `<home>/super`: no project of yours is the cwd of a pass that reads every project, and safe mode loads no CLAUDE.md anyway | the first project in `config.json` `projects` | (a) |
+| D4 | Watchdog signals in slice 1 | two, from data the service keeps: a running step in it for more than twice the median of its kind's ended steps (3 or more), and the same verify failure twice. Spend with no file changed needs per-step git timing the service does not keep; it comes with the pause act (slice 3) | all of design 3.6 now, adding a timed git read per running task to every sweep | (b) |
+| D5 | Replay (`py -m console --super-replay PASS`) | slice 3, with the acts it is there to check; slice 1 keeps the last prompt in `last-prompt.md` and each pass's prompt hash and byte size | now, which needs every pass's digest archived | (a) |
+| D6 | A way to run a pass by hand | `POST /api/super {"action": "sort"}`, for the live check now and the window's Sort button later | none until the box (slice 2) | (a) |
+| D7 | The Usage page | its own block "Super agent passes", drawn by plan 50's function with a `key` argument | one block with a second row for the super agent | (a) |
+| D8 | `super.jsonl` growth | moved to `super.1.jsonl` at 5 MB (one older copy kept) | never rotated | (a) |
+| D9 | The settings in the window | none in slice 1: `config.json` by hand, reread on the window's GET /api/config or at start; a Models page card with slice 2 | a card now, like plan 50's | (a) |
+| D10 | A STOP question with no options | always forwarded, like a decision without a default: nothing else ever answers it | rankable, and a pass may put it later | (a) |
+| D11 | `act` and `order` in the answer now | no (slice 3; the contract reminder is code, so no Reset is needed then) | in the schema now and ignored | (a) |
+| D12 | JEV for decisions/routing | corrected slice 1 first, then an explicitly enabled Command Code shadow evaluation with human labels; see [assessment](08-review-and-jev.md#4-recommendation-and-implementation-gate) | no JEV experiment | (a) |
 
 D12 is proposed, not approved. Direct TypeSafe HTTP conflicts with the current no-network rule; the sticker
 project's transport cannot be copied unchanged. JEV does not produce the prose this pass requires.
+
+Decided by Fred, 2026-11-08:
+
+- D1: (a) after plan 52's live check.
+- D2: (a) passes on at the upgrade, $0.20 a pass, $1.00 a day.
+- D3: (a) the pass runs in <home>/super.
+- D4: (b) all of design 3.6's watchdog signals now, with a timed git read per running task each sweep; the task file's code is for (a), so the build writes the two added signals test first.
+- D5: (a) replay in slice 3; slice 1 keeps last-prompt.md and each pass's hash and size.
+- D6: (a) POST /api/super sort, later the window's Sort button.
+- D7: (a) its own Usage block, Super agent passes.
+- D8: (a) super.jsonl rotates to super.1.jsonl at 5 MB.
+- D9: (a) settings in config.json by hand; the Models card comes with plan 59.
+- D10: (a) a STOP question without options is always forwarded.
+- D11: (a) no act or order in the answer until slice 3.
+- D12: (a) slice 1 first, then a separately enabled Command Code shadow evaluation as its own later plan.
 
 ## 6. Verification at the end of every task
 

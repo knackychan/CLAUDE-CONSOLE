@@ -128,6 +128,10 @@ def task_line(task: dict, level: str, now: float) -> str:
     return _clip(" · ".join(p for p in parts if p), LINE_MAX)
 
 
+# [D4 b, Fred 2026-11-08] All of design 3.6 now: besides `slow` and `same_fail`, add `idle_spend` (spend in the last
+# 30 minutes of a running task with no file changed, from a timed git read per running task on each sweep) and
+# `retries` (retries used in the current step). This file's code is written for (a): the build writes the two added
+# signals test first, keeps the git read bounded in time and count, and never lets a git error fail the sweep.
 def signals(by_id: dict, now: float) -> list:
     """The two watchdog signals of slice 1 (D4), from saved step data only. `slow`: a running step in its current run
     for at least SLOW_MIN_S and for more than twice the median of its kind's ended steps (done or failed, both times
