@@ -836,7 +836,7 @@ class TaskOverviewTest(unittest.TestCase):
             self.assertNotIn(gone, html)
         self.assertIn('data-bpick="s1"', html)
         self.assertIn('data-bpick="s2"', html)
-        self.assertIn("Goal", html)
+        self.assertIn(">Brief<", html)
 
 
 
@@ -1214,16 +1214,6 @@ class OpenedTaskTest(unittest.TestCase):
       d.supervisor = {mode: 'suggest', pending: PEND, audit: AUDIT}; """
 
 
-    def test_route_lists_proposed_steps_dim(self):
-        html = render(self.setup + "t.supervisor = {proposed: [{kind: 'verify', goal: 'check it', model: ''}, {kind: 'code', goal: 'more', model: ''}]}; routeHtml(t, d, row)")
-        self.assertIn('data-bpick="s1"', html)
-        self.assertIn('data-bpick="s2"', html)
-        self.assertEqual(html.count('class="v-sr pl proposed"'), 2)
-        tail = html.split('class="v-sr pl proposed"')[1]
-        self.assertIn('<span class="n">03</span>', tail)
-        self.assertIn("proposed", tail)
-        self.assertNotIn("data-bpick", html.split('class="v-sr pl proposed"', 1)[1])  # a proposed row opens nothing
-        self.assertNotIn("proposed", render(self.setup + "routeHtml(t, d, row)").replace("Route", ""))
 
     def test_opened_task_has_no_tabs_and_closed_folds(self):
         html = render(self.setup + "inspTask(t, d, row)")
@@ -1231,8 +1221,7 @@ class OpenedTaskTest(unittest.TestCase):
             self.assertNotIn(gone, html)
         self.assertIn('class="p-hd"', html)
         self.assertIn('data-bpick="s1"', html)
-        self.assertRegex(html, r'data-fkey="tgoal" aria-expanded="false"')
-        self.assertNotIn("Implement the thing</pre>", html.split('data-fkey="tgoal"')[0])
+        self.assertIn(">Brief<", html)
 
 
 
@@ -1307,7 +1296,7 @@ class RecoveryBoxTest(unittest.TestCase):
     def test_recovery_refresh_keeps_draft_and_focus(self):
         html = render(self.setup + "taskDraftFor(t).text = 'half a thought'; inspTask(t, d, row)")
         body = html.split('class="ipane"', 1)[1]
-        self.assertLess(body.index("askbox recovery"), body.index("Route"))
+        self.assertLess(body.index("askbox recovery"), body.index(">Brief<"))
         self.assertIn("half a thought</textarea>", html)
         self.assertNotIn("<textarea", html.split('class="askbox recovery"', 1)[1].split("</div>", 1)[0])
         self.assertNotIn("<input", html.split('class="askbox recovery"', 1)[1].split("</div>", 1)[0])
@@ -1443,6 +1432,10 @@ class AutopilotHeadTest(unittest.TestCase):
         self.assertIn('class="p-pill n">▸ Running<', html)
         self.assertIn('class="p-cost"', html)
         self.assertIn("$1.00", html)
+        took = render(self.setup + "t.state = 'done'; t.steps[0].started = 10; t.updated = 85; taskHead(t, d, row)")
+        self.assertIn('1m<span class="ss"> 15s</span>', took)
+        self.assertNotIn('&lt;span', took)
+
         for gone in ("task-crumb", "supervised · ", "v-lab"):
             self.assertNotIn(gone, html)
         for state, word in (("plan_ready", "? Plan to confirm"), ("decision", "? Needs you"), ("failed_twice", "✕ Failed twice"),
@@ -1530,6 +1523,9 @@ class AutopilotDockTest(unittest.TestCase):
         self.assertIn(">Take default and auto accept<", card)
         self.assertIn("The task waits for you.", card)
         self.assertIn('data-aid="b" data-afn="runAction">Confirm b<', self.card(x + "; optPick.t = 'b'"))
+        fresh = self.card(x + "; taskCard(t, d, row); optPick.t = 'b'; t.decision.q = 'A new question?'")
+        self.assertIn('data-aid="a" data-afn="runAction">Confirm a<', fresh)
+
         auto = self.card(x + "; d.supervisor = {mode: 'auto'}; cfg = {tuning: {decision_timeout_s: {value: 600}}}")
         self.assertIn("Console takes the default in 10 min if you do not choose.", auto)  # snap.now 100, asked 90
         plain = self.card("t.why = 'asks: Which database?'; row.asks = 'Which database?'; d.actions = A('decision', [], [])")
@@ -1612,6 +1608,53 @@ class AutopilotDockTest(unittest.TestCase):
                      "function gaugeHtml(", "function replanBox(", "doneConfirm", "supNote", 'lv.stop === ""', 'lv.pause === ""',
                      "d.handoff_available === \"\"", "details class=\"action-more\" data-key=\"more\""):
             self.assertNotIn(gone, src)
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class AutopilotBodyTest(unittest.TestCase):
+    """Plan 55 Task 3: Prompt, Brief, Plan as one section pattern; the plan is a timeline of links with supervisor lines."""
+    setup = AutopilotDockTest.setup + """d.actions = A('running', [], []); d.prompt = 'fix the overflow';
+      t.created = 0; t.type = 'risky'; t.demand = {reasoning: 'high'}; t.prep = {state: 'done', model: 'haiku', route: {model: 'opus', effort: 'high'}};
+      t.steps[0].started = 10; t.steps[0].cost = 0.01; t.steps[0].model = 'haiku'; t.steps[0].verdict = 'PASS'; """
+
+    def test_sections_in_order_and_folded(self):
+        html = render(self.setup + "taskBody(t, d)")
+        self.assertLess(html.index(">Prompt<"), html.index(">Brief<"))
+        self.assertLess(html.index(">Brief<"), html.index(">Plan<"))
+        self.assertIn('class="pv" data-txfold="tprompt"', html)
+        self.assertNotIn("p-chip", html)  # the chips show only when the Brief is open
+        opened = render(self.setup + "foldState.tbrief = true; taskBody(t, d)")
+        self.assertIn('class="p-chip">Risky<', opened)
+        self.assertIn('class="p-chip">Deep reasoning<', opened)
+        self.assertIn("Opus, high effort", opened)
+        self.assertIn('data-turncopy data-text="Implement the thing"', opened)
+        self.assertNotIn(">Prompt<", render(self.setup + "d.prompt = ''; taskBody(t, d)"))
+
+    def test_plan_rows_are_links_with_plain_words(self):
+        html = render(self.setup + "planTimeline(t, d)")
+        self.assertEqual(html.count('class="p-st'), 2)
+        self.assertIn('data-bpick="s1" data-btask="t"', html)
+        self.assertIn("✓ passed", html)
+        self.assertIn("· queued", html)
+        self.assertIn("$0.01", html)
+        ask = render(self.setup + "t.current = 2; t.steps[1].state = 'waiting'; row.asks = 'Which?'; d.actions = A('decision', [], []); planTimeline(t, d)")
+        self.assertIn("? asks you", ask)
+
+    def test_supervisor_lines_sit_after_the_step_that_had_started(self):
+        html = render(self.setup + "t.steps[1].started = 50; d.supervisor = {mode: 'gated', audit: ["
+                      "{ts: 20, wake: 1, phase: 'outcome', status: 'dispatched', decision: 'retry'},"
+                      "{ts: 60, wake: 2, phase: 'outcome', status: 'suggest', decision: 'finish'}]}; planTimeline(t, d)")
+        s1, s2 = html.index('data-bpick="s1"'), html.index('data-bpick="s2"')
+        self.assertLess(s1, html.index('data-sv="t|1"'))
+        self.assertLess(html.index('data-sv="t|1"'), s2)
+        self.assertLess(s2, html.index('data-sv="t|2"'))
+        self.assertIn("Finish the task", html)
+
+    def test_the_old_route_gauge_and_quiet_card_are_gone(self):
+        src = APP.read_text(encoding="utf-8")
+        for gone in ("function routeHtml(", "function supCard(", "function questionsFold(", "Supervisor · last decision"):
+            self.assertNotIn(gone, src)
+        self.assertIn('class="p-sect"', render(self.setup + "inspTask(t, d, row)"))
 
 
 if __name__ == "__main__":

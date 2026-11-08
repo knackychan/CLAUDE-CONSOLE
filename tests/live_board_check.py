@@ -41,7 +41,23 @@ def dock_checks(page, name):  # Task 2: the card stays in sight, the primary is 
         assert card.count() == 0, (name, "no card while it runs")
     assert page.locator(".p-bar").count() == 1, (name, "one action bar")
 
-CHECKS = [head_checks, dock_checks]
+def body_checks(page, name):  # Task 3: the sections and the timeline; every row a pointer link with a chevron
+    assert page.locator(".p-sect .lbl", has_text="Plan").count() == 1, (name, "a Plan section")
+    rows = page.locator(".p-st")
+    assert rows.count() >= 2, (name, "plan rows")
+    assert rows.first.evaluate("e => getComputedStyle(e).cursor") == "pointer", (name, "rows look clickable")
+    rows.first.hover()
+    assert rows.first.locator(".go").evaluate("e => getComputedStyle(e).opacity") == "1", (name, "chevron on hover")
+    if name == "running":
+        tid = page.evaluate("boardTask")
+        rows.first.focus()
+        rows.first.press("Enter")
+        page.wait_for_function("boardPick === 's1'")
+        page.evaluate("id => openTask(id)", tid)
+        page.locator('.idock[data-p="task"] .p-hd').wait_for()
+
+
+CHECKS = [head_checks, dock_checks, body_checks]
 
 
 def variants(c):

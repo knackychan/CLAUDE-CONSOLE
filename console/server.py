@@ -4809,6 +4809,7 @@ class Handler(BaseHTTPRequestHandler):
                            "step_levers": self.hub.levers(cs["session"]) if cs and cs["session"] else None,
                            "note": tasks.read_note(self.hub.folder, task, last),
                            "brief": tasks.read_brief(self.hub.folder, task, last),
+                           "prompt": tasks.read_prompt(self.hub.folder, task),  # plan 55 D7: a read, nothing starts
                            "handoff": tasks.read_handoff(self.hub.folder, task),
                            "supervisor": self.hub.supervisor_view(task),  # plan 44 backend: the read projection
                            "handoff_available": self.hub.handoff_available(task),  # plan 44: the whole-task handoff

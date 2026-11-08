@@ -1946,8 +1946,8 @@ function levelSeg(d) {  // D4 a: gated and auto, plus the task's own word when i
 function taskHead(t, d, row) {
   const A = acts(d), cs = t.steps.find((x) => x.n === t.current), first = t.steps.find((x) => x.started);
   const pill = t.accepted ? ["✓ Accepted", "g"] : PILL[A.state] || PILL.running, facts = [];
-  if (A.state === "running" && cs && cs.state === "running") facts.push(["Now", `${two(cs.n)} ${cs.kind} on ${modelText(rungOf(cs.harness, cs.model), cs.effort)}, ${stepTime(cs)}`]);
-  if (t.state === "done" && first) facts.push(["Took", elapsed(t.updated - first.started)]);
+  if (A.state === "running" && cs && cs.state === "running") facts.push(["Now", `${two(cs.n)} ${esc(cs.kind)} on ${esc(modelText(rungOf(cs.harness, cs.model), cs.effort))}, ${stepTime(cs)}`, true]);
+  if (t.state === "done" && first) facts.push(["Took", elapsed(t.updated - first.started), true]);
   if (t.handoff_from) facts.push(["Follow-up of", `<button class="olink" data-task="${esc(t.handoff_from)}">${esc(labelOf(t.handoff_from))}</button>`, true]);
   if (t.handoff_to) facts.push(["Handed to", `<button class="olink" data-task="${esc(t.handoff_to)}">${esc(labelOf(t.handoff_to))}</button>`, true]);
   return pageHead({ eyebrow: t.project, title: t.title, tip: `${t.title} · ${taskDir(t.id)} · C copies ${labelOf(t.id)}`, pill, facts,
@@ -1966,6 +1966,7 @@ const ICON = {  // UI-8: the utility actions as 32 px icons (the locked mock's p
   attach: '<path d="M10.5 4.5l-5 5a1.5 1.5 0 0 0 2 2l5.5-5.5a3 3 0 0 0-4-4L3.5 7.5a4.5 4.5 0 0 0 6.5 6.5l4-4"/>' };
 const svgIcon = (k) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
 let optPick = {};   // task id -> the decision option Fred selected (the default until he picks one)
+let optQuestion = {};  // a new question resets the previous option choice
 let sumOpen = "";   // the task whose Finished card lists its changed files
 function drawable(a) { return !!a.post || FORM_IDS.has(a.id); }
 function iconBtn(a, fn = "runAction") {
@@ -2000,6 +2001,73 @@ function taskBar(t, d, row, withGate = false) {  // withGate: a step page draws 
 function taskShell(tid, scroll, card, box, bar) {  // UI-7, UI-8: the page scrolls; the card, the box and the bar never scroll away
   return `<div class="idock" data-p="task"><div class="iscroll">${scroll}</div>${card ? `<div class="p-dock">${card}</div>` : ""}${box}<div class="p-bar">${bar}</div>${busyBox(tid)}</div>`;
 }
+ICON.copy = '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/>';
+let svOpen = "";  // "<task>|<wake>": the supervisor line whose record is open in place
+function sect(label, sub, body, cls = "") {  // UI-4: label column (name, one muted line), a hairline, the body (plan 53 reuses it)
+  return `<section class="p-sect${cls ? " " + cls : ""}"><div class="sh"><span class="lbl">${esc(label)}</span>${sub ? `<span class="sm">${sub}</span>` : ""}</div><div class="sb">${body}</div></section>`;
+}
+function foldLine(key, text, extra = "") {  // UI-4: one line; opened, a selectable box about 5 lines tall with a copy icon, then `extra`
+  const open = foldOpen(key, false);
+  return `<div class="p-tx"><button class="car" data-txfold="${esc(key)}" aria-expanded="${open}" aria-label="${open ? "Fold" : "Open"}">${open ? "▾" : "▸"}</button>
+    ${open ? `<div class="p-txt"><div class="tt">${esc(text)}</div><button class="p-cp" data-turncopy data-text="${esc(text)}" title="Copy to clipboard" aria-label="Copy to clipboard">${svgIcon("copy")}</button></div>${extra}`
+      : `<button class="pv" data-txfold="${esc(key)}" aria-expanded="false">${esc(text)}</button>`}</div>`;
+}
+const CHECK = { passed: ["✓ passed", "g"], done: ["✓ done", "n"], failed: ["✕ failed", "r"], running: ["▸ running", "n"], replied: ["▸ replied", "n"],
+  asks: ["? asks you", "y"], held: ["? held", "y"], waiting: ["? waits for you", "y"], planned: ["· queued", "q"] };
+function planRow(o) {  // UI-5: rail mark, number, kind, model, the plain check word, cost; the whole row opens the step (plan 53 reuses it)
+  return `<div class="p-st${o.cls ? " " + o.cls : ""}" data-bpick="s${o.n}" data-btask="${esc(o.tid)}" tabindex="0" role="button" title="Open step ${two(o.n)}">
+    <span class="dt">${o.mark}</span><span class="n">${two(o.n)}</span><span class="what"><b>${esc(o.kind)}</b>${o.route ? `<span class="rt">${esc(o.route)}</span>` : ""}<span class="g">${esc(o.goal)}</span></span>
+    <span class="chk ${o.check[1]}">${o.check[0]}</span><span class="c">${esc(o.cost)}</span><span class="go" aria-hidden="true">›</span></div>`;
+}
+function stepCheck(t, s, A) {
+  const shown = stepShown(t, s, boardRow(t.id));
+  if (s.verdict === "PASS") return CHECK.passed;
+  if (shown === "failed") return CHECK.failed;
+  if (s.n === t.current && A.state === "decision") return CHECK.asks;
+  if (s.n === t.current && A.state === "hold") return CHECK.held;
+  return CHECK[shown] || CHECK.planned;
+}
+function svLine(a, t) {  // UI-5: a supervisor action where it happened, muted; it opens its record in place (Folder holds supervisor.jsonl)
+  const key = `${t.id}|${a.wake}`, open = svOpen === key;
+  return `<button class="p-sv" data-sv="${esc(key)}" aria-expanded="${open}" title="The supervisor's record of wake ${esc(a.wake)}"><span class="sg">◆</span><span>Supervisor</span>
+    <span class="tx2">${esc(decisionText({ decision: a.decision }, t))}${a.status ? " · " + esc(a.status) : ""}</span><span class="tm">${a.ts ? hhmm(a.ts) : ""}</span></button>
+    ${open ? `<div class="p-svd m">wake ${esc(a.wake)} · ${esc(a.phase)} · ${esc(a.status || "")}${a.cost ? " · $" + Number(a.cost).toFixed(3) : ""}${a.error ? " · " + esc(a.error) : ""}</div>` : ""}`;
+}
+function planTimeline(t, d) {  // one row per step in chain order; each wake's last decision after the step that had started when it was taken
+  const A = acts(d), row = boardRow(t.id), byWake = new Map();
+  for (const a of (d.supervisor || {}).audit || []) if (a.decision && a.ts) byWake.set(a.wake, a);
+  const after = (a) => { let k = -1; t.steps.forEach((s, j) => { if (s.started && s.started <= a.ts) k = j; }); return k; };
+  const lines = [...byWake.values()].sort((x, y) => x.ts - y.ts);
+  let html = lines.filter((a) => after(a) < 0).map((a) => svLine(a, t)).join("");
+  t.steps.forEach((s, j) => {
+    const pl = s.state === "planned", check = stepCheck(t, s, A), shown = stepShown(t, s, row);
+    html += planRow({ tid: t.id, n: s.n, kind: s.kind, goal: s.goal || "", check, mark: sprite(SR_SPRITE[shown] || "planned"),
+      route: pl ? "" : modelText(rungOf(s.harness, s.model), s.effort), cost: pl ? "" : costUnknown(s) ? "?" : "$" + money(s.cost),
+      cls: [pl ? "q" : "", check[1] === "r" ? "fail" : check[1] === "y" ? "wait" : ""].filter(Boolean).join(" ") });
+    html += lines.filter((a) => after(a) === j).map((a) => svLine(a, t)).join("");
+  });
+  return `<div class="p-tl">${html}</div>`;
+}
+const REASONING = { high: "Deep reasoning", medium: "Some reasoning", low: "Light reasoning" };  // README 4.3: new words
+function briefExtra(t, d) {  // the route as plain chips (D8 a: all ink), the changed files as a fold of names
+  const route = (t.prep && t.prep.route) || {}, dm = t.demand || {}, cap = (w) => w ? w[0].toUpperCase() + w.slice(1) : "";
+  const chips = [cap(t.type), REASONING[dm.reasoning] || "", route.model ? `${cap(alias(route.model) || route.model)}, ${route.effort || "auto"} effort` : ""].filter(Boolean);
+  const files = (d.summary && d.summary.files) || [];
+  return `<div class="p-open">${chips.length ? `<div class="p-chips">${chips.map((c) => `<span class="p-chip">${esc(c)}</span>`).join("")}</div>` : ""}
+    ${files.length ? fold(`${files.length} ${files.length === 1 ? "file" : "files"} changed`, "", `<ul class="p-files">${files.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`, { key: "tfiles" }) : ""}</div>`;
+}
+function taskBody(t, d) {  // UI-4: Prompt, Brief, Plan, then the open questions; one section pattern
+  const p = t.prep && typeof t.prep === "object" ? t.prep : null, n = t.steps.length;
+  const prompt = d.prompt ? sect("Prompt", `you, ${hhmm(t.created || t.updated)}`, foldLine("tprompt", d.prompt)) : "";
+  const brief = sect("Brief", p && p.state !== "skipped" ? `<button class="olink" data-bpick="p" data-btask="${esc(t.id)}" title="Step 00: the Prep card">prep · ${esc(alias(p.model) || p.model || "haiku")}</button>` : "as typed",
+    foldLine("tbrief", t.goal, briefExtra(t, d)));
+  const planMd = d.plan && t.plan ? fold("plan.md", `${Number(t.plan.words || 0).toLocaleString("en")} w`, planOpenHtml(t, d, t.steps.find((x) => x.n === t.current), { board: true }), { key: "tplanmd" }) : "";
+  const plan = sect("Plan", `${n} ${n === 1 ? "step" : "steps"}`, planTimeline(t, d) + planMd);
+  const qs = d.questions || [], open = qs.filter((q) => !q.closed);
+  const questions = qs.length ? sect("Questions", `${open.length} open`, `<div class="oq">${[...open, ...qs.filter((q) => q.closed)].map((q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.opened)}${q.closed ? " · closed " + two(q.closed) : ""}</span></div>`).join("")}</div>`) : "";
+  return prompt + brief + plan + questions;
+}
+
 function retryPick(t, cur) {  // D5 a: the model to retry on, inside the card; the note is the box's text
   return `<div class="p-retry"><label class="nl" for="b-retrymodel">Model</label><select class="in" id="b-retrymodel" aria-label="Model for the retry">${modelOptions(cur && cur.pick || "", true, cur && cur.kind)}</select>
     <button class="btn" data-tact="retrycancel" data-tid="${esc(t.id)}">Cancel</button><button class="btn you" data-tact="retry" data-tid="${esc(t.id)}">Retry</button></div>`;
@@ -2031,6 +2099,9 @@ function taskCard(t, d, row) {  // UI-7: "" most of the time; one card for the g
     const dec = t.decision || {}, why0 = String(t.why || "").replace(/^asks: /, ""), gap = why0.startsWith("Plan gap:");
     const opts = P.filter((a) => a.id !== "default_auto"), q = dec.q || row.asks || why0.replace(/^Plan gap:\s*/, "");
     if (!opts.length) return dockCard({ tag: gap ? "Plan gap" : "Asks you", q, why: gap ? "Answer it in the box below; it joins the plan's Decisions." : "Answer it in the box below." });
+    const question = JSON.stringify(dec);
+    if (optQuestion[t.id] && optQuestion[t.id] !== question) delete optPick[t.id];
+    optQuestion[t.id] = question;
     const pick = opts.find((a) => a.id === optPick[t.id]) || opts.find((a) => a.id === dec.default) || opts[0];
     const tm = Number(((cfg && cfg.tuning && cfg.tuning.decision_timeout_s) || {}).value || 0);
     const mins = sup.mode === "auto" && dec.default && dec.asked && tm ? Math.max(1, Math.ceil((dec.asked + tm - snap.now) / 60)) : 0;
@@ -3891,13 +3962,6 @@ function retryForm(t, cur, tid) {  // plan 40: a note, the model to retry on (au
     <div class="rrow"><label class="nl" for="b-retrymodel">Model</label><select class="in" id="b-retrymodel" aria-label="Model for the retry">${modelOptions(cur && cur.pick || "", true, cur && cur.kind)}</select>
     <button class="btn go" data-tact="retry" data-tid="${tid}">Retry</button></div>`;
 }
-function questionsFold(d) {  // plan 48: one closed fold, open questions first
-  const qs = d.questions || [], open = qs.filter((q) => !q.closed);
-  const qrow = (q) => `<div class="oqr${q.closed ? " closed" : ""}"><span class="gl">${q.closed ? "✓" : "?"}</span><span>${esc(q.q)}</span><span class="m">opened ${two(q.opened)}${q.closed ? " · closed " + two(q.closed) : ""}</span></div>`;
-  if (!qs.length) return "";
-  return fold("Questions", `${open.length} open · ${qs.length - open.length} closed`, `<div class="oq">${[...open, ...qs.filter((q) => q.closed)].map(qrow).join("")}</div>`,
-    { key: "tquestions", tone: open.length ? "y" : "" });
-}
 const CUT_TEXT = { interrupted: "was interrupted: the run ended without a result (a restart or a crash).", stopped: "was stopped.",
   unknown: "did not finish; the cause is not recorded." };
 function recoveryBox(t, d) {  // plan 48 section 7: what definitely finished, what was cut, what Fred can do; saved fields only, no button
@@ -3940,28 +4004,6 @@ function decisionText(dec, t) {  // a supervisor decision as one sentence: "Add 
   if (word === "escalate_to_fred") return dec.for_fred || "Ask you";
   return { finish: "Finish the task", stop: "Stop the task", confirm: "Confirm the plan", keep: "Keep the old plan", answer: "Answer the question", wait: "Wait" }[word] || word || "";
 }
-function supFine(audit, wake) {  // "15:20 · $0.003" from the audit entries of one wake
-  const a = audit.filter((x) => x.wake === wake), cost = a.reduce((s, x) => s + (Number(x.cost) || 0), 0), ts = a.length ? a[a.length - 1].ts : 0;
-  return [ts ? hhmm(ts) : "", cost ? "$" + cost.toFixed(3) : ""].filter(Boolean).join(" · ");
-}
-function supCard(t, d) {  // plan 48: the pending card (Approve only where can_approve), else the last decision, quiet; nothing when off
-  const sup = d.supervisor;
-  if (!sup || sup.mode === "off") return "";
-  const p = sup.pending, audit = sup.audit || [], tid = esc(t.id);
-  const a = [...audit].reverse().find((x) => x.decision);
-  if (!a) return `<div class="blk sup-card"><span class="lbl">Supervisor · last decision</span><p class="say">No decision yet: the supervisor decides when a step ends.</p></div>`;
-  const fine = [supFine(audit, a.wake), a.status].filter(Boolean).join(" · ");
-  return `<div class="blk sup-card"><span class="lbl">Supervisor · last decision</span><div class="askbox quiet dec">
-    <div class="who"><span class="st n">wake ${esc(a.wake)}</span>${fine ? `<span class="fine">${esc(fine)}</span>` : ""}</div>
-    <div class="act">${esc(decisionText({ decision: a.decision }, t))}</div>${a.error ? `<div class="why">${esc(a.error)}</div>` : ""}</div></div>`;
-}
-function routeHtml(t, d, row) {  // plan 48: the step rows (each opens its inspector), then the supervisor's proposed steps, dim
-  const prop = ((t.supervisor || {}).proposed || []).filter((x) => x && x.kind), last = latestStep(t), base = last ? last.n : 0, n = t.steps.length;
-  const dim = prop.map((x, k) => `<div class="v-sr pl proposed" title="${esc(x.goal || "")}">${sprite("planned")}<span class="n">${two(base + k + 1)}</span>
-    <span class="k"><b>${esc(x.kind)}</b><span class="m">proposed</span></span><span></span><span class="c"></span></div>`).join("");
-  return `<div class="blk"><div class="hd"><span class="lbl">Route · ${n} ${n === 1 ? "step" : "steps"}</span>${prop.length ? `<span class="m">${prop.length} proposed</span>` : ""}</div>
-    <div class="route">${stepRows(t)}${dim}</div></div>`;
-}
 function handoffForm(t) {  // plan 44 nav T3: the Hand off task form; Save document and Create follow-up task follow a preview of this note
   const h = handoffDraft[t.id];
   if (!h || !h.open) return "";
@@ -3986,7 +4028,7 @@ function inspTask(t, d, row) {  // plan 55: head, the forms an action opened, re
   const tid = esc(t.id), cur = t.steps.find((s) => s.n === t.current);
   const [, src] = nextOpen && nextOpen.tid === t.id ? nextSource(d) : [null, null];
   const body = `${taskHead(t, d, row)}${handoffForm(t)}${planEdit ? planEditBox(t, d, tid) : ""}${src ? nextFormHtml(t, src, row, d) : ""}${recoveryBox(t, d)}
-    ${supCard(t, d)}${routeHtml(t, d, row)}${fold("Goal", "", `<pre class="text goal">${esc(t.goal)}</pre>`, { key: "tgoal" })}${questionsFold(d)}`;
+    ${taskBody(t, d)}`;
   return taskShell(t.id, `<div class="ipane">${body}</div>`, taskCard(t, d, row), NO_BOX.has(acts(d).state) ? "" : stepFooter(t, cur, d), taskBar(t, d, row));
 }
 
@@ -4114,7 +4156,7 @@ document.addEventListener("click", async (e) => {
     else if (b.dataset.tfile) openStepFile(b);
     return;
   }
-  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],[data-optpick],[data-aid],[data-nverify],#brief");
+  const t = e.target.closest("[data-prep],[data-go],[data-open],[data-tab],[data-min],[data-act],[data-pact],[data-do],[data-here],[data-proj],[data-pick],[data-harness],[data-models],[data-step],[data-attach],[data-unattach],[data-task],[data-eff],[data-bpick],[data-itab],[data-tact],[data-txfold],[data-sv],[data-optpick],[data-aid],[data-nverify],#brief");
   if (!t) return;
   if (t.matches(".card") && e.target.closest("[data-stay]")) return;  // typing an answer in a card
   if (t.dataset.open || t.dataset.task) {  // a session opened from the Board returns to it, a task opened from a session too
@@ -4133,6 +4175,8 @@ document.addEventListener("click", async (e) => {
   } else if (t.dataset.itab) { itab = t.dataset.itab; saveDraft(); renderBoard(); }
   else if (t.dataset.eff) setEffort(t.dataset.eff);
   else if (t.dataset.task) openTask(t.dataset.task);
+  else if (t.dataset.txfold) { foldState[t.dataset.txfold] = !foldOpen(t.dataset.txfold, false); saveFolds(); renderBoard(); }
+  else if (t.dataset.sv) { svOpen = svOpen === t.dataset.sv ? "" : t.dataset.sv; renderBoard(); }
   else if (t.dataset.optpick) { optPick[t.dataset.tid] = t.dataset.optpick; renderBoard(); }
   else if (t.dataset.aid) { const fn = t.dataset.afn === "runAction" ? runAction : window[t.dataset.afn]; if (typeof fn === "function") fn(t); }
   else if (t.dataset.tact) taskAct(t.dataset.tact, t);
@@ -4233,6 +4277,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.matches("[data-open],.card[data-prep],.card[data-task]")) { e.target.click(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); go("new"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") { e.preventDefault(); openPicker(); return; }
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".p-st")) { e.preventDefault(); e.target.click(); return; }
   const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
   const onCtl = e.key !== "Escape" && e.target.matches('[data-page="board"] button, [data-page="board"] select');  // plan 27: Enter presses it, the arrows scroll
   if (e.key === "Escape" && nextOpen) { e.preventDefault(); cancelNextForm(); return; }  // plan 36: Escape closes only the inline form

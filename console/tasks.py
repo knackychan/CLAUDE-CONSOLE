@@ -1079,6 +1079,14 @@ def read_brief(home, task: dict, n: int) -> str:
         return ""
 
 
+def read_prompt(home, task: dict) -> str:
+    """Plan 55 D7: the task's prompt.md as Fred typed it (plan 29 writes it when the prompt is sent), masked; "" when absent."""
+    try:
+        return redact.mask((folder(home, task["id"]) / "prompt.md").read_text(encoding="utf-8")).strip()
+    except (OSError, UnicodeError):
+        return ""
+
+
 def write_brief(home, task: dict, step: dict, text: str) -> str:
     """The compacted note of `step` (compact.run_brief's text) in its brief file; returns the relative name."""
     rel = brief_file(task, step)
