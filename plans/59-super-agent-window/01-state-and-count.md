@@ -3,13 +3,15 @@
 > Contract: [README.md](README.md) 4.1a, 4.2, 4.3, 4.7, 4.10. Decisions D8 a (the queue spans all projects), D9 a (the word),
 > D10 a (a finished task waiting for Accept is an item; written for a, the lines another answer drops are marked `D10`).
 > Pure module first, then the three server seams (`snapshot`, the tick, `super_view`'s queue call) and the tray.
-> Everything here reads plan 58's documented contract (README section 2); step 0 binds its Hub names in one method.
+> Everything here reads plan 58's documented contract (README section 2); step 0 binds its Hub names: the derived
+> facts in `Hub._super_inputs`, the attributes this task reads directly in the one mapping list of section 1.0.
 
 **Files**
 - Create: `console/superwin.py` (also `accept_items`, D10 a)
 - Modify: `console/superagent.py` (state v2: `extra_state`, `upgrade`, `check_extra`, `blank_state`, `load_state`)
-- Modify: `console/server.py` (`Hub._super_inputs`, `_super_window`, `_super_summary`, `snapshot`, the tick's log lines,
-  the one queue call in `super_view`; other chats edit this file: anchored edits, stage only these hunks)
+- Modify: `console/server.py` (`Hub._super_inputs`, `_super_publish`, `_super_live`, `_super_window`, `_super_summary`,
+  `_super_log_changes`, `snapshot`, the tick's log lines and its publish call, the one queue call in `super_view`; other
+  chats edit this file: anchored edits, stage only these hunks)
 - Modify: `console/tray.py` (`look`)
 - Create: `tests/test_superwin.py`, `tests/test_superwin_server.py`
 - Modify: `tests/test_superagent.py` (`load_state` of a v1 file returns the v2 keys with `looked` at the oldest `seen`; a malformed
@@ -19,24 +21,52 @@ Commit boundary: `feat: the super agent window's state and its one count (plan 5
 
 ## 1.0 Step 0: bind plan 58's names (30 minutes, no behaviour)
 
-Read the built `Hub` super section and write `Hub._super_inputs()` so it returns exactly the dict below. This is the
-only method in this plan that names plan 58's Hub attributes; the rest of the plan calls it.
+Read the built `Hub` super section and write `Hub._super_inputs(state, spend)` so it returns exactly the dict below. It
+binds the **derived facts**; it reads nothing from disk and takes no lock, so both the snapshot path (the published
+copy and the cached spend) and the GET path (the live state and plan 58's own ledger read) can call it.
 
 ```python
-    def _super_inputs(self) -> dict:
-        """Plan 59: what the window needs from plan 58's Hub state, in one place (rename here, nowhere else).
+    def _super_inputs(self, state: dict, spend) -> dict:
+        """Plan 59: what the window needs from plan 58's Hub facts, in one place (rename here, nowhere else).
+        `state` is self.super or self.super_pub; `spend` is today's settled plus held super spend (None when the ledger
+        could not be read: then `capped` is False and `error` names it, as plan 58's view does).
         ranked/why: superagent.status; error: a settings error, a storage error or no claude.exe ("" for none);
-        off: super_day_usd or super_pass_usd is 0; capped: today's settled plus held spend reached the day limit;
-        sorting: None or {"n", "items", "since"}; last: state["last"]; never_reviewed: live items not in `reviewed`
-        (plan 58 coverage); today: the day's super spend or None when the ledger cannot be read."""
+        off: super_day_usd or super_pass_usd is 0; capped: spend reached the day limit; sorting: None or
+        {"n", "items", "since"} (the busy job); last: state["last"]; never_reviewed: live items not in `reviewed`
+        (plan 58 coverage); today: spend."""
         limits, errors = superagent.settings(self.cfg)
-        ...  # bind to plan 58 Task 5/6: super_view builds the same facts for GET /api/super
+        ...  # bind to plan 58 Task 5/6: super_view builds the same facts for GET /api/super (status, blocked, the busy job)
         return {"ranked": ranked, "why": why, "error": error, "off": off, "capped": capped, "sorting": sorting,
-                "never_reviewed": never, "today": today, "limits": limits}
+                "never_reviewed": never, "today": spend, "limits": limits}
 ```
 
+The plan 58 attributes this task reads **directly** (one mapping list; rename here when plan 58's built names differ):
+
+| This plan says | Plan 58 contract | Where |
+|---|---|---|
+| `self.super` | the loaded state dict (58 Task 5 "State at start") | `_super_publish`, the tick insert, Task 3 |
+| `self.super_clock()`, `self.super_mono()` | the injectable wall and monotonic clocks | `_super_window`, Task 3 |
+| `self._super_tick()` and its locals `live`, `events`, `ended`, the required-save call | 58 Task 5 "Tick and wakes" 1-2 | the tick insert (1.2) |
+| the pass result's publication step and its `last` | 58 Task 5 "Completion and publication" 5 | the two `note` lines (1.2) |
+| `self._super_arm(now, events, at_once=...)`, `self.super_wake["events"]` | 58/05 tests | Task 3, the tests here |
+| the day's super spend the tick and the view read (`usage.load_super`) | 58 Task 4, R5 | `_super_publish` caches it as `self.super_spend` |
+
+`Hub._super_publish()` (new, called under `tlock` at the end of every path that saved `self.super`: plan 58's tick save,
+the pass result save, this plan's `_super_commit`):
+
+```python
+    def _super_publish(self, spend=None) -> None:
+        """Plan 59: the copy snapshot() reads without a lock. Replaced as a whole, never mutated; the spend figure is the
+        one the caller just read from the ledger (None: keep the last one)."""
+        self.super_pub = copy.deepcopy(self.super)
+        if spend is not None or not hasattr(self, "super_spend"):
+            self.super_spend = spend
+```
+
+`Hub.__init__` (plan 58's state-at-start) ends with `self._super_publish(None)`.
+
 Test it first (Section 1.1, `test_inputs_contract`): a scratch Hub with no task returns `ranked` False, `why` `no pass yet`,
-`error` `""`, `off` False, `capped` False, `sorting` None, `never_reviewed` 0.
+`error` `""`, `off` False, `capped` False, `sorting` None, `never_reviewed` 0, `today` None.
 
 ## 1.1 Tests first (red)
 
@@ -44,7 +74,7 @@ Test it first (Section 1.1, `test_inputs_contract`): a scratch Hub with no task 
 
 ```python
 """Plan 59 Task 1: superwin is pure. Items are plain dicts; superagent.queue is stubbed where only the wrapper is
-under test, and plan 58's golden fixture (tests.test_superagent, table 4.2) is used once end to end."""
+under test, and plan 58's golden table 4.2 (rebuilt here from tests.test_superagent's helpers) is used once end to end."""
 import unittest
 from unittest import mock
 
@@ -70,7 +100,7 @@ def stub_queue(items_, st, now, ranked):  # one card per item in the given order
 
 
 class AcceptItemTest(unittest.TestCase):
-    """D10 a: a task that finished within a day and is not accepted is an item of kind `accept`."""
+    """D10 a: a finished task the snapshot still shows and that is not accepted is an item of kind `accept`."""
 
     def row(self, tid="d1", group="done", **kw):
         return dict({"id": tid, "group": group, "project": "p", "project_dir": "D:/p", "title": "Task " + tid, "label": tid}, **kw)
@@ -79,28 +109,27 @@ class AcceptItemTest(unittest.TestCase):
         steps = [{"kind": "code", "state": "done", "attempts": [{}]}, {"kind": "verify", "state": "done", "verdict": "PASS", "attempts": [{}]}]
         return dict({"id": tid, "state": "done", "accepted": 0, "chat": False, "updated": T0, "steps": steps}, **kw)
 
-    def items(self, rows, tasks, now=T0 + 60):
-        return superwin.accept_items({"tasks": rows}, {t["id"]: t for t in tasks}, now)
+    def items(self, rows, tasks):
+        return superwin.accept_items({"tasks": rows}, {t["id"]: t for t in tasks})
 
     def test_a_fresh_finish_is_an_accept_item(self):
         (got,) = self.items([self.row()], [self.task()])
         self.assertEqual((got["kind"], got["always"], got["type"], got["id"]), ("accept", "", "task", "d1"))
         self.assertRegex(got["key"], r"^task:d1:[0-9a-f]{16}$")
 
-    def test_not_for_accepted_chat_old_or_needs_rows(self):
-        for label, rows, tasks, now in (
-                ("accepted", [self.row()], [self.task(accepted=T0)], T0 + 60),
-                ("chat", [self.row()], [self.task(chat=True)], T0 + 60),
-                ("older than a day", [self.row()], [self.task()], T0 + superwin.ACCEPT_WINDOW_S + 1),
-                ("already a needs row", [self.row(group="needs")], [self.task()], T0 + 60),
-                ("still running", [self.row()], [self.task(state="running")], T0 + 60),
-                ("no task", [self.row()], [], T0 + 60)):
+    def test_not_for_accepted_chat_running_or_needs_rows(self):
+        for label, rows, tasks in (
+                ("accepted", [self.row()], [self.task(accepted=T0)]),
+                ("chat", [self.row()], [self.task(chat=True)]),
+                ("already a needs row", [self.row(group="needs")], [self.task()]),
+                ("still running", [self.row()], [self.task(state="running")]),
+                ("no task", [self.row()], [])):
             with self.subTest(label):
-                self.assertEqual(self.items(rows, tasks, now), [])
+                self.assertEqual(self.items(rows, tasks), [])
 
     def test_the_key_moves_with_verify_verdict_and_attempts_not_with_time(self):
         k0 = self.items([self.row()], [self.task()])[0]["key"]
-        self.assertEqual(self.items([self.row()], [self.task(updated=T0 + 500)], T0 + 600)[0]["key"], k0)
+        self.assertEqual(self.items([self.row()], [self.task(updated=T0 + 5 * 86400)])[0]["key"], k0)  # a week later: same item
         t = self.task()
         t["steps"][1]["verdict"] = "FAIL"
         self.assertNotEqual(self.items([self.row()], [t])[0]["key"], k0)
@@ -114,7 +143,7 @@ class StateTest(unittest.TestCase):
         s = superagent.blank_state()
         self.assertEqual(s["v"], 2)
         for key, empty in (("hand", {}), ("back", {}), ("fwd", []), ("looked", None), ("looked_cost", None),
-                           ("log", []), ("messages", [])):
+                           ("log", []), ("messages", []), ("paused_at", None)):
             self.assertEqual(s[key], empty)
 
     def test_upgrade_v1_adds_defaults_and_starts_looked_at_the_oldest_seen(self):
@@ -129,7 +158,7 @@ class StateTest(unittest.TestCase):
         ok = superagent.blank_state()
         self.assertEqual(superagent.check_extra(ok), "")
         for key, bad in (("hand", {"k": "soon"}), ("hand", {"k": True}), ("hand", [1]), ("back", {"k": 1.5}),
-                         ("fwd", [1]), ("looked", "x"), ("looked_cost", -1), ("log", [{"ts": 1, "g": 2, "t": "x", "p": ""}]),
+                         ("fwd", [1]), ("looked", "x"), ("looked_cost", -1), ("paused_at", "13:40"), ("log", [{"ts": 1, "g": 2, "t": "x", "p": ""}]),
                          ("log", ["x"]), ("messages", [{"id": "u", "ts": 1, "text": "x" * 501}]),
                          ("messages", [{"id": "u", "ts": 1, "text": "x"}] * 4)):
             with self.subTest(key=key, bad=bad):
@@ -378,17 +407,34 @@ class PurityTest(unittest.TestCase):
         self.assertFalse(calls & {"open", "print"}, calls)
 ```
 
-Plan 58's golden fixture end to end (the one place the real `superagent.queue` runs; `[58 T2]`): in the same file,
+Plan 58's golden table 4.2 end to end (the one place the real `superagent.queue` runs; `[58 T2]`): in the same file.
+Plan 58 keeps that table inline in `test_golden_order` (58/02 section 2.2), so this file builds the fixture itself from
+the table's words; the annotation fields plan 58's `check` stores beside `do`, `rank`, `say`, `why`, `batch`, `until`
+(`basis`, the pass-scoped batch identity of R2) are copied from `test_golden_order` at build, in `ann()` below.
 
 ```python
-from tests import test_superagent as sa
+def ann(do, rank, **over):
+    return {"do": do, "rank": rank, "say": "", "why": "", "batch": "", "until": None, **over}
+
+
+def golden_queue_fixture():
+    """Plan 58 README table 4.2: G decision without a default, A hold (Fable), B decision, C stuck, D and E hold (batch
+    acc), H hold (later until T0+600), I hold, F question (new); the last pass ok at T0+200; now T0+400."""
+    rows = [("G", "decision", "decision without a default", 90), ("A", "hold", "Fable confirm", 100), ("B", "decision", "", 110),
+            ("C", "stuck", "", 120), ("D", "hold", "", 130), ("E", "hold", "", 140), ("H", "hold", "", 150), ("I", "hold", "", 160),
+            ("F", "question", "", 300)]
+    items_ = [item(k, kind=kind, always=always) for k, kind, always, _ in rows]
+    st = state(n=1, seen={k: T0 + t for k, _, _, t in rows}, last={"n": 1, "ok": True, "at": T0 + 200, "items": 8},
+               ann={"A": ann("later", 9, why="w", until=T0 + 900), "B": ann("forward", 3, say="b"), "C": ann("forward", 1, say="c"),
+                    "D": ann("batch", 2, batch="acc"), "E": ann("batch", 4, batch="acc"), "H": ann("later", 5, why="w", until=T0 + 600)})
+    return items_, st, T0 + 400
 
 
 class GoldenWithHandTest(unittest.TestCase):
     """Plan 58 table 4.2 with Fred's hour: B goes later; the rest keeps its order; the count follows."""
 
     def setUp(self):
-        self.items, self.state, self.now = sa.golden_queue_fixture()  # plan 58's fixture (now T0+400, last pass T0+200)
+        self.items, self.state, self.now = golden_queue_fixture()  # plan 58 table 4.2 (now T0+400, last pass T0+200)
 
     @staticmethod
     def keys(out):
@@ -416,8 +462,9 @@ class GoldenWithHandTest(unittest.TestCase):
         self.assertEqual(refused["G"], "stays here: decision without a default")
 ```
 
-(If plan 58's built fixture has another name, the `setUp` line is the one to change; the expected card keys are plan 58's
-table 4.2 and must not change. The `always` strings are plan 58's `always_reason` words, table 4.1.)
+(The expected card keys are plan 58's table 4.2 and must not change. The `always` strings are plan 58's `always_reason`
+words, table 4.1. If the real `superagent.queue` needs described fields on D and E to call them compatible, give both the
+same `options`, `default` and `level` in `golden_queue_fixture`.)
 
 `tests/test_superwin_server.py` (reuses plan 58's `SuperHubTest` fixtures: `make_task`, frozen clocks, patched `superagent.run`)
 
@@ -426,16 +473,27 @@ table 4.2 and must not change. The `always` strings are plan 58's `always_reason
 import unittest
 from unittest import mock
 
-from console import server, superagent, superwin, tray
+from console import server, superagent, superwin, tray, usage
 from tests.test_superagent_server import SuperHubTest, T0
+
+
+class _NeverLock:
+    """A lock snapshot() must not take."""
+
+    def __enter__(self):
+        raise AssertionError("snapshot() took tlock")
+
+    def __exit__(self, *exc):
+        return False
 
 
 class WindowCountTest(SuperHubTest):
     def test_inputs_contract(self):
-        got = self.hub._super_inputs()
+        got = self.hub._super_inputs(self.hub.super, None)
         for key, want in (("ranked", False), ("why", "no pass yet"), ("error", ""), ("off", False), ("capped", False),
-                          ("sorting", None), ("never_reviewed", 0)):
+                          ("sorting", None), ("never_reviewed", 0), ("today", None)):
             self.assertEqual(got[key], want)
+        self.assertEqual(self.hub._super_inputs(self.hub.super, 1.0)["capped"], True)  # the default day limit is $1.00
 
     def test_snapshot_has_one_count_everywhere(self):
         for n in (1, 2, 3):
@@ -455,6 +513,7 @@ class WindowCountTest(SuperHubTest):
         a, b = self.task(1), self.task(2)
         self.tick(T0)
         self.hub.super["hand"][self.key(a)] = T0 + 3600
+        self.hub._super_publish()  # a direct edit of the state: publish as every real writer does
         snap = self.hub.snapshot()
         self.assertEqual((snap["counts"]["needs"], snap["counts"]["for_you"], snap["super"]["later"]), (2, 1, 1))
         self.assertEqual(snap["super"]["marks"][a][0], "later")
@@ -467,16 +526,20 @@ class WindowCountTest(SuperHubTest):
         self.assertEqual(snap["super"]["marks"][d], ["queue"])
         self.hub.tasks[d]["accepted"] = T0
         self.assertEqual(self.hub.snapshot()["counts"]["for_you"], 0)
-        self.hub.tasks[d].update(accepted=0, updated=T0 - 2 * 86400)
-        self.assertEqual(self.hub.snapshot()["counts"]["for_you"], 0)  # older than a day: quiet
+        self.hub.tasks[d].update(accepted=0, updated=T0 - 5 * 86400)
+        self.assertEqual(self.hub.snapshot()["counts"]["for_you"], 1)  # days later and still unaccepted: still an item
 
-    def test_the_snapshot_reads_no_file_and_runs_no_gate(self):
+    def test_the_snapshot_takes_no_lock_reads_no_file_and_runs_no_gate(self):
         self.task(1)
-        with mock.patch.object(server.Hub, "actions", side_effect=AssertionError("Hub.actions")), \
+        self.tick(T0)
+        with mock.patch.object(self.hub, "tlock", _NeverLock()), \
+                mock.patch.object(server.Hub, "actions", side_effect=AssertionError("Hub.actions")), \
+                mock.patch.object(usage, "load_super", side_effect=AssertionError("ledger")), \
                 mock.patch.object(superagent, "save_state", side_effect=AssertionError("save")), \
                 mock.patch.object(superagent, "append_log", side_effect=AssertionError("log")):
             snap = self.hub.snapshot()
         self.assertEqual(snap["counts"]["for_you"], 1)
+        self.assertEqual(snap["super"]["mode"], "waiting")  # the published copy, not an error fallback
 
     def test_a_failing_super_falls_back_to_the_raw_count(self):
         self.task(1)
@@ -488,13 +551,18 @@ class WindowCountTest(SuperHubTest):
 
     def test_paused_and_off_show_their_mode_and_unranked_line(self):
         self.task(1)
-        self.hub.super["paused"] = True
+        self.hub.super["paused"], self.hub.super["paused_at"] = True, T0 + 30
+        self.hub._super_publish()
         self.assertEqual(self.hub.snapshot()["super"]["mode"], "paused")
         self.assertIn("paused · oldest first", self.hub.snapshot()["super"]["line"])
-        self.hub.super["paused"] = False
+        self.hub.super["paused"], self.hub.super["paused_at"] = False, None
+        self.hub._super_publish()
         self.hub.cfg["super_day_usd"] = 0
         sup = self.hub.snapshot()["super"]
         self.assertEqual((sup["mode"], sup["line"]), ("off", "off · oldest first"))
+        self.hub.cfg["super_day_usd"] = 1.0
+        self.hub._super_publish(spend=1.0)  # what the tick would publish after its ledger read
+        self.assertEqual(self.hub.snapshot()["super"]["mode"], "capped")
 
 
 class WindowLogTest(SuperHubTest):
@@ -513,6 +581,16 @@ class WindowLogTest(SuperHubTest):
         self.assertIn("Task 1: hold settled", got)
         self.assertIn("Task 2 finished", got)
         self.assertEqual({x["g"] for x in self.hub.super["log"]}, {"◇", "✓"})
+
+    def test_a_changed_key_of_a_live_subject_writes_no_settled_line(self):
+        a = self.task(1)
+        self.tick(T0)
+        self.hub.tasks[a]["why"] = "confirm Fable"  # still waiting, still an item: the event hash moves, nothing settled
+        self.tick(T0 + 5)
+        self.assertEqual([x for x in self.lines() if "settled" in x], [])
+        self.hub.tasks[a].update(state="running", why="")
+        self.tick(T0 + 10)
+        self.assertIn("Task 1: hold settled", self.lines())
 
     def test_a_pass_result_writes_one_sorted_line_and_a_failure_writes_its_error(self):
         self.task(1)
@@ -565,7 +643,8 @@ LOG_MAX = 60
 
 def extra_state() -> dict:
     """The keys plan 59 adds to state.json (README 4.2)."""
-    return {"hand": {}, "back": {}, "fwd": [], "looked": None, "looked_cost": None, "log": [], "messages": []}
+    return {"hand": {}, "back": {}, "fwd": [], "looked": None, "looked_cost": None, "paused_at": None, "log": [],
+            "messages": []}
 
 
 def upgrade(state: dict, now: float) -> dict:
@@ -592,6 +671,8 @@ def check_extra(state: dict) -> str:
         return "looked is malformed"
     if state.get("looked_cost") is not None and not (_num(state["looked_cost"]) and state["looked_cost"] >= 0):
         return "looked_cost is malformed"
+    if state.get("paused_at") is not None and not _num(state["paused_at"]):
+        return "paused_at is malformed"
     if not isinstance(log, list) or len(log) > LOG_MAX or any(
             not isinstance(x, dict) or not _num(x.get("ts")) or not all(isinstance(x.get(f), str) for f in ("g", "t", "p")) for x in log):
         return "log is malformed"
@@ -605,7 +686,8 @@ def check_extra(state: dict) -> str:
 `blank_state()`: `"v": 2` and `**extra_state()`. `load_state`: where it rejects an unsupported `v`, accept `(1, 2)`;
 after its existing key checks add `state = upgrade(state, time.time()); error = check_extra(state)` and return that
 error through the same path plan 58 uses for a malformed key (blocks passes, raw queue, Pause not reset). A v1 file is
-not rewritten until the next save.
+not rewritten until the next save. Plan 58's pause branch sets `state["paused_at"] = now` beside `paused = True`, its
+resume branch sets it back to `None` (Task 3 makes those two edits with its own; `paused_at` is read by the page, 4.10).
 
 ### `console/superwin.py`
 
@@ -645,18 +727,15 @@ def hm(ts) -> str:
 
 # -- the accept item (D10 a) ---------------------------------------------------------------------------------------
 
-ACCEPT_WINDOW_S = 24 * 3600   # a finished task asks for Accept for a day, then goes quiet
-
-
-def accept_items(snap: dict, by_id: dict, now: float) -> list:
+def accept_items(snap: dict, by_id: dict) -> list:
     """Items for finished tasks that wait for Accept (README 4.1a), in the shape of superagent.items: state done, not
-    accepted, not a chat, not already a `needs` row (a pending supervisor card keeps its own item), finished within a
-    day. The key's event hashes the task id, the step count, the last verify's verdict and the attempt count."""
+    accepted, not a chat, not already a `needs` row (a pending supervisor card keeps its own item). No window of its
+    own: the snapshot's horizon (server.old_done) is the only one, so time never removes an item. The key's event
+    hashes the task id, the step count, the last verify's verdict and the attempt count."""
     out = []
     for row in snap["tasks"]:
         t = by_id.get(row["id"])
-        if (t is None or t.get("chat") or t.get("state") != "done" or t.get("accepted") or row["group"] == "needs"
-                or now - float(t.get("updated") or 0) > ACCEPT_WINDOW_S):
+        if t is None or t.get("chat") or t.get("state") != "done" or t.get("accepted") or row["group"] == "needs":
             continue
         verify = [s for s in t["steps"] if s["kind"] == "verify" and s["state"] == "done"]
         verdict = (verify[-1].get("verdict") or "") if verify else ""
@@ -921,25 +1000,31 @@ def look(counts: dict) -> tuple:
 
 ### `console/server.py`
 
-Imports: add `superwin` beside `superagent`. Insert the methods beside plan 58's `_super_*` section.
+Imports: add `superwin` beside `superagent` (`copy` is imported already; check). Insert the methods beside plan 58's
+`_super_*` section (`_super_publish` is in section 1.0).
 
 ```python
-    def _super_live(self, snap: dict, now: float) -> list:
+    def _super_live(self, snap: dict) -> list:
         """The live items: plan 58's needs set plus the accept items (D10 a). Every plan 58 call of
         `superagent.items(snap, self.tasks)` (tick, window, view, admission) becomes this one call. D10 b: drop the
         second term."""
-        return superagent.items(snap, self.tasks) + superwin.accept_items(snap, self.tasks, now)
+        return superagent.items(snap, self.tasks) + superwin.accept_items(snap, self.tasks)
 
-    def _super_window(self, snap: dict, described=None) -> dict:
+    def _super_window(self, snap: dict, described=None, *, state=None, raw=None, spend=None) -> dict:
         """The window's data from one snapshot: the live items, the queue, the one count, the mode and the row line.
-        `described` is the full list of super_view's described items; without it the items are described cheaply
-        (superagent.describe with view={}: pure, no Hub.actions, no brief or file read). Same `rev` either way."""
-        now, inp, st = self.super_clock(), self._super_inputs(), self.super
+        Two callers: snapshot() passes nothing (the published copy `super_pub`, the cached spend, items described
+        cheaply with view={}: pure, no Hub.actions, no brief, file or ledger read); super_view passes its `described`
+        list, `state` (plan 58's current-basis-filtered projection, for the queue), `raw` (the live self.super, for
+        `rev`) and the spend its own ledger read gave. `rev` is computed over the raw state in both paths (README 4.3)."""
+        now = self.super_clock()
+        st = state if state is not None else self.super_pub
+        raw = raw if raw is not None else st
+        inp = self._super_inputs(raw, self.super_spend if spend is None and state is None else spend)
         live = described
         if live is None:
             timeout, rows = self.cfg["decision_timeout_s"], {r["id"]: r for r in [*snap["tasks"], *snap["sessions"]]}
             live = []
-            for i in self._super_live(snap, now):
+            for i in self._super_live(snap):
                 task = self.tasks.get(i["id"]) if i["type"] == "task" else None
                 level = supervisor.policy(self.cfg, task, now)["mode"] if task else ""
                 live.append(superagent.describe(i, task, rows.get(i["id"], {}), {}, level, timeout, now))
@@ -954,13 +1039,13 @@ Imports: add `superwin` beside `superagent`. Insert the methods beside plan 58's
                                  sorting_n=(inp["sorting"] or {}).get("items", 0), reviewed=reviewed, live=len(live))
         return {"cards": cards, "later": later, "counts": n, "mode": mode, "line": line, "live": live,
                 "by_project": superwin.by_project(cards), "marks": superwin.marks(cards, later),
-                "rev": superwin.rev(live, st, mode, inp["ranked"], now), "inputs": inp, "now": now}
+                "rev": superwin.rev(live, raw, mode, inp["ranked"], now), "inputs": inp, "now": now}
 
     def _super_summary(self, snap: dict) -> dict:
-        """snap["super"]: what the header, the tray, the row and the list read. Falls back to the raw needs count."""
+        """snap["super"]: what the header, the tray, the row and the list read. No lock: it reads the published copy
+        (self.super_pub, replaced whole by _super_publish, never mutated). Falls back to the raw needs count."""
         try:
-            with self.tlock:
-                w = self._super_window(snap)
+            w = self._super_window(snap)
             return {"rev": w["rev"], "mode": w["mode"], "for_you": w["counts"]["queue"], "later": w["counts"]["later"],
                     "line": w["line"], "by_project": w["by_project"], "marks": w["marks"], "error": ""}
         except Exception as exc:  # the count must never drop below what needs Fred
@@ -976,12 +1061,13 @@ Imports: add `superwin` beside `superagent`. Insert the methods beside plan 58's
 `        snap["spend"]["fills"] = self.fill_marks()  # outside the lock: budget() takes it`:
 
 ```python
-        snap["super"] = self._super_summary(snap)  # plan 59: outside self.lock, under tlock (tlock is taken first)
+        snap["super"] = self._super_summary(snap)  # plan 59: outside self.lock, no tlock: reads the published copy
         snap["counts"]["for_you"] = snap["super"]["for_you"]
 ```
 
 The fallback's task-row query uses `snap["tasks"]` rows (group `needs`), so a task row and a session row count once,
-as `counts.needs` does. `test_a_failing_super_falls_back_to_the_raw_count` pins it.
+as `counts.needs` does. `test_a_failing_super_falls_back_to_the_raw_count` pins it;
+`test_the_snapshot_takes_no_lock_reads_no_file_and_runs_no_gate` pins the absence of `tlock` and of the ledger read.
 
 The tick (plan 58 Task 5, `_super_tick`): after `live = superagent.items(...)` and `superagent.sync(...)`, add
 
@@ -993,12 +1079,16 @@ The tick (plan 58 Task 5, `_super_tick`): after `live = superagent.items(...)` a
                 self._super_save_required()  # plan 58's required-save path (a failure blocks admission)
 ```
 
-(`events`, `ended` and the save call are plan 58's own names for the tick's event list, the tasks that ended since the
-last tick and its required save; bind them at step 0.) And the log writer:
+and, as the tick's last statement under `tlock` (after its save and its ledger read), `self._super_publish(spend)`
+where `spend` is the day figure the tick read (None when the ledger could not be read). The same call ends plan 58's
+pass completion (after the final state save) and this plan's `_super_commit` (Task 3). (`events`, `ended`, the save
+call and the spend figure are plan 58's own names for the tick's event list, the tasks that ended since the last tick,
+its required save and its ledger read; bind them at step 0.) And the log writer:
 
 ```python
     def _super_log_changes(self, live: list, ended: list, now: float) -> bool:
-        """Since you looked: a line for each task that ended and each key that left the live set. Not on the first tick."""
+        """Since you looked: a line for each task that ended and each key that left the live set while its subject did
+        not stay live under a new key (a changed key is a changed state, not a settled item). Not on the first tick."""
         prev, self._super_prev = getattr(self, "_super_prev", None), {i["key"]: i for i in live}
         if prev is None:
             return False
@@ -1011,8 +1101,9 @@ last tick and its required save; bind them at step 0.) And the log writer:
                 superwin.note(self.super, now, "✕", f"{title} is stuck: {task['why']}", task["project"])
             else:
                 superwin.note(self.super, now, "·", f"{title} {state}", task["project"])
+        subjects = {(i["type"], i["id"]) for i in live}
         for key, gone in prev.items():
-            if key not in self._super_prev:
+            if key not in self._super_prev and (gone["type"], gone["id"]) not in subjects:
                 superwin.note(self.super, now, "◇", f"{gone['title']}: {superwin.kind_word(gone['kind'])} settled", gone["project"])
         return len(self.super["log"]) != before
 ```
@@ -1029,12 +1120,15 @@ and on a failed result `superwin.note(self.super, now, "✕", f"Super agent sort
 
 `super_view` (plan 58 Task 6): replace its call `superagent.queue(items_, state, now, ranked)` by
 `superwin.queue(items_, state, now, ranked)`; its `counts` by `superwin.counts(...)` (which keeps plan 58's four keys);
-add `rev` (`superwin.rev(described, state, mode, ranked, now)`) and `by_project`. Task 2 adds the card fields.
+add `rev` (`superwin.rev(described, self.super, mode, ranked, now)`: the **raw** state, README 4.3) and `by_project`.
+Task 2 moves these into one `_super_window(snap, described, state=projection, raw=self.super, spend=today)` call and adds
+the card fields.
 
 ## 1.3 Steps and acceptance
 
-- [ ] 0. Bind `Hub._super_inputs` (section 1.0). `grep -n "superagent.items(" console/server.py` and replace each plan 58
-      call by `self._super_live(snap, now)` (D10 a).
+- [ ] 0. Bind `Hub._super_inputs`, write `Hub._super_publish` and fill the mapping list (section 1.0).
+      `grep -n "superagent.items(" console/server.py` and replace each plan 58 call by `self._super_live(snap)` (D10 a).
+      `grep -n "save_state(" console/server.py`: every path that saves `self.super` ends with `self._super_publish(...)`.
 - [ ] 1. Write the tests; run `py -m unittest tests.test_superwin tests.test_superwin_server`: red for the missing module,
       state keys and Hub methods.
 - [ ] 2. Make the 1.2 edits. Focused tests green; `tests.test_superagent`, `tests.test_superagent_server`,

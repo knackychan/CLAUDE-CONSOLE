@@ -254,13 +254,15 @@ drops it). `trigger_words([("message", "u1"), ("message", "u2")])` reads `2 mess
 
     def _super_commit(self, candidate: dict, record: dict) -> tuple:
         """Persist, then swap (plan 58 R4): the candidate state is saved first; only a durable save replaces self.super
-        (in place, so the tick's references hold). The audit line is best effort and never undoes a saved state."""
+        (in place, so the tick's and a running pass's references hold), then the copy snapshot() reads is published.
+        The audit line is best effort and never undoes a saved state."""
         try:
             superagent.save_state(self.folder, candidate)
         except OSError as exc:
             return 503, {"error": redact.clip(redact.mask(f"cannot save the super agent state: {exc.strerror or exc}"), 200)}
         self.super.clear()
         self.super.update(candidate)
+        self._super_publish()  # Task 1: snapshot() reads this copy, never self.super
         try:
             superagent.append_log(self.folder, dict(record, by="fred", ts=self.super_clock()))
         except OSError:
@@ -271,7 +273,7 @@ drops it). `trigger_words([("message", "u1"), ("message", "u2")])` reads `2 mess
     def _super_fred(self, body: dict) -> tuple:
         """Plan 59 Task 3: later, bring_back, seen, message, orders. Called by super_action after pause/resume/sort."""
         action = body.get("action")
-        if set(body) != self.FRED_ACTIONS[action]:
+        if action not in self.FRED_ACTIONS or set(body) != self.FRED_ACTIONS[action]:
             return 400, {"error": self.SUPER_ACTIONS_TEXT}
         with self.tlock:
             now = self.super_clock()
@@ -326,8 +328,10 @@ drops it). `trigger_words([("message", "u1"), ("message", "u2")])` reads `2 mess
 ```
 
 In plan 58's `super_action`: where it answers `400 action: pause, resume or sort` for an unknown action, route the new
-five to `self._super_fred(body)` and make the 400 text `self.SUPER_ACTIONS_TEXT`. `import copy`, `uuid`, `superwin`,
-`redact`, `paths` are already imported in `server.py` (check; add what is missing).
+five to `self._super_fred(body)` and make the 400 text `self.SUPER_ACTIONS_TEXT`. Its pause branch gains
+`candidate["paused_at"] = now`, its resume branch `candidate["paused_at"] = None` (README 4.2; the page reads it), and
+both end with `self._super_publish()` after their durable save (Task 1). `import copy`, `uuid`, `superwin`, `redact`,
+`paths` are already imported in `server.py` (check; add what is missing).
 
 Pass admission (plan 58 Task 5, the immutable job): read `messages = list(self.super["messages"])` under `tlock` with the
 rest of the input, pass them to `digest(..., messages)`, store their ids in `claimed["msgs"]` and the job. Completion:
@@ -335,6 +339,13 @@ on an **ok** result (after the durable result and settlement, in the same state 
 `superwin.drop_messages(state, job["msgs"])` and one `superwin.note(state, now, "◆", f'Super agent, to "{text[:60]}": noted
 for the next sorts. To keep it, add it to your orders.', "All projects")` for each; a failed result keeps them. A message
 that arrives while a pass runs is not in `job["msgs"]` and stays.
+
+**Binding requirement (step 0 checks it in plan 58's built completion; README 4.9):** the completion's candidate state is
+built from the **live** `self.super` under `tlock` at completion time, never from a copy taken at admission. The
+immutable job holds handles, bases and the policy hash, not the state. A `hand`, `fwd`, `back`, `looked`, `paused_at` or
+`messages` change written by `_super_commit` while the pass ran must be in the published state, and
+`test_a_message_that_arrives_during_a_pass_waits_for_the_next` fails if it is not. If the built completion copies at
+admission, the fix is in plan 58's completion (read `self.super` again under `tlock`), one line, made in this task.
 
 ### `console/superagent.py` ([58 T3] digest)
 
@@ -357,6 +368,8 @@ orders file or a gate.` (the test above pins the clause).
 
 ## 3.3 Steps and acceptance
 
+- [ ] 0. Read plan 58's built completion: confirm it merges over the live `self.super` under `tlock` (the binding
+      requirement above); if not, make that one-line change here, with the message test as its proof.
 - [ ] 1. Write the tests; run `py -m unittest tests.test_superwin_server tests.test_superagent`: red for the missing branches.
 - [ ] 2. Make the 3.2 edits. Focused tests green; plan 58's `tests.test_superagent_server` green with its one edited
       assertion (the 400 text).

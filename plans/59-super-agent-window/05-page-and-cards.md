@@ -23,7 +23,7 @@ class SuperPageTest(unittest.TestCase):
     """Plan 59 Task 5: markup and keys from a canned GET /api/super. No gate in JS: off comes from the data."""
     ITEM = ("{key: 'k1', type: 'task', id: 't1', kind: 'decision', always: '', project: 'ARTCOUSTIC', project_dir: 'D:\\\\a', title: 'Paths and settings',"
             " label: 't1', ask: 'Which name for the product-sheet folder?', why: '', options: ['PRODUCT_SHEETS_DIR', 'SHEETS_DIR'], default: 'PRODUCT_SHEETS_DIR',"
-            " left_s: 600, stay: 'the default is taken at 14:16', level: 'auto', age_s: 840, new: false, back: false, incomplete: '', observed: false, do: 'forward', rank: 1,"
+            " left_s: null, stay: '', level: 'gated', age_s: 840, new: false, back: false, incomplete: '', observed: false, do: 'forward', rank: 1,"
             " say: 'Take a: the T02 spec already uses it.', source: '', path: ['ARTCOUSTIC', 'Paths and settings'], open: {kind: 'task', id: 't1', step: 3},"
             " facts: [], own: {mode: 'answer', post: '/api/task/message', off: '', body: {task: 't1', target: {step: 3}}, request_id: true},"
             " acts: {state: 'decision', line: '', hint: '', message: null, bar: [], menu: [], primary: ["
@@ -42,20 +42,32 @@ class SuperPageTest(unittest.TestCase):
         return render("const ITEM = " + cls.ITEM + "; " + cls.SETUP + cls.VIEW + view + expr)
 
     def test_current_card_has_path_tags_ask_options_rec_links_and_one_primary(self):
-        html = self.x("swCard(superView.queue[0], 0, true)")
-        for want in ('class="sw-qc cur"', "ARTCOUSTIC", "Paths and settings", "decision · 14 min", "default at ",
+        html = self.x("swCard(superView.queue[0], 0, true)")  # a gated decision: it may go Later, so no "default at" tag
+        for want in ('class="sw-qc cur"', "ARTCOUSTIC", "Paths and settings", "decision · 14 min",
                      "Which name for the product-sheet folder?", 'data-sw="pick"', "PRODUCT_SHEETS_DIR", "Super agent suggests",
                      "Take a: the T02 spec already uses it.", "Write your own answer", 'data-sw="open"', 'data-sw="later"'):
             self.assertIn(want, html)
         self.assertEqual(html.count("btn you"), 1)
         self.assertIn("Confirm 1", html)  # the preselected default
+        self.assertEqual(html.count("isdef"), 1)
+
+    def test_a_decision_without_a_default_preselects_nothing(self):
+        html = self.x("ITEM.default = ''; ITEM.always = 'decision without a default'; ITEM.stay = 'decision without a default'; swCard({batch: '', items: [ITEM]}, 0, true)")
+        self.assertNotIn("isdef", html)
+        self.assertNotIn(">default<", html)
+        self.assertEqual(html.count('aria-pressed="true"'), 0)
+        self.assertRegex(html, r'<button class="btn you"[^>]*disabled[^>]*>Confirm</button>')  # off until Fred picks a row
+        picked = self.x("ITEM.default = ''; swPick.k1 = '2'; swCard({batch: '', items: [ITEM]}, 0, true)")
+        self.assertIn("Confirm 2", picked)
+        self.assertEqual(picked.count('aria-pressed="true"'), 1)
 
     def test_a_default_about_to_be_taken_and_an_always_item_stay_here_with_no_later(self):
-        always = self.x("ITEM.always = 'Fable confirm'; ITEM.left_s = null; ITEM.stay = 'Fable confirm'; swCard({batch: '', items: [ITEM]}, 0, true)")
+        always = self.x("ITEM.always = 'Fable confirm'; ITEM.stay = 'Fable confirm'; swCard({batch: '', items: [ITEM]}, 0, true)")
         self.assertIn("always yours", always)
         self.assertIn("Stays here: Fable confirm", always)
         self.assertNotIn('data-sw="later"', always)
-        timed = self.x("swCard({batch: '', items: [ITEM]}, 0, true)")
+        timed = self.x("ITEM.level = 'auto'; ITEM.left_s = 600; ITEM.stay = 'the default is taken at 14:16'; swCard({batch: '', items: [ITEM]}, 0, true)")
+        self.assertIn("default at ", timed)
         self.assertIn("Stays here: the default is taken at", timed)
         self.assertNotIn('data-sw="later"', timed)
         plain = self.x("ITEM.left_s = null; ITEM.stay = ''; swCard({batch: '', items: [ITEM]}, 0, true)")
@@ -124,7 +136,7 @@ class SuperPageTest(unittest.TestCase):
                  "Object.assign({}, ITEM, {key: 'a', id: 'ta', kind: 'accept', left_s: null, title: 'Storyboard kit', facts: [['verify passed · 3 steps · $0.41', 'ok']]}),"
                  "Object.assign({}, ITEM, {key: 'b', id: 'tb', kind: 'accept', left_s: null, title: 'Usage page', facts: [['verify passed · 2 steps · $0.18', 'ok']]})]}")
         html = self.x(f"swCard({batch}, 0, true)")
-        for want in ("2 tasks", "accept · 2 items", "Storyboard kit", "Usage page", "verify passed · 3 steps", "Review one by one", "Accept both"):
+        for want in ("2 tasks", "finished · 2 items", "Storyboard kit", "Usage page", "verify passed · 3 steps", "Review one by one", "Accept both"):  # SW_KIND.accept is "finished"
             self.assertIn(want, html)
         self.assertEqual(html.count('data-sw="openid"'), 2)
         none = self.x(f"const B = {batch}; B.answer = null; swCard(B, 0, true)")
@@ -135,12 +147,12 @@ class SuperPageTest(unittest.TestCase):
         self.assertEqual(self.x(f"superView.queue = [{batch}]; swCards().map((c) => c.items.length)"), [2])
 
     def test_note_per_mode(self):
-        want = {"sorting": "Sorting 4 items.", "paused": "Paused by you.", "off": "The super agent is off.",
+        want = {"sorting": "Sorting 4 items.", "paused": "Paused by you at ", "off": "The super agent is off.",
                 "capped": "limit of $1.00 is reached.", "failed": "The last sort failed: the pass took longer than 120 s",
                 "waiting": "The first sort starts in a moment.", "error": "claude.exe not found", "partial": "Recommendations cover 2 of 4 items."}
         for mode, text in want.items():
             with self.subTest(mode):
-                html = self.x(f"superView.mode = '{mode}'; superView.why = 'claude.exe not found'; superView.sorting = {{n: 4, items: 4, since: 1}};"
+                html = self.x(f"superView.mode = '{mode}'; superView.why = 'claude.exe not found'; superView.sorting = {{n: 4, items: 4, since: 1}}; superView.paused_at = 1000;"
                               " superView.last.ok = false; superView.last.error = 'the pass took longer than 120 s'; superView.coverage = {live: 4, last_submitted: 2, never_reviewed: 2};"
                               " swNote(superView)")
                 self.assertIn(text, html)
@@ -216,9 +228,28 @@ class SuperPageTest(unittest.TestCase):
         self.assertEqual(self.x(base + "key('3'); swPick.k1 || ''"), "")      # there is no third option
         self.assertEqual(self.x(base + "key('s'); key('o'); key('Enter'); calls"), ["later", "open", "confirm"])
 
-Headless, `tests/live_super_check.py` gains `page_checks` for the home pane: `#bwrap .sw-qc` exists, exactly one `.cur`,
-one `.btn.you` inside it, every `.sw-qc .btn` at least 24 px, every text at least 11 px, no horizontal scroll at 900,
-400 and 340 px, Tab reaches the current card's controls and J moves focus to the next card.
+Headless, `tests/live_super_check.py` gains `page_checks` for the home pane (added to its `CHECKS`, run at 900, 400 and
+340 px, dark and light; `SMALL` and `TINY` are plan 55's 11 px and 24 px scans, extended to `#bwrap .sw-*`):
+
+```python
+def page_checks(page, name):  # Task 5: one current card, one orange primary in it, the keys move focus, targets and text floors
+    page.evaluate("showPage('board'); boardTask = ''; boardPick = ''; swSel = ''; renderBoard()")
+    page.wait_for_selector("#bwrap .sw-qc")
+    assert page.locator("#bwrap .sw-qc.cur").count() == 1, (name, "one current card")
+    assert page.locator("#bwrap .sw-qc.cur .btn.you").count() <= 1, (name, "at most one orange primary")
+    for el in page.locator("#bwrap .sw-qc .btn, #bwrap .sw-qc .lnk").all():
+        box = el.bounding_box()
+        assert box and box["height"] >= 24, (name, "24 px target", el.inner_text())
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), (name, "no horizontal scroll")
+    page.locator("#bwrap .sw-qc.cur").focus()
+    page.keyboard.press("Tab")
+    assert page.evaluate("document.activeElement.closest('#bwrap .sw-qc.cur') !== null"), (name, "Tab reaches the current card's controls")
+    if page.locator("#bwrap .sw-qc").count() > 1:
+        page.locator("#bwrap .sw-qc.cur").focus()
+        page.keyboard.press("j")
+        assert page.evaluate("swCur") == 1, (name, "J moves to the next card")
+        assert page.evaluate("document.activeElement.classList.contains('cur')"), (name, "focus follows the current card")
+```
 
 ## 5.2 Code (`web/app.js`)
 
@@ -285,13 +316,14 @@ function swBtn(it, a, cls = "", o = {}) {  // one served action; a button exists
   const tip = a.off || o.tip || "";
   return `<button class="btn${cls ? " " + cls : ""}" data-sw="act" data-key="${esc(it.key)}" data-aid="${esc(a.id)}"${a.off || o.disabled ? " disabled" : ""}${tip ? ` title="${esc(tip)}"` : ""}>${esc(o.label || actLabel(a, it.acts.state))}</button>`;
 }
-function swOptions(it) {  // a decision's options as selectable rows, the default preselected; the picked one is the primary
+function swOptions(it) {  // a decision's options as selectable rows; the served default (if any) preselected; the picked one is the primary
   const opts = it.acts.state === "decision" ? it.acts.primary : [];
-  if (!opts.length) return { html: "", pick: null };
-  const def = opts.find((a) => a.label === it.default) || opts[0], pick = opts.find((a) => a.id === swPick[it.key]) || def;
-  const rows = opts.map((a, j) => `<button class="sw-opt${a === def ? " isdef" : ""}" data-sw="pick" data-key="${esc(it.key)}" data-aid="${esc(a.id)}" aria-pressed="${a === pick}"${a.off ? ` disabled title="${esc(a.off)}"` : ""} title="Key ${j + 1}">
+  if (!opts.length) return { html: "", pick: null, none: false };
+  // No invented default: a decision without one (always-forwarded, plan 58 3.4) preselects nothing and Confirm waits for a pick.
+  const def = it.default ? opts.find((a) => a.label === it.default) || null : null, pick = opts.find((a) => a.id === swPick[it.key]) || def;
+  const rows = opts.map((a, j) => `<button class="sw-opt${a === def ? " isdef" : ""}" data-sw="pick" data-key="${esc(it.key)}" data-aid="${esc(a.id)}" aria-pressed="${a === pick}"${a.off ? " disabled" : ""} title="${esc(a.off || "Key " + (j + 1))}">
     <span class="k">${esc(a.id)}</span><span>${esc(a.label)}</span>${a === def ? `<span class="def">default${it.left_s != null ? " · " + swHm(snap.now + it.left_s) : ""}</span>` : "<span></span>"}</button>`).join("");
-  return { html: `<div class="sw-opts" role="group" aria-label="Options">${rows}</div>`, pick };
+  return { html: `<div class="sw-opts" role="group" aria-label="Options">${rows}</div>`, pick, none: !pick };
 }
 function swMembers(card) {
   return `<ul class="sw-bl">${card.items.map((m) => { const f = (m.facts || [])[0] || ["", "h"];
@@ -321,6 +353,7 @@ function swCard(card, i, cur, dock = false) {
     const open = `<button class="btn go" data-sw="open" data-key="${esc(it.key)}">${incomplete ? "Open the task" : "Open"}</button>`;
     const bar = it.acts.bar.map((a) => swBtn(it, a)).join("");
     const prim = opt.pick ? swBtn(it, opt.pick, incomplete ? "" : "you", { label: "Confirm " + opt.pick.id })
+      : opt.none ? swBtn(it, { id: "", label: "Confirm", off: "", confirm: false }, incomplete ? "" : "you", { label: "Confirm", disabled: true, tip: "Pick an option first" })  // no default: Fred picks a row first
       : it.acts.primary.map((a) => swBtn(it, a, incomplete ? "" : "you")).join("");
     btns = (openBtn ? open : "") + bar + prim;
   }
@@ -334,7 +367,7 @@ function swNote(v) {  // SW-8, SW-16: one line per mode; "" for ranked
   switch (v.mode) {
     case "sorting": { const k = v.sorting ? v.sorting.items : 0; return n("", "n live", `Sorting ${k} ${k === 1 ? "item" : "items"}.`, "Cards keep their last recommendations until it ends."); }
     case "partial": return n("", "h", `Recommendations cover ${seen} of ${live} items.`, `The last sort had room for ${seen}. The ${live - seen} marked not reviewed follow, oldest first, until the next sort. Sort now continues it.`);
-    case "paused": return n("", "q", "Paused by you.", "Nothing is sorted until you resume. " + SW_UNR);
+    case "paused": return n("", "q", `Paused by you${v.paused_at ? " at " + swHm(v.paused_at) : ""}.`, "Nothing is sorted until you resume. " + SW_UNR);  // paused_at: README 4.2, X8
     case "off": return n("", "q", "The super agent is off.", `Its daily limit is $0. ${SW_UNR}${link}`);
     case "capped": return n("", "q", `Today's limit of ${swMoney((v.spend || {}).day_limit)} is reached.`, `Sorting starts again tomorrow, or raise the limit. ${SW_UNR}${link}`);
     case "failed": return n(" r", "r", `The last sort failed: ${(v.last || {}).error || "no reason given"}`, SW_UNR + " Sort again, or it tries at the next change.");
@@ -413,8 +446,10 @@ Wiring (anchors): in `renderBoard()` after the list is drawn, `if (swHome() && s
 (the box and bar are added by Task 6 around it, with plan 55's `taskShell`; until then the page scrolls alone); the existing
 `homePick`/auto-open of a first task does not exist and is not added. A card's `data-sw="cur"` click sets `swCur`
 (Task 6 routes every `data-sw` value; the `cur` branch is added here: `swCur = +t.dataset.i; swAnswerTo = ""; renderBoard();`).
-A key `Escape` that leaves a selection never closes the window or the pill (the global Escape handler returns first
-when `swKeys` handled it: it already checks `e.defaultPrevented`).
+`Escape`: `swKeys` acts only when it has something to leave (`swAnswerTo` or `swSel`), else it returns and the existing
+handler decides as today. The existing global keydown handler (`app.js:4140`) runs **first** (it was registered first) and
+does not check `e.defaultPrevented`; on the Board with nothing picked its Escape branch does nothing, so the two never
+fight. Do not add a `defaultPrevented` check to it in this plan.
 
 ## 5.3 Style (`web/style.css`)
 

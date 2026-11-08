@@ -62,7 +62,7 @@ class CardActsTest(unittest.TestCase):
 
     def test_a_hand_off_hint_carries_the_handoff_form_only(self):
         v = self.view("running", [], [act("stop"), act("pause")], [act("handoff", post=""), act("terminal"), act("delete")])
-        self.assertEqual(self.ids(superwin.card_acts(v, "hand_off")), ([], [], ["handoff"]))
+        self.assertEqual(self.ids(superwin.card_acts(v, "hand_off")), ([], ["handoff"], []))  # in the bar: a card draws primary and bar
         self.assertEqual(self.ids(superwin.card_acts(v, "stuck")), ([], [], []))  # running carries nothing otherwise
 
     def test_observed_running_paused_ready_carry_nothing_and_off_is_kept(self):
@@ -87,6 +87,9 @@ class OwnAnswerTest(unittest.TestCase):
                                "body": {"task": "t1", "target": MSG["target"]}, "request_id": True})
         nxt = superwin.own_answer({"message": dict(MSG, mode="next")}, "suggestion", self.ITEM)
         self.assertEqual(nxt["mode"], "next")
+        chat = superwin.own_answer({"message": MSG}, "chat", self.ITEM)  # a window-run chat task at a STOP question (plans 30, 42)
+        self.assertEqual((chat["mode"], chat["post"]), ("answer", "/api/task/message"))
+        self.assertIsNone(superwin.own_answer({"state": "observed"}, "chat", self.ITEM))  # an observed chat task has no message
 
     def test_not_for_other_kinds_or_other_modes(self):
         self.assertIsNone(superwin.own_answer({"message": MSG}, "accept", self.ITEM))
@@ -139,7 +142,7 @@ class OrderLinesTest(unittest.TestCase):
 ```
 
 `tests/test_superwin_server.py` (real Hub; `Hub.actions` is real for the four states a scratch task can reach, canned for
-the rest):
+the rest; the file's import line gains `DECISION`: `from tests.test_superagent_server import SuperHubTest, T0, DECISION`):
 
 ```python
 class ServedCardTest(SuperHubTest):
@@ -178,7 +181,7 @@ class ServedCardTest(SuperHubTest):
         self.assertEqual(fable["stay"], "Fable confirm")                     # code's reason, drawn as "Stays here"
 
     def test_canned_states(self):
-        t = self.task(1)
+        t = self.task(1, why="asks: Which file?", decision=dict(DECISION))  # kind `decision`: `own` needs it (OWN_KINDS)
         canned = {
             "decision": {"state": "decision", "line": "needs you · Which file?", "primary": [act("1", "style.css", "/api/task/message"), act("2", "app.js", "/api/task/message"), act("default_auto")],
                          "bar": [act("stop")], "menu": [act("terminal")], "message": MSG},
@@ -242,7 +245,7 @@ class ServedCardTest(SuperHubTest):
         self.assertEqual(view["by_project"], self.hub.snapshot()["super"]["by_project"])
 
     def test_orders_lines_follow_the_file(self):
-        self.hub.super_orders_path().write_text("# mine\nfashion first\n", encoding="utf-8")  # plan 58's orders file
+        (superagent.folder(self.hub.folder) / superagent.ORDERS_FILE).write_text("# mine\nfashion first\n", encoding="utf-8")  # plan 58's orders file
         self.assertEqual(self.hub.super_view()["order_lines"], ["fashion first"])
 
     def test_unranked_modes_keep_every_action(self):
@@ -254,17 +257,38 @@ class ServedCardTest(SuperHubTest):
         self.assertEqual([a["id"] for a in item["acts"]["primary"]], ["confirm"])
         self.assertEqual(item["say"], "")
 
-    def test_get_calls_actions_once_per_queue_card_and_writes_nothing(self):
+    def test_get_calls_actions_once_per_item_outside_tlock_and_writes_nothing(self):
         for n in range(1, 6):
             self.task(n)
-        with mock.patch.object(server.Hub, "actions", autospec=True, side_effect=server.Hub.actions) as spy, \
+        held = []
+        real = server.Hub.actions
+
+        def spy_actions(hub, task):
+            held.append(hub.tlock._is_owned())  # RLock: True when this thread holds it
+            return real(hub, task)
+
+        with mock.patch.object(server.Hub, "actions", autospec=True, side_effect=spy_actions) as spy, \
                 mock.patch.object(superagent, "save_state", side_effect=AssertionError("save")), \
                 mock.patch.object(superagent, "append_log", side_effect=AssertionError("log")), \
                 mock.patch("console.paths.write_text_atomic", side_effect=AssertionError("write")):
             view = self.hub.super_view()
-        self.assertEqual(spy.call_count, 5)
+        self.assertEqual(spy.call_count, 5)  # plan 58's describe loop once per item; the card reuses that view
+        self.assertEqual(held, [False] * 5)  # the gates run outside tlock, as GET /api/task does
         self.assertEqual(view["counts"]["queue"], 5)
         self.assertEqual(self.hub.super_threads, [])
+
+    def test_get_at_thirty_items_fits_the_budget(self):  # README 9: measured here, not at the end
+        import statistics
+        import time as clock
+        for n in range(1, 31):
+            self.task(n)
+        samples = []
+        for _ in range(5):
+            t = clock.perf_counter()
+            self.hub.super_view()
+            samples.append(clock.perf_counter() - t)
+        ms = statistics.median(samples) * 1000
+        self.assertLess(ms, 150 * 4, f"GET /api/super at 30 items took {ms:.0f} ms")  # 4x slack for a loaded test machine; Task 8 measures for real
 ```
 
 ## 2.2 Code
@@ -287,8 +311,8 @@ CARD_ACTS = {
     "session_blocked": (("terminal",), (), ()),
     "session_stall": (("done",), (), ()),
 }
-HAND_OFF_CARD = ((), (), ("handoff",))               # a hand-off hint: the task's own Hand off form
-OWN_KINDS = frozenset({"decision", "question", "suggestion", "failed_twice", "stuck", "stop"})
+HAND_OFF_CARD = ((), ("handoff",), ())               # a hand-off hint: the task's own Hand off form, in the bar (a card draws primary and bar)
+OWN_KINDS = frozenset({"decision", "question", "suggestion", "failed_twice", "stuck", "stop", "chat"})  # chat: a window-run chat task's STOP question
 BATCH_ANSWERS = frozenset({"accept"})                # D2 a
 
 
@@ -381,9 +405,11 @@ def order_lines(text: str) -> list:
         rest = view["line"].split(" · ", 1)[-1]
         return [[f"{word} · {rest}", "ok" if word == "verify passed" else "h"]]
 
-    def _super_card(self, item: dict, task) -> dict:
-        """README 4.4: one queue item's served fields. Read only; `item` is plan 58's described item."""
-        view = self._session_acts(item["id"]) if item["type"] == "session" else self.actions(task)
+    def _super_card(self, item: dict, task, view) -> dict:
+        """README 4.4: one queue item's served fields. Read only; `item` is plan 58's described item and `view` the
+        Hub.actions(task) plan 58's describe loop already computed for it (never computed twice); a session item has
+        no view and gets _session_acts."""
+        view = self._session_acts(item["id"]) if item["type"] == "session" else (view or self.actions(task))
         acts, inc = superwin.card_acts(view, item["kind"]), item.get("incomplete") or ""  # [58 R7] the flag's name
         step = 0
         if task is not None:
@@ -398,30 +424,36 @@ def order_lines(text: str) -> list:
 `Hub.actions` uses it (the string at `server.py:1239` is replaced by the constant; no wording change).
 
 `super_view` (plan 58 Task 6, with Task 1's swap of `superagent.queue` for `superwin.queue`). It already describes every
-live item (`described`, plan 58 3.9: full `describe`, evidence read, bounded). Build the window data from that list, so
-the view and the snapshot differ only in how much evidence they read:
+live item (`described`, plan 58 3.9: full `describe`, evidence read, bounded) and, to do so, calls `Hub.actions(task)`
+once per task item. **Lock scope**: that describe loop runs outside `tlock` on a copy of the items and the state taken
+under it (GET /api/task calls `actions` without `tlock` today, 58 README 2); only the copy is taken under the lock.
+Keep each item's view: `views[item["key"]] = view` in that loop (one line in plan 58's code; bind at step 0). Build the
+window data from the described list, so the view and the snapshot differ only in how much evidence they read:
 
 ```python
-        w = self._super_window(snap, described)          # queue over the described items; mode, rev, by_project, counts
+        w = self._super_window(snap, described, state=projection, raw=self.super, spend=today)  # Task 1: queue over the described items; mode, rev, by_project, counts
         for card in w["cards"]:
-            card["items"] = [self._super_card(i, self.tasks.get(i["id"]) if i["type"] == "task" else None) for i in card["items"]]
+            card["items"] = [self._super_card(i, self.tasks.get(i["id"]) if i["type"] == "task" else None, views.get(i["key"])) for i in card["items"]]
             card["answer"] = superwin.batch_answer(card["items"]) if len(card["items"]) > 1 else None
         later = [dict(i, path=[i["project"], i["title"]]) for i in w["later"]]
         spent = superwin.spent_since(self.super, sum(r["cost"] for r in snap["tasks"]))
-        view.update(queue=w["cards"], later=later, rev=w["rev"], mode=w["mode"], counts=w["counts"],
+        view.update(queue=w["cards"], later=later, rev=w["rev"], mode=w["mode"], counts=w["counts"], paused_at=self.super.get("paused_at"),
                     controls=superwin.controls(w["mode"]), by_project=w["by_project"], order_lines=superwin.order_lines(orders_text),
                     since={**superwin.since(self.super, w["now"]), "spent": {"tasks": spent}})
 ```
 
-(`orders_text` is the orders text plan 58's view already reads for its `orders` field. A card item keeps every plan 58
-field and gains `acts`, `own`, `observed`, `incomplete`, `facts`, `path`, `open`, `back`. `view["state"]`, `why`,
-`sorting`, `last`, `spend`, `coverage`, `digest`, `notes` stay plan 58's.) The test helper `hub.super_orders_path()` is
-`hub.folder / "super" / "orders.md"` if plan 58 has no such method.
+(`orders_text` is the orders text plan 58's view already reads for its `orders` field; `projection` is plan 58's
+current-basis-filtered copy of the state its GET queues from (R3), `today` the spend figure its one ledger read gave,
+`views` the dict above. A card item keeps every plan 58 field and gains `acts`, `own`, `observed`, `incomplete`, `facts`,
+`path`, `open`, `back`. `view["state"]`, `why`, `sorting`, `last`, `spend`, `coverage`, `digest`, `notes` stay plan 58's.)
+The orders file in the tests is `superagent.folder(hub.folder) / superagent.ORDERS_FILE` (58/01:44, :118); plan 58 has
+no helper method for it and this plan adds none.
 
 ## 2.3 Steps and acceptance
 
 - [ ] 1. Write the tests; run `py -m unittest tests.test_superwin tests.test_superwin_server`: red for the missing functions.
 - [ ] 2. Make the 2.2 edits. Focused tests green; `tests.test_superagent_server` (plan 58's GET tests) green: every
-      field it asserts is still there.
+      field it asserts is still there. `test_get_at_thirty_items_fits_the_budget` reports its median in its message:
+      note the figure in the commit body (README 9: measured here first).
 - [ ] 3. Full suite green (report the count). Stage the test files by path and only this task's hunks of
       `console/server.py` and `console/superwin.py`. Commit with the message above.

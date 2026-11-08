@@ -73,7 +73,7 @@ class SuperActTest(unittest.TestCase):
         got = self.x("ITEM.left_s = null; ITEM.stay = ''; superView.queue = [{batch: 'acc', rank: 1, answer: null, items: [ITEM, Object.assign({}, ITEM, {key: 'k2'})]}];"
                      " api.ret = {done: ['k1', 'k2'], later: [{until: '2027-01-15T15:06'}]}; (async () => { await swDo('later', swCards()[0]); return calls; })()")
         self.assertEqual(got, [["/api/super", {"action": "later", "keys": ["k1", "k2"]}]])
-        stays = self.x("(async () => { await swDo('later', swCards()[0]); return [calls, swAck]; })()")   # ITEM has a default about to be taken
+        stays = self.x("ITEM.level = 'auto'; ITEM.left_s = 600; ITEM.stay = 'the default is taken at 14:16'; (async () => { await swDo('later', swCards()[0]); return [calls, swAck]; })()")   # a default about to be taken
         self.assertEqual(stays[0], [])
         self.assertIn("Stays here: the default is taken at", stays[1])
         stale = self.x("ITEM.left_s = null; ITEM.stay = ''; api.fail = 'unknown item'; (async () => { await swDo('later', swCards()[0]); return swAck; })()")
@@ -311,8 +311,36 @@ the chip) and 11 px text.
 
 ## 6.4 Steps and acceptance
 
-- [ ] 1. Write `SuperActTest` and extend `tests/live_super_check.py` (click Later and Bring back against a scratch service,
-      answer a plan-ready card and a decision; the page, the header and the project line all read the same number after).
+- [ ] 1. Write `SuperActTest` and extend `tests/live_super_check.py` with `act_checks` (below): click Later and Bring back
+      against the scratch service, answer a plan-ready card and a decision; the page, the header and the project line all
+      read the same number after each.
+
+```python
+def act_checks(page, rig):  # Task 6: the clicks post what the data says; every surface shows one number after each
+    page.evaluate("showPage('board'); boardTask = ''; boardPick = ''; swSel = ''; renderBoard()")
+    page.wait_for_selector("#bwrap .sw-qc.cur")
+    before = page.evaluate(COUNT_JS)
+    page.locator("#bwrap .sw-qc.cur [data-sw='later']").first.click()                 # Later: the card leaves, the Later section lists it
+    page.wait_for_function(f"forYou() === {before['forYou'] - 1}")
+    assert page.locator("#bwrap [data-sw='bring']").count() >= 1, "Later lists the card with Bring back"
+    page.locator("#bwrap [data-sw='bring']").first.click()                            # Bring back: it returns with the tag
+    page.wait_for_function(f"forYou() === {before['forYou']}")
+    assert page.locator("#bwrap .sw-tag", has_text="back from Later").count() == 1
+    plan = page.locator("#bwrap .sw-qc.cur .btn.you", has_text="Confirm")            # a plan-ready card: Confirm posts /api/task/confirm
+    if plan.count():
+        plan.first.click()
+        page.wait_for_function("!document.querySelector('#bwrap .sw-qc[aria-busy=true]')")
+    decision = page.locator("#bwrap .sw-qc.cur .sw-opt").first                         # a decision: pick a row, Enter confirms
+    if decision.count():
+        decision.click()
+        page.keyboard.press("Enter")
+        page.wait_for_function("!document.querySelector('#bwrap .sw-qc[aria-busy=true]')")
+    c = page.evaluate(COUNT_JS)
+    assert c["row"] == c["hdr"] == c["forYou"] == c["items"], ("one number after the answers", c)
+    assert c["proj"] <= c["row"], ("project lines never exceed the whole", c)
+```
+
+(`COUNT_JS` is Task 7's; Task 6 writes it first in `tests/live_super_check.py` and Task 7 keeps it.)
 - [ ] 2. Make the 6.2 and 6.3 edits. `node --check web/app.js`; `py -m unittest tests.test_web`; `py -m tests.live_super_check`.
 - [ ] 3. Full suite green (report the count). Stage the test files and only this task's hunks of `web/app.js` and
       `web/style.css`. Commit with the message above.

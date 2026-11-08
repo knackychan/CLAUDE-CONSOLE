@@ -22,9 +22,11 @@ New class after plan 55's `BoardListTest` replacement (or after `BoardListTest` 
 @unittest.skipUnless(NODE, "Node is not installed")
 class SuperListTest(unittest.TestCase):
     """Plan 59 Task 4: the row, the counts and the roll-up list read snap.super and the view, never a gate."""
-    SUP = ("snap.now = 1000; snap.super = {rev: 'r1', mode: 'ranked', for_you: 3, later: 1, line: '4 running · 1 later · sorted 14:01',"
-           " by_project: {'D:\\\\p': 2, 'D:\\\\q': 1}, marks: {a: ['queue'], b: ['queue'], c: ['queue'], z: ['later', '15:06']}, error: ''}; "
-           "snap.counts = {needs: 5, for_you: 3}; snap.tasks = []; snap.sessions = []; ")
+    # app.js starts with `let snap = null`, so the fixture assigns the whole object (a property write on null throws)
+    SUP = ("snap = {now: 1000, counts: {needs: 5, for_you: 3}, tasks: [], sessions: [], preps: [], older: 0,"
+           " super: {rev: 'r1', mode: 'ranked', for_you: 3, later: 1, line: '4 running · 1 later · sorted 14:01',"
+           " by_project: {'D:\\\\p': 2, 'D:\\\\q': 1}, marks: {a: ['queue'], b: ['queue'], c: ['queue'], z: ['later', '15:06']}, error: ''}}; "
+           "superView = null; superBusy = false; superAt = 0; swWant = ''; ")
 
     def test_row_is_first_counts_for_you_and_names_the_line(self):
         html = render(self.SUP + "swRow()")
@@ -39,7 +41,9 @@ class SuperListTest(unittest.TestCase):
     def test_one_count_the_view_when_in_sync_else_the_snapshot(self):
         x = self.SUP + "superView = {rev: 'r1', counts: {queue: 2}, by_project: {'D:\\\\p': 2}}; "
         self.assertEqual(render(x + "forYou()"), 2)                      # in sync: the accurate view
-        self.assertEqual(render(x + "snap.super.rev = 'r9'; forYou()"), 3)  # out of sync: the snapshot
+        self.assertEqual(render(x + "snap.super.rev = 'r9'; forYou()"), 3)  # out of sync, nothing in flight: the snapshot
+        self.assertEqual(render(x + "snap.super.rev = 'r9'; superBusy = true; superAt = Date.now() - 1000; forYou()"), 2)  # a refetch in flight, the view is fresh: keep it (no flicker)
+        self.assertEqual(render(x + "snap.super.rev = 'r9'; superBusy = true; superAt = Date.now() - 60000; forYou()"), 3)  # in flight but stale: the snapshot
         self.assertEqual(render(x + "forYouIn('d:/P')"), 2)               # project match goes through sameDir
         self.assertEqual(render("snap = {counts: {needs: 4}}; superView = null; forYou()"), 4)  # an old service: the raw count
 
@@ -65,12 +69,13 @@ class SuperListTest(unittest.TestCase):
         self.assertEqual(got, 1)  # swWant records the rev even on failure
 
     def test_project_line_is_quiet_until_something_is_for_you(self):
+        # BoardListTest.setup defines tk0 and mkt; SUP then replaces snap. Four backslashes: Python "\\\\" is JS "\\", one backslash in the string.
         setup = BoardListTest.setup + self.SUP + "projectName = (d) => d; boardTask = ''; swSel = ''; swOpenP = {}; swAllP = {}; "
-        quiet = render(setup + "swProjectBlock('D:\\z', {live: [mkt({id: 'r1'}), mkt({id: 'r2'})], obs: [], today: [], earlier: [], ts: 0})")
+        quiet = render(setup + "swProjectBlock('D:\\\\z', {live: [mkt({id: 'r1'}), mkt({id: 'r2'})], obs: [], today: [], earlier: [], ts: 0})")
         self.assertIn('aria-expanded="false"', quiet)
         self.assertIn("2 running", quiet)
         self.assertNotIn("for you", quiet)
-        mine = render(setup + "swProjectBlock('D:\\p', {live: [mkt({id: 'a'}), mkt({id: 'r1'}), mkt({id: 'r2'})], obs: [], today: [], earlier: [], ts: 0})")
+        mine = render(setup + "swProjectBlock('D:\\\\p', {live: [mkt({id: 'a'}), mkt({id: 'r1'}), mkt({id: 'r2'})], obs: [], today: [], earlier: [], ts: 0})")
         self.assertIn("<b>2 for you</b>", mine)
         self.assertIn('aria-expanded="true"', mine)
         self.assertIn("+ 2 more: 2 running", mine)       # a is shown, the two quiet ones fold into one line
@@ -137,7 +142,9 @@ let swAllP = {};        // project dir -> its "+ N more" line is open
 const SW_REFRESH_MS = 30000;  // served `off` reasons and the time left on a default age: refetch while the page shows
 
 const swReady = () => !!(snap && snap.super);
-const swInSync = () => !!superView && swReady() && superView.rev === snap.super.rev;
+// the view is the source when its rev matches the snapshot's, or while a refetch is in flight and the view is fresh
+// (README 4.3: no flicker to the cheap number for the frames between a tick and its refetch)
+const swInSync = () => !!superView && swReady() && (superView.rev === snap.super.rev || (superBusy && Date.now() - superAt < SW_REFRESH_MS));
 const swMark = (id) => (swReady() && snap.super.marks && snap.super.marks[id]) || null;  // ["queue"] or ["later", "HH:MM"]
 function forYou() { return swInSync() ? superView.counts.queue : swReady() ? snap.super.for_you : snap && snap.counts ? snap.counts.needs : 0; }
 function forYouIn(dir) {
@@ -258,7 +265,7 @@ function listHtml() {  // SW-1, SW-12: the super agent row, then one rolled-up b
 
 Edits by anchor:
 
-- `renderBoard()`: replace the three lines from `  const nb = snap.counts.needs;` through the line that sets `$("needsbtn").textContent` by `  swHeader();` and `swFetch();` on the next line; replace `setHtml($("bchain"), chainHtml());` by `setHtml($("bchain"), listHtml());`; delete the `homePick();` line if plan 55 Task 4 had added it (it is not built: nothing to delete).
+- `renderBoard()`: replace the three lines from `  const nb = snap.counts.needs;` through the line that sets `$("needsbtn").textContent` by `  swFetch();` and `swHeader();` on the next line, **in that order**: `swFetch` sets `superBusy` before its first `await`, so the header drawn on the same tick keeps the fresh view's number while the refetch runs (README 4.3); replace `setHtml($("bchain"), chainHtml());` by `setHtml($("bchain"), listHtml());`; delete the `homePick();` line if plan 55 Task 4 had added it (it is not built: nothing to delete).
 - `function statusLine(t) {`: first line of the body `const m = swMark(t.id); if (m && m[0] === "later") return [\`later · back ${m[1]}\`, ""];`.
 - `function taskHtml(t, o = {})`: the line that appends the step rows (`stepRows(t)`) is guarded by `&& t.id === boardTask` (SW-12: steps only under the selected task).
 - `go("needs")` becomes `if (name === "needs") { swSel = "sa"; boardTask = ""; boardPick = ""; renderBoard(); const c = document.querySelector("#bwrap .sw-qc.cur"); if (c) c.focus(); }` (the header button selects the super agent row and focuses the current card, Task 5).

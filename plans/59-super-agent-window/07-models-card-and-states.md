@@ -40,13 +40,38 @@ class SuperModelsCardTest(unittest.TestCase):
         self.assertNotIn("super_model", html)   # the two pass models are fixed (plan 58): not editable here
 
     def test_the_off_note_links_to_this_card(self):
-        got = render("""showPage = (n) => { window.__page = n; }; swAct({dataset: {sw: 'settings'}}); [mtab, window.__page]""")
-        self.assertEqual(got, ["tuning", "models"])
+        # the harness's `window` is a proxy that answers every property with another proxy: use a plain object
+        got = render("""const shown = []; showPage = (n) => shown.push(n); swAct({dataset: {sw: 'settings'}}); [mtab, shown]""")
+        self.assertEqual(got, ["tuning", ["models"]])
 ```
 
-`tests/test_tuning.py` round trip (the loop Fred will use): save `super_day_usd: 0` through `POST /api/config/models`
-(200), `Hub.reload_tuning`, then `Hub.snapshot()["super"]` has `mode` `off` and `line` `off · oldest first`; `super_day_usd: 21`
-is refused with the plan 58 range text; `super_model: "opus"` is refused (fixed alias).
+`tests/test_tuning.py` round trip (the loop Fred will use), in its existing HTTP class (`RunServerTest`-based; `post` is
+its helper, `self.hub` the server's Hub, `make_task` plan 58's):
+
+```python
+    def test_super_day_limit_round_trip_turns_the_window_off_and_on(self):
+        from tests.test_superagent_server import make_task
+        make_task(self.hub, self.project, 1)
+        status, data = self.post("/api/config/models", {"super_day_usd": 0})
+        self.assertEqual(status, 200, data)
+        self.hub.reload_tuning()
+        sup = self.hub.snapshot()["super"]
+        self.assertEqual((sup["mode"], sup["line"]), ("off", "off · oldest first"))
+        self.assertEqual(self.hub.super_view()["controls"]["sort"]["off"], "The super agent is not sorting today")
+        status, data = self.post("/api/config/models", {"super_day_usd": 21})
+        self.assertEqual(status, 400)
+        self.assertIn("super_day_usd must be a number between 0 and 20", data["error"])   # plan 58's range text
+        status, data = self.post("/api/config/models", {"super_model": "opus"})
+        self.assertEqual(status, 400)
+        self.assertIn("haiku only", data["error"])                                        # tuning.SUPERVISOR_MODELS wording
+        status, data = self.post("/api/config/models", {"super_day_usd": 1})
+        self.assertEqual(status, 200, data)
+        self.hub.reload_tuning()
+        self.assertEqual(self.hub.snapshot()["super"]["mode"], "waiting")
+```
+
+(The exact refusal strings are plan 58 Task 1's and `tuning.validate`'s at build; the assertions name them so a wording
+change is one edit here.)
 
 Code (`web/app.js`), inside `TUNE` after the supervisor entries and inside `MGROUP` after `supervisor`:
 
@@ -88,7 +113,9 @@ class SuperA11yTest(unittest.TestCase):
 
 Code: in `index.html` change `<div id="bchain" class="v-chain" aria-label="Tasks and chats"></div>` to the same element as
 `<nav id="bchain" ...></nav>` and `<div id="bwrap" class="bwrap"></div>` to `<main id="bwrap" class="bwrap"></main>`
-(check `style.css` for `div#bchain`/`div.bwrap` selectors: `grep -n "div#b\|div\.bwrap"`; none expected).
+(check `style.css` for `div#bchain`/`div.bwrap` selectors: `grep -n "div#b\|div\.bwrap"`; none expected). The JS below
+goes **inside** the plan 59 region, before the `// -- end plan 59` line Task 6 added (Task 6's route test reads that
+region; nothing of plan 59 lives outside it).
 
 ```js
 let swAnnounced = "";

@@ -87,8 +87,15 @@ When a name changes at build time, only the "Used in" task changes.
 | `superagent.sync(state, live, now) -> (new, back, changed)`, `queue(items, state, now, ranked) -> {"queue": [card], "later": [item]}`, `status(...) -> (ranked, why)`, `select_items` | 58 3.6, 3.8, 2.1a | 1 | R1 expiry, R2 coverage | Task 1 wrapper only |
 | state functions `blank_state`, `load_state` (strict), `save_state(home, state)`, `append_log(home, record)`, `read_log`, `read_notes`, `read_orders`, `cut_notes`, `ORDERS_MAX`, `LINE_MAX` | 58 Task 1, 1.1a | 1, 3 | R4 (strict read) | Task 1 step 0 |
 | state.json v1 keys `v n paused seen reviewed ann last digest claimed` | 58 3.5 | 1 | R3 `basis`, R4 claimed | Task 1 `upgrade` |
-| `describe(...)` card fields and an `incomplete` flag per item | 58 3.9, 3.1a, R7 | 2 | R7 | Task 2 mapping line |
-| `Hub.super` (state dict), `super_clock`, `super_mono`, `_super_tick`, `_super_arm(now, events, at_once)`, `super_threads`, `super_wake`, the storage-error flag, `super_view`, `super_action` | 58 Tasks 5, 6 | 1, 2, 3 | D2, D6, R4, R9 | `Hub._super_inputs` (Task 1 step 0) is the only place that reads these |
+| `describe(item, task, row, view, level, timeout_s, now)` card fields (`ask options default left_s level supervisor source`) | 58 3.9, 58/03 `describe` | 1, 2 | none | Task 1 `_super_window`, Task 2 |
+| the `incomplete` flag per item: plan 58 sets it when it builds an item's digest block (3.1a, R7), not in `describe`; GET carries it only if the pass stored it with the annotation. **Unverified until plan 58 is built**: Task 2 reads `item.get("incomplete")` and falls back to "" | 58 3.1a, R7 | 2 | R7 | Task 2 mapping line |
+| `superagent.settings(cfg) -> (limits, errors)`, `blocked(...)`, `status(...)` | 58 3.2, 3.8, 58/01 | 1 | none | `Hub._super_inputs` |
+| `superagent.policy_hash(cfg, folder)` (R3's hash of the effective orders, kind text and settings); `superagent.ORDERS_FILE`, `superagent.folder(home)` | 58 R3, 58/01:44, :118 | 3 | R3 | Task 3 tests (`policy_hash` is this plan's name for it; bind at build) |
+| plan 58's GET describe loop: `super_view` already calls `Hub.actions(task)` once per live task item to describe it (3.7, 3.9, 06-routes "Describe all live items") | 58 3.7, 3.9, Task 6 | 2 | none | Task 2 keeps that `view` per key and never calls `actions` a second time |
+| `Hub.super` (state dict), `super_clock`, `super_mono`, `_super_tick`, `_super_arm(now, events, at_once)`, `super_threads`, `super_wake` (`{"events": [(what, id)], ...}`), the storage-error flag, `super_view`, `super_action`, the tick's `events` list, `ended` tasks and required-save call, the pass completion's candidate state | 58 Tasks 5, 6 | 1, 2, 3 | D2, D6, R4, R9 | step 0 of Task 1 binds every name listed here: `Hub._super_inputs` binds the derived facts (ranked, error, off, capped, sorting, coverage, spend); the attributes themselves are read directly where section 2 of each task says, and renamed there |
+| pass completion merges over the **live** `self.super` under `tlock`, not over the admission-time copy (58/05 "rebuild live items under tlock"; the immutable job holds handles and bases, not the state) | 58 Task 5 | 3 | R4 | Task 3 step 0 asserts it (`test_a_message_that_arrives_during_a_pass_waits_for_the_next`) |
+| plan 58 test fixtures: `SuperHubTest` (`task`, `tick`, `drain`, `key`, `log`, `answer`, `gate`, `calls`, `now`), `make_task(hub, project, n, state, why, **extra)` (title `Task N`, project `proj`, `updated` T0), `DECISION`, `T0`; `tests.test_superagent.make_task`, `snap_of`; the golden table 4.2 data is inline in `test_golden_order`, **there is no fixture function** | 58/05:118-192, 58/02:185-228 | 1, 2, 3 | none | Task 1 builds `golden_queue_fixture` itself in `tests/test_superwin.py` from `tests.test_superagent.make_task` and `snap_of` (section 1.1) |
+| `usage.load_super(folder)` (the ledger read plan 58's view and admission make) | 58 Task 4 | 1 | R5 | `_super_inputs` takes the spend figure as an argument; the snapshot path reads the cached one |
 | `GET /api/super` fields (3.9) incl. `counts.queue`, `coverage`, `sorting`, `last`, `spend`, `orders`, `digest` | 58 3.9, 6.1 | 2, 5 | none | the page reads these names |
 | `POST /api/super` `pause`, `resume`, `sort` and its 400 text `action: pause, resume or sort` | 58 3.10, 6.1 | 3, 6 | D6 | Task 3 edits the 400 text and its test |
 | `Hub.reload_tuning`, `tuning.TUNING` super keys (group `super`, unit `lines`) | 58 3.2 | 7 | D9 | Task 7 reads `cfg.tuning` |
@@ -122,9 +129,14 @@ Open decisions of other plans this plan is **written against**:
   carry. Loose window sessions (Needs you: stop, blocked, interrupted, stall) are answered today by the client with
   `needButtons`/`unblock` (`app.js:404`, `433`): `/api/continue` (answer, Resume), `/api/terminal`, `/api/done`.
   Task 2 serves the same four from `Hub.levers(sid)` so the page keeps no gate.
-- **Console cannot open another app.** `/api/terminal` answers 404 `not a window run` for anything it did not start
-  (`server.py:4626`); no code opens a VS Code or terminal chat. The mock's "Open in terminal / Open in VS Code" buttons
-  need a capability that does not exist (D3).
+- **Console cannot focus another app's chat.** It does open things: a task folder and models.json through
+  `os.startfile` (`server.py:4501`, `:4522`) and a terminal on its own runs (`runs.open_terminal`, `runs.py:396`;
+  `/api/terminal` answers 404 `not a window run` for anything else, `server.py:4626`). No code can bring a VS Code or
+  terminal chat to the front, so the mock's "Open in terminal / Open in VS Code" buttons need a capability that does not
+  exist (D3). A later plan could add `code -r <folder>` (focus the project's VS Code window) as such a capability.
+- **A chat task (plans 30, 42) is the common "needs you".** Its plan 58 kind is `chat`; when it is a window run its
+  `Hub.actions` message mode is `answer` at a STOP question, so Write your own answer serves it (4.5); when its session
+  is observed, `Hub.actions` returns the observed set with no `message` key (`server.py:1131`), so nothing answers it.
 - **Gap found while planning: a finished task is not "needing Fred" today.** `server.task_row` (`server.py:4181`) puts a
   task in group `needs` only when it is waiting, stuck, asks a question, shows a hand-off hint, holds a handoff note
   or has a pending supervisor card; a `done` task is group `done` whether or not it was accepted. Plan 58's items are
@@ -163,14 +175,18 @@ tests/live_super_check.py        new (Task 7), extends plan 55's Rig
 
 ### 4.1a The `accept` item (D10 a)
 
-`superwin.accept_items(snap, by_id, now)` adds one item for each task that is `done`, not accepted, not a chat, not
-already a `needs` row (a pending supervisor card keeps its own item) and finished within `ACCEPT_WINDOW_S` (24 hours of
-`updated`). Kind `accept`, never always-forwarded. Its key's event is a hash of the task id, the step count, the last
-verify's verdict and the attempt count, so Fred's Accept (the task leaves the set), a Reopen (new steps) and a new verify
-change it and time does not. Older finished tasks stay quiet: they keep their place in the list and the Finished card,
-and never become queue items. `Hub._super_live(snap, now)` is `superagent.items(...) + accept_items(...)`; every plan 58
-call of `superagent.items` becomes that one call (tick, window, view, admission). The raw `counts.needs` does not change;
-`for_you` can exceed it, which is why the header and the tray read `for_you`.
+`superwin.accept_items(snap, by_id)` adds one item for each task row of the snapshot that is `done`, not accepted, not a
+chat and not already a `needs` row (a pending supervisor card keeps its own item). Kind `accept`, never always-forwarded.
+Its key's event is a hash of the task id, the step count, the last verify's verdict and the attempt count, so Fred's
+Accept (the task leaves the set), a Reopen (new steps) and a new verify change it and time does not. **No window of its
+own**: the snapshot already hides a finished task after `DONE_DAYS` (`server.old_done`, `server.py:4154`), and that is
+the only horizon; a key never leaves the set because time passed, so no "settled" line is written for a task Fred did
+not touch (4.7). At the upgrade every unaccepted finish inside that horizon becomes an item once; the super agent can
+batch them ("Accept all N"). `Hub._super_live(snap)` is `superagent.items(snap, self.tasks) + accept_items(snap,
+self.tasks)`; every plan 58 call of `superagent.items` becomes that one call (tick, window, view, admission). The raw
+`counts.needs` does not change; `for_you` can exceed it, which is why the header and the tray read `for_you`. Wake cost:
+none added; plan 58 already wakes when a task ends (58 README 3.6 step 2). What changes is that the tray turns orange on
+every unaccepted finish, and at level `auto` the queue is mostly Accept items until slice 3 may accept them.
 
 ### 4.2 `state.json` v2 (additive over plan 58 section 3.5)
 
@@ -179,7 +195,7 @@ call of `superagent.items` becomes that one call (tick, window, view, admission)
  "hand": {"<key>": 1800003600.0},
  "back": {"<key>": 12},
  "fwd": ["<key>"],
- "looked": 1800000000.0, "looked_cost": 3.21,
+ "looked": 1800000000.0, "looked_cost": 3.21, "paused_at": null,
  "log": [{"ts": 1800000100.0, "g": "✓", "t": "Storyboard kit finished", "p": "MOTION STUDIO"}],
  "messages": [{"id": "uuid", "ts": 1800000100.0, "text": "fashion_packshots first"}]}
 ```
@@ -191,8 +207,11 @@ call of `superagent.items` becomes that one call (tick, window, view, admission)
   line is the difference, never below 0). A missing value starts at the oldest `seen` time, else now.
 - `log`: at most 60 lines, none older than 7 days, text masked and clipped to 160 characters. Written only by the tick
   and by the pass result (4.7). `messages`: at most 3, 500 characters each, masked; cleared by the pass that read them.
+- `paused_at`: the epoch of the last Pause (null when not paused); the page reads "Paused by you at HH:MM" from it (the
+  mock's copy, SW-8). Set by plan 58's pause branch, cleared by resume; one line each.
 - `load_state` reads v1 (adds the defaults, `v` becomes 2 on the next save) and v2; a malformed new key blocks passes
-  exactly like a malformed plan 58 key (R4: error, raw queue, no reset).
+  exactly like a malformed plan 58 key (R4: error, raw queue, no reset). The migration is one way: the first save after
+  the upgrade writes `v: 2`, which plan 58-only code refuses as an unsupported version (its 1.1a); say so in the close.
 
 ### 4.3 The one number
 
@@ -201,26 +220,36 @@ count from one source at a time:
 
 | Surface | Reads | Test |
 |---|---|---|
-| header button, super agent row, page pill, For you sub-line, project lines, bar | the view's `counts.queue` and `by_project` when `view.rev === snap.super.rev`; else `snap.super.for_you` and `snap.super.by_project`, and the page refetches | Task 1, 4, 5 |
+| header button, super agent row, page pill, For you sub-line, project lines, bar | the view's `counts.queue` and `by_project` when `view.rev === snap.super.rev`, or while a refetch is in flight and the view is under 30 s old; else `snap.super.for_you` and `snap.super.by_project` | Task 1, 4, 5 |
 | tray tooltip | `snap.counts.for_you` (equals `snap.super.for_you`) | Task 1 |
 | `GET /api/super` `counts.queue` | the same function over described items | Task 2 |
 
-`snapshot()` computes `snap["super"]` **cheaply** (live items described with `view={}`, the queue, no `Hub.actions`, no
-brief or file read): `{rev, mode, for_you, later, line, by_project, marks}`; `marks` maps a task or session id to
-`["queue"]` or `["later", "HH:MM"]`. `rev` is a hash of the live keys with their stored advice, Fred's hour, the back
-markers, the mode and the log tail; it never moves with age, cost or time left, so the cheap and the full computation
-agree on it. `GET /api/super` computes the same `rev` and the accurate counts (evidence-complete, auto-default aware,
-batches validated). The two numbers agree whenever no item's Later validity turned on evidence only the full view reads;
-in that rare case the window shows the view's, the tray the snapshot's, and the next tick or the 30 s refresh closes it.
-When the super machinery fails, `for_you` falls back to the raw `counts.needs` and the mode is `error`: the count is
-never below what needs Fred. The window refetches `GET /api/super` when `snap.super.rev` differs from the view's, after
-every action of its own, and every 30 s while the page shows (served `off` reasons and `left_s` age).
+`snapshot()` computes `snap["super"]` **cheaply and without a lock of its own** (live items described with `view={}`,
+the queue, no `Hub.actions`, no brief, file or ledger read): `{rev, mode, for_you, later, line, by_project, marks}`;
+`marks` maps a task or session id to `["queue"]` or `["later", "HH:MM"]`. It reads `Hub.super_pub`, a published copy of
+the state: every path that changes `self.super` under `tlock` (plan 58's tick save, the pass result save, this plan's
+`_super_commit`) ends with `self._super_publish()`, which replaces the reference with a deep copy and caches the ledger
+figure the tick read. `snapshot()` never takes `tlock` (today it holds `self.lock` only, briefly, `server.py:551-583`;
+GET /api/state, the long poll and the tray must not queue behind task transactions). `rev` is a hash of the live keys
+with their stored advice (the **raw** `ann`, in both paths: plan 58 R3's stale-advice filter in GET is applied to the
+cards, never to the `rev` basis), Fred's hour, the back markers, the mode and the log tail; it never moves with age,
+cost or time left, so the cheap and the full computation agree on it. `GET /api/super` computes the same `rev` and the
+accurate counts (evidence-complete, auto-default aware, batches validated, stale advice filtered). The two numbers can
+differ by an item for at most one tick (5 s) in two cases: an item's Later validity turned on evidence only the full
+view reads (`incomplete`), or GET filtered a stale annotation that the next tick removes durably. The window then shows
+the view's number, the tray the snapshot's, and the tick closes it. When the super machinery fails, `for_you` falls
+back to the raw `counts.needs` and the mode is `error`: the count is never below what needs Fred (it drops the `accept`
+items and shows Fred's Later items again, so it only ever jumps up). The window refetches `GET /api/super` when
+`snap.super.rev` differs from the view's, after every action of its own, and every 30 s while the page shows (served
+`off` reasons and `left_s` age). `renderBoard` starts the refetch **before** it draws the header, so a stale snapshot
+number never shows for a frame while the view is fresh.
 
 ### 4.4 `GET /api/super` additions (plan 58 3.9 keeps every field)
 
 Top level: `rev`, `mode` (`ranked partial sorting paused off capped failed waiting error`), `controls`
 (`{pause, resume, sort}`, each `{label, off}` or null), `since` (`{at, lines[{ts g t p tm}], spent}`), `order_lines`
-(the orders a pass reads, comments dropped), `by_project`; `counts` keeps plan 58's four keys and `counts.queue` is the one number.
+(the orders a pass reads, comments dropped), `by_project`, `paused_at` (epoch or null, 4.2); `counts` keeps plan 58's
+four keys and `counts.queue` is the one number.
 
 Per item: `back`, `incomplete` (a reason or ""), `stay` (why it has no Later, or ""), `observed`, `path`, `open {kind id step}`, `facts [[text, "ok"|"h"]]`,
 `acts {state primary bar menu message}` (the served actions, filtered by an allowlist per state, `off` kept),
@@ -235,8 +264,9 @@ chat) and, where noted, opens the form the existing page already has; nothing is
 
 | Card kind (plan 58 `kind`) | Served state | Buttons (served ids) | Route and body | Gate |
 |---|---|---|---|---|
-| decision with options | `decision` | one row per option; Confirm `<key>` | `POST /api/task/message` `{task, mode: "answer", text, target, request_id}` as served | `Hub.task_message`, `message_availability` |
+| decision with options | `decision` | one row per option; Confirm `<key>`. The served default is preselected; a decision **without a default** (always-forwarded, plan 58 3.4) preselects nothing, marks no row "default" and keeps Confirm off until Fred picks a row | `POST /api/task/message` `{task, mode: "answer", text, target, request_id}` as served | `Hub.task_message`, `message_availability` |
 | decision without options, question | `decision` | Write your own answer | same route, text from the box, `request_id` a new UUID, `target` from `acts.message` | same |
+| chat task (plans 30, 42) at a STOP question, Console run | `running` or `decision` | Write your own answer (`acts.message.mode` is `answer`) | same route | same; an observed chat task has no `message` and only opens |
 | plan to confirm (`hold`) | `plan_ready` | Confirm | `POST /api/task/confirm` `{task}` | `task_levers.confirm` |
 | held: Fable | `hold` | Confirm Fable (two clicks) | `POST /api/task/confirm` | same |
 | held: pace | `hold` | Run anyway | `POST /api/task/confirm` | same |
@@ -246,7 +276,7 @@ chat) and, where noted, opens the form the existing page already has; nothing is
 | done, to accept | `done` | Accept; Reopen (opens the task, box focused) | `POST /api/task/accept` | `task_levers.accept` |
 | failed twice, stuck | `failed_twice`, `stuck` | Retry on a model (opens the retry form), Accept step result, Finish | none; `POST /api/task/stepdone`; `POST /api/task/done` (two clicks) | `retry`, `stepdone`, `done` |
 | handed with a note | `handed` | Start next task | `POST /api/task/resume` `{task: follow-up}`, or opens the next-step form | `task_levers.resume` |
-| hand-off hint | `running` | Hand off now (opens the Hand off form) | none (a form) | `handoff_available` |
+| hand-off hint | `running` | Hand off now (opens the Hand off form; served in the card's `bar`, since a card draws `primary` and `bar` only) | none (a form) | `handoff_available` |
 | Console run, STOP question | session | Write your own answer | `POST /api/continue` `{session, text}` | `Hub.levers.continue` |
 | Console run, interrupted | session | Resume | `POST /api/continue` `{session, text: RESUME_TEXT}` | `Hub.levers.continue` |
 | Console run, blocked | session | Open in terminal | `POST /api/terminal` `{session}` | `Hub.levers.terminal` |
@@ -277,9 +307,11 @@ an always item (plan 58); an unranked state has no batch.
 - **Expiry**: a hand entry whose hour passed returns once (`back`), and arms the same wake as plan 58's expired Later.
 - **Since you looked**: the tick appends a line when a task ends (finished, failed or stuck), when a key leaves the live
   set ("<task>: <kind> settled": answered here, in VS Code, in a terminal, or by Console at `auto`), and when a pass
-  ends ("Super agent sorted 10 items: 8 for you, 2 later" or "sort failed: <error>"). The spend line is the tasks'
-  cost since `looked_cost` plus the super agent's day figure. Mark seen: `{action: "seen"}` sets `looked`, `looked_cost`
-  and empties the page's list (the log keeps its lines until they age out).
+  ends ("Super agent sorted 10 items: 8 for you, 2 later" or "sort failed: <error>"). A key that leaves while the same
+  subject is still live under a new key (the state changed: a Reopen, a new attempt, a re-asked question) writes no
+  "settled" line: nothing was settled. The spend line is the tasks' cost since `looked_cost` plus the super agent's day
+  figure. Mark seen: `{action: "seen"}` sets `looked`, `looked_cost` and empties the page's list (the log keeps its lines
+  until they age out).
 
 ### 4.8 The one box (design section 6; code routes, no model)
 
@@ -300,14 +332,17 @@ mock); in `off`, `capped` and `error` the input is off. The next pass's prompt g
 the last sort` after the orders, delimited as untrusted evidence (it does not outrank the orders file or any code gate;
 the code-owned schema reminder says so); the pass that ends ok clears the messages it read. The reply is the pass's
 digest and the log line `Super agent, to "<first 60 characters>": noted for the next sorts. To keep it, add it to your
-orders.` (D4 a). Slice 3 can make it reply and propose an order.
+orders.` (D4 a). Slice 3 can make it reply and propose an order. **Binding requirement on plan 58's completion** (Task 3
+step 0 asserts it): the pass publishes its result by merging into the **live** `self.super` under `tlock`, never by
+replacing it with a copy taken at admission; a message, a Later, a Bring back or a Mark seen written while the pass ran
+must survive, and `drop_messages` removes only the ids the pass read (`job["msgs"]`).
 
 ### 4.10 Modes (the mock's eight states and two it does not draw)
 
 | Mode | When (code, first that holds) | Cards | Row line | Note on the page |
 |---|---|---|---|---|
 | `error` | a settings error, a storage error or no `claude.exe` | unranked | `cannot sort · oldest first` | red note with the reason; no Sort |
-| `paused` | Pause | unranked | `paused · oldest first · N running` | "Paused by you at HH:MM." Resume |
+| `paused` | Pause | unranked | `paused · oldest first · N running` | "Paused by you at HH:MM." (`paused_at`, 4.2) Resume |
 | `off` | `super_day_usd` or `super_pass_usd` is 0 | unranked | `off · oldest first` | "The super agent is off. Its daily limit is $0." Models settings |
 | `capped` | today's settled plus held spend reached the day limit | unranked | `today's limit reached · oldest first` | "Today's limit of $X is reached." Models settings |
 | `sorting` | a pass is running | as before (ranked keeps its advice) | `sorting N items · N running` | "Sorting N items. Cards keep their last recommendations until it ends." |
@@ -332,7 +367,7 @@ classes carry the prefix `sw-` (the mock's `.row .note .btn .lbl` collide with t
 |---|---|---|---|
 | SW-1 | The super agent row | First row of the list, always present: `◆ Super agent`, `N for you` (orange when N > 0, muted at 0), one code-built line (4.10). Selecting it makes the box talk to the super agent; selecting again leaves it. `aria-current` on the home pane. | 4 |
 | SW-2 | One count | Header button `N for you` (muted at 0, never hidden), row, page pill, For you sub-line, project lines and the tray tooltip read one number; a batch counts each member (4.3). | 1, 4 |
-| SW-3 | The page is the home pane | Shown with nothing selected, with the super agent row or a project row selected; eyebrow `All projects`, title `Super agent`, pill by mode, facts (Reviewed X of Y, Order oldest first, Last sorted / Last good sort), cost right (`$ super agent today`, `of $1.00 today` when capped). Plan 55's `pageHead`. | 5 |
+| SW-3 | The page is the home pane | Shown with nothing selected, with the super agent row or a project row selected; eyebrow `All projects`, title `Super agent`, pill by mode, facts (Reviewed X of Y, Order oldest first, Last sorted; no "Last good sort", X8), cost right (`$ super agent today`, `of $1.00 today` when capped). Plan 55's `pageHead` (`costSub` is its field). | 5 |
 | SW-4 | Four sections | For you, Later, Since you looked, Orders, plan 55's `sect` pattern. | 5 |
 | SW-5 | Card anatomy | Path `project › task`, tags, `kind · age`; the ask; the facts code knows; options with the default; a neutral block headed `Super agent suggests`; links (Open, Write your own answer, Later); buttons with one orange primary. The current card is orange-tinted like the dock card; the others fold to ask plus one `◆` line. | 5 |
 | SW-6 | What cannot wait says so | "Stays here: <reason>" replaces the Later link on an always item and on a decision whose default is about to be taken (`the default is taken at HH:MM`); tags `always yours`, `default at HH:MM`. | 5, 6 |
@@ -360,7 +395,7 @@ classes carry the prefix `sw-` (the mock's `.row .note .btn .lbl` collide with t
 | X5 | Undo, proposed order | Not drawn | slice 3 |
 | X6 | Job and merge rows | Not drawn | slices 4 and 5 |
 | X7 | One box | The left composer (files, effort, draft) stays; the page box's `New work` chip hands its text to the same `doPrep` and the two share one draft | the composer carries attachments and the effort slider the mock does not draw (D11) |
-| X8 | `Last good sort` fact, `Paused by you at 13:40` | Not drawn: `Paused by you.` and no last-good fact | the state keeps only the last pass and no pause time; adding either is a state key for a line of copy |
+| X8 | `Last good sort` fact, `Paused by you at 13:40` | `Paused by you at HH:MM` is drawn (`paused_at`, one float in the v2 state this plan adds anyway); the `Last good sort` fact is not drawn | the state keeps only the last pass; a last-good time would be a second record for one fact nobody acts on |
 
 ### 5.3 Unshown states this plan draws (shown to Fred as screenshots at Task 7)
 
@@ -394,8 +429,21 @@ D12; these are what the window adds.
 | D7 | The rest of the list under the roll-up (Done today, Done earlier, Older, Select done tasks, empty chats) | plan 55 D10 a inside each opened project; the quiet line counts `N done` | only what the mock draws; done tasks reachable by `+ N more` alone |
 | D8 | The queue and the project scope filter | the queue spans all projects (plan 55 D11 a); the scope filters the project groups only | the queue and its count follow the scope |
 | D9 | The word on the header button and in the tray | `N for you` (the mock's word) in both; the tray tooltip reads `2 for you, 1 working` | change the button only; the tray keeps `need you` |
-| D10 | Do finished tasks waiting for Accept reach the queue (the mock's Accept cards and the Accept batch)? | yes, for a day: a task that finished within 24 hours and is not accepted becomes an `accept` item (4.1a); older ones stay quiet | no: the queue holds only what plan 58 counts (waiting, stuck, asks, hints, handoffs, suggestions); Accept stays on the task page, and Accept cards wait for jobs (slice 4) |
+| D10 | Do finished tasks waiting for Accept reach the queue (the mock's Accept cards and the Accept batch)? | yes: every finished task the snapshot still shows (`DONE_DAYS`) and that is not accepted becomes an `accept` item (4.1a); no window of its own, so no item ever leaves because time passed and no false "settled" line is written | no: the queue holds only what plan 58 counts (waiting, stuck, asks, hints, handoffs, suggestions); Accept stays on the task page, and Accept cards wait for jobs (slice 4) |
 | D11 | The New work box | the page box's `New work` chip is a second entry to the existing composer: its text becomes the shared draft and `doPrep` runs (files and effort stay in the left composer, which stays visible) | the left composer moves into the page box (attachments, effort and draft re-homed; a bigger change to plan 48's moment 1) |
+
+Review notes (2026-11-08, plan review before the build; Fred decides):
+
+- **D1**: the review recommends a (b)-lite: a Task 0 that adds `retry_up` alone (a server `model: "up"` on the existing
+  retry route, plan 55 4.2 already names it) and leaves `run_instead` and the hint dismiss for later. Without it every
+  stuck and failed-twice card needs the task page for its Retry, which breaks "a day's items without a task page" for
+  the most frequent red card. If Fred takes it, Task 2's `CARD_ACTS` for `failed_twice` and `stuck` gains `retry_up` in
+  `primary` and the card draws it as the orange primary; nothing else changes.
+- **D11**: the review recommends (a) with **one visible text input at a time**: while the home pane shows, the left
+  composer's textarea collapses to its chips, effort and files strip and the page box is the input; off the home pane
+  the composer returns. Two editable inputs bound to one draft confuse focus and Enter. The mock has one box, so this
+  goes back to Fred rather than silently changing the mock.
+- **D10** is written for (a) as corrected above (no 24 h window).
 
 ## 8. Verification at the end of every task
 
@@ -411,16 +459,23 @@ D12; these are what the window adds.
 
 ## 9. Risks
 
-- **Planned against documents.** Plans 58 and 55 may change before they are built. Mitigation: section 2, and Task 1
-  step 0 binds every plan 58 name in one method (`Hub._super_inputs`); the web names of plan 55 are called, never copied.
-- **GET cost.** `Hub.actions` runs once per queue card (each reads several gates). Task 8 measures `GET /api/super`
-  with 30 and 65 live items (budget 150 ms at 30). If it is over, a read-only `GET /api/super/card?key=` serves the
-  current card lazily; no gate moves.
+- **Planned against documents.** Plans 58 and 55 may change before they are built. Mitigation: section 2 lists every
+  name; Task 1 step 0 binds the derived facts in one method (`Hub._super_inputs`) and maps the plan 58 attributes the
+  tasks read directly (`self.super`, `super_clock`, `_super_arm`, `super_wake`, `super_threads`, the tick's `events` and
+  `ended`, the completion's candidate) where each task names them; the web names of plan 55 are called, never copied.
+- **GET cost and lock scope.** `Hub.actions` runs **once per live item** (plan 58's describe loop; Task 2 reuses that
+  view and never calls it again), each call reading several gates: `levers` twice (`actions` and
+  `message_availability`, `server.py:1113`, `:1335`), `os.path.isdir`, `handoff_ready`'s stat, `recovery`'s process
+  probe. Those calls run **outside `tlock`** on a copied item list, as GET /api/task does today (58 README 2); only the
+  copy of state and items is taken under it. Task 2 measures `GET /api/super` with 30 live items on a scratch Hub as
+  soon as the cards serve (budget 150 ms at 30; Task 8 repeats it with 65). If it is over, a read-only
+  `GET /api/super/card?key=` serves the current card lazily; no gate moves.
 - **A stale answer.** A card is a snapshot. Every action posts keys the service re-checks (`404 unknown item`), the
   routes re-check their own gates, and a `rev` mismatch refetches before the next key press.
 - **Filtering something important.** Later is counted on the row and the page, its reasons are in sight, always items
   cannot enter it, Fred's hour is one fixed hour, and the unranked modes put the super agent's Later back.
-- **Two count sources.** The window reads one source at a time (4.3): the view when its `rev` matches the snapshot's, else the snapshot. A test fails if two window surfaces differ; the tray may lag the window by one tick in the rare case 4.3 names.
+- **Two count sources.** The window reads one source at a time (4.3): the view when its `rev` matches the snapshot's or a refetch is in flight, else the snapshot. A test fails if two window surfaces differ; the tray may lag the window by one tick in the two cases 4.3 names.
+- **`snapshot()` latency.** `snap["super"]` reads the published copy `Hub.super_pub` and takes no `tlock`; a test fails if `snapshot()` acquires it or reads the ledger.
 - **Key capture.** Keys act only with focus outside input, textarea, select and contenteditable, on the home pane, with
   no modifier; an armed two-click button disarms on any key.
 
@@ -430,3 +485,10 @@ D12; these are what the window adds.
   `a627264`; the seams read in `server.py` (`actions`, `levers`, `task_message`, `snapshot`, `task_row`), `app.js`
   (`needButtons`, `unblock`, the Models Tuning card, the header count), `tray.py` and `tuning.py`. Decisions D1 to D11
   open for Fred; no product file touched.
+- 2026-11-08: reviewed (plan only, same day). Fixed: one `Hub.actions` call per item, outside `tlock` (Task 2);
+  `snapshot()` reads a published state copy and takes no lock, reads no ledger (Task 1, `Hub.super_pub`); the hand-off
+  hint's form in the card's `bar`; a decision without a default preselects nothing; `chat` tasks answer in place; the
+  `accept` item has no 24 h window and a changed key writes no "settled" line (D10 wording); `paused_at` (X8); the
+  completion-merges-live-state requirement (4.9); the ledger rows of section 2 (fixtures, `policy_hash`, `incomplete`,
+  `settings`, `load_super`); the honest binding statement (section 9); seven tests that could not pass as written
+  (Tasks 2, 4, 5, 7, 8). Review notes under section 7 for D1 and D11. Still plan only.

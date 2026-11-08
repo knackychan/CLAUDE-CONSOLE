@@ -22,7 +22,7 @@ def scripted_day(page, rig):
     page.evaluate("showPage('board'); boardTask = ''; boardPick = ''; swSel = ''; renderBoard()")
     start = page.evaluate("forYou()")
     assert start >= 8, ("a day with items", start)
-    answered, later = [], 0
+    answered, later, skipped = [], 0, 0
     for _ in range(60):
         card = page.locator("#bwrap .sw-qc.cur")
         if not card.count():
@@ -35,12 +35,18 @@ def scripted_day(page, rig):
                 primary.first.click()
             rig.wait_idle(page)                                # the card shows Sent, then leaves on the service's word
             answered.append(label)
+            skipped = 0
         elif card.locator("[data-sw='later']").count():        # an observed chat or a card with no answer in it: Later, never Open
             card.locator("[data-sw='later']").click()
             rig.wait_idle(page)
             later += 1
-        else:
-            break                                              # an always item with no answer in the card
+            skipped = 0
+        else:                                                  # an always item with no answer in the card: J to the next one
+            total = page.evaluate("swCards().length")
+            skipped += 1
+            if skipped >= total:
+                break                                          # a whole cycle with nothing to do: the rest is for the task page
+            page.keyboard.press("j")
     opens = page.evaluate("window.__opens")
     assert opens == 0, ("no task page was opened", opens, answered)
     stuck = page.evaluate("swCards().flatMap((c) => c.items).filter((i) => i.acts.primary.some((a) => a.post && !a.off)).map((i) => i.key)")
