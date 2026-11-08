@@ -66,6 +66,16 @@ gated recovery actions. Implemented 2026-10-19 (Fred's live check open); plan 48
 | 55 | [plans/55-autopilot-ui/README.md](plans/55-autopilot-ui/README.md) (guided plan, 7 tasks) - the web build of the locked autopilot UI (plan 52 D9 a, design lock UI-1 to UI-9): the page reads GET /api/task actions only (15 client gate tests deleted, README 1.1); head and level switch, needs-you dock card, box hints and an icon bar with no menu, sections and plan timeline with supervisor lines, list by project under a pinned Needs you, step page with prev/next and the chat as a thread, the unshown states, plan 52's acceptance driven by page clicks; one read field (`prompt`) on GET /api/task; plan 38 leftovers placed; seam for plan 53 Task 4 | written 2026-11-07, plan only, decisions open for Fred |
 | 56 | [plans/56-skill-library/README.md](plans/56-skill-library/README.md) (guided plan, 9 tasks) - Skill library (plan 44 BRAINSTORM 14, D14-D18): `~/.claude/console/skills/` seeded from `dotclaude/console/skills/` like the kind files, a hand-edited `index.json` (kinds, tags, paths, always), picked by code from kind, tags and plan files with the supervisor and Fred on top, bodies inlined whole in the step prompt and saved as `skills.md`, `--disable-slash-commands` on every task step run (Claude; Command Code already has `--no-skills`), Prep and design `tags`, the Skills tab through a new `POST /api/skill`; no count or size limit; the window task depends on plan 55 | written 2026-11-07, plan only, decisions open for Fred |
 
+## Super agent and jobs (2026-11-08)
+
+[Brainstorm](design/brainstorm/2026-11-08-super-agent.md), BRAINSTORM D17, D18 and section 7.7. Fred reversed
+orchestration D-1: one super agent over every job and task (bounded passes over a code-built digest, a notes file and
+standing orders; it filters, ranks, recommends, and acts at `auto`), jobs in stages above tasks (plan 53 absorbed as
+the folder path), git worktrees for parallel writers. Five slices, each its own plan once the one before is built and
+checked: 1 super agent v1 with no acts (plan 58; building it needs plan 52's live check), 2 the window (needs plan 55
+Tasks 1 to 3 and the locked mock), 3 acts at `auto`, 4 jobs, 5 worktrees. Plan 55 Task 4 (the list) is replaced by
+slice 2; plan 53 is not built as written. The mock is made in a later session.
+
 ## Supervisor and navigation design (2026-10-17)
 
 [Plan 44 supervisor brainstorm](plans/44-supervisor/BRAINSTORM.md): supervisor policy

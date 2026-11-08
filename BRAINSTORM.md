@@ -31,6 +31,10 @@ a scheduler, worktree management, disk telemetry, a VS Code extension, adapter c
 controller leases, or a practice lab. No database. No model calls except through the harness CLIs.
 No cloud, no network calls of its own.
 
+Amended 2026-11-08 (D17, D18): worktrees are in for parallel writers, behind a per-project switch; a job's list of
+stages is not a task graph and its one index, advanced on the hub tick, is not a scheduler; the super agent is bounded
+passes, not a daemon or a resident agent.
+
 ## 3. Decisions (Fred, 2026-10-10)
 
 | # | Question | Decision |
@@ -51,6 +55,8 @@ No cloud, no network calls of its own.
 | D14 | Tray (2026-10-11) | A2: the service lives in a tray icon process (ctypes, no new package); the pywebview window is a child process that exists only while open, so a hidden console costs about 39 MB instead of about 329 (`plans/12-tray.md`) |
 | D15 | Name and logo (2026-10-11) | Name: ContextCompanion, temporary (Fred), harness-neutral; only the shown name changes (`window.TITLE`, page title), ids and folders stay. Logo: a 3 x 3 board of cells, a lit route to an orange signal cell (`design/logo/`, `console/icon.py`, `plans/14-logo.md`) |
 | D16 | Board simplification (2026-10-19) | Prompt, Run supervised, Supervise (section 7.6, `plans/48-three-moments.md`): Start is supervised by default, one message box carries what comes next, per-step levers leave the screen, Hand off / Finish / Models sit behind one menu. Mock explored, not yet locked |
+| D17 | Jobs (2026-11-08) | A job is a goal split into tasks, in stages: the tasks of a stage run side by side, stages run in order, one index advanced on the hub tick (not a task graph, not a scheduler). From a typed goal (the planner splits it, Fred confirms) or a sub-plan folder (plan 53, absorbed). Parallel writers in one repo run in git worktrees behind a per-project switch, merged on Fred's click. `design/brainstorm/2026-11-08-super-agent.md` section 4 |
+| D18 | Super agent (2026-11-08) | One role over every job and task: bounded passes on events over a code-built digest, a notes file and Fred's standing orders. It filters, ranks and recommends; at `auto` it also acts within caps; what needs Fred and what is always shown to him are code. Reverses orchestration D-1 (no orchestrator agent) and plan 44's "no cross-task decisions"; still no resident session. One box follows the selection. Same file, sections 3 and 6; section 7.7 |
 
 ## 4. Architecture
 
@@ -307,6 +313,16 @@ Decisions (Fred took the recommended option on each, 2026-10-19):
 
 Plan 52 (decided 2026-10-20, built 2026-11-07): the chain is the run loop; the supervisor handles exceptions. Start keeps the planner's whole step list as the plan 17 chain, so no pass runs between two good steps (D1 and D2 above now read: every mode runs the chain, and the level decides the gates, not whether a step waits for a pass). The supervisor wakes on stuck, a plan hold, done, Fred's message and a 30-minute stall. The levels are `gated`, `auto`, `suggest` and `off`, per project, with `gated` the default: the plan is the one gate (one Confirm), and `auto` also applies replans and takes a decision's default after `decision_timeout_s` (600 s). A question that is a real choice is a decision card: the handoff's `DECISION:` block gives two to four options and an optional default, and the answer joins plan.md Decisions. A finished task shows the finish card (steps, verdicts, files, cost, open questions) with Accept and Reopen. `GET /api/task` `actions` is the UI's one input; its design is `design/rework/locked/workflow-autopilot.html`, built by a later web plan. Headless acceptance: `tests/live_autopilot_check.py`; Fred's live check is open.
 
+### 7.7 Super agent and jobs (decided by Fred, 2026-11-08)
+
+Design: `design/brainstorm/2026-11-08-super-agent.md` (D17, D18); the mock is made in a later session. Fred stops being
+the router and the filter between tasks. The super agent row replaces the Needs you pin, and its page is the home
+pane: one queue of what needs Fred, ranked, batched and recommended by the super agent, each card answered in place
+(J, K, 1 to 4, Enter, S), with Later and Since you looked always in sight. The list rolls up: a project, a job and a
+task are one line each until something inside needs Fred, and steps show only under the selected task (plan 52 UI-2
+changes). Jobs sit between projects and tasks; one box follows the selection, its chip naming where Enter goes. Five
+slices: super agent v1 with no acts (plan 58), the window, acts at `auto`, jobs, worktrees.
+
 ## 8. Error handling
 
 - **Crash / shutdown during a run**: transcripts are written line by line, edits stay on disk, only
@@ -390,3 +406,7 @@ Plan 52 (decided 2026-10-20, built 2026-11-07): the chain is the run loop; the s
 - 2026-10-19 - Board simplification with Fred (section 7.6, D16): three moments (Prompt, Run supervised,
   Supervise), supervised by default, one message box for what comes next, the rest behind one menu. Mock in
   `design/rework/explored/e-prompt-run-supervise.html`; sub-plan 48.
+- 2026-11-08 - Super agent and jobs with Fred, from a video report on super-agent design (section 7.7, D17, D18,
+  `design/brainstorm/2026-11-08-super-agent.md`): one super agent over every task made of bounded passes (reverses
+  orchestration D-1), jobs in stages above tasks (absorbs plan 53), git worktrees for parallel writers. Slice 1 is
+  plan 58; the mock moves to a later session.
