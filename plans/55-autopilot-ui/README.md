@@ -1,6 +1,6 @@
 # Plan 55: The autopilot Board. The locked UI built into web/, reading `actions` only
 
-Status: written 2026-11-07, plan only (no product code, test or config changed by its writing). D1 to D14 below are
+Status: written 2026-11-07, plan only, decisions closed 2026-11-08 (D3 b with a Task 0, the rest a) (no product code, test or config changed by its writing). D1 to D14 below are
 written as defaults with the recommended option first; Fred confirms or changes them before Task 1 starts. Plan 52
 D9 (a): "a plan of its own after Task 6, reading `actions` only". Lands on plans 48 (the Board in three moments),
 50 (Models Supervisor card), 51 (Reject view), 52 (Task 6 `actions`, Task 8 design lock UI-1 to UI-9), 38 (open
@@ -11,6 +11,7 @@ are Console Cells, unchanged. The mock's strings are the copy; where this plan c
 
 | # | File | Delivers | Depends on |
 |---|---|---|---|
+| 0 | (no file yet; [D3 b, Fred 2026-11-08]) | server first: `Hub.actions` lists the README 4.2 rows that have a route (`approve_auto` with a `remember: "auto"` body field on `/api/task/supervisor`; `run_instead` and `retry_up` as `model` / `model: "up"` on the existing retry route; `terminal` and `folder` in the stuck and stopped menus; `add_step` and `finish` in `common_menu`; `retry` in the handed menu when `lv.retry == ""`), tests first in `tests/test_server.py`; Edit steps and Edit prompt stay out (they need an editor plan) | none |
 | 1 | [01-head-and-seam.md](01-head-and-seam.md) | the seam (`acts`, `actBtn`, `runAction`), the page head on the opened task (UI-3), the level switch, `tests/live_board_check.py` | none |
 | 2 | [02-dock-box-bar.md](02-dock-box-bar.md) | the needs-you dock card (UI-7), the message box hints (UI-8), the bar with icon tools and no menu (UI-8, UI-9); the ⋯ task menu, `supCard`'s pending card and the attention gates go | 1 |
 | 3 | [03-body-and-plan.md](03-body-and-plan.md) | the body sections (UI-4: Prompt, Brief, Plan), the plan timeline with `◆ Supervisor` lines (UI-5); `routeHtml`, `gaugeHtml` and the quiet `supCard` go | 2 |
@@ -26,24 +27,41 @@ dark and light, reduced motion and 130 % text scaling. Other chats edit `web/app
 `CLAUDE.md` in parallel: anchor every edit by the quoted line, never by a line number, stage explicit paths, never
 stage `console/__main__.py`. Line numbers below are those of `9b6f988` and are for finding, not anchoring.
 
-## Decisions (open for Fred; recommended default first)
+## Decisions (closed by Fred 2026-11-08; recommended default first)
 
-| # | Question | Default (recommended) | Other option |
-|---|---|---|---|
-| D1 | Task order | (a) head, then the action surface (dock card, box, bar), then body, list, step page: Fred's plan 52 live check needs Accept, the decision options, Approve and the level switch on the page, and today only HTTP reaches them (section 6) | (b) the list first, as the prompt's example order |
-| D2 | Where the mock's button words come from | (a) a small web map `ACT_COPY` keyed by action id (and a `TIP` map for tooltips); `actions` stays unchanged, as UI-9 says ("Task 6 `actions` is unchanged") | (b) change the labels in `Hub.actions` (touches `test_server`, `live_autopilot_check` and the README 52 section 3 wording Fred confirmed on 2026-11-07) |
-| D3 | Buttons the mock draws that `actions` does not list (section 4.2: Approve and auto accept; Run on opus instead; Terminal and Folder icons on stuck and stopped tasks; "Retry on a stronger model" as one click; Edit steps and Edit prompt on a saved planned task) | (a) not drawn; a later server plan lists them in `actions` and the page draws them with no web change but an icon or a copy line | (b) a Task 0 here adds them to `Hub.actions` first |
-| D4 | The head's level switch (UI-3 shows gated / auto) | (a) two words, gated and auto; when the task is at off or suggest, that word shows too, pressed, so the state is never hidden; off and suggest are set per project on Models | (b) all four words in the head |
-| D5 | Notes for Reject and Retry | (a) both take the message box's text as their note (the mock's hints: "Why not, or what to do instead", "Tell the agent what to try differently on the retry"); Retry's model picker opens inside the dock card | (b) keep today's separate note boxes (Reject's second click, the retry form's own textarea) |
-| D6 | The spend figure "of $5" in the bar | (a) dropped: no per-task budget exists (`supervisor_work_usd` counts only auto-dispatched work); the bar shows the task's spend | (b) show `of $` + the supervisor work cap when the level is gated or auto |
-| D7 | The Prompt section (Fred's typed words; the mock's "you, 08:10") | (a) GET /api/task gains one read field, `prompt` (the task folder's `prompt.md`, masked), in Task 3; no gate, no write | (b) only the Brief section until a later plan |
-| D8 | The Risky chip in orange (mock `.chip.y`) | (a) ink, like the other chips: style.css's rule is "orange means needs you and nothing else" | (b) orange as drawn |
-| D9 | The status marks (mock: 8 px squares that blink) | (a) keep plan 21's locked status sprites in the list rows and on the plan rail (Fred picked them; they already follow Windows animation effects) | (b) the mock's squares |
-| D10 | The list beyond the mock (Done days, Older, Select to delete, empty chats, step 00) | (a) per project: live rows, today's done rows, then one "Done earlier · N" fold that opens that project's days; Older stays one row at the end; Select done tasks stays on the day groups; empty chats stay behind the header menu; the step 00 row leaves the list (the Brief section links to it) | (b) one global Done group under the projects |
-| D11 | The Needs you pin under a project scope | (a) the pin always spans all projects (the mock says "all projects"; the header's "N need you" button counts the same set); the project groups follow the scope | (b) the pin follows the scope |
-| D12 | The step page's tabs and step-level actions | (a) Chat, Received, Handoff, Files; the Route tab's facts move to the head meta (Model, Took); the Plan tab goes (plan.md opens from the task page's Plan section and the plan card's "Read or edit the plan"); "Add step from here" stays on an older step, reading the served `levers.add_next` and `sources` reasons (a step-level action `actions` does not carry) | (b) also drop Add step from here |
-| D13 | The observed page for a session row (a VS Code or terminal chat that is not a task) | (a) the session page gets the UI-3 head and the UI-8 bar, its buttons still from GET /api/levers (the service's gates, not rebuilt); a saved task with an external session reads `actions` like any task | (b) GET /api/levers also returns `actions: Hub.actions(row)` (Fred named `Hub.actions` accepting a session row on 2026-11-07, but no route serves it) |
-| D14 | The states the mock did not draw (section 5) | (a) as specified in section 5 (new design, reusing the dock card and bar rules), shown to Fred as screenshots at stop 1 before Task 3 | (b) Fred draws them in the mock first |
+| # | Question | Default (recommended) | Other option | Taken |
+|---|---|---|---|---|
+| D1 | Task order | (a) head, then the action surface (dock card, box, bar), then body, list, step page: Fred's plan 52 live check needs Accept, the decision options, Approve and the level switch on the page, and today only HTTP reaches them (section 6) | (b) the list first, as the prompt's example order | (a) |
+| D2 | Where the mock's button words come from | (a) a small web map `ACT_COPY` keyed by action id (and a `TIP` map for tooltips); `actions` stays unchanged, as UI-9 says ("Task 6 `actions` is unchanged") | (b) change the labels in `Hub.actions` (touches `test_server`, `live_autopilot_check` and the README 52 section 3 wording Fred confirmed on 2026-11-07) | (a) |
+| D3 | Buttons the mock draws that `actions` does not list (section 4.2: Approve and auto accept; Run on opus instead; Terminal and Folder icons on stuck and stopped tasks; "Retry on a stronger model" as one click; Edit steps and Edit prompt on a saved planned task) | (a) not drawn; a later server plan lists them in `actions` and the page draws them with no web change but an icon or a copy line | (b) a Task 0 here adds them to `Hub.actions` first | (b) |
+| D4 | The head's level switch (UI-3 shows gated / auto) | (a) two words, gated and auto; when the task is at off or suggest, that word shows too, pressed, so the state is never hidden; off and suggest are set per project on Models | (b) all four words in the head | (a) |
+| D5 | Notes for Reject and Retry | (a) both take the message box's text as their note (the mock's hints: "Why not, or what to do instead", "Tell the agent what to try differently on the retry"); Retry's model picker opens inside the dock card | (b) keep today's separate note boxes (Reject's second click, the retry form's own textarea) | (a) |
+| D6 | The spend figure "of $5" in the bar | (a) dropped: no per-task budget exists (`supervisor_work_usd` counts only auto-dispatched work); the bar shows the task's spend | (b) show `of $` + the supervisor work cap when the level is gated or auto | (a) |
+| D7 | The Prompt section (Fred's typed words; the mock's "you, 08:10") | (a) GET /api/task gains one read field, `prompt` (the task folder's `prompt.md`, masked), in Task 3; no gate, no write | (b) only the Brief section until a later plan | (a) |
+| D8 | The Risky chip in orange (mock `.chip.y`) | (a) ink, like the other chips: style.css's rule is "orange means needs you and nothing else" | (b) orange as drawn | (a) |
+| D9 | The status marks (mock: 8 px squares that blink) | (a) keep plan 21's locked status sprites in the list rows and on the plan rail (Fred picked them; they already follow Windows animation effects) | (b) the mock's squares | (a) |
+| D10 | The list beyond the mock (Done days, Older, Select to delete, empty chats, step 00) | (a) per project: live rows, today's done rows, then one "Done earlier · N" fold that opens that project's days; Older stays one row at the end; Select done tasks stays on the day groups; empty chats stay behind the header menu; the step 00 row leaves the list (the Brief section links to it) | (b) one global Done group under the projects | (a) |
+| D11 | The Needs you pin under a project scope | (a) the pin always spans all projects (the mock says "all projects"; the header's "N need you" button counts the same set); the project groups follow the scope | (b) the pin follows the scope | (a) |
+| D12 | The step page's tabs and step-level actions | (a) Chat, Received, Handoff, Files; the Route tab's facts move to the head meta (Model, Took); the Plan tab goes (plan.md opens from the task page's Plan section and the plan card's "Read or edit the plan"); "Add step from here" stays on an older step, reading the served `levers.add_next` and `sources` reasons (a step-level action `actions` does not carry) | (b) also drop Add step from here | (a) |
+| D13 | The observed page for a session row (a VS Code or terminal chat that is not a task) | (a) the session page gets the UI-3 head and the UI-8 bar, its buttons still from GET /api/levers (the service's gates, not rebuilt); a saved task with an external session reads `actions` like any task | (b) GET /api/levers also returns `actions: Hub.actions(row)` (Fred named `Hub.actions` accepting a session row on 2026-11-07, but no route serves it) | (a) |
+| D14 | The states the mock did not draw (section 5) | (a) as specified in section 5 (new design, reusing the dock card and bar rules), shown to Fred as screenshots at stop 1 before Task 3 | (b) Fred draws them in the mock first | (a) |
+
+Decided by Fred, 2026-11-08:
+
+- D1: (a) head, then dock card, box and bar, then body, list, step page.
+- D3: (b) a Task 0 serves the 4.2 buttons that have a route before Task 1; Edit steps and Edit prompt stay out until an editor plan. Seen live: f400's stuck card had only Dismiss.
+- D14: (a) the unshown states as section 5 specifies, Fred checks screenshots at Stop 1.
+- D2: (a) ACT_COPY and TIP in web/app.js; actions unchanged.
+- D4: (a) gated and auto in the head, plus off or suggest pressed when the task is there.
+- D5: (a) Reject and Retry notes come from the message box; Retry's model picker in the dock card.
+- D6: (a) the bar shows the task's spend, no 'of $'.
+- D7: (a) GET /api/task gains the read field prompt in Task 3.
+- D8: (a) the Risky chip in ink; orange means for you only.
+- D9: (a) plan 21's status sprites stay.
+- D10: (a) per project: live, today's done, Done earlier fold, Older; now the inner grouping of plan 59's roll-up (plan 59 Task 4 replaces Task 4 here).
+- D11: (a) the needs-you set spans all projects; the scope filters the project groups only.
+- D12: (a) Chat, Received, Handoff, Files; Add step from here stays on an older step.
+- D13: (a) the observed page gets the new head and bar look, buttons from GET /api/levers.
 
 ## 1. The seam: `actions` decides what shows and what is enabled
 
@@ -144,6 +162,10 @@ sentence ends at "auto". Everything else draws `a.label` unchanged.
 | Edit steps, Edit prompt | ready (saved planned task) | no editor exists for a saved planned task; the Prep card's editors serve Prep jobs only | an editor plan; until then a ready task shows Start and Drop |
 | (not in the mock, a loss) Add step on a model, Finish task | running, decision, plan_ready, a replied chat task | today's ⋯ menu has both on any task; `actions` lists `add_step` only after a Reject and `finish` only on stuck, stopped and failed twice. A chat task (plan 42) can then not get a next step or be finished from its page until it stops | `add_step` and `finish` in `common_menu` (two lines in `Hub.actions`); Fred decides with D3 |
 | (not in the mock, a loss) Retry on another model when a handoff run wrote no note (plan 40) | handed | the `handed` state lists `start_next` and Delete only; `handedBox` read `d.levers.retry` | `retry` in the handed menu when `lv.retry == ""` |
+
+[D3 b, Fred 2026-11-08] Task 0 serves every row above that has a route (the right column), before Task 1; the page
+draws them through `ACT_COPY` and `actBtn` with no other web change. Edit steps and Edit prompt stay undrawn until an
+editor plan (Fred: out of Task 0).
 
 ### 4.3 Copy this plan writes (not in the mock; flagged for Fred at stop 1)
 

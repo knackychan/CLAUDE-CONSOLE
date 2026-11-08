@@ -503,6 +503,8 @@ def dock_checks(page, name):  # Task 2: the card stays in sight, the primary is 
 clicks go; Hand off is `page.locator('.p-bar [data-aid="handoff"]')`; the `nextopen` step (Add step on a model from the
 task menu) is replaced by the same check on a rejected supervisor card's bar (`[data-aid="add_step"]`), or dropped
 with a note if that fixture has no supervisor (D3 a: `actions` lists Add step only after Reject).
+[D3 b, Fred 2026-11-08] After Task 0 `add_step` is in `common_menu`: the `nextopen` step stays, as
+`page.locator('.p-bar [data-aid="add_step"]')` on the running fixture; nothing is dropped.
 
 ## 5. Run
 

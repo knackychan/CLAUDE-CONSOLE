@@ -44,3 +44,22 @@ rule's own Claude rung. A retry should not try a second untested harness. Keep F
 | D10 STOP without options | (a) always forwarded | |
 | D11 act and order | (a) slice 3 | |
 | D12 JEV | (a) shadow evaluation later, own plan | |
+
+## Plan 55
+
+| Decision | Choice | Reason |
+|---|---|---|
+| D1 task order | (a) head, action surface, then the rest | |
+| D3 unserved buttons | (b) Task 0 in Hub.actions (the routed rows of 4.2); Edit steps/prompt out | F4: stuck card had only Dismiss |
+| D14 unshown states | (a) section 5 table, screenshots at Stop 1 | |
+| D2 button words | (a) ACT_COPY / TIP in the page | |
+| D4 level switch | (a) two words, plus the current one | |
+| D5 Reject/Retry notes | (a) the message box | |
+| D6 spend figure | (a) spend only | |
+| D7 Prompt section | (a) read field prompt | |
+| D8 Risky chip | (a) ink | |
+| D9 status marks | (a) plan 21 sprites | |
+| D10 list beyond the mock | (a) per project (inner grouping of plan 59's roll-up) | |
+| D11 needs-you under a scope | (a) always all projects | |
+| D12 step page | (a) four tabs, Add step from here kept | |
+| D13 observed page | (a) new look, levers route | |
