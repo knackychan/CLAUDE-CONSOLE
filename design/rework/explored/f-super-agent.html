@@ -1,0 +1,1095 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super Agent</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Explored 2026-11-08; locked by Fred the same day as design/rework/locked/super-agent.html (the target). Design: design/brainstorm/2026-11-08-super-agent.md (sections 5, 6, 9), plan 58
+   and its review (plans/58-super-agent/08-review-and-jev.md). Built on the locked workflow-autopilot.html: the Needs
+   you pin becomes the super agent row and its page, the list rolls up, one box follows the selection. Tokens, type and
+   the cell motif are Console Cells (locked), unchanged. Sample data only; nothing here talks to the service.
+   URL hash for screenshots: #s=queue|sorting|partial|calm|paused|off|capped|failed|f-acts|f-job|f-jobtask|f-merge
+   &theme=light|dark &w=900|400|340 &motion=reduce &nv=list &open=<task id> */
+:root {
+  --page: #0b0c0e; --win: #121315; --raise: #1a1c1f; --off: #24272b; --ink: #ebe8e1; --mut: #9a9993; --line: #26292d;
+  --you: #ff8a3d; --bad: #ff5a4e; --ok: #5ed39a;
+  --shadow: 0 24px 60px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --dot: "Doto", "Cascadia Mono", monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; } }
+:root[data-theme="light"] {
+  --page: #dedcd6; --win: #f4f3ef; --raise: #e7e5e0; --off: #d6d4ce; --ink: #17181b; --mut: #5f5e59; --line: #d2d0ca;
+  --you: #b84f00; --bad: #c0352b; --ok: #1d7a4b; --shadow: 0 24px 60px rgb(30 28 20 / 20%), 0 0 0 1px rgb(0 0 0 / 5%); color-scheme: light; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { scrollbar-color: var(--off) transparent; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--ui); padding: 24px 16px 48px; accent-color: var(--ink); caret-color: var(--ink); }
+::selection { background: color-mix(in srgb, var(--ink) 24%, transparent); }
+.wrap { max-width: 940px; margin: 0 auto; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+header h1 { font: 700 30px/1 var(--dot); margin: 0 0 8px; }
+header p { margin: 0; color: var(--mut); max-width: 78ch; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:where(button, input, textarea, [tabindex]):focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+button { font-family: inherit; }
+button:disabled { cursor: default; }
+.lbl { font: 500 11px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--mut); }
+.cells { display: grid; gap: 1px; }
+.cells i { display: block; aspect-ratio: 1; background: var(--off); border-radius: 1px; }
+.cells i.f { background: var(--ink); }
+@keyframes blink { 50% { background: var(--off); } }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="reduce"]) .live { animation: blink 1.6s steps(2, jump-none) infinite; }
+  :root:not([data-motion="reduce"]) .btn { transition: transform .12s ease-out, border-color .12s; }
+  :root:not([data-motion="reduce"]) .btn:active:not(:disabled) { transform: scale(.97); }
+  :root:not([data-motion="reduce"]) :is(.row, .qc, .prj, .sub, .st, .opt) { transition: border-color .12s, background-color .12s; }
+}
+
+/* review controls, outside the window */
+.views { display: grid; gap: 6px; }
+.vrow { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.vrow .g { font: 500 11px var(--mono); color: var(--mut); text-transform: uppercase; letter-spacing: .04em; width: 100px; flex: none; }
+.views button { font: 500 12px var(--mono); color: var(--mut); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; min-height: 32px; cursor: pointer; }
+.views button:hover { color: var(--ink); }
+.views button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+.vrow.fut button { border-style: dashed; }
+.scen { margin: 0; font: 12px/1.5 var(--mono); color: var(--mut); padding: 8px 12px; border: 1px dashed var(--line); border-radius: 8px; max-width: 900px; }
+.scen.fut { color: var(--ink); border-color: var(--mut); }
+.scen b { color: var(--ink); font-weight: 600; }
+
+/* the window: Board size, a CSS container; one column under 700 px */
+.win { width: 100%; max-width: 900px; height: 700px; background: var(--win); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; position: relative; }
+.win.w400 { max-width: 400px; } .win.w340 { max-width: 340px; }
+.top { height: 36px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 0 12px; border-bottom: 1px solid var(--line); }
+.top .brand { font: 600 13px var(--ui); }
+.top .sp { flex: 1; }
+.scope { height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font: 600 12px var(--mono); }
+.needs { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); background: transparent; border-radius: 4px; padding: 1px 7px; min-height: 24px; cursor: pointer; white-space: nowrap; }
+.needs.z { color: var(--mut); border-color: var(--line); }
+.rb { width: 34px; height: 36px; border: 0; background: transparent; color: var(--mut); font: 14px var(--ui); }
+@container (max-width: 380px) { .scope { display: none; } .rb { width: 30px; } }
+.body { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+.vback { display: none; }
+@container (max-width: 700px) {
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .list { display: none; border-right: 0 !important; }
+  .win.nlist .list { display: block; }
+  .win.nlist .task { display: none; }
+  .vback { display: flex; }
+}
+
+/* the list */
+.list { border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: thin; padding-bottom: 10px; min-width: 0; }
+.row { width: calc(100% - 16px); margin: 0 8px 4px; padding: 7px 9px; border-radius: 8px; background: var(--raise); border: 1px solid transparent; display: grid; gap: 2px; cursor: pointer; grid-template-columns: minmax(0, 1fr); text-align: left; color: var(--ink); font: inherit; }
+.row:hover { border-color: var(--line); }
+.row.pick { border-color: var(--ink); }
+.row.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 7%, var(--raise)); }
+.row.y.pick { border-color: var(--you); }
+.row .l1 { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.row .t { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .l2 { display: flex; gap: 6px; font: 11px var(--mono); color: var(--mut); min-width: 0; }
+.row .l2 .ln { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .l2 .ln.y { color: var(--you); } .row .l2 .ln.r { color: var(--bad); } .row .l2 .ln.n { color: var(--ink); }
+.mk { width: 8px; height: 8px; flex: none; border-radius: 1px; background: var(--off); display: inline-block; }
+.mk.n { background: var(--ink); } .mk.y { background: var(--you); } .mk.r { background: var(--bad); } .mk.g { background: var(--ok); }
+.mk.h { background: repeating-linear-gradient(135deg, var(--mut) 0 1.2px, transparent 1.2px 3px); box-shadow: inset 0 0 0 1px var(--mut); }
+.row.obs { background: transparent; border: 1px dashed var(--line); padding-block: 5px; }
+.row.obs .t { font-weight: 400; }
+.row.obs.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 4%, transparent); }
+.row.obs.pick { border-color: var(--ink); }
+/* the super agent row: always first; its count is the queue (what reaches Fred), the same number as the header */
+.sa { width: calc(100% - 16px); margin: 8px 8px 4px; padding: 8px 10px; border-radius: 9px; background: var(--raise); border: 1px solid var(--line); display: grid; gap: 3px; cursor: pointer; text-align: left; color: var(--ink); font: inherit; }
+.sa:hover { border-color: var(--mut); }
+.sa .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sa .dm { font: 12px var(--mono); }
+.sa .t { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; }
+.cnt { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+.cnt.z { color: var(--mut); border-color: var(--line); }
+.sa .l2 { font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa.y { border-color: color-mix(in srgb, var(--you) 40%, transparent); background: color-mix(in srgb, var(--you) 5%, var(--raise)); }
+.sa[aria-current="page"] { border-color: var(--mut); }
+.sa.pick { border-color: var(--ink); }
+/* a project: one line until something inside is for Fred; then its for-you rows and one quiet line for the rest */
+.prj { display: flex; align-items: center; gap: 6px; width: calc(100% - 16px); margin: 8px 8px 3px; padding: 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; min-height: 30px; }
+.prj:hover { background: var(--raise); }
+.prj.pick { border-color: var(--ink); }
+.prj .car { font: 11px var(--mono); color: var(--mut); width: 10px; flex: none; }
+.prj .nm { flex: 1 1 auto; min-width: 9ch; font: 600 11px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prj .sum { flex: 0 1 auto; min-width: 0; font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prj .sum b { color: var(--you); font-weight: 600; }
+.more { display: block; width: calc(100% - 16px); margin: -1px 8px 6px; padding: 3px 9px; border: 0; border-radius: 5px; background: transparent; color: var(--mut); font: 11px var(--mono); text-align: left; cursor: pointer; min-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.more:hover { color: var(--ink); background: var(--raise); }
+.subs, .jsubs { margin: -1px 8px 6px 18px; padding: 2px 0 0 8px; border-left: 1px solid var(--line); display: grid; gap: 1px; }
+.sub, .jt { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 6px; align-items: baseline; width: 100%; padding: 4px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: 12px var(--ui); text-align: left; cursor: pointer; min-height: 24px; }
+.sub:hover, .jt:hover { background: var(--raise); }
+.sub.pick, .jt.pick { background: var(--raise); box-shadow: inset 0 0 0 1px var(--line); }
+.sub .sg, .jt .sg { font: 11px var(--mono); color: var(--mut); }
+:is(.sub, .jt).done .sg { color: var(--ok); } :is(.sub, .jt).run .sg { color: var(--ink); } :is(.sub, .jt).fail .sg { color: var(--bad); } :is(.sub, .jt).wait .sg, .jt.wait .sm { color: var(--you); }
+:is(.sub, .jt) .sn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:is(.sub, .jt).q .sn { color: var(--mut); }
+:is(.sub, .jt) .sm { font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.row.job .jg { font: 12px var(--mono); color: var(--mut); width: 10px; flex: none; }
+.stg { display: inline-flex; gap: 2px; flex: none; }
+.stg i { width: 9px; height: 9px; border-radius: 1px; background: var(--off); }
+.stg i.f { background: var(--ink); }
+.stg i.c { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink); }
+
+/* the page */
+.task { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.vback { flex: none; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); min-width: 0; }
+.vb { flex: none; font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; min-height: 28px; cursor: pointer; }
+.vb:hover { border-color: var(--ink); }
+.vback .crumb { flex: 1; min-width: 0; font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tscroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; padding: 14px 18px 18px; display: grid; align-content: start; grid-template-columns: minmax(0, 1fr); }
+@container (max-width: 520px) { .tscroll { padding: 12px 12px 16px; } }
+.hd { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 16px; align-items: end; padding-bottom: 12px; }
+@container (max-width: 420px) { .hd { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; } .hd .cost b { font-size: 22px; } }
+.hd .hl { min-width: 0; }
+.hd .eb { display: block; font: 600 11px var(--mono); letter-spacing: .04em; color: var(--mut); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.hd h2 { margin: 0 0 6px; font: 600 17px/1.3 var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd h2:focus { outline: none; }
+.hd h2:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font: 12px var(--ui); min-width: 0; }
+.pst { font: 600 12px var(--ui); padding: 2px 9px; border-radius: 10px; background: var(--raise); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.pst.g { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--raise)); }
+.pst.y { color: var(--you); background: color-mix(in srgb, var(--you) 12%, var(--raise)); }
+.pst.r { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--raise)); }
+.pst.q { color: var(--mut); }
+.fact { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); white-space: nowrap; }
+.fact i { font-style: normal; color: var(--mut); }
+.spin { width: 8px; height: 8px; border-radius: 1px; background: var(--ink); display: inline-block; flex: none; }
+.hd .cost { text-align: right; display: grid; justify-items: end; gap: 2px; }
+.hd .cost b { font: 700 28px/1 var(--dot); }
+.hd .cost span { font: 12px var(--ui); color: var(--mut); }
+.hd .cost .lvl { margin-bottom: 4px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { font: 600 11px var(--mono); background: transparent; color: var(--mut); border: 0; padding: 2px 8px; cursor: pointer; min-height: 24px; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--win); }
+.sect { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.sect .sh { display: grid; align-content: start; gap: 2px; padding-top: 1px; }
+.sect .sh .lbl { color: var(--ink); }
+.sect .sh .sm { font: 11px var(--mono); color: var(--mut); }
+.sect .sh .sm.y { color: var(--you); }
+.sect .sb { min-width: 0; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+@container (max-width: 520px) { .sect { grid-template-columns: minmax(0, 1fr); gap: 6px; } .sect .sh { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; } }
+.tx { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 0 6px; align-items: start; }
+.tx .car { background: none; border: 0; color: var(--mut); font: 11px var(--mono); padding: 3px 0 0; cursor: pointer; text-align: left; }
+.tx .pv { grid-column: 2; background: none; border: 0; padding: 0; text-align: left; font: 13px var(--ui); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; }
+.tx .pv:hover { color: var(--ink); }
+.txt { grid-column: 2; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; max-height: 116px; overflow-y: auto; padding: 8px 10px; font: 13px/1.55 var(--ui); user-select: text; white-space: pre-wrap; }
+.brief { margin: 0; font-size: 13px; line-height: 1.55; }
+.brief.mut { color: var(--mut); }
+/* plan rows (locked UI-5) */
+.tl { display: grid; grid-template-columns: minmax(0, 1fr); }
+.st { display: grid; grid-template-columns: 14px 22px minmax(0, 1fr) auto auto; gap: 0 10px; align-items: baseline; padding: 7px 8px; margin: 0 -8px; border-radius: 6px; position: relative; cursor: pointer; }
+.st:hover, .st.pick { background: var(--raise); }
+.st::before { content: ""; position: absolute; left: 14px; top: 22px; bottom: -7px; width: 1px; background: var(--line); }
+.st:last-child::before { display: none; }
+.st .dt { width: 13px; height: 13px; border-radius: 2px; background: var(--off); align-self: center; position: relative; z-index: 1; }
+.st.done .dt, .st.run .dt { background: var(--ink); } .st.fail .dt { background: var(--bad); } .st.wait .dt { background: var(--you); }
+.st .n { font: 11px var(--mono); color: var(--mut); }
+.st .what { min-width: 0; }
+.st .what b { font-weight: 600; font-size: 13px; }
+.st .what .rt { font: 11px var(--mono); color: var(--mut); margin-left: 6px; }
+.st .what .g { display: block; color: var(--mut); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st .chk { font: 11px var(--mono); white-space: nowrap; }
+.st .chk.g { color: var(--ok); } .st .chk.r { color: var(--bad); } .st .chk.q { color: var(--mut); } .st .chk.n { color: var(--ink); } .st .chk.y { color: var(--you); }
+.st .c { font: 11px var(--mono); color: var(--mut); width: 44px; text-align: right; }
+.st.q .what b { color: var(--mut); font-weight: 400; }
+@container (max-width: 420px) { .st { grid-template-columns: 14px 22px minmax(0, 1fr) auto; } .st .c { display: none; } }
+
+/* the queue: one card per item or compatible batch; the current one is open, the rest are two lines */
+.qq { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr); }
+.qc { border-radius: 8px; border: 1px solid var(--line); background: var(--win); padding: 8px 12px 9px; display: grid; gap: 4px; grid-template-columns: minmax(0, 1fr); cursor: pointer; min-width: 0; }
+.qc:hover { border-color: var(--mut); }
+.qc.cur { cursor: default; padding: 10px 12px 12px; gap: 8px; border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 7%, var(--win)); }
+.qc:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.qc.dock { cursor: default; }
+.qtop { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; font: 11px var(--mono); color: var(--mut); }
+.qtop .path { flex: 1 1 auto; min-width: 0; display: flex; gap: 5px; white-space: nowrap; overflow: hidden; }
+.qtop .pt { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 3ch; }
+.qtop .pt.cur { color: var(--ink); flex: 0 1 auto; min-width: 8ch; }
+.qtop .sep { flex: none; }
+.qtop .kd { margin-left: auto; white-space: nowrap; flex: none; }
+@container (max-width: 520px) { .qtop .path { flex-basis: 100%; } .qtop .kd { margin-left: 0; } }
+.tags { display: inline-flex; gap: 4px; flex: none; }
+.tag { font: 600 11px/1 var(--mono); padding: 3px 5px; border-radius: 3px; border: 1px solid var(--line); color: var(--mut); white-space: nowrap; }
+.tag.y { color: var(--you); border-color: color-mix(in srgb, var(--you) 45%, transparent); }
+.tag.dash { border-style: dashed; border-color: var(--mut); }
+.qc .ask { font-weight: 600; font-size: 14px; line-height: 1.4; }
+.qc .ask.one { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qc .why { font-size: 13px; color: var(--mut); }
+/* the super agent's words: a neutral block with its name, never a fact */
+.rec { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 0 8px; align-items: baseline; padding: 7px 10px; border-radius: 6px; background: var(--raise); font-size: 13px; }
+.rec .dm { font: 11px var(--mono); color: var(--ink); }
+.rec .who { display: block; font: 600 11px var(--mono); color: var(--mut); margin-bottom: 1px; }
+.rec.none { background: transparent; border: 1px dashed var(--mut); }
+.rec.none .dm { color: var(--mut); }
+.rec1 { font-size: 12.5px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec1 .dm { font: 11px var(--mono); margin-right: 6px; }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; text-align: left; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--win); color: var(--ink); font: 13px var(--ui); cursor: pointer; }
+.opt:hover { border-color: var(--ink); }
+.opt .k { font: 600 12px var(--mono); color: var(--mut); }
+.opt > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+@container (max-width: 440px) { .opt { grid-template-columns: 22px minmax(0, 1fr); row-gap: 4px; } .opt .def { grid-column: 2; justify-self: start; } .opt .nodef { display: none; } }
+.opt .def { font: 600 11px var(--mono); color: var(--you); border: 1px solid color-mix(in srgb, var(--you) 45%, transparent); padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
+.opt.isdef { border-color: color-mix(in srgb, var(--you) 55%, transparent); }
+.opt[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--you); }
+.bl { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.bl li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 1px 8px; align-items: center; font-size: 13px; padding: 6px 8px; background: var(--raise); border-radius: 6px; min-width: 0; }
+.bl .bt { min-width: 0; display: grid; }
+.bl .bt b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bl .bt span { font: 11px var(--mono); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bl .bt span.ok { color: var(--ok); }
+.sacts { display: flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
+.sacts .sp { flex: 1; }
+.sacts .bs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.stay { font: 11px var(--mono); color: var(--mut); }
+.lnk { justify-self: start; background: none; border: 0; padding: 0; color: var(--ink); font: 12.5px var(--ui); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mut); cursor: pointer; min-height: 24px; }
+.lnk:hover { text-decoration-color: var(--ink); }
+.lnk.mut2 { color: var(--mut); }
+.keys { display: flex; gap: 4px 14px; flex-wrap: wrap; font: 11px var(--mono); color: var(--mut); padding-top: 2px; }
+.keys kbd { font: 600 11px var(--mono); color: var(--ink); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+@container (max-width: 520px) { .keys { display: none; } }
+.calm { margin: 0; color: var(--mut); font-size: 13px; }
+.calm b { color: var(--ink); font-weight: 600; }
+.calm:focus { outline: none; }
+.ack { margin: 0; font-size: 12.5px; color: var(--mut); display: flex; gap: 8px; align-items: baseline; }
+.ack .g { color: var(--ok); font: 11px var(--mono); }
+/* the state line: sorting, partial, paused, off, limit, failed */
+.note { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 2px 10px; align-items: baseline; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--raise); font-size: 13px; }
+.note .mk { align-self: center; }
+.note .h { font-weight: 600; }
+.note .w { grid-column: 2; color: var(--mut); }
+.note .w .lnk { font-size: 13px; }
+.note.r { border-color: color-mix(in srgb, var(--bad) 40%, transparent); background: color-mix(in srgb, var(--bad) 7%, var(--win)); }
+/* later, since you looked, orders */
+.lt { display: grid; gap: 6px; }
+.li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 6px 10px; border-radius: 6px; border: 1px dashed var(--line); }
+.li .l1 { display: flex; gap: 6px; align-items: baseline; min-width: 0; font-size: 13px; }
+.li .pj.sep { min-width: 0; flex: none; }
+.li .pj { font: 11px var(--mono); color: var(--mut); flex: 0 1 auto; min-width: 3ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.li .t { font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.li .w { grid-column: 1; font-size: 12.5px; color: var(--mut); }
+.li .w .bk { font: 11px var(--mono); color: var(--ink); white-space: nowrap; }
+.li .btn { grid-column: 2; grid-row: 1 / span 2; }
+@container (max-width: 420px) { .li { grid-template-columns: minmax(0, 1fr); } .li .btn { grid-column: 1; grid-row: auto; justify-self: start; } }
+.dg { display: grid; }
+.dl { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.dl:last-child { border-bottom: 0; }
+.dl .sg { font: 11px var(--mono); color: var(--mut); text-align: center; }
+.dl .sg.g { color: var(--ok); } .dl .sg.r { color: var(--bad); }
+.dl .tx2 { min-width: 0; }
+.dl .pj { grid-column: 2; font: 11px var(--mono); color: var(--mut); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl .tm { grid-column: 3; grid-row: 1; font: 11px var(--mono); color: var(--mut); white-space: nowrap; }
+.dl .ud { grid-column: 3; grid-row: 2; justify-self: end; }
+.dl .ud.done { font: 11px var(--mono); color: var(--mut); }
+.spent { font-size: 12.5px; color: var(--mut); }
+.spent b { color: var(--ink); font: 12px var(--mono); }
+.ord { margin: 0; padding-left: 20px; font-size: 13px; display: grid; gap: 3px; }
+.oed { width: 100%; min-height: 96px; resize: vertical; font: 13px/1.5 var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.orow { display: flex; gap: 6px; justify-content: flex-end; }
+.prop { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 6px 8px; align-items: baseline; font-size: 13px; padding: 8px 10px; border-radius: 6px; background: var(--raise); }
+.prop .dm { font: 11px var(--mono); }
+.prop .who { display: block; font: 600 11px var(--mono); color: var(--mut); }
+.prop .orow { grid-column: 2; justify-content: flex-start; }
+/* job page (future scenarios): stages stacked in order, the tasks of one stage side by side */
+.stage { display: grid; gap: 6px; padding: 4px 0 8px; }
+.sgh { display: flex; gap: 8px; align-items: baseline; }
+.sgh .sn { font: 600 11px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+.sgh .sl { font: 11px var(--mono); color: var(--mut); }
+.side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.side.one { grid-template-columns: minmax(0, 1fr); }
+@container (max-width: 560px) { .side { grid-template-columns: minmax(0, 1fr); } }
+.tk { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 3px; background: var(--win); cursor: pointer; min-width: 0; text-align: left; color: var(--ink); font: inherit; }
+.tk:hover { border-color: var(--ink); }
+.tk.y { border-color: color-mix(in srgb, var(--you) 45%, transparent); background: color-mix(in srgb, var(--you) 6%, var(--win)); }
+.tk .l1 { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.tk .sg { font: 11px var(--mono); color: var(--mut); width: 10px; flex: none; }
+.tk.done .sg { color: var(--ok); } .tk.run .sg { color: var(--ink); } .tk.wait .sg { color: var(--you); }
+.tk .t { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk.q .t { color: var(--mut); font-weight: 400; }
+.tk .l2 { display: flex; gap: 8px; font: 11px var(--mono); color: var(--mut); padding-left: 16px; min-width: 0; }
+.tk .l2 .ln { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk.wait .l2 .ln { color: var(--you); }
+.wt { font: 600 11px/1 var(--mono); padding: 3px 5px; border-radius: 3px; border: 1px solid var(--line); color: var(--mut); white-space: nowrap; flex: none; }
+.sv { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; width: 100%; padding: 4px 8px; margin: 0 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--mut); font: 12px var(--ui); text-align: left; }
+.sv .sg { font: 11px var(--mono); text-align: center; }
+.sv span:nth-child(2) { font: 600 11px var(--mono); }
+.sv .tx2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sv .tm { font: 11px var(--mono); }
+/* the dock, the box, the bar (locked UI-7, UI-8) */
+.dock { flex: none; padding: 0 12px 8px; display: grid; grid-template-columns: minmax(0, 1fr); max-height: 300px; overflow-y: auto; }
+.dock:empty { display: none; }
+.dock .foot { font: 11px var(--mono); color: var(--mut); }
+.btn { font: 600 12px var(--ui); color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.btn:hover:not(:disabled) { border-color: var(--ink); }
+.btn.go { background: var(--ink); color: var(--win); border-color: var(--ink); }
+.btn.you { background: var(--you); border-color: var(--you); color: #1a0d00; }
+.btn.ghost { border-color: transparent; color: var(--mut); }
+.btn.ghost:hover:not(:disabled) { color: var(--ink); border-color: var(--line); }
+.btn.sm { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+.btn:disabled { opacity: .45; }
+.sent { flex: none; margin: 0; padding: 0 12px 6px; font-size: 12.5px; color: var(--mut); }
+.sent:empty { display: none; }
+.sent b { color: var(--ink); font-weight: 600; }
+.steer { flex: none; border-top: 1px solid var(--line); padding: 12px 12px 4px; display: flex; gap: 8px; align-items: center; }
+.steer input { flex: 1; min-width: 0; min-height: 40px; font: 13.5px var(--ui); color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+.steer input::placeholder { color: var(--mut); opacity: 1; }
+.steer input:disabled { opacity: .7; }
+.steer .btn { min-height: 40px; padding: 0 16px; }
+.tgt { flex: none; max-width: 42%; min-height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: 600 11px var(--mono); white-space: nowrap; }
+.tgt .tn { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tgt.sa { border-color: var(--ink); }
+.tgt.an { border-color: color-mix(in srgb, var(--you) 55%, transparent); color: var(--you); }
+.tgt.ro { color: var(--mut); border-style: dashed; }
+.tgx { flex: none; width: 22px; height: 22px; margin-right: -4px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: 12px var(--mono); cursor: pointer; display: grid; place-items: center; }
+.tgx:hover { background: var(--raise); }
+@container (max-width: 520px) { .steer { flex-wrap: wrap; row-gap: 6px; padding-top: 8px; } .tgt { flex: 1 1 100%; max-width: none; min-height: 28px; } }
+.bar { flex: none; border-top: 1px solid var(--line); padding: 8px 12px 10px; display: flex; gap: 6px; align-items: center; min-height: 52px; }
+.bar .sp { flex: 1; }
+.tools2 { display: inline-flex; gap: 2px; }
+.ib { width: 32px; height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--mut); display: grid; place-items: center; cursor: pointer; }
+.ib:hover { color: var(--ink); border-color: var(--line); background: var(--raise); }
+.use { display: inline-flex; align-items: center; gap: 6px; margin: 0 4px 0 8px; font: 11px var(--mono); color: var(--mut); white-space: nowrap; min-width: 0; }
+.bar > .use:first-child { margin-left: 0; }
+.use .cells.ctx { grid-template-columns: repeat(15, 4px); }
+.use b { font-weight: 400; color: var(--ink); }
+.use .dv { width: 1px; height: 14px; background: var(--line); }
+@container (max-width: 560px) { .use .cells { display: none; } }
+@container (max-width: 380px) { .tools2 .ib.opt2 { display: none; } }
+.notes { color: var(--mut); font-size: 13px; max-width: 86ch; }
+.notes b { color: var(--ink); }
+.notes li { margin: 4px 0; }
+.notes h2 { font: 600 13px var(--ui); color: var(--ink); margin: 14px 0 4px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Super Agent</h1>
+    <p>Explored 2026-11-08; the locked copy is design/rework/locked/super-agent.html. The Needs you pin becomes the super agent row and its page; the list rolls up; one box follows the selection. Built on the locked workflow-autopilot.html with Console Cells unchanged. Sample data, local only. Keys on the home page: J and K move, 1 to 4 pick, Enter confirms, S puts later, O opens, Esc goes back.</p>
+  </header>
+  <div class="views" id="views">
+    <div class="vrow"><span class="g">Slice 2</span>
+      <button data-s="queue">queue</button><button data-s="sorting">sorting</button><button data-s="partial">partial coverage</button><button data-s="calm">empty</button>
+      <button data-s="paused">paused</button><button data-s="off">off</button><button data-s="capped">limit reached</button><button data-s="failed">failed</button></div>
+    <div class="vrow fut"><span class="g">Future</span>
+      <button data-s="f-acts">acts and Undo · slice 3</button><button data-s="f-job">job · slice 4</button><button data-s="f-jobtask">task in a job · slice 4</button><button data-s="f-merge">merge · slice 5</button></div>
+    <div class="vrow"><span class="g">View</span>
+      <button data-w="900">900 px</button><button data-w="400">400 px</button><button data-w="340">340 px</button>
+      <button id="theme">light / dark</button><button id="motion" aria-pressed="false">reduced motion</button><button id="reset">reset sample</button></div>
+  </div>
+  <p class="scen" id="scen"></p>
+
+  <div class="win" id="win">
+    <div class="top">
+      <span class="brand">Console</span>
+      <span class="sp"></span>
+      <button class="scope" tabindex="-1">All projects ▾</button>
+      <button class="needs" id="needs" data-a="needs" title="Open the super agent: what needs you"></button>
+      <button class="rb" tabindex="-1" aria-label="Menu">⋯</button><button class="rb" tabindex="-1" aria-label="Minimise">–</button><button class="rb" tabindex="-1" aria-label="Close">✕</button>
+    </div>
+    <div class="body">
+      <nav class="list" id="list" aria-label="Work"></nav>
+      <main class="task" aria-label="Page">
+        <div class="vback" id="vback"></div>
+        <div class="tscroll" id="card"></div>
+        <div class="dock" id="dock"></div>
+        <p class="sent" id="sent" role="status"></p>
+        <div class="steer"><span class="tgt" id="tgt"></span><input id="steerin" autocomplete="off" aria-describedby="tgt"><button class="btn" data-a="send" id="send">Send</button></div>
+        <div class="bar" id="bar"></div>
+      </main>
+    </div>
+    <div class="sr" id="live" aria-live="polite"></div>
+  </div>
+
+  <div class="notes">
+    <h2>Design read</h2>
+    <ul>
+      <li><b>Dials:</b> ENERGY 2, RHYTHM 2, MOTION 1. Motion only on running marks and button presses, none on keyboard moves; all of it off with reduced motion or Windows animation effects off.</li>
+      <li><b>One count:</b> the header button, the super agent row, the page pill and the project lines all count items that reach you; a batch card counts each member.</li>
+      <li><b>A card is self-contained:</b> project and task, kind and age, the ask, the facts code knows, the options with the default, then the super agent's words in their own block (◆ Super agent). Its words never read as a fact, and a card it could not check says so instead of looking approved.</li>
+      <li><b>What cannot wait says so:</b> "always yours" items and a decision whose default is about to be taken have no Later; the card says why it stays.</li>
+      <li><b>Later is never a hiding place:</b> each line has its reason and its return time; while sorting is paused, off, over its limit or failed, the super agent's Later items come back to For you.</li>
+      <li><b>Unranked keeps every action:</b> paused, off, limit and failed differ only in their state line; the cards keep their options and buttons, batches split, recommendations go.</li>
+      <li><b>Roll-up:</b> a quiet project is one line; a project with something for you shows those rows and one "more" line; steps only under the selected task.</li>
+      <li><b>The box always names where Enter goes:</b> New work, Super agent, Answer, Task, or read only for an observed chat.</li>
+      <li><b>Orange means for you, nothing else;</b> red and green only for state. No eyebrow, glyph or token is new except the hatched mark for "not seen".</li>
+    </ul>
+    <h2>Decided by Fred, 2026-11-08</h2>
+    <ul>
+      <li>The current card is orange-tinted like the dock card (not neutral with orange only on its primary button).</li>
+      <li>The recommendation is a neutral block headed "Super agent suggests" (not one muted ◆ line under the ask).</li>
+      <li>Later by hand is one fixed hour (no choice of return times).</li>
+      <li>With nothing selected, New work goes to the last project used (the box does not ask for a project).</li>
+      <li>A card the super agent could not check has Open the task as its primary button; Accept stays a plain button.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const NOW = "14:06", LATER_BACK = "15:06", LAST_PASS = "14:01", LOOKED = "13:05", NEW_WORK_PROJECT = 2;
+const mins = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const ago = t => { const d = mins(NOW) - mins(t); return d < 1 ? "now" : d + " min"; };
+const G = { done: "✓", run: "▸", q: "·", wait: "?", fail: "✕" };
+
+// ---------- sample data: four projects, their tasks and chats, and what needs Fred ----------
+const PROJECTS = ["ARTCOUSTIC-AUDIO-REPORT", "fashion_packshots_ai", "CLAUDE CONSOLE", "MOTION STUDIO"];
+const JOB = "Batch prepare launch split";
+// st is the state after any pending item is answered: run, acc (accepted), idle, q (queued)
+const TASKS = {
+  paths: { p: 0, title: "Paths and settings", st: "run", line: "running · 03 code · sonnet", cost: "$0.57", level: "auto",
+    prompt: "Create src/core/paths.ts and settings.ts from Motion Studio: PORT 4322, APP_HOME ~/ArtcousticReport, the report-page and product-sheet paths, vitest for safeJoin and the settings round-trip." },
+  export: { p: 0, title: "Report page export", st: "run", line: "running · 02 code · sonnet · 4m", cost: "$0.33" },
+  eslint: { p: 0, title: "Fix eslint config", obs: "terminal", st: "idle", line: "terminal · idle", cost: "$0.20" },
+  launch: { p: 1, title: "Launch UI verify", st: "run", line: "running · 05 verify · opus", cost: "$0.74" },
+  worker: { p: 1, title: "Batch worker", st: "run", line: "running · 04 fix · sonnet", cost: "$0.91",
+    prompt: "Build the batch worker: drain the queue model in FIFO order, retry a failed item twice, write results under out/batch/." },
+  split: { p: 1, title: "Split queue model", st: "acc", line: "accepted · 13:12", cost: "$0.62" },
+  crops: { p: 1, title: "Packshot crop presets", obs: "terminal", st: "run", line: "terminal · working", cost: "$0.44" },
+  skill: { p: 2, title: "Plan 56 skill index", st: "run", line: "retrying · 05 fix · opus", cost: "$0.89" },
+  live52: { p: 2, title: "Plan 52 live check fixes", st: "run", line: "running · 05 docs · sonnet", cost: "$0.63" },
+  usage: { p: 2, title: "Usage page empty state", st: "acc", line: "accepted · now", cost: "$0.18" },
+  tray: { p: 2, title: "Tray count", st: "run", line: "running · 01 scout · haiku", cost: "$0.02" },
+  schema: { p: 2, title: "Settings schema notes", st: "run", line: "running · 02 design · opus", cost: "$0.38" },
+  brain: { p: 2, title: "Workflow redesign brainstorm", obs: "desktop", st: "idle", line: "desktop · idle", cost: "$2.30" },
+  story: { p: 3, title: "Storyboard kit: shotTiming tests", st: "acc", line: "accepted · now", cost: "$0.41" },
+  presets: { p: 3, title: "Export presets cleanup", st: "acc", line: "accepted · now", cost: "$0.18" },
+  render: { p: 3, title: "Refactor render queue", obs: "VS Code", st: "run", line: "VS Code · working", cost: "$1.12" },
+  captions: { p: 3, title: "Caption track", obs: "terminal", st: "idle", line: "terminal · idle", cost: "$0.09" },
+  // future scenarios only (slice 4 and 5)
+  job: { p: 1, title: JOB, fut: true, job: true },
+  e2e: { p: 1, title: "T04 e2e tests", fut: true, st: "q", line: "stage 3", cost: "" },
+};
+const FUT_TITLES = { launch: "T03 launch UI", worker: "T02 batch worker", split: "T01 split queue model" };
+
+// one entry per item code shows as needing Fred. always: why the super agent cannot hold it back (code's list).
+// acts: [label, button class, what it does: answer (default), open, ext (opens its own app), split]
+const ITEMS = {
+  G: { task: "skill", kind: "failed twice", seen: "13:31", always: "it failed twice",
+    ask: "2 of 6 tests still fail after the fix.", why: "Its verify failed twice: settings do not round-trip on Windows paths.",
+    say: "Retry one model up, with the note: use path.posix in safeJoin. The fix changed the right file but kept the Windows separator.",
+    acts: [["See the failure", "", "open"], ["Accept step result", ""], ["Retry on a stronger model", "you"]], words: true, row: ["r", "failed twice · 2 tests fail"] },
+  A: { task: "launch", kind: "held", seen: "13:48", always: "you confirm Fable each time",
+    ask: "The verify step wants to run on Fable.", why: "Fable is scarce, so you confirm it each time.",
+    say: "Run it on opus: the same check passed on opus for Batch worker.",
+    acts: [["Run on opus instead", ""], ["Confirm Fable", "you"]], row: ["y", "held · confirm Fable"] },
+  B: { task: "paths", kind: "decision", seen: "13:52", auto: "14:12",
+    ask: "Which name for the product-sheet folder?", why: "The two specs disagree. At level auto, Console takes the default at 14:12 unless you choose.",
+    opts: [["a", "PRODUCT_SHEETS_DIR, as in T02", true], ["b", "SHEETS_DIR, as in the design spec", false]],
+    say: "Take a: the T02 spec and the code already use it; b renames 3 files.",
+    acts: [["Confirm", "you"]], words: true, row: ["y", "needs you · decision · default 14:12"] },
+  C1: { task: "story", kind: "accept", seen: "13:40", batch: "acc", ask: "Finished. Accept the result?",
+    facts: ["verify passed · 3 steps · $0.41", "ok"], say: "Accept: every check passed and nothing is left open.",
+    acts: [["Reopen", ""], ["Accept", "you"]], row: ["y", "done · to accept"] },
+  C2: { task: "usage", kind: "accept", seen: "13:50", batch: "acc", ask: "Finished. Accept the result?",
+    facts: ["verify passed · 2 steps · $0.18", "ok"], say: "Accept: a copy-only change, and its check passed.",
+    acts: [["Reopen", ""], ["Accept", "you"]], row: ["y", "done · to accept"] },
+  F: { task: "live52", kind: "suggestion", seen: "13:44",
+    ask: "Add a step: list the new app folders in the README?", why: "Its supervisor suggests it: all 4 steps passed, but the README lists every app folder and PRODUCT_SHEETS_DIR is new.",
+    say: "Approve: one short docs step, and the README check fails without it.",
+    acts: [["Reject", ""], ["Approve", "you"]], words: true, row: ["y", "supervisor suggests a step"] },
+  E: { task: "eslint", kind: "terminal chat", seen: "13:24",
+    ask: "It asks to run npm audit fix --force.", why: "Your own terminal chat: the super agent ranks it, only you answer it.",
+    say: "Say no there: --force can jump major versions. Plain npm audit fix is enough.",
+    acts: [["Open in terminal", "go", "ext"]], row: ["y", "terminal · waiting for you"] },
+  D: { task: "presets", kind: "accept", seen: "13:41", ask: "Finished. Accept the result?",
+    facts: ["verify output not available · 2 steps · $0.18", "h"],
+    incomplete: "Its verify output was cut short, so it could not check this one. Open the task before you accept.",
+    acts: [["Accept", ""], ["Open the task", "go", "open"]], row: ["y", "done · to accept · check not seen"] },
+  L1: { task: "schema", kind: "hand-off hint", seen: "13:46", later: ["14:30", "Its step is still running; it hands off by itself when the step ends."],
+    ask: "It suggests a hand-off before its context fills.", why: "Its context is 78% full.",
+    say: "Hand off now only if you want the next step fresh; otherwise it hands off by itself.",
+    acts: [["Let it continue", ""], ["Hand off now", "you"]], row: ["y", "hand-off hint"] },
+  L2: { task: "render", kind: "VS Code chat", seen: "13:55", later: ["14:45", "Your chat is mid-answer. Look once its turn ends."],
+    ask: "Its context is at 91%: early details may drop.", why: "Your own VS Code chat.",
+    say: "Open it when its turn ends; nothing is lost yet.", acts: [["Open in VS Code", "go", "ext"]], row: ["y", "VS Code · context 91%"] },
+  I: { task: "worker", kind: "plan to confirm", seen: "13:58", ask: "The plan is written. Confirm it and the last 2 steps run on their own.",
+    why: "Level gated: the plan waits for you before code starts.", say: "Confirm: the plan matches the brief and only touches src/batch.",
+    acts: [["Read the plan", "", "open"], ["Confirm", "you"]], row: ["y", "plan ready · confirm"] },
+  J: { task: "export", kind: "stuck", seen: "13:57", ask: "Step 03 failed: the PDF renderer is not installed.", why: "It ran once; the retry has not started.",
+    say: "Retry after installing the renderer: the failure is a missing package, not the code.",
+    acts: [["See the failure", "", "open"], ["Retry", "you"]], words: true, row: ["r", "stuck · step 03 failed"] },
+  K: { task: "tray", kind: "handed off", seen: "13:59", ask: "The handoff note is saved. Start the follow-up from it?",
+    say: "Start it: the note lists 2 open questions the follow-up needs.", acts: [["Read the note", "", "open"], ["Start next task", "you"]], row: ["y", "handed off · note saved"] },
+  L: { task: "captions", kind: "terminal chat", seen: "13:56", ask: "It stopped and asks: overwrite captions.srt?", why: "Your own terminal chat.",
+    say: "Answer no there unless you replaced the captions by hand.", acts: [["Open in terminal", "go", "ext"]], row: ["y", "terminal · asks"] },
+  N: { task: "crops", kind: "terminal chat", seen: "14:05", ask: "It stopped and asks whether to delete 214 cached crops.", why: "Your own terminal chat.",
+    say: "Answer yes there: the crops rebuild in a minute.", acts: [["Open in terminal", "go", "ext"]], row: ["y", "terminal · asks"] },
+  M: { task: "job", kind: "merge ready", seen: "14:03", always: "merges are yours",
+    ask: "2 branches are ready to merge into master.", why: "Stage 2 is accepted and nothing writes in the main tree. In order: T02 batch worker (9 files), then T03 launch UI (5 files).",
+    acts: [["See the changes", "", "open"], ["Merge 2 branches", "you"]], foot: "A conflict stops the merge and asks you: Open in terminal, Try again, or Discard branch.", row: ["y", "merge ready"] },
+};
+const RANK = { B: 1, C1: 2, C2: 2, F: 3, I: 4, J: 5, E: 6, K: 7, L: 8, N: 8.5, D: 9, L1: 10, L2: 10 };
+const BATCH = { acc: { kind: "accept", ask: "2 tasks finished with every check passing and no open question.",
+  say: "Accept both: they touch different files and every test passes.", acts: [["Review one by one", "", "split"], ["Accept both", "you"]] } };
+const LOG_BASE = [
+  { g: "◆", t: "Super agent sorted 10 items: 8 for you, 2 later", p: "All projects", tm: "14:01" },
+  { g: "✓", t: "Storyboard kit: shotTiming tests finished, every check passed", p: "MOTION STUDIO", tm: "13:40" },
+  { g: "✕", t: "Plan 56 skill index failed its verify twice", p: "CLAUDE CONSOLE", tm: "13:31" },
+  { g: "◇", t: "Console took the default b on Settings schema notes after 20 min (level auto)", p: "CLAUDE CONSOLE", tm: "13:22" },
+  { g: "✓", t: "You accepted Split queue model", p: "fashion_packshots_ai", tm: "13:12" },
+];
+const LOG_ACTS = [ // slice 3 only: acts at auto, each with the route that reverses it
+  { g: "◆", t: "Took the default b on Settings schema notes 2 min before its timeout; its step started", p: "CLAUDE CONSOLE · level auto", tm: "13:22", u: "Stop" },
+  { g: "◆", t: "Paused Report page export: $2.40 in 30 min with no file changed", p: "ARTCOUSTIC-AUDIO-REPORT · level auto", tm: "13:36", u: "Resume" },
+  { g: "◆", t: "Accepted Split queue model: its verify passed, no open question", p: "fashion_packshots_ai · level auto", tm: "13:12", u: "Reopen" },
+];
+const ORDERS0 = ["fashion_packshots_ai first today.", "Never raise a lint-only failure: fold it into the next step.", "Always ask before anything changes the settings schema."];
+const PROPOSED = "Accept a task whose verify passed when it only touched tests.";
+const SCEN = {
+  queue: "Slice 2 · the queue, ranked. Answer cards here or with the keys; counts and focus follow.",
+  sorting: "Slice 2 · a sort is running over 1 new item; the other cards keep their last recommendations.",
+  partial: "Slice 2 · partial coverage: 14 live items, the last sort had room for 10.",
+  calm: "Slice 2 · empty: nothing for you, two items still in Later.",
+  paused: "Slice 2 · paused by Fred: no sorting, every item shown oldest first.",
+  off: "Slice 2 · off: the daily limit is $0.",
+  capped: "Slice 2 · today's limit reached.",
+  failed: "Slice 2 · the last sort failed.",
+  "f-acts": "<b>Future scenario, design slice 3:</b> the super agent acts at level auto, with Undo where a route exists, and proposes standing orders. Not part of plan 58 or the slice 2 window; nothing here is planned or built.",
+  "f-job": "<b>Future scenario, design slice 4:</b> a job (a goal split into stages of tasks) and its page. Not planned or built.",
+  "f-jobtask": "<b>Future scenario, design slices 4 and 5:</b> a task inside a job, in its own worktree. Not planned or built.",
+  "f-merge": "<b>Future scenario, design slice 5:</b> worktrees for parallel writers and the merge item. Not planned or built.",
+};
+const MODE_OF = { queue: "ranked", sorting: "sorting", partial: "partial", calm: "ranked", paused: "paused", off: "off", capped: "capped", failed: "failed", "f-acts": "ranked", "f-job": "ranked", "f-jobtask": "ranked", "f-merge": "ranked" };
+
+// ---------- state ----------
+let S;
+function fresh(scen) {
+  const base = ["G", "A", "B", "C1", "C2", "F", "E", "D", "L1", "L2"];
+  const ids = scen === "sorting" ? [...base, "N"] : scen === "partial" ? [...base, "I", "J", "K", "L"] : scen === "f-merge" ? [...base.filter(x => x !== "A"), "M"] : base;
+  return { scen, mode: MODE_OF[scen], ids, reviewed: new Set(scen === "f-merge" ? [...base, "M"] : base), gone: new Set(scen === "calm" ? base.filter(x => !ITEMS[x].later) : []),
+    later: [], back: new Set(), fwd: new Set(), split: false, picked: {}, cur: 0, sel: null, nlist: false, answerTo: null,
+    log: [], seen: false, lastPass: LAST_PASS, sorts: scen === "capped" ? 38 : scen === "off" ? 0 : 11, spend: scen === "capped" ? 1 : scen === "off" ? 0 : 0.06,
+    openP: {}, allP: {}, ack: "", sent: "", sortN: 1, orders: ORDERS0.slice(), editing: false, prop: scen === "f-acts" ? "open" : "", undone: new Set(),
+    pausedAt: scen === "paused" ? "13:40" : "", level: {}, step: null };
+}
+const FUTJOB = () => ["f-job", "f-jobtask", "f-merge"].includes(S.scen);
+const RANKED = () => ["ranked", "sorting", "partial"].includes(S.mode);
+const title = id => (FUTJOB() && FUT_TITLES[id]) || TASKS[id].title;
+const projOf = id => PROJECTS[TASKS[ITEMS[id].task].p];
+const inJob = tid => FUTJOB() && (FUT_TITLES[tid] || tid === "e2e");
+const onHome = () => !S.sel || S.sel.t === "sa" || S.sel.t === "p";
+
+function laterEntries() {
+  const out = [];
+  if (RANKED()) for (const id of S.ids) { const it = ITEMS[id];
+    if (it.later && S.reviewed.has(id) && !S.back.has(id) && !S.fwd.has(id) && !S.gone.has(id)) out.push({ id, by: "sa", back: it.later[0], why: it.later[1] }); }
+  for (const u of S.later) if (!S.gone.has(u.id) && !S.back.has(u.id)) out.push(u);
+  return out.sort((a, b) => a.back.localeCompare(b.back));
+}
+function liveIds() { const lat = new Set(laterEntries().map(x => x.id)); return S.ids.filter(id => !S.gone.has(id) && !lat.has(id)); }
+const bySeen = (a, b) => mins(ITEMS[a].seen) - mins(ITEMS[b].seen);
+function tagOf(id) { if (S.back.has(id)) return "back"; if (!S.reviewed.has(id)) return ITEMS[id].seen > S.lastPass ? "new" : "unrev"; return null; }
+// the queue order is code's: always items oldest first; then the last sort's ranks; then not reviewed; then new
+function queue() {
+  const ids = liveIds(), one = (id, tag) => ({ ids: [id], tag: tag || null });
+  const always = ids.filter(id => ITEMS[id].always).sort(bySeen), rest = ids.filter(id => !ITEMS[id].always);
+  if (!RANKED()) return [...always, ...rest.sort(bySeen)].map(id => one(id));
+  const cards = always.map(id => one(id, ITEMS[id].always && !S.reviewed.has(id) ? tagOf(id) : null));
+  const rev = rest.filter(id => !tagOf(id)).sort((a, b) => (RANK[a] - RANK[b]) || bySeen(a, b)), placed = new Set();
+  for (const id of rev) {
+    if (placed.has(id)) continue;
+    const b = ITEMS[id].batch;
+    if (b && !S.split) { const mem = rev.filter(x => ITEMS[x].batch === b); if (mem.length > 1) { mem.forEach(x => placed.add(x)); cards.push({ ids: mem, batch: b, tag: null }); continue; } }
+    placed.add(id); cards.push(one(id));
+  }
+  rest.filter(id => tagOf(id) === "unrev").sort(bySeen).forEach(id => cards.push(one(id, "unrev")));
+  rest.filter(id => ["new", "back"].includes(tagOf(id))).sort(bySeen).forEach(id => cards.push(one(id, tagOf(id))));
+  return cards;
+}
+const count = cards => cards.reduce((a, c) => a + c.ids.length, 0);
+const running = () => Object.keys(TASKS).filter(id => !TASKS[id].obs && !TASKS[id].fut && TASKS[id].st === "run" && !liveIds().some(x => ITEMS[x].task === id)).length;
+const stayOf = card => { if (card.batch) return ""; const it = ITEMS[card.ids[0]]; return it.always ? it.always : it.auto ? `the default is taken at ${it.auto}` : ""; };
+const askOf = card => card.batch ? BATCH[card.batch].ask : ITEMS[card.ids[0]].ask;
+const namesOf = card => card.ids.map(id => title(ITEMS[id].task));
+
+// ---------- the list ----------
+function statusOf(id) {
+  const t = TASKS[id];
+  if (S.scen === "f-acts" && id === "export" && !S.undone.has(1)) return { mk: "q", line: "paused by the super agent" };
+  return { mk: { run: "n", acc: "g", idle: "q", q: "q" }[t.st] || "q", line: t.line, live: t.st === "run" && !t.obs };
+}
+function rowOf(id) {
+  const li = liveIds().find(x => ITEMS[x].task === id);
+  if (li) return { y: true, mk: ITEMS[li].row[0], line: ITEMS[li].row[1] };
+  const le = laterEntries().find(x => ITEMS[x.id].task === id);
+  if (le) return { mk: "q", line: `${TASKS[id].obs ? TASKS[id].obs + " · " : ""}later · back ${le.back}` };
+  return statusOf(id);
+}
+function taskRow(id) {
+  const t = TASKS[id], r = rowOf(id), pick = S.sel && ["task", "step"].includes(S.sel.t) && S.sel.id === id;
+  const lcls = r.y ? (r.mk === "r" ? "r" : "y") : r.mk === "n" ? "n" : "";
+  let h = `<button class="row${r.y ? " y" : ""}${t.obs ? " obs" : ""}${pick ? " pick" : ""}" data-a="task" data-id="${id}"${pick ? ' aria-current="page"' : ""}><span class="l1"><span class="mk ${r.mk}${r.live ? " live" : ""}"></span><span class="t">${esc(title(id))}</span></span><span class="l2"><span class="ln ${lcls}">${esc(r.line)}</span></span></button>`;
+  if (pick && !t.obs) h += `<div class="subs">${stepsOf(id).map((s, i) => `<button class="sub ${s[3]}${S.step === i ? " pick" : ""}" data-a="step" data-id="${id}" data-n="${i}"><span class="sg">${G[s[3]]}</span><span class="sn">${String(i + 1).padStart(2, "0")} ${s[0]}</span><span class="sm">${s[3] === "run" ? s[1].split(" · ")[0] + " · running" : { done: "done", q: "queued", fail: "failed", wait: "waits" }[s[3]]}</span></button>`).join("")}</div>`;
+  return h;
+}
+function quietSum(ids, max = 9) {
+  const n = { run: 0, done: 0, chat: 0, later: 0, paused: 0 };
+  ids.forEach(id => { const t = TASKS[id], r = rowOf(id);
+    if (r.line.includes("later")) n.later++; else if (t.obs) n.chat++; else if (r.line.startsWith("paused")) n.paused++; else if (t.st === "run") n.run++; else n.done++; });
+  return [n.run && `${n.run} running`, n.paused && `${n.paused} paused`, n.done && `${n.done} done`, n.later && `${n.later} later`, n.chat && `${n.chat} chat${n.chat > 1 ? "s" : ""}`].filter(Boolean).slice(0, max).join(" · ") || "nothing live";
+}
+function projectBlock(pi) {
+  const ids = Object.keys(TASKS).filter(id => TASKS[id].p === pi && !TASKS[id].fut && !inJob(id));
+  const live = liveIds(), fyItems = live.filter(x => TASKS[ITEMS[x].task].p === pi).length;
+  const selP = S.sel && S.sel.t === "p" && S.sel.p === pi, selT = S.sel && S.sel.id && TASKS[S.sel.id] && TASKS[S.sel.id].p === pi;
+  const open = pi in S.openP ? S.openP[pi] : (fyItems > 0 || selP || selT || (FUTJOB() && pi === 1));
+  const sum = fyItems ? `<b>${fyItems} for you</b>` : esc(quietSum(ids, 1));
+  let h = `<button class="prj${selP ? " pick" : ""}" data-a="proj" data-p="${pi}" aria-expanded="${open}"><span class="car" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="nm">${esc(PROJECTS[pi])}</span><span class="sum">${sum}</span></button>`;
+  if (!open) return h;
+  if (FUTJOB() && pi === 1) h += jobBlock();
+  const all = selP || S.allP[pi] || fyItems === 0;
+  const shown = all ? ids : ids.filter(id => rowOf(id).y || (S.sel && S.sel.id === id));
+  h += shown.map(taskRow).join("");
+  const hid = ids.filter(id => !shown.includes(id));
+  if (hid.length) h += `<button class="more" data-a="allp" data-p="${pi}">+ ${hid.length} more: ${esc(quietSum(hid))}</button>`;
+  return h;
+}
+function saRow(n) {
+  const run = running(), lat = laterEntries().length;
+  const line = { ranked: `${run} running · ${lat} later · sorted ${S.lastPass}`, sorting: `sorting ${S.sortN} ${S.sortN === 1 ? "item" : "items"} · ${run} running`,
+    partial: `reviewed 10 of 14 · ${run} running`, paused: `paused · oldest first · ${run} running`, off: "off · oldest first",
+    capped: "today's limit reached · oldest first", failed: "last sort failed · oldest first" }[S.mode];
+  const home = onHome() && !(S.sel && S.sel.t === "job");
+  return `<button class="sa${n ? " y" : ""}${S.sel && S.sel.t === "sa" ? " pick" : ""}" id="sarow" data-a="sa"${home ? ' aria-current="page"' : ""} aria-pressed="${!!(S.sel && S.sel.t === "sa")}" title="${S.sel && S.sel.t === "sa" ? "Selected: the box talks to the super agent. Select again to leave it." : "Open the super agent; select it to talk to it"}"><span class="l1"><span class="dm" aria-hidden="true">◆</span><span class="t">Super agent</span><span class="cnt${n ? "" : " z"}">${n} for you</span></span><span class="l2">${esc(line)}</span></button>`;
+}
+function list(cards) { return saRow(count(cards)) + PROJECTS.map((_, i) => projectBlock(i)).join(""); }
+
+// ---------- cards ----------
+function pathHtml(card) {
+  if (card.batch) { const ps = [...new Set(card.ids.map(projOf))]; return `<span class="path"><span class="pt cur">${card.ids.length} tasks</span><span class="sep">·</span><span class="pt">${esc(ps.join(", "))}</span></span>`; }
+  const it = ITEMS[card.ids[0]], tid = it.task, parts = [projOf(card.ids[0])];
+  if (inJob(tid) || TASKS[tid].job) parts.push(JOB);
+  if (!TASKS[tid].job) parts.push(title(tid));
+  return `<span class="path">${parts.map((p, k) => `<span class="pt${k === parts.length - 1 ? " cur" : ""}">${esc(p)}</span>`).join(`<span class="sep">›</span>`)}</span>`;
+}
+function tagsHtml(card) {
+  const t = [];
+  if (!card.batch) { const it = ITEMS[card.ids[0]];
+    if (it.always) t.push(`<span class="tag" title="Code always shows this to you: the super agent cannot put it later or batch it">always yours</span>`);
+    if (it.auto) t.push(`<span class="tag y" title="At level auto, Console takes the default at ${it.auto}">default at ${it.auto}</span>`);
+    if (TASKS[it.task].obs) t.push(`<span class="tag dash">your ${esc(TASKS[it.task].obs)} chat</span>`); }
+  if (RANKED() && card.tag === "new") t.push(`<span class="tag">new · not sorted yet</span>`);
+  if (RANKED() && card.tag === "unrev") t.push(`<span class="tag" title="The last sort had no room for it">not reviewed yet</span>`);
+  if (RANKED() && card.tag === "back") t.push(`<span class="tag">back from Later</span>`);
+  return t.length ? `<span class="tags">${t.join("")}</span>` : "";
+}
+function kindHtml(card) {
+  if (card.batch) return `${BATCH[card.batch].kind} · ${card.ids.length} items · ${ago(card.ids.map(x => ITEMS[x].seen).sort().pop())}`;
+  const it = ITEMS[card.ids[0]]; return `${it.kind} · ${ago(it.seen)}`;
+}
+function recOf(card) {
+  if (!RANKED() || card.tag) return null;
+  const it = card.batch ? BATCH[card.batch] : ITEMS[card.ids[0]];
+  if (it.incomplete) return { none: true, text: it.incomplete };
+  return it.say ? { text: it.say } : null;
+}
+function cardHtml(card, i, isCur, dock) {
+  const top = `<div class="qtop">${pathHtml(card)}${tagsHtml(card)}<span class="kd">${esc(kindHtml(card))}</span></div>`;
+  const rec = recOf(card);
+  const label = `${namesOf(card).join(" and ")}: ${askOf(card)}`;
+  if (!isCur) return `<article class="qc" data-a="cur" data-i="${i}" tabindex="-1" aria-label="${esc(label)}">${top}<div class="ask one">${esc(askOf(card))}</div>${rec ? `<div class="rec1"><span class="dm" aria-hidden="true">◆</span>${rec.none ? "No recommendation: it could not check this one" : esc(rec.text)}</div>` : ""}</article>`;
+  const it = card.batch ? BATCH[card.batch] : ITEMS[card.ids[0]], key = card.ids[0];
+  const pk = S.picked[key] || (it.opts ? it.opts.find(o => o[2])[0] : "");
+  let body = `<div class="ask">${esc(askOf(card))}</div>` + (it.why ? `<div class="why">${esc(it.why)}</div>` : "");
+  if (it.opts) body += `<div class="opts" role="group" aria-label="Options">${it.opts.map(([k, t, d], j) => `<button class="opt${d ? " isdef" : ""}" data-a="pick" data-k="${k}" aria-pressed="${pk === k}" title="Key ${j + 1}"><span class="k">${k}</span><span>${esc(t)}</span>${d ? `<span class="def">default${it.auto ? " · " + it.auto : ""}</span>` : `<span class="nodef"></span>`}</button>`).join("")}</div>`;
+  if (card.batch) body += `<ul class="bl">${card.ids.map(id => { const m = ITEMS[id]; return `<li><span class="mk ${m.facts[1] === "ok" ? "g" : "h"}" aria-hidden="true"></span><span class="bt"><b>${esc(projOf(id))} › ${esc(title(m.task))}</b><span class="${m.facts[1] === "ok" ? "ok" : ""}">${esc(m.facts[0])}</span></span><button class="lnk" data-a="openid" data-id="${id}">Open</button></li>`; }).join("")}</ul>`;
+  else if (it.facts) body += `<ul class="bl"><li><span class="mk ${it.facts[1] === "ok" ? "g" : "h"}" aria-hidden="true"></span><span class="bt"><span class="${it.facts[1] === "ok" ? "ok" : ""}">${esc(it.facts[0])}</span></span><span></span></li></ul>`;
+  if (rec) body += `<div class="rec${rec.none ? " none" : ""}"><span class="dm" aria-hidden="true">◆</span><span><span class="who">${rec.none ? "Super agent · no recommendation" : "Super agent suggests"}</span>${esc(rec.text)}</span></div>`;
+  const links = [];
+  if (!dock) links.push(`<button class="lnk" data-a="open">Open</button>`);
+  if (!card.batch && it.words) links.push(`<button class="lnk" data-a="words">Write your own answer</button>`);
+  const stay = stayOf(card);
+  links.push(stay ? `<span class="stay">Stays here: ${esc(stay)}</span>` : `<button class="lnk mut2" data-a="later" title="Back at ${LATER_BACK}">Later</button>`);
+  const btns = it.acts.map(([l, c, k]) => `<button class="btn ${c}" data-a="act" data-k="${k || "answer"}" data-l="${esc(l)}">${esc(it.opts && c === "you" ? l + " " + pk : l)}</button>`).join("");
+  body += `<div class="sacts">${links.join("")}<span class="bs">${btns}</span></div>` + (it.foot ? `<div class="foot">${esc(it.foot)}</div>` : "");
+  return `<article class="qc cur${dock ? " dock" : ""}" ${dock ? `data-dock="${key}"` : `data-i="${i}"`} tabindex="${dock ? -1 : 0}" aria-label="${esc(label)}">${top}${body}</article>`;
+}
+
+// ---------- the super agent page (the home pane) ----------
+const sect = (l, sub, body, subCls = "") => `<section class="sect"><div class="sh"><span class="lbl">${l}</span>${sub ? `<span class="sm ${subCls}">${sub}</span>` : ""}</div><div class="sb">${body}</div></section>`;
+function noteHtml(n) {
+  const unr = "Items that always need you come first, then the rest by age, with every action and no recommendations.";
+  const set = (cls, mk, h, w) => `<div class="note${cls}"><span class="mk ${mk}" aria-hidden="true"></span><span class="h">${h}</span><span class="w">${w}</span></div>`;
+  switch (S.mode) {
+    case "sorting": return set("", "n live", `Sorting ${S.sortN} ${S.sortN === 1 ? "item" : "items"}.`, "Cards keep their last recommendations until it ends.");
+    case "partial": return set("", "h", "Recommendations cover 10 of 14 items.", "The last sort had room for 10. The 4 marked not reviewed follow, oldest first, until the next sort. Sort now continues it.");
+    case "paused": return set("", "q", `Paused by you at ${S.pausedAt}.`, "Nothing is sorted until you resume. " + unr);
+    case "off": return set("", "q", "The super agent is off.", `Its daily limit is $0. ${unr} <button class="lnk" data-a="settings">Models settings</button>`);
+    case "capped": return set("", "q", "Today's limit of $1.00 is reached.", `Sorting starts again tomorrow, or raise the limit. ${unr} <button class="lnk" data-a="settings">Models settings</button>`);
+    case "failed": return set(" r", "r", `The last sort failed at ${S.lastPass}: it took longer than 2 minutes.`, unr + " Sort again, or it tries at the next change.");
+  }
+  return "";
+}
+function laterHtml(entries) {
+  if (!entries.length) return `<p class="calm">${!RANKED() && S.ids.some(id => ITEMS[id].later && !S.gone.has(id)) ? "Empty while the super agent is not sorting: what it put later is back in For you." : "Nothing in Later."}</p>`;
+  return `<div class="lt">${entries.map(e => { const tid = ITEMS[e.id].task; return `<div class="li"><div class="l1"><span class="pj">${esc(projOf(e.id))}</span><span class="pj sep" aria-hidden="true">›</span><span class="t">${esc(title(tid))}</span></div><div class="w">${e.by === "sa" ? `<span aria-hidden="true">◆ </span>` : ""}${esc(e.why)} <span class="bk">Back ${e.back}</span></div><button class="btn sm" data-a="bringback" data-id="${e.id}">Bring back</button></div>`; }).join("")}</div>`;
+}
+function digestHtml() {
+  const base = S.seen ? [] : (S.scen === "f-acts" ? [...LOG_ACTS, ...LOG_BASE.filter(r => r.g !== "◇" && !r.t.startsWith("You accepted"))] : S.scen === "partial" ? [{ ...LOG_BASE[0], t: "Super agent reviewed 10 of 14 items: 8 for you, 2 later; 4 wait for the next sort" }, ...LOG_BASE.slice(1)]
+    : S.scen === "off" ? LOG_BASE.slice(1) : S.scen === "failed" ? [{ g: "✕", t: "Super agent sort failed: it took longer than 2 minutes", p: "All projects", tm: "14:01" }, { ...LOG_BASE[0], tm: "13:40" }, ...LOG_BASE.slice(1)] : LOG_BASE);
+  const rows = [...S.log, ...base];
+  if (!rows.length) return `<p class="calm">Nothing new since you marked it seen at ${NOW}.</p><div class="spent">Spent since then: <b>$0.00</b></div>`;
+  const h = rows.map((r, k) => { const ui = LOG_ACTS.indexOf(r); return `<div class="dl"><span class="sg ${r.g === "✕" ? "r" : r.g === "✓" ? "g" : ""}" aria-hidden="true">${r.g}</span><span class="tx2">${esc(r.t)}</span><span class="tm">${r.tm}</span><span class="pj">${esc(r.p)}</span>${r.u ? (S.undone.has(ui) ? `<span class="ud done">undone</span>` : `<button class="lnk ud" data-a="undo" data-u="${ui}">${r.u}</button>`) : ""}</div>`; }).join("");
+  return `<div class="dg">${h}</div><div class="spent">Spent since ${S.seen ? NOW : LOOKED}: <b>${S.seen ? "$0.00" : "$3.10"}</b> on tasks. Super agent today: <b>$${S.spend.toFixed(2)}</b>, ${S.sorts} ${S.sorts === 1 ? "sort" : "sorts"}.</div>${S.seen ? "" : `<button class="lnk" data-a="seen">Mark seen</button>`}`;
+}
+function ordersHtml() {
+  if (S.editing) return `<label class="sr" for="ordersin">Standing orders, one per line</label><textarea class="oed" id="ordersin">${esc(S.orders.join("\n"))}</textarea><div class="orow"><button class="btn sm ghost" data-a="ocancel">Cancel</button><button class="btn sm" data-a="osave">Save orders</button></div>`;
+  return `<ol class="ord">${S.orders.map(o => `<li>${esc(o)}</li>`).join("")}</ol>` +
+    (S.prop === "open" ? `<div class="prop"><span class="dm" aria-hidden="true">◆</span><span><span class="who">Super agent proposes</span>${esc(PROPOSED)}</span><span class="orow"><button class="btn sm" data-a="psave">Save as an order</button><button class="btn sm ghost" data-a="pdrop">Dismiss</button></span></div>` : "") +
+    `<button class="lnk" data-a="oedit">Edit orders</button>`;
+}
+function homePage(cards) {
+  const n = count(cards);
+  if (S.cur > cards.length - 1) S.cur = Math.max(0, cards.length - 1);
+  const pill = { ranked: n ? `<span class="pst y">? ${n} for you</span>` : `<span class="pst g">✓ Nothing for you</span>`, sorting: `<span class="pst"><span class="spin live" aria-hidden="true"></span>Sorting</span>`,
+    partial: `<span class="pst y">? ${n} for you</span>`, paused: `<span class="pst q">Paused</span>`, off: `<span class="pst q">Off</span>`,
+    capped: `<span class="pst q">Limit reached</span>`, failed: `<span class="pst r">✕ Sort failed</span>` }[S.mode];
+  const facts = (S.mode === "partial" ? `<span class="fact"><i>Reviewed</i>10 of 14</span>` : "") + (!RANKED() ? `<span class="fact"><i>Order</i>oldest first</span>` : "") +
+    (!["off", "failed"].includes(S.mode) ? `<span class="fact"><i>Last sorted</i>${S.lastPass}</span>` : S.mode === "failed" ? `<span class="fact"><i>Last good sort</i>13:40</span>` : "");
+  const items = cards.length < n ? `${n} items in ${cards.length} cards` : `${n} ${n === 1 ? "item" : "items"}`;
+  const ack = S.ack ? `<p class="ack"><span class="g" aria-hidden="true">✓</span><span>${esc(S.ack)}</span></p>` : "";
+  const keys = `<div class="keys" aria-hidden="true"><span><kbd>J</kbd> <kbd>K</kbd> move</span><span><kbd>1</kbd> to <kbd>4</kbd> pick</span><span><kbd>Enter</kbd> confirm</span><span><kbd>S</kbd> later</span><span><kbd>O</kbd> open</span></div>`;
+  const lat = laterEntries();
+  const body = noteHtml(n) + ack + (n ? `<div class="qq">${cards.map((c, i) => cardHtml(c, i, i === S.cur)).join("")}</div>${keys}`
+    : `<p class="calm" id="emptyq" tabindex="-1"><b>Nothing for you.</b> ${running()} tasks run${lat.length ? `; ${lat.length} wait in Later, the next back at ${lat[0].back}` : ""}. The super agent looks again when something changes.</p>`);
+  return `<div class="hd"><div class="hl"><span class="eb">All projects</span><h2 id="pgh" tabindex="-1">Super agent</h2><div class="meta">${pill}${facts}</div></div><div class="cost"><b>$${S.spend.toFixed(2)}</b><span>${S.mode === "capped" ? "of $1.00 today" : "super agent today"}</span></div></div>` +
+    sect("For you", `${items}${n ? (RANKED() ? " · ranked" : " · oldest first") : ""}`, body, n ? "y" : "") +
+    sect("Later", lat.length ? `${lat.length} · back at their time` : "none", laterHtml(lat)) +
+    sect("Since you looked", `since ${S.seen ? NOW : LOOKED}`, digestHtml()) +
+    sect("Orders", `yours · ${S.orders.length}`, ordersHtml());
+}
+
+// ---------- the task page (locked) and the observed chat ----------
+function pendingOf(tid) { return liveIds().find(x => ITEMS[x].task === tid); }
+function stepsOf(tid) {
+  const s = [["scout", "haiku · low", "Read the brief's files and their tests", "done", "✓ done", "$0.02"], ["design", "opus · high", "Plan the change, the files and the tests", "done", "✓ done", "$0.21"],
+    ["code", "sonnet · medium", "Write the change and its tests", "run", "▸ running", "$0.24"], ["verify", "opus · medium", "Check step 3", "q", "· queued", ""]];
+  const p = pendingOf(tid), k = p && ITEMS[p].kind, t = TASKS[tid];
+  const done = i => { s[i][3] = "done"; s[i][4] = "✓ done"; };
+  if (k === "decision") { s[2][3] = "wait"; s[2][4] = "? asks you"; }
+  else if (k === "plan to confirm") { s[2][3] = "wait"; s[2][4] = "? waits for you"; s[2][5] = ""; }
+  else if (k === "held") { done(2); s[3][3] = "wait"; s[3][4] = "? held"; }
+  else if (k === "failed twice") { done(2); s[3] = ["verify", "opus · medium", "Check step 3: 2 tests fail", "fail", "✕ failed", "$0.11"]; s.push(["fix", "opus · high", "Fix the separator in safeJoin", "fail", "✕ failed", "$0.09"]); }
+  else if (k === "stuck") { s[2][3] = "fail"; s[2][4] = "✕ failed"; }
+  else if (p || t.st === "acc") { done(2); s[3][3] = "done"; s[3][4] = "✓ passed"; s[3][5] = "$0.05"; }
+  return s;
+}
+function pillOf(tid) {
+  const p = pendingOf(tid);
+  if (p) { const k = ITEMS[p].kind; return k === "failed twice" ? `<span class="pst r">✕ Failed twice</span>` : k === "stuck" ? `<span class="pst r">✕ Stuck</span>` : k === "held" ? `<span class="pst y">? Held</span>` : `<span class="pst y">? Needs you</span>`; }
+  if (S.scen === "f-acts" && tid === "export" && !S.undone.has(1)) return `<span class="pst q">Paused</span>`;
+  const t = TASKS[tid]; return t.st === "acc" ? `<span class="pst g">✓ Accepted</span>` : t.st === "q" ? `<span class="pst q">Queued</span>` : `<span class="pst">▸ Running</span>`;
+}
+const fold = (id, text) => `<div class="tx"><button class="car" data-a="fold" data-t="${id}" aria-expanded="false" aria-label="Show all">▸</button><button class="pv" data-a="fold" data-t="${id}">${esc(text)}</button><div id="${id}" class="txt" hidden>${esc(text)}</div></div>`;
+function taskPage(tid) {
+  const t = TASKS[tid], st = stepsOf(tid), lvl = S.level[tid] || t.level || "gated";
+  const now = st.find(r => r[3] === "run");
+  const rows = st.map((r, i) => `<div class="st ${r[3]}${S.step === i ? " pick" : ""}" role="button" tabindex="0" data-a="tstep" data-n="${i}" title="Step ${String(i + 1).padStart(2, "0")}"><span class="dt${r[3] === "run" ? " live" : ""}"></span><span class="n">${String(i + 1).padStart(2, "0")}</span><span class="what"><b>${r[0]}</b><span class="rt">${r[1]}</span><span class="g">${esc(r[2])}</span></span><span class="chk ${{ done: "g", fail: "r", run: "n", wait: "y", q: "q" }[r[3]]}">${r[4]}</span><span class="c">${r[5]}</span></div>`).join("");
+  const eb = inJob(tid) ? `${PROJECTS[t.p]} › ${JOB}` : PROJECTS[t.p];
+  return `<div class="hd"><div class="hl"><span class="eb">${esc(eb)}</span><h2 id="pgh" tabindex="-1" title="${esc(title(tid))}">${esc(title(tid))}</h2><div class="meta">${pillOf(tid)}${now ? `<span class="fact"><i>Now</i>${String(st.indexOf(now) + 1).padStart(2, "0")} ${now[0]} on ${now[1].split(" · ")[0]}</span>` : ""}${inJob(tid) ? `<span class="fact"><i>Worktree</i>its own</span>` : ""}</div></div>` +
+    `<div class="cost"><span class="lvl" title="Autonomy level of this task"><span class="seg">${["gated", "auto"].map(l => `<button data-a="lvl" data-id="${tid}" data-l="${l}" aria-pressed="${lvl === l}">${l}</button>`).join("")}</span></span><b>${t.cost || "$0"}</b><span>this task</span></div></div>` +
+    sect("Prompt", "you, 12:58", fold("pr", t.prompt || `${title(tid)}: the words you typed when you started this task.`)) +
+    sect("Brief", "prep · haiku", fold("bt", (t.prompt ? "From the prompt: " + t.prompt : "Prep's brief for this task: scope, files and the tests that prove it.") + (inJob(tid) ? " Runs in its own worktree, made from master at 13:13." : ""))) +
+    sect("Plan", `${st.length} steps · planner opus`, `<div class="tl">${rows}</div>`);
+}
+function obsPage(tid) {
+  const t = TASKS[tid], p = pendingOf(tid);
+  return `<div class="hd"><div class="hl"><span class="eb">${esc(PROJECTS[t.p])} · ${esc(t.obs)}</span><h2 id="pgh" tabindex="-1">${esc(t.title)}</h2><div class="meta">${p ? `<span class="pst y">? Waits for you there</span>` : `<span class="pst q">Observed</span>`}<span class="fact"><i>In</i>${esc(t.obs)}</span></div></div><div class="cost"><b>${t.cost}</b><span>this chat</span></div></div>` +
+    sect("You", `${t.obs}, 13:10`, `<p class="brief">${tid === "eslint" ? "Fix the eslint config so npm run lint passes on the new src/core files." : "Your request in that chat."}</p>`) +
+    sect("Claude", "latest turn", `<p class="brief">${esc(p ? ITEMS[p].ask : "Working; nothing asks you.")}</p>`) +
+    sect("Read only", "", `<p class="brief mut">Driven in ${esc(t.obs)}. Console and the super agent only watch it: answer it there.</p>`);
+}
+
+// ---------- future scenarios: the job row and the job page (design slices 4 and 5) ----------
+function jobBlock() {
+  const m = S.scen === "f-merge", merged = S.gone.has("M"), fable = !S.gone.has("A") && !m;
+  const fy = m ? !merged : fable, at = m && merged ? 3 : 2, pick = S.sel && S.sel.t === "job";
+  const stg = [0, 1, 2].map(i => `<i class="${i < at - 1 ? "f" : i === at - 1 ? "c" : ""}"></i>`).join("");
+  const line = m ? (merged ? "stage 3/3 · 1 running" : "stage 2/3 · merge ready") : fy ? "stage 2/3 · 1 for you" : "stage 2/3 · 2 running";
+  let h = `<button class="row job${fy ? " y" : ""}${pick ? " pick" : ""}" data-a="job"><span class="l1"><span class="jg" aria-hidden="true">◇</span><span class="t">${esc(JOB)}</span><span class="stg" title="Stage ${at} of 3">${stg}</span></span><span class="l2"><span class="ln ${fy ? "y" : ""}">${esc(line)}</span></span></button>`;
+  const jt = (st, tid, meta) => `<button class="jt ${st}${S.sel && S.sel.id === tid ? " pick" : ""}" data-a="task" data-id="${tid}"><span class="sg">${G[st]}</span><span class="sn">${esc(title(tid))}</span><span class="sm">${esc(meta)}</span></button>`;
+  const showAll = pick || (S.sel && inJob(S.sel.id));
+  if (showAll) {
+    h += `<div class="jsubs">` + jt("done", "split", "accepted") + (m ? jt("done", "worker", "accepted") : jt("run", "worker", "04 fix · sonnet")) +
+      (S.sel && S.sel.id === "worker" ? `<div class="subs">${stepsOf("worker").map((s, i) => `<button class="sub ${s[3]}${S.step === i ? " pick" : ""}" data-a="step" data-id="worker" data-n="${i}"><span class="sg">${G[s[3]]}</span><span class="sn">${String(i + 1).padStart(2, "0")} ${s[0]}</span><span class="sm">${s[3]}</span></button>`).join("")}</div>` : "") +
+      (m ? jt("done", "launch", "accepted") : fable ? jt("wait", "launch", "held · Fable") : jt("run", "launch", "05 verify · opus")) +
+      (m && merged ? jt("run", "e2e", "01 scout · haiku") : jt("q", "e2e", m ? "after the merge" : "stage 3")) + `</div>`;
+  } else if (fable) h += `<div class="jsubs">${jt("wait", "launch", "held · Fable")}</div>`;
+  return h;
+}
+function jobPage() {
+  const m = S.scen === "f-merge", merged = S.gone.has("M"), fable = !S.gone.has("A") && !m;
+  const tk = (st, tid, meta, cost, y) => `<button class="tk ${st}${y ? " y" : ""}" data-a="task" data-id="${tid}"><span class="l1"><span class="sg">${G[st]}</span><span class="t">${esc(title(tid))}</span>${tid !== "e2e" && tid !== "split" && !(m && merged) ? `<span class="wt" title="Runs in its own git worktree">worktree</span>` : ""}</span><span class="l2"><span class="ln">${esc(meta)}</span><span>${cost}</span></span></button>`;
+  const sv = (t, tm) => `<div class="sv"><span class="sg" aria-hidden="true">◆</span><span>Super agent</span><span class="tx2">${esc(t)}</span><span class="tm">${tm}</span></div>`;
+  const stage = (n, label, body, one) => `<div class="stage"><div class="sgh"><span class="sn">Stage ${n}</span><span class="sl">${esc(label)}</span></div><div class="side${one ? " one" : ""}">${body}</div></div>`;
+  const s2 = m ? tk("done", "worker", "accepted by you", "$1.12") + tk("done", "launch", "accepted by you", "$0.95")
+    : tk("run", "worker", "04 fix · sonnet · 2 min", "$0.91") + (fable ? tk("wait", "launch", "held · the verify wants Fable", "$0.74", true) : tk("run", "launch", "05 verify · opus", "$0.74"));
+  const split = stage(1, "done", tk("done", "split", "accepted", "$0.62"), true) +
+    stage(2, m ? (merged ? "merged into master" : "accepted · 2 branches to merge") : "side by side, each in its own worktree", s2) +
+    sv("started stage 2 in two worktrees: both tasks write src/", "13:13") + (m && merged ? sv("you merged 2 branches; stage 3 started", "now") : "") +
+    stage(3, m ? (merged ? "running" : "after the merge") : "after stage 2", m && merged ? tk("run", "e2e", "01 scout · haiku", "$0.01") : tk("q", "e2e", "waits", ""), true);
+  const pill = m && !merged ? `<span class="pst y">? Merge ready</span>` : fable ? `<span class="pst y">? 1 for you</span>` : `<span class="pst">▸ Running</span>`;
+  return `<div class="hd"><div class="hl"><span class="eb">fashion_packshots_ai · job</span><h2 id="pgh" tabindex="-1">${esc(JOB)}</h2><div class="meta">${pill}<span class="fact"><i>Stage</i>${m && merged ? 3 : 2} of 3</span><span class="fact"><i>Tasks</i>${m ? 3 : 1} of 4 accepted</span></div></div>` +
+    `<div class="cost"><span class="lvl"><span class="seg"><button aria-pressed="true">gated</button><button aria-pressed="false">auto</button></span></span><b>${m ? "$3.31" : "$2.84"}</b><span>this job</span></div></div>` +
+    sect("Goal", "you, 12:58", fold("goal", "Split batch prepare from launch: a queue model, a batch worker that drains it, and the launch UI on top; end with e2e tests. Keep every CLI flag working.")) +
+    sect("Split", "planner opus · 3 stages", split);
+}
+
+// ---------- dock, box, bar ----------
+function dockHtml() {
+  if (S.sel && S.sel.t === "job") { const id = S.scen === "f-merge" ? "M" : "A"; return liveIds().includes(id) ? cardHtml({ ids: [id] }, 0, true, true) : ""; }
+  if (S.sel && S.sel.id && !TASKS[S.sel.id].obs) { const p = pendingOf(S.sel.id); return p ? cardHtml({ ids: [p] }, 0, true, true) : ""; }
+  return "";
+}
+function target() {
+  if (S.answerTo) { const it = ITEMS[S.answerTo]; return { cls: "an", chip: "Answer · " + title(it.task), ph: "Your answer to: " + it.ask, kind: "answer" }; }
+  const s = S.sel;
+  if (s && s.t === "sa") { const off = ["off", "capped"].includes(S.mode);
+    return { cls: "sa", chip: "◆ Super agent", ph: off ? "Not sorting today" : "Ask or tell the super agent", kind: "sa", off }; }
+  if (s && s.t === "job") return { cls: "", chip: "Job · " + JOB, ph: "Ask about this job", kind: "job" };
+  if (s && s.id) { const t = TASKS[s.id];
+    if (t.obs) return { cls: "ro", chip: "Read only · " + t.obs + " chat", ph: `Answer it in its ${t.obs}`, kind: "ro", off: true };
+    return { cls: "", chip: "Task · " + title(s.id), ph: "Message the agent", kind: "task" }; }
+  const p = s && s.t === "p" ? s.p : NEW_WORK_PROJECT;
+  return { cls: "", chip: "New work · " + PROJECTS[p], ph: "Describe the new work", kind: "new", p };
+}
+function composer() {
+  const t = target(), tg = $("tgt"), inp = $("steerin");
+  tg.className = "tgt " + t.cls;
+  tg.innerHTML = `<span class="sr">Enter goes to: </span><span class="tn">${esc(t.chip)}</span>` + (t.kind === "answer" ? `<button class="tgx" data-a="tgx" aria-label="Cancel the answer" title="Cancel (Esc)">✕</button>` : "");
+  tg.title = "Where Enter goes: " + t.chip;
+  inp.placeholder = t.ph; inp.disabled = !!t.off; $("send").disabled = !!t.off;
+  inp.setAttribute("aria-label", "Message to " + t.chip);
+}
+const I = d => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  "Hand off": I('<path d="M9.5 2.5h4v4M13.5 2.5l-6 6M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/>'),
+  "Open in terminal": I('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2 2-2 2M8.5 10.5h3"/>'),
+  "Open folder": I('<path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>'),
+  "Delete": I('<path d="M2.5 4.5h11M6 4.5V3a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1.5M4 4.5l.7 8.6a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8.6"/>'),
+};
+const tools = names => `<span class="tools2">${names.map((x, i) => `<button class="ib${i > 1 ? " opt2" : ""}" title="${x}" aria-label="${x}">${ICONS[x]}</button>`).join("")}</span>`;
+function cells(n, f) { let s = ""; for (let i = 0; i < n; i++) s += `<i class="${i < f ? "f" : ""}"></i>`; return s; }
+function barHtml() {
+  if (onHome()) {
+    const can = ["ranked", "partial", "failed"].includes(S.mode);
+    const pause = S.mode === "paused" ? `<button class="btn go" data-a="resume">Resume</button>` : ["off", "capped"].includes(S.mode) ? "" : `<button class="btn ghost" data-a="pause">Pause</button>`;
+    const why = S.mode === "paused" ? "Resume first" : S.mode === "sorting" ? "A sort is running" : !can ? "The super agent is not sorting today" : "Sort what needs you now";
+    return `<span class="use"><b>${S.sorts}</b> sorts<span class="dv"></span><b>$${S.spend.toFixed(2)}</b> today</span><span class="sp"></span>${pause}<button class="btn" data-a="sort" title="${why}"${can ? "" : " disabled"}>${S.mode === "sorting" ? "Sorting" : S.mode === "failed" ? "Sort again" : "Sort now"}</button>`;
+  }
+  if (S.sel.t === "job") return tools(["Open folder"]) + `<span class="use"><b>${S.scen === "f-merge" && S.gone.has("M") ? 0 : 2}</b> worktrees<span class="dv"></span><b>${S.scen === "f-merge" ? "$3.31" : "$2.84"}</b></span><span class="sp"></span><button class="btn">Pause job</button><button class="btn">Stop job</button>`;
+  const t = TASKS[S.sel.id];
+  if (t.obs) return `<span class="use"><b>${t.cost}</b> this chat</span><span class="sp"></span><button class="btn go" data-a="ext" data-id="${S.sel.id}">Open in ${esc(t.obs)}</button>`;
+  const p = pendingOf(S.sel.id), runs = !p && t.st === "run";
+  return tools(["Hand off", "Open in terminal", "Open folder", "Delete"]) + `<span class="use"><span class="cells ctx">${cells(15, 6)}</span><b>58K</b><span class="dv"></span><b>${t.cost || "$0"}</b></span><span class="sp"></span>` +
+    (runs ? `<button class="btn">Pause</button><button class="btn">Stop</button>` : p ? `<button class="btn">Stop</button>` : "");
+}
+function vbackHtml() {
+  if (S.sel && S.sel.t === "job") return `<button class="vb" data-a="tolist">‹ All work</button><span class="crumb">${esc(PROJECTS[1])} › ${esc(JOB)}</span>`;
+  if (S.sel && S.sel.id) return `<button class="vb" data-a="tolist">‹ All work</button><span class="crumb">${esc(PROJECTS[TASKS[S.sel.id].p])} › ${esc(title(S.sel.id))}</span>`;
+  const n = count(queue());
+  return `<button class="vb" data-a="tolist">‹ All work</button><span class="crumb">Super agent · ${n} for you</span>`;
+}
+
+// ---------- render, focus, announce ----------
+function render(focus) {
+  const cards = queue(), n = count(cards);
+  $("list").innerHTML = list(cards);
+  $("card").innerHTML = S.sel && S.sel.t === "job" ? jobPage() : S.sel && S.sel.id ? (TASKS[S.sel.id].obs ? obsPage(S.sel.id) : taskPage(S.sel.id)) : homePage(cards);
+  $("dock").innerHTML = dockHtml();
+  $("vback").innerHTML = vbackHtml();
+  $("sent").innerHTML = S.sent;
+  $("bar").innerHTML = barHtml();
+  composer();
+  $("needs").textContent = `${n} for you`; $("needs").className = "needs" + (n ? "" : " z");
+  $("win").classList.toggle("nlist", S.nlist);
+  $("scen").innerHTML = SCEN[S.scen]; $("scen").className = "scen" + (S.scen.startsWith("f-") ? " fut" : "");
+  document.querySelectorAll("#views [data-s]").forEach(b => b.setAttribute("aria-pressed", b.dataset.s === S.scen));
+  check(cards);
+  if (focus === "cur") { const c = document.querySelector("#card .qc.cur") || $("emptyq") || $("pgh"); if (c) c.focus(); }
+  else if (focus === "head") { const h = $("pgh"); if (h) h.focus(); }
+  else if (focus === "dock") { const d = document.querySelector("#dock .qc") || $("pgh"); if (d) d.focus(); }
+  else if (focus) { const e = document.querySelector(focus); if (e) e.focus(); }
+}
+// every count on screen must agree: header, row, pill, section, projects (batches count each member)
+function check(cards) {
+  const n = count(cards), live = liveIds();
+  const perP = PROJECTS.map((_, i) => live.filter(x => TASKS[ITEMS[x].task].p === i).length).reduce((a, b) => a + b, 0);
+  const row = $("sarow").querySelector(".cnt").textContent, need = $("needs").textContent;
+  if (perP !== n || row !== `${n} for you` || need !== `${n} for you` || new Set(cards.flatMap(c => c.ids)).size !== n) console.error("count mismatch", { n, perP, row, need });
+}
+let liveT;
+function say(msg) { const l = $("live"); l.textContent = ""; clearTimeout(liveT); liveT = setTimeout(() => { l.textContent = msg; }, 30); }
+
+// ---------- actions ----------
+const cardOf = el => { const a = el.closest(".qc"); if (!a) return null; return a.dataset.dock ? { ids: [a.dataset.dock], dock: true } : queue()[+a.dataset.i]; };
+function answer(card, label) {
+  const names = namesOf(card), nm = names.length > 1 ? `${names.length} tasks` : names[0];
+  const ps = [...new Set(card.ids.map(projOf))].join(", ");
+  card.ids.forEach(id => { S.gone.add(id); S.back.delete(id); });
+  if (S.answerTo && card.ids.includes(S.answerTo)) S.answerTo = null;
+  S.log.unshift({ g: "◇", t: `${names.join(" and ")}: you chose ${label}`, p: ps, tm: NOW });
+  S.ack = `${label}: sent to ${nm}.`; S.sent = "";
+  const q = queue(), n = count(q);
+  if (S.cur > q.length - 1) S.cur = Math.max(0, q.length - 1);
+  render(onHome() ? "cur" : "head");
+  say(`${label}: sent to ${nm}. ${n} for you.` + (onHome() && q.length ? ` Now: ${askOf(q[S.cur])}` : ""));
+}
+function putLater(card) {
+  const stay = stayOf(card);
+  if (stay) { say(`Stays here: ${stay}.`); return; }
+  card.ids.forEach(id => { S.back.delete(id); S.later.push({ id, by: "you", back: LATER_BACK, why: "You put it later." }); });
+  S.ack = `${namesOf(card).join(" and ")}: in Later, back at ${LATER_BACK}.`;
+  render(onHome() ? "cur" : "head");
+  say(`Put later, back at ${LATER_BACK}. ${count(queue())} for you.`);
+}
+function openTask(tid) {
+  S.answerTo = null; S.step = null; S.sent = ""; S.nlist = false;
+  S.sel = TASKS[tid].job ? { t: "job" } : { t: "task", id: tid };
+  render("head");
+}
+function ext(id, card) {
+  const tid = card ? ITEMS[card.ids[0]].task : id, t = TASKS[tid];
+  S.sent = `Opened ${esc(title(tid))} in its ${esc(t.obs)}. The card leaves when that chat moves on.`;
+  render(card && !card.dock ? "cur" : null);
+  const item = card ? card.ids[0] : pendingOf(tid);
+  if (!item) return;
+  setTimeout(() => { if (S.gone.has(item) || !S.ids.includes(item)) return;
+    const hadFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest("#card .qc.cur");
+    S.gone.add(item); S.log.unshift({ g: "◇", t: `You answered ${title(tid)} in its ${t.obs}`, p: PROJECTS[t.p], tm: NOW });
+    S.sent = `${esc(title(tid))} moved on in its ${esc(t.obs)}: its card left.`;
+    render(hadFocus ? "cur" : null); say(`${title(tid)} moved on in its ${t.obs}. ${count(queue())} for you.`); }, 1600);
+}
+let sortT;
+function startSort(msg) {
+  clearTimeout(sortT);
+  S.sortN = liveIds().length + laterEntries().length; S.mode = "sorting"; render(); say(`Sorting ${S.sortN} items.`);
+  sortT = setTimeout(() => {
+    S.mode = "ranked"; S.ids.forEach(id => S.reviewed.add(id)); S.back.forEach(id => S.fwd.add(id)); S.back.clear();
+    S.lastPass = NOW; S.sorts++; S.spend += 0.004; if (S.scen === "partial") S.scen = "queue";
+    S.log.unshift(msg ? { g: "◆", t: `Super agent, to "${msg.slice(0, 60)}": noted for the next sorts. To keep it, add it to your orders.`, p: "All projects", tm: NOW }
+      : { g: "◆", t: `Super agent sorted ${S.sortN} items`, p: "All projects", tm: NOW });
+    render(); say(`Sorted. ${count(queue())} for you.`);
+  }, 1400);
+}
+function send() {
+  const inp = $("steerin"), v = inp.value.trim(), t = target();
+  if (!v || t.off) { inp.focus(); return; }
+  inp.value = "";
+  if (t.kind === "answer") { const id = S.answerTo; S.answerTo = null; const q = queue(), ix = q.findIndex(c => c.ids.includes(id));
+    if (ix >= 0 && onHome()) S.cur = ix; answer({ ids: [id] }, "Your own answer"); return; }
+  if (t.kind === "sa") { if (["paused", "failed"].includes(S.mode)) { S.sent = "Kept: the super agent reads it at the next sort."; render(); return; } S.sent = "Sent to the super agent: it sorts with your message."; startSort(v); return; }
+  S.sent = t.kind === "task" ? `Sent to <b>${esc(title(S.sel.id))}</b>: the agent reads it after its current step.`
+    : t.kind === "job" ? "Sent to the super agent with this job in scope." : `New work in <b>${esc(PROJECTS[t.p])}</b>: Prep sizes it as a task.`;
+  render();
+}
+function act(a, el) {
+  const card = cardOf(el);
+  switch (a) {
+    case "needs": S.sel = null; S.answerTo = null; S.nlist = false; S.sent = ""; render("cur"); break;
+    case "sa": { const was = S.sel && S.sel.t === "sa"; S.sel = was ? null : { t: "sa" }; S.answerTo = null; S.nlist = false; S.sent = ""; S.step = null; render("#sarow"); break; }
+    case "proj": { const pi = +el.dataset.p, isSel = S.sel && S.sel.t === "p" && S.sel.p === pi;
+      if (isSel) S.openP[pi] = el.getAttribute("aria-expanded") !== "true"; else { S.sel = { t: "p", p: pi }; S.openP[pi] = true; }
+      S.answerTo = null; S.sent = ""; render(`.prj[data-p="${pi}"]`); break; }
+    case "allp": S.allP[+el.dataset.p] = true; render(`.prj[data-p="${el.dataset.p}"]`); break;
+    case "task": openTask(el.dataset.id); break;
+    case "job": S.sel = { t: "job" }; S.nlist = false; S.answerTo = null; render("head"); break;
+    case "step": S.sel = { t: "step", id: el.dataset.id }; S.step = +el.dataset.n; S.nlist = false; render(`.sub[data-n="${el.dataset.n}"]`); break;
+    case "tstep": S.step = +el.dataset.n; if (S.sel) S.sel = { t: "step", id: S.sel.id }; render(`.st[data-n="${el.dataset.n}"]`); break;
+    case "tolist": S.nlist = true; render("#sarow"); break;
+    case "cur": S.cur = +el.dataset.i; S.answerTo = null; render("cur"); break;
+    case "pick": { const it = ITEMS[card.ids[0]]; S.picked[card.ids[0]] = el.dataset.k; render(card.dock ? "dock" : "cur"); say(`Option ${el.dataset.k}: ${it.opts.find(o => o[0] === el.dataset.k)[1]}`); break; }
+    case "act": { const k = el.dataset.k;
+      if (k === "open") return openTask(ITEMS[card.ids[0]].task);
+      if (k === "split") { S.split = true; render("cur"); say("Split into one card per task."); return; }
+      if (k === "ext") return ext(null, card);
+      const it = card.batch ? null : ITEMS[card.ids[0]];
+      answer(card, it && it.opts ? `${el.dataset.l} ${S.picked[card.ids[0]] || it.opts.find(o => o[2])[0]}` : el.dataset.l); break; }
+    case "ext": ext(el.dataset.id); break;
+    case "open": openTask(ITEMS[card.ids[0]].task); break;
+    case "openid": openTask(ITEMS[el.dataset.id].task); break;
+    case "words": S.answerTo = card.ids[0]; render("#steerin"); say(`Answer box: ${title(ITEMS[card.ids[0]].task)}. Enter sends, Esc cancels.`); break;
+    case "tgx": S.answerTo = null; render(onHome() ? "cur" : "dock"); break;
+    case "later": putLater(card); break;
+    case "bringback": { const id = el.dataset.id; S.later = S.later.filter(x => x.id !== id); S.back.add(id); S.fwd.delete(id);
+      S.ack = `${title(ITEMS[id].task)}: back in For you.`; render(`#card .qc[aria-label^="${CSS.escape(title(ITEMS[id].task))}"]`); say(`${title(ITEMS[id].task)} is back in For you.`); break; }
+    case "seen": S.seen = true; S.log = []; render("#pgh"); say("Marked seen."); break;
+    case "pause": clearTimeout(sortT); S.mode = "paused"; S.pausedAt = NOW; S.ack = ""; render('[data-a="resume"]'); say("Paused. Every item shows oldest first, without recommendations."); break;
+    case "resume": S.ack = ""; startSort(); break;
+    case "sort": S.ack = ""; startSort(); break;
+    case "settings": S.sent = "The Models page opens here (not drawn in this mock)."; render(); break;
+    case "oedit": S.editing = true; render("#ordersin"); break;
+    case "ocancel": S.editing = false; render('[data-a="oedit"]'); break;
+    case "osave": S.orders = $("ordersin").value.split("\n").map(x => x.trim()).filter(Boolean); S.editing = false; render('[data-a="oedit"]'); say("Orders saved."); break;
+    case "psave": S.orders.push(PROPOSED); S.prop = ""; render('[data-a="oedit"]'); break;
+    case "pdrop": S.prop = ""; render('[data-a="oedit"]'); break;
+    case "undo": S.undone.add(+el.dataset.u); render(); break;
+    case "lvl": S.level[el.dataset.id] = el.dataset.l; render(`[data-a="lvl"][data-l="${el.dataset.l}"]`); break;
+    case "fold": { const id = el.dataset.t, box = $(id), open = box.hidden, tx = el.closest(".tx"); box.hidden = !open; tx.querySelector(".pv").hidden = open;
+      const c = tx.querySelector(".car"); c.textContent = open ? "▾" : "▸"; c.setAttribute("aria-expanded", open); break; }
+    case "send": send(); break;
+  }
+}
+$("win").addEventListener("click", e => { const el = e.target.closest("[data-a]"); if (el && !el.disabled) act(el.dataset.a, el); });
+$("steerin").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); send(); }
+  else if (e.key === "Escape") { e.preventDefault(); if (S.answerTo) { S.answerTo = null; render(onHome() ? "cur" : "dock"); } else e.target.blur(); }
+});
+// keys: only on the home page, never while typing, never with a modifier; Enter on a button stays the button's
+document.addEventListener("keydown", e => {
+  const tg = e.target;
+  if (tg.closest && tg.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!$("win").contains(tg) && tg !== document.body) return;
+  const k = e.key;
+  if (k === "Escape") {
+    if (S.answerTo) { S.answerTo = null; render("cur"); }
+    else if (S.sel && (S.sel.id || S.sel.t === "job")) { S.sel = null; S.step = null; S.sent = ""; render("cur"); }
+    else if (S.sel) { S.sel = null; render("cur"); }
+    e.preventDefault(); return;
+  }
+  if (!onHome()) { if ((k === "Enter" || k === " ") && tg.matches(".st[role=button]")) { e.preventDefault(); tg.click(); } return; }
+  const q = queue(); if (!q.length) return;
+  const card = q[S.cur], onCard = tg.matches && tg.matches(".qc"), onCtl = tg.closest && tg.closest("button") && !onCard;
+  const move = d => { S.cur = Math.min(Math.max(S.cur + d, 0), q.length - 1); S.answerTo = null; render("cur"); };
+  if (k === "j" || k === "J" || (k === "ArrowDown" && onCard)) move(1);
+  else if (k === "k" || k === "K" || (k === "ArrowUp" && onCard)) move(-1);
+  else if (/^[1-4]$/.test(k)) { const it = card.batch ? null : ITEMS[card.ids[0]]; if (!it || !it.opts || !it.opts[+k - 1]) return; S.picked[card.ids[0]] = it.opts[+k - 1][0]; render("cur"); say(`Option ${it.opts[+k - 1][0]}: ${it.opts[+k - 1][1]}`); }
+  else if (k === "Enter") { if (onCtl) return; const b = [...document.querySelectorAll("#card .qc.cur .btn.you, #card .qc.cur .btn.go")].pop(); if (b) b.click(); }
+  else if (k === "s" || k === "S") putLater(card);
+  else if (k === "o" || k === "O") openTask(ITEMS[card.ids[0]].task);
+  else return;
+  e.preventDefault();
+});
+
+// ---------- review controls ----------
+const HASH = Object.fromEntries(location.hash.slice(1).split("&").filter(Boolean).map(kv => kv.split("=")));
+function setW(w) { $("win").classList.toggle("w400", w === "400"); $("win").classList.toggle("w340", w === "340"); document.querySelectorAll("[data-w]").forEach(b => b.setAttribute("aria-pressed", b.dataset.w === w)); }
+function setScen(s) {
+  clearTimeout(sortT); S = fresh(s);
+  if (s === "f-job" || s === "f-merge") S.sel = { t: "job" };
+  if (s === "f-jobtask") S.sel = { t: "task", id: "worker" };
+  render();
+}
+document.querySelectorAll("#views [data-s]").forEach(b => b.onclick = () => setScen(b.dataset.s));
+document.querySelectorAll("#views [data-w]").forEach(b => b.onclick = () => setW(b.dataset.w));
+$("theme").onclick = () => { const r = document.documentElement, dark = r.dataset.theme ? r.dataset.theme === "dark" : !matchMedia("(prefers-color-scheme: light)").matches; r.dataset.theme = dark ? "light" : "dark"; };
+$("motion").onclick = () => { const r = document.documentElement, on = r.dataset.motion !== "reduce"; if (on) r.dataset.motion = "reduce"; else delete r.dataset.motion; $("motion").setAttribute("aria-pressed", on); };
+$("reset").onclick = () => setScen(S.scen);
+if (HASH.theme) document.documentElement.dataset.theme = HASH.theme;
+if (HASH.motion === "reduce") { document.documentElement.dataset.motion = "reduce"; $("motion").setAttribute("aria-pressed", "true"); }
+setW(["400", "340"].includes(HASH.w) ? HASH.w : "900");
+setScen(SCEN[HASH.s] ? HASH.s : "queue");
+if (HASH.open && TASKS[HASH.open]) { S.sel = TASKS[HASH.open].job ? { t: "job" } : { t: "task", id: HASH.open }; render(); }
+if (HASH.sel === "sa") { S.sel = { t: "sa" }; render(); }
+if (HASH.nv === "list") { S.nlist = true; render(); }
+</script>

@@ -13,9 +13,10 @@
   `console/supervisor.py` (modes, `MODEL_ALIASES`, limits, `AUTO_KINDS`, `REPORT_ONLY`, `auto_reason`),
   `console/server.py` (`task_row`, the snapshot counts, `_sup_judge`, `_sup_auto`), `console/state.py` (`NEEDS_YOU`).
 - State: design approved by Fred on 2026-11-08 (D1 to D6 asked one at a time, D-a to D-f taken as proposed).
-  Brainstorm only: no code changed. The mock is made in a later session (Fred, 2026-11-08); an unchecked first draft
-  from this session sits untracked at `design/rework/explored/f-super-agent.html`, for that session to start from or
-  replace. Each slice in section 9 becomes its own plan; slice 1 is plan 58.
+  Brainstorm only: no code changed. Each slice in section 9 becomes its own plan; slice 1 is plan 58.
+- Mock: locked by Fred on 2026-11-08 as `design/rework/locked/super-agent.html` (the slice 2 window: the super agent
+  row and page, the rolled-up list, one box; the later slices only as marked future scenarios). Its notes hold the
+  five visual decisions. The explored copy stays at `design/rework/explored/f-super-agent.html`.
 
 ## 0. Short answer
 
