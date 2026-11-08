@@ -193,8 +193,9 @@ Pause?").
 ### 3.8 Files and audit
 
 `~/.claude/console/super/`: `notes.md`, `orders.md`, `super.jsonl` (append only, masked: each pass with its trigger,
-the items in, the output, its cost; each act's intent and outcome) and `seen.json` (when Fred last marked Since you
-looked as seen). A replay command like plan 44's (`py -m console --super-replay PASS`) re-runs a recorded digest for
+the items in, the output, its cost; each act's intent and outcome) and `state.json` (the current annotations, when
+each item was first seen, the last pass, Pause, and when Fred last marked Since you looked as seen), so a restart keeps
+the queue's order. A replay command like plan 44's (`py -m console --super-replay PASS`) re-runs a recorded digest for
 accounting only, never dispatching.
 
 ## 4. Jobs
@@ -267,7 +268,7 @@ a merge, a task in a job; dark and light; 900 and 400 px. What it must show:
     pick an option, Enter confirms, S puts it later, O opens. An answered card leaves and the next one takes focus.
   - Later: the count and each reason.
   - Since you looked: what was decided (with Undo where a route exists), what finished and failed, the spend, since
-    `seen.json`; Mark seen.
+    the `looked` time in `state.json` (its `seen` map holds each item's first-seen time, plan 58); Mark seen.
   - Orders: the file's lines, a proposed order with Save, Edit.
 
   Empty: "Nothing for you." with the running count and the last pass time. A pass running: "Sorting N new items".
@@ -375,3 +376,6 @@ the super agent's part is the accept (section 4.2).
 - 2026-11-08 - Brainstorm with Fred from the super-agent video report: the gap analysis, D1 to D6 asked one at a time,
   Fred's reversal of D-1 ("something to watch over all those tasks as a super agent"), the design approved as
   presented with D-a to D-f as proposed; this file written. Fred moved the mock to a later session. No code.
+- 2026-11-08 - Slice 1 written as plan 58 (`plans/58-super-agent/`, plan only, its D1 to D11 open for Fred). This
+  file now names `state.json` in 3.8 (it replaces `seen.json`; Since you looked reads its `looked` time). Found while
+  writing it: plan 44's `supervisor.append_log` can write a line that no longer parses (plan 58 README section 2).
