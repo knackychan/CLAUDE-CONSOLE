@@ -300,3 +300,202 @@ def read_log(home) -> list:
                 raise ValueError(f"super audit corrupt: {name} line {n}") from exc
             out.append(record)
     return out
+
+
+# -- items and the queue (Task 2) ---------------------------------------------------------------------------
+
+def _event(values) -> str:
+    """16 hex of canonical JSON SHA-256, stable until the decision evidence changes."""
+    raw = json.dumps(values, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def always_reason(task: dict) -> str:
+    """README 3.4: why an item of this task reaches the user whatever a pass says, the first that holds; "" when a
+    pass may rank it, batch it or put it later."""
+    why, state = str(task.get("why") or ""), task.get("state")
+    sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+    pending = sup.get("pending") if isinstance(sup.get("pending"), dict) else {}
+    decision = task.get("decision") if isinstance(task.get("decision"), dict) else {}
+    cs = tasks.current_step(task) if task.get("current") else None
+    if state == "waiting" and why == "confirm Fable":
+        return "Fable confirm"
+    if state == "stuck" and why.startswith("verify failed twice"):
+        return "second verify FAIL"
+    if why.startswith("supervisor work cap reached"):
+        return "work cap"
+    if pending.get("error") == "supervisor spend cap reached":
+        return "spend cap"
+    if tasks.held(task):
+        return "pace hold"
+    if cs and cs.get("limit"):
+        return "usage limit"
+    if pending.get("status") == "uncertain" or decision.get("taken") == "uncertain" or any(
+            isinstance(m, dict) and m.get("status") == "uncertain" for m in task.get("messages") or []):
+        return "uncertain dispatch"
+    if state == "waiting" and why.startswith("asks: ") and not decision.get("taken") and not decision.get("default"):
+        return "decision without a default"  # D10: a plain STOP question has no default either
+    return ""
+
+
+def task_kind(row: dict, task: dict) -> str:
+    """The kind of a task's item, from its list row (server.task_row) and task.json, the first that holds:
+    suggestion, decision (a question with options), question, hand_off, handed, failed_twice, stuck, hold (any other
+    wait: a plan, Fable, a pace, a cap), chat (a chat task's turn), else the task state (README 3.3)."""
+    state = task.get("state")
+    if (row.get("supervisor") or {}).get("attention"):
+        return "suggestion"
+    if row.get("asks"):
+        return "decision" if state == "waiting" and isinstance(task.get("decision"), dict) else "question"
+    if row.get("hand_off"):
+        return "hand_off"
+    if state == "handed":
+        return "handed"
+    if state == "stuck":
+        return "failed_twice" if str(task.get("why") or "").startswith("verify failed twice") else "stuck"
+    if state == "waiting":
+        return "hold"
+    return "chat" if task.get("chat") else str(state or "")
+
+
+def items(snap: dict, by_id: dict) -> list:
+    """README 3.3, the needs set, from a Hub snapshot (pure): every task row in group needs whose task is in `by_id`
+    (Hub.tasks, never changed), then every session row in group needs with neither task nor chat_task (a task's
+    session counts as its task, as the snapshot's counts do). The key is "<type>:<id>:<event>"; the event changes
+    when the state that raised the item changes, never with time, cost or `updated`."""
+    out = []
+    for row in snap.get("tasks") or []:
+        task = by_id.get(row.get("id"))
+        if row.get("group") != "needs" or not isinstance(task, dict):
+            continue
+        kind = task_kind(row, task)
+        sup = task.get("supervisor") if isinstance(task.get("supervisor"), dict) else {}
+        pending = sup.get("pending") if isinstance(sup.get("pending"), dict) else {}
+        decision = task.get("decision") if isinstance(task.get("decision"), dict) else {}
+        cs = tasks.current_step(task) if task.get("current") else None
+        event = _event([kind, task.get("state"), task.get("why") or "", task.get("current") or 0,
+                        len(tasks.attempts(cs)) if cs else 0, row.get("asks") or "", row.get("hand_off") or "",
+                        [pending.get(k) for k in ("wake", "status", "decision", "error")], decision,
+                        cs.get("limit") if cs else None, always_reason(task)])
+        out.append({"key": f"task:{task['id']}:{event}", "type": "task", "id": task["id"], "kind": kind,
+                    "always": always_reason(task), "subject_state": task.get("state"), "project": row.get("project") or "",
+                    "project_dir": row.get("project_dir") or "", "title": row.get("title") or "",
+                    "label": row.get("label") or task["id"]})
+    for row in snap.get("sessions") or []:
+        if row.get("group") != "needs" or row.get("task") or row.get("chat_task"):
+            continue
+        kind = (row["state"] if row.get("state") in NEEDS_YOU else "context" if row.get("ctx_tone") == "red"
+                else "handed")
+        event = _event([kind, row.get("state"), row.get("turn_ts"), row.get("handoff_by") or "",
+                        row.get("stop_question") or ""])
+        out.append({"key": f"session:{row['id']}:{event}", "type": "session", "id": row["id"], "kind": kind,
+                    "always": "", "project": row.get("project") or "", "project_dir": row.get("project_dir") or "",
+                    "title": row.get("title") or "", "label": str(row["id"])[:8]})
+    return out
+
+
+def sync(state: dict, live: list, now: float) -> tuple:
+    """Bring state.json's item memory to the live set (README 3.6): a new key is seen `now`; a key that left is
+    forgotten with its annotation, and so is an annotation whose key is no longer seen; a later annotation whose until
+    has passed is marked back, once. Returns (new keys, back keys, changed). Mutates `state`."""
+    keys = {i["key"] for i in live}
+    seen, ann = state["seen"], state["ann"]
+    new = [i["key"] for i in live if i["key"] not in seen]
+    for key in new:
+        seen[key] = float(now)
+    gone = [k for k in seen if k not in keys]
+    for key in gone:
+        del seen[key]
+    reviewed = state.setdefault("reviewed", {})
+    reviewed_gone = [key for key in reviewed if key not in keys]
+    for key in reviewed_gone:
+        del reviewed[key]
+    stale = [k for k in ann if k not in keys]
+    for key in stale:
+        del ann[key]
+    back = []
+    for key, a in ann.items():
+        until = a.get("until")
+        if a.get("do") == "later" and _num(until) and until <= now and not a.get("back"):
+            a["back"] = True
+            back.append(key)
+    return new, back, bool(new or gone or stale or back or reviewed_gone)
+
+
+def _when(ts) -> str:
+    """A timestamp as the local YYYY-MM-DDTHH:MM a pass writes; "" for none."""
+    return time.strftime("%Y-%m-%dT%H:%M", time.localtime(ts)) if _num(ts) else ""
+
+
+def last_at(state: dict) -> float:
+    """When the last pass was claimed; 0.0 for no pass, or for a hand-edited `last` whose time is not a number (the
+    queue and the sweep read it, and neither may raise)."""
+    last = state.get("last")
+    at = last.get("at") if isinstance(last, dict) else None
+    return float(at) if _num(at) else 0.0
+
+
+def select_items(items_: list, state: dict) -> list:
+    seen, reviewed = state.get("seen", {}), state.get("reviewed", {})
+    return sorted(items_, key=lambda i: (reviewed.get(i["key"], 0), not bool(i.get("always")),
+                                        seen.get(i["key"], 0), i["key"]))
+
+
+def _must_forward(item):
+    return bool(item.get("always") or item.get("incomplete") or
+                item.get("level") == "auto" and item.get("deadline") is not None)
+
+
+def compatible(group: list) -> bool:
+    """Only identical, available answer contracts justify a presentation batch."""
+    if len(group) < 2 or any(_must_forward(i) for i in group):
+        return False
+    first = group[0]
+    contract = first.get("contract")
+    return bool(contract and contract.get("action") and all(
+        i.get("kind") == first.get("kind") and i.get("level") == first.get("level")
+        and i.get("contract") == contract for i in group))
+
+
+def queue(items_: list, state: dict, now: float, ranked: bool) -> dict:
+    seen, annotations = state.get("seen", {}), state.get("ann", {})
+    rows, later, batches = [], [], {}
+    for item in items_:
+        key = item["key"]
+        a = annotations.get(key)
+        a = a if ranked and _annotation(a) else {}
+        row = dict(item, age_s=max(0, int(now - seen.get(key, now))),
+                   new=bool(ranked and (key not in seen or seen[key] > last_at(state))),
+                   do="forward", rank=a.get("rank"), say=redact.mask(a.get("say", "")),
+                   why=redact.mask(a.get("why", "")), batch="", until="")
+        if a and not _must_forward(item):
+            until = a.get("until")
+            if a["do"] == "later" and a["why"].strip() and _num(until) and now < until <= now + LATER_MAX_S:
+                row.update(do="later", until=_when(until))
+                later.append((until, row))
+                continue
+            if a["do"] == "batch" and isinstance(a.get("batch"), str) and a["batch"]:
+                batches.setdefault(a["batch"], []).append(row)
+        rows.append(row)
+    for identity, group in batches.items():
+        if compatible(group):
+            for row in group:
+                row.update(do="batch", batch=identity.split(":", 1)[-1])
+    def order(row):
+        age = (seen.get(row["key"], now), row["key"])
+        if row.get("always"):
+            return (0, 0, *age)
+        if ranked and row["rank"] is not None:
+            return (1, row["rank"], *age)
+        return (3 if row["new"] else 2, 0, *age)
+    rows.sort(key=order)
+    cards, used = [], set()
+    for row in rows:
+        if row["key"] in used:
+            continue
+        identity = annotations.get(row["key"], {}).get("batch") if row["do"] == "batch" else None
+        group = sorted(batches[identity], key=order) if identity else [row]
+        used.update(i["key"] for i in group)
+        cards.append({"batch": row["batch"], "rank": row["rank"], "items": group})
+    return {"queue": cards, "later": [row for _, row in sorted(later, key=lambda pair: (pair[0], pair[1]["key"]))]}
+
