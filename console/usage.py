@@ -395,17 +395,17 @@ def folder_sizes(home) -> dict:
 # The same usage-days.json is the spend authority; a pass id (supervisor.request_id) is the identity, so a
 # deleted task or a replayed log settles exactly once and a restart never frees a reserved allowance.
 
-def load_supervisor(folder) -> dict:
+def load_supervisor(folder, *, section="supervisor") -> dict:
     """The supervisor ledger from usage-days.json as {pass_id: record}. A missing section is valid empty; an
     unreadable or malformed section is an explicit error, never a free empty allowance."""
     data = _read(folder)
     if data is None:
         return {"error": "usage-days.json is unreadable", "records": {}}
-    sup = data.get("supervisor")
+    sup = data.get(section)
     if sup is None:
         return {"error": "", "records": {}}
     if not isinstance(sup, dict):
-        return {"error": "usage-days.json supervisor is not an object", "records": {}}
+        return {"error": f"usage-days.json {section} is not an object", "records": {}}
     return {"error": "", "records": sup}
 
 
@@ -460,20 +460,31 @@ def reserve_supervisor(folder, pass_id: str, record: dict, task_limit: float, da
         return {"status": "reserved", "reserved": round(remaining, 6), "task": task, "day": day}
 
 
-def record_supervisor(folder, pass_id: str, result: dict) -> dict:
+def record_supervisor(folder, pass_id: str, result: dict, *, section="supervisor") -> dict:
     """Settle one reservation with the reported cost. Unknown spend retains the reservation as unknown; a known
     cost is recorded in full even above the reservation. Settlement is idempotent and conflicting settlements are
     refused. The admission day is preserved."""
     cost = result.get("cost")
-    known = isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost)
+    known = (_super_money(cost) if section == "super" else
+             isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost))
     with FILE_LOCK:
-        data = _read(folder)
+        try:
+            data = _read(folder)
+        except UnicodeError:
+            if section != "super":
+                raise
+            data = None
         if data is None:
             _set_aside(folder)
             return {"status": "error", "error": "usage-days.json is unreadable"}
-        sup = data.get("supervisor", {})
+        sup = data.get(section, {})
         if not isinstance(sup, dict):
-            return {"status": "error", "error": "usage-days.json supervisor is not an object"}
+            return {"status": "error", "error": f"usage-days.json {section} is not an object"}
+        if section == "super":
+            error = _super_error(sup)
+            if error:
+                return {"status": "error", "error": error}
+            known = _super_money(cost)
         rec = sup.get(pass_id)
         if rec is None:
             return {"status": "error", "error": "no reservation for this pass"}
@@ -485,7 +496,7 @@ def record_supervisor(folder, pass_id: str, result: dict) -> dict:
             rec.update(cost=0.0, status="unknown")  # keep the reservation: it cannot be reclaimed silently
         else:
             rec.update(cost=round(float(cost), 6), reserved=round(float(cost), 6), status="settled")
-        data["supervisor"] = sup
+        data[section] = sup
         try:
             _write(folder, data)
         except OSError as exc:
@@ -497,3 +508,88 @@ def supervisor_spent(folder, *, task: str = "", day: str = "") -> tuple:
     """(settled cost, active reservations) of one task or one day in the ledger; an unreadable ledger counts as
     nothing left to spend is decided by reserve_supervisor, so this read-only view returns (0.0, 0.0) then."""
     return _supervisor_used(load_supervisor(folder)["records"], task=task, day=day)
+
+
+def _super_money(value):
+    try:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 and math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _super_error(records):
+    if not isinstance(records, dict):
+        return "usage-days.json super is not an object"
+    for pid, rec in records.items():
+        valid = isinstance(pid, str) and bool(pid) and isinstance(rec, dict)
+        if valid:
+            try:
+                day = rec.get("day")
+                valid = isinstance(day, str) and _date(day).isoformat() == day
+            except ValueError:
+                valid = False
+        if valid:
+            valid = (rec.get("kind") == "super" and rec.get("status") in ("reserved", "unknown", "settled")
+                     and _super_money(rec.get("cost")) and _super_money(rec.get("reserved")))
+        if valid and rec["status"] != "settled":
+            valid = rec["cost"] == 0 and rec["reserved"] > 0
+        if not valid:
+            return "usage-days.json super has an invalid record"
+    return ""
+
+
+def load_super(folder) -> dict:
+    with FILE_LOCK:
+        try:
+            data = _read(folder)
+        except UnicodeError:
+            data = None
+        if data is None:
+            return {"error": "usage-days.json is unreadable", "records": {}}
+        records = data.get("super", {})
+        error = _super_error(records)
+        return {"error": error, "records": {} if error else records}
+
+
+def reserve_super(folder, pass_id: str, day: str, pass_limit: float, day_limit: float) -> dict:
+    if not _super_money(pass_limit) or not _super_money(day_limit) or pass_limit <= 0 or day_limit <= 0:
+        return {"status": "error", "error": "super agent limits must be finite positive numbers"}
+    try:
+        valid_day = isinstance(day, str) and _date(day).isoformat() == day
+    except ValueError:
+        valid_day = False
+    if not valid_day or not isinstance(pass_id, str) or not pass_id:
+        return {"status": "error", "error": "invalid super agent admission identity or day"}
+    with FILE_LOCK:
+        try:
+            data = _read(folder)
+        except UnicodeError:
+            data = None
+        if data is None:
+            _set_aside(folder)
+            return {"status": "error", "error": "usage-days.json is unreadable"}
+        records = data.get("super", {})
+        error = _super_error(records)
+        if error:
+            return {"status": "error", "error": error}
+        if pass_id in records:
+            return {"status": "duplicate", "error": "pass already reserved", "record": records[pass_id]}
+        settled, held = super_spent(records, day)
+        amount = round(min(pass_limit, day_limit - settled - held), 6)
+        if amount <= 0:
+            return {"status": "cap", "error": "super agent day limit reached", "reserved": 0.0}
+        records[pass_id] = {"day": day, "kind": "super", "reserved": amount, "cost": 0.0, "status": "reserved"}
+        data["super"] = records
+        try:
+            _write(folder, data)
+        except OSError as exc:
+            return {"status": "error", "error": f"cannot write usage-days.json: {exc}"}
+        return {"status": "reserved", "reserved": amount, "day": day}
+
+
+def record_super(folder, pass_id: str, result: dict) -> dict:
+    return record_supervisor(folder, pass_id, result, section="super")
+
+
+def super_spent(records: dict, day: str) -> tuple:
+    return _supervisor_used(records, day=day)

@@ -421,6 +421,8 @@ class Hub:
             hours = fills.fail_hours(self.tasks, self.cfg, now)
         ledger = usage.load_supervisor(self.folder)
         spend = supervisor.spend_view(ledger["records"])
+        super_ledger = usage.load_super(self.folder)
+        super_days = supervisor.spend_view(super_ledger["records"])["days"]
         return {"ready": ready, "today": today, "first": min(days) if days else "",
                 "limit": self.cfg["daily_budget_usd"], "days": days,
                 "weeks": usage.weeks(days, today), "months": usage.months(days, today),
@@ -431,7 +433,12 @@ class Hub:
                 "supervisor": {"days": spend["days"],
                                "today": spend["days"].get(today, {"cost": 0.0, "runs": 0, "unknown": 0, "reserved": 0.0}),
                                "task_limit": self.cfg["supervisor_task_usd"],
-                               "day_limit": self.cfg["supervisor_day_usd"], "error": ledger["error"]}}
+                               "day_limit": self.cfg["supervisor_day_usd"], "error": ledger["error"]},
+                "super": {"days": super_days,
+                          "today": None if super_ledger["error"] else super_days.get(today,
+                              {"cost": 0.0, "runs": 0, "unknown": 0, "reserved": 0.0}),
+                          "day_limit": self.cfg.get("super_day_usd", 0),
+                          "pass_limit": self.cfg.get("super_pass_usd", 0), "error": super_ledger["error"]}}
 
     def history_loop(self) -> None:
         while not self._stop.is_set():

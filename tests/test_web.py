@@ -1639,6 +1639,25 @@ class SupervisorSettingsTest(unittest.TestCase):
         self.assertEqual(render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(empty)})"), "")
 
 
+    def test_usage_shows_super_agent_spend(self):  # plan 58 (D7): its own block, through the same function
+        days = {"2026-10-20": {"cost": 0.03, "runs": 9, "unknown": 0, "reserved": 0.2}}
+        data = {"today": "2026-10-20",
+                "supervisor": {"days": {}, "today": {}, "task_limit": 0.5, "day_limit": 2, "error": ""},
+                "super": {"days": days, "today": days["2026-10-20"], "day_limit": 1, "pass_limit": 0.2, "error": ""}}
+        html = render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(data)}, 'super')")
+        self.assertIn("Super agent passes", html)
+        self.assertIn("of $1.00 a day", html)
+        self.assertIn("9 passes", html)
+        self.assertIn("up to the super agent's day limit", html)
+        self.assertNotIn("Supervisor passes", html)
+        self.assertEqual(render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(data)})"), "")  # nothing spent there
+        bad = dict(data, super=dict(data["super"], error="usage-days.json super is not an object"))
+        self.assertIn("The super agent ledger could not be read: usage-days.json super is not an object",
+                      render(f"uMonth = '2026-10'; usageSupervisor({json.dumps(bad)}, 'super')"))
+        self.assertEqual(render(f"uMonth = '2026-10'; usageSupervisor({json.dumps({'today': '2026-10-20'})}, 'super')"), "")
+        self.assertIn('usageSupervisor() + usageSupervisor(usage, "super")', APP.read_text(encoding="utf-8"))
+
+
 @unittest.skipUnless(NODE, "Node is not installed")
 class LooseEndsWebTest(unittest.TestCase):
     """Plan 51: the card after Reject says what to do next; the recovery box names the uncertain decision."""
