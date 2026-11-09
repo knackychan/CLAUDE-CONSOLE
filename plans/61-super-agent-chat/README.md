@@ -9,8 +9,8 @@
 
 Status: **written 2026-11-09, plan only.** Baseline: master `4a0eb05` (docs) and branch `plan-58` at `d557f22` (plan 58
 Tasks 1 to 6 built, not merged). Every code fact below was read on `plan-58`; nothing is implemented and no product
-file was touched. D2 and D3 closed (a) by Fred 2026-11-09; D1 (section 5) is open; the task files are written for the
-recommended (a) answers and mark the lines another answer changes.
+file was touched. Decided by Fred 2026-11-09 (section 5): D1 (b, bounded), D2 (a), D3 (a); the task files follow
+them.
 
 **The build waits.** Tasks 1 to 4 build after plan 58 Tasks 1 to 6 are merged to master, on scratch services only.
 Task 5 (background acts) builds after plan 58's live check (its Task 7), and runs on one real project first. Task 6
@@ -18,11 +18,11 @@ Task 5 (background acts) builds after plan 58's live check (its Task 7), and run
 
 | # | File | Delivers | Depends on |
 |---|---|---|---|
-| 1 | [01-act-layer.md](01-act-layer.md) | `console/superact.py` (pure rules), `Hub.super_act` and `Hub._press`, the act audit, uncertain acts, Undo, `task_lever`'s super agent label | plan 58 T1-6 merged |
+| 1 | [01-act-layer.md](01-act-layer.md) | `console/superact.py` (pure rules), `Hub.super_act` and `Hub._press`, the act audit, uncertain acts, Undo, `task_lever`'s super agent label, the super agent's Approve (`_supervisor_dispatch` by `super`, one step past the work cap) | plan 58 T1-6 merged |
 | 2 | [02-limits-and-ledger.md](02-limits-and-ledger.md) | the six settings (config defaults, tuning whitelist, checks), the `chat` ledger section, GET /api/usage `chat`, the Usage page row | 1 |
 | 3 | [03-endpoint-and-tools.md](03-endpoint-and-tools.md) | `console/mcp.py` (stateless JSON-RPC), `guard.mcp_ok`, `POST /api/mcp`, `console/chattools.py` (nine tools), `superchat.py` part 1 (the thread file), `Hub.chat_card` | 1, 2 |
 | 4 | [04-chat-runner.md](04-chat-runner.md) | `superchat.py` part 2 (prompt, command, stream reader), the turn thread, memory, Stop, restart recovery, `GET` and `POST /api/super/chat`, `snap.chat`; the fake claude chat mode | 3 |
-| 5 | [05-background-acts.md](05-background-acts.md) | `act` in plan 58's answer, its checks and caps, the press from `_super_complete` only, the act rule in `SCHEMA_REMINDER` | 1, 2, plan 58 live check |
+| 5 | [05-background-acts.md](05-background-acts.md) | `act` in plan 58's answer, its checks and caps, the press from `_super_complete` only, the act rule in `SCHEMA_REMINDER`, the one opus retry after a second FAIL | 1, 2, plan 58 live check |
 | 6 | [06-thread-window.md](06-thread-window.md) | the mock (a design session, locked by Fred), then the Thread section, the chip, Confirm cards, act lines with Undo; `later`, `bring_back` and Save order on plan 59 Task 3 | 4, plan 59 web, mock lock |
 | 7 | [07-live-check-close.md](07-live-check-close.md) | Fred's live day by talking, cost per turn and per day, the effort choice, CLAUDE.md and PLAN.md lines | 1-6 |
 
@@ -88,6 +88,15 @@ terminal chats (D3); a Models page card for the new settings (config by hand thr
   (`{action: "orders", text}` replaces `orders.md` whole); web names `swPage`, `swTarget`, `swBox`, `swSend`, `sect`.
 - **`make_server`** returns `(httpd, hub)`; the Hub does not know the bound port (tests bind port 0).
 - **`tests/fake_claude.py`**: `run()` serves stream-json; `--json-schema` goes to `prep()`.
+- **Plan 44 dispatch** (master `368cb15`, read for D1): `_supervisor_dispatch(task_id, wake, by)` runs
+  `supervisor.auto_reason` only when `by` is neither `fred` nor `message`, and `_supervisor_fred` (the window reset)
+  only for `fred`. `auto_reason` tests, in order: the mode, a gated plan, report-only wakes (`REPORT_ONLY`: `done`,
+  `stalled`, `stalled_stop`), the kind (`AUTO_KINDS`: add step, confirm, keep, retry, finish), the work window, the
+  step count, `task_max_steps`, a repair whose verify failed, a used retry. `supervisor.check` refuses a retry with
+  none left in every mode. `start_step` stops a supervisor-caused chain at the work cap (`supervisor work cap reached
+  ($x of $y)`, owner `fred`, no suggestion). A stall's suggestion is Stop (the step still runs); its follow-up is a
+  fixed Retry that needs an Approve in every mode (plan 44 D6). `Hub.actions` serves Approve for a `suggest` pending
+  only.
 
 ## 3. Contract
 
@@ -100,8 +109,9 @@ terminal chats (D3); a Models page card for the new settings (config by hand thr
 2. `superact.verdict`: an observed card is refused; the id must be on the card and its `off` empty; a window-only id
    (`edit_steps`, `edit_prompt`, `edit_plan`, `review`, `terminal`, `folder`, and any other empty `post` outside
    `superact.FORMS`, which covers `start_next` without a follow-up) is refused `opens in the window`. For `super`: the
-   level must be `auto`, the item not always forwarded, the action not always yours, and not the task supervisor's
-   `approve`, `reject` or `dismiss` (D1). For `chat`: an always-yours action answers `needs_click`. `fred` presses.
+   level must be `auto`, the item not always forwarded (one lift, 3.6), the action not always yours, never the task
+   supervisor's `reject` or `dismiss`, and its `approve` only for a kind in `supervisor.AUTO_KINDS` (D1, 3.6). For
+   `chat`: an always-yours action answers `needs_click`. `fred` presses.
 3. A Confirm card's `card_hash` must equal the card's hash now, else `out of date: the card changed`.
 4. An earlier uncertain act on the task refuses every origin: `an earlier act on this task is uncertain: dismiss it
    in the thread first`. For `super`, the caps of 3.2 must have room.
@@ -137,7 +147,7 @@ anyway). The chat gets `needs_click`; the passes are refused.
 |---|---|
 | `/api/task/<lever>` (the eleven levers of `do_POST`) | `task_lever(body["task"], lever, "", None, "", origin=who, remember=body.get("remember"))` |
 | `/api/task/message` | `task_message(body)` (a decision option keeps its served deterministic `request_id`) |
-| `/api/task/supervisor` | `supervisor_action(body)` |
+| `/api/task/supervisor` | `supervisor_action(body)`; a pass's `approve`: `_supervisor_dispatch(task, wake, "super")` (3.6) |
 | `/api/continue` | `pull(body["session"], "continue", body.get("text", ""), False, [])` |
 | anything else | refused `opens in the window` (`superact.verdict` already refuses `/api/terminal` and `/api/task/folder`) |
 
@@ -215,9 +225,33 @@ written with `paths.write_text_atomic`; an unreadable file blocks sending until 
 
 An answer entry may say `"do": "act"` with `"act": {"action", "args"}`. `superagent.check` validates its shape,
 stores the entry as a `forward` annotation (the item stays in the queue with its `say` line) and returns it in
-`acts`; an always-forwarded item's act is trimmed. `Hub._super_complete` (never `_super_reconcile`) then presses each
-act through `super_act(..., "super")` after these checks: the super agent is not paused; the item is still live with
-the pass's basis; the act layer's own checks (3.1, level `auto`, caps). A refused act is one `act_refused` line.
+`acts`; an always-forwarded item's act is trimmed (one lift, rule 2 below). `Hub._super_complete` (never
+`_super_reconcile`) then presses each act through `super_act(..., "super")` after these checks: the super agent is not
+paused; the item is still live with the pass's basis; the act layer's own checks (3.1, level `auto`, caps). A refused
+act is one `act_refused` line.
+
+**What a pass may press at `auto` (D1 (b), bounded, Fred 2026-11-09).** What 3.1 allows, within
+`super_acts_task_hour` and `super_acts_day`, plus three things Fred chose so a project at `auto` keeps moving while he
+is away:
+
+1. **Approve a capped suggestion.** When the task supervisor's own dispatch is held by its step count, its work
+   window or its report-only rule (the done wake; the fixed Retry after a stalled step's Stop), a pass may press
+   Approve if the suggestion's kind is one the task supervisor may run alone (`supervisor.AUTO_KINDS`: add step,
+   confirm, keep, retry, finish; never Stop or Accept step result). The dispatch is `_supervisor_dispatch(task, wake,
+   "super")`: every plan 44 gate and `supervisor.check` run, `supervisor.auto_reason` runs under
+   `superact.lifted(policy)`, and `_supervisor_fred` does not, so the window is never reset: each Approve buys one
+   step, and only Fred's click starts a new window. `start_step` lets that one step past the work cap
+   (`sup_cause["by"] == "super"`); the next one waits.
+2. **Retry once on opus after a second verify FAIL.** The item stays forwarded (`second verify FAIL`); the one press
+   allowed is the card's Retry with `model` `opus`, once per step of a task (`superact.lift`, counted from the intent
+   lines). A FAIL after it reaches Fred.
+3. **Stalls.** A 30-minute stall's suggestion is Stop (the step still runs): Fred's. After his Stop, its fixed Retry
+   suggestion is approved by rule 1.
+
+Still Fred's: Fable, a pace hold and a usage limit (Run anyway), a question with no default, Stop, Finish, Delete,
+Drop, Accept step result, Reject and Dismiss, a chain stopped mid-way at the work cap (`work cap`: no suggestion to
+approve, and Continue there is his takeover), a repair whose verify already failed, a used supervisor retry, the
+supervisor's spend cap, and every uncertain act or dispatch.
 
 ### 3.7 GET and POST /api/super/chat (Task 4)
 
@@ -242,11 +276,11 @@ reach this route, so only the window confirms a card. `snap["chat"] = {busy, tur
 | 9 | effort "measured on a scratch turn" | `medium` now, measured in Task 7 | a measurement needs a paid turn: Fred's live check |
 | 10 | `read` also gives a chat's tail | plan, handoff, note, brief | a chat's tail is an observed session's transcript (D3) |
 
-## 5. Decisions for Fred (D1 open; D2, D3 closed 2026-11-09; the tasks follow (a))
+## 5. Decisions for Fred (closed 2026-11-09; the tasks follow the answers)
 
 | # | Question | (a) recommended | (b) |
 |---|---|---|---|
-| D1 | May a background act press the task supervisor's Approve, Reject or Dismiss at `auto`? | No: the chat and the cards only. At `auto` the task supervisor already acts within its caps; what it leaves on the card is what its caps or its report-only rule kept for Fred | Yes, with the dispatch labelled the super agent's (Task 1 `superact.FRED_SUGGESTION` emptied, Task 5 test reversed) |
+| D1 | May a background act press the task supervisor's Approve, Reject or Dismiss at `auto`? | No: the chat and the cards only. At `auto` the task supervisor already acts within its caps; what it leaves on the card is what its caps or its report-only rule kept for Fred | Yes, with the dispatch labelled the super agent's (Task 1 `superact.FRED_SUGGESTION` loses `approve`). **Closed (b), bounded**, Fred 2026-11-09: (a) meant watching Console all day; he chose Approve capped steps, Retry after a second FAIL and Handle stalls, not Run anyway on a pace hold. Approve only, never Reject or Dismiss (3.6) |
 | D2 | May the chat press Open in terminal and Open folder? | No: `opens in the window`; the chat says where | Yes: move `_terminal` and `_task_folder` into Hub methods and press them for `chat` only. **Closed (a)**, Fred 2026-11-09: "no need" |
 | D3 | Observed VS Code and terminal chats | Not reachable in v1: the chat reads them in `overview` and sends Fred to their card | Confirm cards that fork them through `pull`. **Closed (a)**, Fred 2026-11-09 |
 
@@ -271,6 +305,10 @@ reach this route, so only the window confirms a card. `snap["chat"] = {busy, tur
 | restart mid-turn | the turn `interrupted`, its reservation unknown, `runs/` emptied | `ChatHubTest.test_restart_recovery` |
 | background caps | the 21st act of a day, the 3rd on a task in an hour refused | `BackgroundActTest.test_caps` |
 | item changed before the press | refused `the item changed` | `BackgroundActTest.test_stale_item` |
+| a pass's Approve of a Stop suggestion | 409 `stop needs Fred's approval`; nothing pressed | `AutonomyTest.test_super_approve_never_stops_and_takes_report_only` |
+| a pass's Approve past the step cap | dispatched; the window is not reset | `AutonomyTest.test_super_approve_past_the_step_cap_keeps_the_window` |
+| the step after a pass's Approve at the work cap | waits `supervisor work cap reached` | `AutonomyTest.test_super_approve_buys_one_step_past_the_work_cap` |
+| a second opus retry of a step | refused `... the opus retry of this step was used` | `SuperActHubTest.test_second_fail_retry_once_on_opus` |
 
 ## 7. Verification
 
@@ -282,6 +320,10 @@ saved. Task 6: headless Edge at 900, 400 and 340 px, dark and light, reduced mot
 
 - **A wrong act at `auto`**: the level, the always-yours list, the always-forwarded items, the caps, the audit and
   Undo bound it; Task 5 runs on one project first.
+- **The D1 (b) lifts spend while Fred is away**: each is one press inside `super_acts_task_hour` (2) and
+  `super_acts_day` (20), so a task gets at most 2 steps an hour past its supervisor's caps; every press is an `act`
+  line, and a super Approve is `by` `super` in the task's `supervisor.jsonl`. Task 7 reads a day of them on one
+  project before a second goes to `auto`.
 - **Steered text** (a handoff that says "delete this task"): tool results are data by prompt; the always-yours list,
   the gates and the caps are code.
 - **Cost creep**: `chat_turn_usd`, `chat_day_usd`, Sonnet by default, cache reads on a resumed session, a ledger row;
@@ -296,3 +338,8 @@ saved. Task 6: headless Edge at 900, 400 and 340 px, dark and light, reduced mot
 - 2026-11-09 - Written from the design (C1 to C5) against `plan-58` `d557f22`; CLI and env-var docs re-read; D1 to D3
   open. Plan only.
 - 2026-11-09 - D2 and D3 closed (a) with Fred ("no need", "ok"); D1 open, explained (background = plan 58's passes acting with no message from Fred).
+- 2026-11-09 - D1 closed (b), bounded, with Fred: (a) meant watching Console all day. He chose Approve capped steps,
+  Retry after a second FAIL and Handle stalls, not Run anyway on a pace hold. Task 1 gains the `super` Approve
+  (`superact.lifted`, no window reset, one step past the work cap in `start_step`) and `superact.lift`; Task 5's
+  `check` keeps the one lifted act; 3.6 lists what stays his. Found while reading plan 44: a stall's own suggestion
+  is Stop, so it stays his; a chain stopped mid-way at the work cap has no suggestion and stays his.

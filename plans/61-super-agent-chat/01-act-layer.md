@@ -1,14 +1,15 @@
 # Task 1: the act layer
 
-> Contract: [README.md](README.md) 3.1. Builds after plan 58 Tasks 1 to 6 are merged to master. D1 (a) and D3 (a)
-> are marked where (b) changes a line.
+> Contract: [README.md](README.md) 3.1 and 3.6. Builds after plan 58 Tasks 1 to 6 are merged to master. D1 (b,
+> bounded) and D3 (a), decided by Fred 2026-11-09.
 
 **Files**
 - Create: `console/superact.py`
 - Modify: `console/server.py` (import, `Hub.__init__`, `Hub.super_act`, `Hub._press`, `Hub.act_dismiss`,
-  `Hub.act_undo`, `Hub.recent_acts`, `Hub._super_act_room`, `Hub._act_note`, `task_lever`'s label; stage only this
-  task's hunks)
+  `Hub.act_undo`, `Hub.recent_acts`, `Hub._super_act_room`, `Hub._act_note`, `task_lever`'s label, the `super` caller
+  of `_supervisor_dispatch` and `start_step`'s work cap; stage only this task's hunks)
 - Create: `tests/test_superact.py`
+- Modify: `tests/test_supervisor_server.py` (`AutonomyTest`, three methods; stage only those hunks)
 
 Commit boundary: `feat: the super agent act layer (plan 61 T1)`.
 
@@ -20,7 +21,7 @@ caller of verdict and clean_args; the Hub presses what they allow, through the H
 import hashlib
 import json
 
-from . import redact, tasks, usage
+from . import redact, supervisor, tasks, usage
 
 ORIGINS = ("chat", "super", "fred")  # fred: a Confirm card or an Undo that Fred clicked in the window
 MODELS = ("auto", "haiku", "sonnet", "opus")  # what an act may name; never fable
@@ -31,7 +32,8 @@ WINDOW_ONLY = frozenset({"edit_steps", "edit_prompt", "edit_plan", "review", "te
 FORMS = {"retry": ("model", "note"), "add_step": ("kind", "model", "text"), "handoff": ("follow_up", "note"),
          "reopen": ("text",)}
 NEEDS_TEXT = frozenset({"add_step", "reopen"})
-FRED_SUGGESTION = frozenset({"approve", "reject", "dismiss"})  # D1 (a): never pressed by a pass; (b) empties it
+FRED_SUGGESTION = frozenset({"reject", "dismiss"})  # never pressed by a pass; Approve only for AUTO_KINDS (D1 b)
+LIFT = {"second verify FAIL": "retry"}  # D1 (b): the one press a pass may make on an item forwarded for this reason
 UNDO = {"pause": "resume", "resume": "pause", "start": "stop", "confirm": "stop", "retry": "stop", "add_step": "stop"}
 LEVERS = ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "accept", "redo", "keep")
 CAPS = {"super_acts_day": (0, 100), "super_acts_task_hour": (0, 6)}
@@ -86,15 +88,46 @@ def verdict(origin: str, level: str, card: dict, action_id, task: dict, forwarde
         if always:
             return "refuse", "always yours: " + always, action
         if action_id in FRED_SUGGESTION:
-            return "refuse", "the task supervisor's suggestion stays yours", action
+            return "refuse", "rejecting the task supervisor stays yours", action
+        if action_id == "approve":  # D1 (b): only what the task supervisor may run alone at auto; never Stop
+            kind = (((task.get("supervisor") or {}).get("pending") or {}).get("decision") or {}).get("decision")
+            if kind not in supervisor.AUTO_KINDS:
+                return "refuse", f"the task supervisor suggests {kind or 'nothing'}: yours", action
     if origin == "chat" and always:
         return "click", always, action
     return "press", "", action
 
 
 def pressable(card: dict, task: dict, level: str, forwarded: str = "") -> list:
-    """The ids a pass may press now (Task 5 shows them in the digest)."""
-    return [a["id"] for a in flat(card) if verdict("super", level, card, a["id"], task, forwarded)[0] == "press"]
+    """The ids a pass may press now (Task 5 shows them in the digest); a lifted reason (LIFT) allows its one id."""
+    out = []
+    for a in flat(card):
+        still = "" if LIFT.get(forwarded) == a["id"] else forwarded
+        if verdict("super", level, card, a["id"], task, still)[0] == "press":
+            out.append(a["id"])
+    return out
+
+
+def lift(forwarded: str, action_id, args, task: dict, records: list) -> str:
+    """README 3.6 (D1 b): the forwarded reason that still holds for this background press; "" when Fred lifted it:
+    after a second verify FAIL, one Retry on opus per step of a task, counted at intent like plan 44's retries."""
+    if not forwarded or LIFT.get(forwarded) != action_id:
+        return forwarded
+    if not isinstance(args, dict) or args.get("model") != "opus":
+        return forwarded + ": only a retry on opus"
+    if any(r.get("phase") == "act" and r.get("origin") == "super" and r.get("lift") == forwarded
+           and r.get("task") == task.get("id") and r.get("step") == task.get("current") for r in records):
+        return forwarded + ": the opus retry of this step was used"
+    return ""
+
+
+def lifted(policy: dict) -> dict:
+    """README 3.6 (D1 b): the auto policy a super agent's Approve is checked under (supervisor.auto_reason). Fred
+    lifted three limits for it: the report-only wakes (done, a stall's follow-up), the supervisor's step count and
+    its work window. The mode, the kind (AUTO_KINDS: never Stop), task_max_steps, a repair whose verify failed and a
+    used retry still refuse."""
+    return dict(policy, triggers=[t for t in policy.get("triggers") or () if t not in supervisor.REPORT_ONLY],
+                auto_steps_left=max(1, policy.get("auto_steps_left") or 0), work_usd=float("-inf"))
 
 
 def clean_args(action_id: str, args) -> tuple:
@@ -232,14 +265,21 @@ with:
         needs_click, refused or uncertain."""
         if origin not in superact.ORIGINS:
             return 400, {"outcome": "refused", "why": "unknown origin"}
+        records = []
+        if origin == "super" and forwarded:  # D1 (b): superact.lift counts the lifted presses already made
+            try:
+                records = superagent.read_log(self.folder)
+            except ValueError as exc:
+                return 409, {"outcome": "refused", "why": superagent._clip(exc, 200)}
         with self.tlock:
             task = self.tasks.get(task_id) if isinstance(task_id, str) and tasks.safe_id(task_id) else None
             if task is None:
                 return 404, {"outcome": "refused", "why": "unknown task"}
             card = self.actions(task)
             level = supervisor.policy(self.cfg, task, time.time())["mode"]
-            kind, why, action = superact.verdict(origin, level, card, action_id, task, forwarded)
-            title = task.get("title") or task_id
+            still = superact.lift(forwarded, action_id, args, task, records) if origin == "super" else forwarded
+            kind, why, action = superact.verdict(origin, level, card, action_id, task, still)
+            title, step = task.get("title") or task_id, task.get("current")
         label = action["label"] if action else str(action_id)[:40]
         if kind != "refuse" and card_hash and card_hash != superact.card_hash(card):
             kind, why = "refuse", "out of date: the card changed"
@@ -261,7 +301,9 @@ with:
                          "action": action["id"], "args": clean, "hash": superact.card_hash(card)}
         act = uuid.uuid4().hex
         intent = {"phase": "act", "act": act, "origin": origin, "task": task_id, "action": action["id"],
-                  "label": label, "args": clean}
+                  "label": label, "args": clean, "step": step}
+        if origin == "super" and forwarded:
+            intent["lift"] = forwarded  # a press past a lifted reason: superact.lift counts it per step
         try:
             superagent.append_log(self.folder, intent)
         except OSError as exc:
@@ -319,6 +361,8 @@ with:
             return self.task_lever(body.get("task"), lever, "", None, "", origin=who, remember=body.get("remember"))
         if post == "/api/task/message":
             return self.task_message(body)
+        if post == "/api/task/supervisor" and who == "super" and body.get("action") == "approve":
+            return self._supervisor_dispatch(body["task"], body["wake"], "super")  # D1 (b): Fred's window kept
         if post == "/api/task/supervisor":
             return self.supervisor_action(body)
         if post == "/api/continue":
@@ -370,6 +414,50 @@ with:
             return []
 ```
 
+**`_supervisor_dispatch`, the `super` caller (D1 b, README 3.6).** Its docstring names `"super"` (the super agent's
+Approve) beside `"fred"` and `"auto"`. Replace:
+
+```python
+                reason = supervisor.auto_reason(decision, task, self._sup_auto_policy(task, pol, decision))
+```
+
+with:
+
+```python
+                policy = self._sup_auto_policy(task, pol, decision)
+                if by == "super":  # plan 61 D1 (b): the limits Fred lifted for the super agent's Approve
+                    policy = superact.lifted(policy)
+                reason = supervisor.auto_reason(decision, task, policy)
+```
+
+Only `by == "fred"` calls `_supervisor_fred`, so a `super` Approve never resets the window (auto steps, retries,
+work cost): only Fred's click does. After `task["sup_cause"] = {"wake": wake, "epoch": sup["epoch"]}` add:
+
+```python
+            if by == "super":
+                task["sup_cause"]["by"] = "super"  # plan 61: start_step lets this one step past the work cap
+```
+
+and the slot count inside `if kind == "add_next_step" and isinstance((body or {}).get("step"), int):` reads `if by in
+("auto", "super"):  # a slot at reservation, held or failed too; a super Approve's step counts`.
+
+**`start_step`'s work cap.** Replace:
+
+```python
+            if spent >= limit:  # plan 44: a supervisor-caused continuation stops launching at the work cap
+```
+
+with:
+
+```python
+            if cause.get("by") == "super":  # plan 61 D1 (b): the super agent's Approve buys this one step
+                cause.setdefault("passed", n)
+            if spent >= limit and cause.get("passed") != n:  # plan 44: a supervisor-caused chain stops at the cap
+```
+
+The step after it meets the cap as before: the task waits `supervisor work cap reached`, plan 58 forwards it (`work
+cap`), and it stays Fred's (README 3.6).
+
 `self.actions(task)` runs inside `tlock` (an `RLock`; `actions` takes `self.lock` inside, the existing order).
 
 ## 1.3 Tests first (`tests/test_superact.py`)
@@ -399,6 +487,10 @@ def card(*actions, state="running"):
 TASK = {"id": "t1", "why": "", "state": "running"}
 
 
+def suggesting(kind):
+    return dict(TASK, supervisor={"pending": {"decision": {"decision": kind}}})
+
+
 class VerdictTest(unittest.TestCase):
     def test_order_of_refusals(self):
         c = card(act("pause"), act("x", off="the task is paused"), act("edit_plan", post=""), act("start_next", post=""))
@@ -421,15 +513,46 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(superact.verdict("chat", "auto", c, "confirm", TASK)[:2], ("press", ""))
 
     def test_super_origin_needs_auto_and_no_forward(self):
-        c = card(act("pause"), act("approve", "/api/task/supervisor"))
+        c = card(act("pause"), act("reject", "/api/task/supervisor"))
         self.assertEqual(superact.verdict("super", "gated", c, "pause", TASK)[:2],
                          ("refuse", "the level is gated: only auto acts alone"))
         self.assertEqual(superact.verdict("super", "auto", c, "pause", TASK, "second verify FAIL")[:2],
                          ("refuse", "always forwarded: second verify FAIL"))
-        self.assertEqual(superact.verdict("super", "auto", c, "approve", TASK)[:2],  # D1 (a)
-                         ("refuse", "the task supervisor's suggestion stays yours"))
+        self.assertEqual(superact.verdict("super", "auto", c, "reject", TASK)[:2],
+                         ("refuse", "rejecting the task supervisor stays yours"))
         self.assertEqual(superact.pressable(c, TASK, "auto"), ["pause"])
         self.assertEqual(superact.pressable(c, TASK, "gated"), [])
+
+    def test_approve_by_kind_and_the_lift(self):  # D1 (b)
+        c = card(act("approve", "/api/task/supervisor"), act("retry", ""))
+        self.assertEqual(superact.verdict("super", "auto", c, "approve", suggesting("retry"))[:2], ("press", ""))
+        self.assertEqual(superact.verdict("super", "auto", c, "approve", suggesting("stop"))[:2],
+                         ("refuse", "the task supervisor suggests stop: yours"))
+        self.assertEqual(superact.pressable(c, suggesting("add_next_step"), "auto"), ["approve", "retry"])
+        self.assertEqual(superact.pressable(c, suggesting("retry"), "auto", "second verify FAIL"), ["retry"])
+        self.assertEqual(superact.pressable(c, suggesting("retry"), "auto", "work cap"), [])
+        t = dict(TASK, current=3)
+        used = [{"phase": "act", "origin": "super", "task": "t1", "step": 3, "lift": "second verify FAIL"}]
+        self.assertEqual(superact.lift("second verify FAIL", "retry", {"model": "opus"}, t, []), "")
+        self.assertEqual(superact.lift("second verify FAIL", "retry", {"model": "sonnet"}, t, []),
+                         "second verify FAIL: only a retry on opus")
+        self.assertEqual(superact.lift("second verify FAIL", "retry", {"model": "opus"}, t, used),
+                         "second verify FAIL: the opus retry of this step was used")
+        self.assertEqual(superact.lift("second verify FAIL", "retry", {"model": "opus"}, dict(t, current=4), used), "")
+        self.assertEqual(superact.lift("work cap", "confirm", {}, t, []), "work cap")
+
+    def test_lifted_policy(self):  # D1 (b)
+        pol = {"mode": "auto", "triggers": ["done", "stuck"], "auto_steps_left": 0, "work_usd": 9.0, "room": 2,
+               "settings": {"supervisor_work_usd": 5, "supervisor_max_auto_steps": 3, "supervisor_max_retries": 1}}
+        finish, add = {"decision": "finish"}, {"decision": "add_next_step"}
+        self.assertEqual(supervisor.auto_reason(finish, TASK, pol), "report only: Fred approves this one")
+        lifted = superact.lifted(pol)
+        self.assertEqual(lifted["triggers"], ["stuck"])
+        self.assertEqual(supervisor.auto_reason(finish, TASK, lifted), "")
+        self.assertEqual(supervisor.auto_reason(add, TASK, lifted), "")
+        self.assertEqual(supervisor.auto_reason({"decision": "stop"}, TASK, lifted), "stop needs Fred's approval")
+        self.assertEqual(supervisor.auto_reason(add, TASK, dict(lifted, room=0)),
+                         "task_max_steps reached: only Fred adds more steps")
 
     def test_card_hash_follows_gates(self):
         a, b = card(act("pause")), card(act("pause", off="busy"))
@@ -515,12 +638,79 @@ mapping and the audit are what this task tests (the routes keep their own tests)
   the card serves `resume`; `act_undo(act)` calls `task_lever(t, "resume", ...)` through `super_act(..., "fred")`; an act of `accept` (written by hand) answers 409 `this act has no Undo`.
 - `test_caps`: an `auto` Hub with `super_acts_task_hour` 1: the first `super` press of `confirm` goes, the second on the
   same task is 409 `1 background acts on this task within an hour`.
+- `test_super_approve_goes_to_the_dispatch` (D1 b): an `auto` Hub and a task made under it;
+  `task.setdefault("supervisor", supervisor.initial(hub.cfg, task["project_dir"], T0))["pending"] = {"wake": 1,
+  "decision": {"decision": "retry"}}`; `hub.actions` patched to return `card(act("approve", "/api/task/supervisor",
+  body={"task": t, "wake": 1, "action": "approve"}))`; `_supervisor_dispatch` and `supervisor_action` patched to
+  `(200, {"task": t})`. `super_act(t, "approve", {}, "super")` is 200 `done` and called `_supervisor_dispatch(t, 1,
+  "super")`; `super_act(t, "approve", {}, "chat")` called `supervisor_action({"task": t, "wake": 1, "action":
+  "approve"})` (Fred's word is his Approve); with the decision `stop`, the `super` press is 409 `the task supervisor
+  suggests stop: yours`.
+- `test_second_fail_retry_once_on_opus` (D1 b): an `auto` Hub, `task_lever` patched; task 2 `stuck` with `why` `verify
+  failed twice: tests fail` and its current step `failed` (then `tasks.save`). With `forwarded="second verify FAIL"`:
+  `retry` with `{"model": "sonnet", "note": "n"}` is 409 `always forwarded: second verify FAIL: only a retry on opus`
+  and writes one `act_refused` line; with `"opus"` it is 200 `done` and called `task_lever(t2, "retry", "n", "opus",
+  "", origin="super")`, its intent line has `lift` `second verify FAIL` and `step` the task's `current`; a second
+  `opus` press is 409 `always forwarded: second verify FAIL: the opus retry of this step was used`.
+
+`tests/test_supervisor_server.py`, `AutonomyTest` (plan 44's helpers `supervised_task`, `stuck_task`, `auto`,
+`pending`, `held_add`), three methods:
+
+```python
+    def test_super_approve_past_the_step_cap_keeps_the_window(self):  # plan 61 D1 (b)
+        tid = self.supervised_task()
+        self.auto(tid)
+        with mock.patch.object(self.hub, "preview_next", return_value=(200, {"revision": "r"})), self.held_add(tid):
+            for wake in (1, 2, 3, 4):
+                self.pending(tid, ADD, wake=wake)
+                self.hub._sup_auto(tid, wake)
+            self.assertIn("approve the next", self.hub.tasks[tid]["supervisor"]["pending"]["error"])
+            self.assertEqual(self.hub._supervisor_dispatch(tid, 4, "auto")[0], 409)  # auto stays capped
+            code, body = self.hub._supervisor_dispatch(tid, 4, "super")
+        self.assertEqual(code, 200, body)
+        self.assertEqual(self.hub.tasks[tid]["supervisor"]["auto_steps"], 4)  # counted; only Fred's click resets it
+        self.assertTrue(any(r.get("phase") == "outcome" and r.get("by") == "super"
+                            for r in supervisor.read_log(self.folder, tid)))
+
+    def test_super_approve_never_stops_and_takes_report_only(self):  # plan 61 D1 (b)
+        tid = self.stuck_task("20260101-000000-b0b5")
+        self.auto(tid)
+        self.pending(tid, dict(decision="stop", reason="r", confidence="high", for_fred=""), triggers=("stalled",))
+        with mock.patch.object(self.hub, "task_lever") as lever:
+            self.assertEqual(self.hub._supervisor_dispatch(tid, 1, "super"),
+                             (409, {"error": "stop needs Fred's approval"}))
+        self.assertEqual(lever.call_count, 0)
+        done = self.supervised_task("20260101-000000-b0b6")
+        self.auto(done)
+        self.pending(done, dict(decision="finish", reason="done", confidence="high", for_fred=""), triggers=("done",))
+        self.hub._sup_auto(done, 1)
+        self.assertIn("report only", self.hub.tasks[done]["supervisor"]["pending"]["error"])
+        self.assertEqual(self.hub._supervisor_dispatch(done, 1, "super")[0], 200)
+        self.assertEqual(self.hub.tasks[done]["state"], "done")
+
+    def test_super_approve_buys_one_step_past_the_work_cap(self):  # plan 61 D1 (b)
+        tid = self.supervised_task("20260101-000000-aaa3")
+        t = self.hub.tasks[tid]
+        t.update(progression=None, owner="service", state="running", why="")
+        t["steps"].extend((tasks._blank(2, "code", "next"), tasks._blank(3, "code", "after")))
+        t["steps"][0]["attempts"][0]["sup"] = {"wake": 1, "epoch": t["supervisor"]["epoch"], "cost_at_start": 0.0}
+        t["steps"][0]["attempts"][0]["cost"] = 6.0
+        t["sup_cause"] = {"wake": 1, "epoch": t["supervisor"]["epoch"], "by": "super"}
+        with mock.patch.object(self.hub.runs, "start", return_value="sid-2") as start:
+            self.hub.start_step(t, 2)
+        self.assertEqual((start.call_count, t["sup_cause"]["passed"]), (1, 2))
+        t.update(state="running", owner="service", why="")
+        with mock.patch.object(self.hub.runs, "start") as start:
+            self.hub.start_step(t, 3)
+        self.assertEqual(start.call_count, 0)
+        self.assertIn("work cap", t["why"])
+```
 
 ## 1.4 Steps
 
 - [ ] 1. Write `tests/test_superact.py`; run `py -m unittest tests.test_superact`: red (no module `superact`).
 - [ ] 2. Create `console/superact.py` (1.1). The pure classes go green; the Hub class stays red.
-- [ ] 3. Make the 1.2 edits. `py -m unittest tests.test_superact tests.test_superagent_server tests.test_server`
-      green.
+- [ ] 3. Make the 1.2 edits. `py -m unittest tests.test_superact tests.test_superagent_server tests.test_server
+      tests.test_supervisor_server` green.
 - [ ] 4. Full suite green (report the count). Stage `console/superact.py`, `tests/test_superact.py` and only this
-      task's hunks of `console/server.py`. Commit with the message above.
+      task's hunks of `console/server.py` and `tests/test_supervisor_server.py`. Commit with the message above.

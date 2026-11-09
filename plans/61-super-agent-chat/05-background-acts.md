@@ -1,10 +1,11 @@
 # Task 5: background acts
 
-> Contract: [README.md](README.md) 3.6. Builds after plan 58's live check (its Task 7). The first real run is on one
-> project at `auto`; every other project stays where it is.
+> Contract: [README.md](README.md) 3.6 (D1 (b, bounded), Fred 2026-11-09). Builds after plan 58's live check (its
+> Task 7). The first real run is on one project at `auto`; every other project stays where it is.
 
 **Files**
-- Modify: `console/superagent.py` (`ACT`, `SCHEMA`, `SCHEMA_REMINDER`, `evidence`, `basis`, `_act_shape`, `check`)
+- Modify: `console/superagent.py` (the import, `ACT`, `SCHEMA`, `SCHEMA_REMINDER`, `evidence`, `basis`, `_act_shape`,
+  `check`)
 - Modify: `console/server.py` (`_super_describe`, `_super_complete`, `Hub._super_acts`; stage only this task's hunks)
 - Modify: `tests/fake_claude.py` (`SUPER-ACT` in `superagent()`)
 - Modify: `tests/test_superagent.py` (plan 58's D11 schema assertion), `tests/test_superact.py` (`ActCheckTest`,
@@ -14,7 +15,8 @@ Commit boundary: `feat: background acts at auto through the act layer (plan 61 T
 
 ## 5.1 `console/superagent.py`
 
-After `DO = ("forward", "batch", "later")`:
+The `from . import` line gains `superact` (no cycle: `superact` imports `redact`, `supervisor`, `tasks` and `usage`,
+none of which imports `superagent`). After `DO = ("forward", "batch", "later")`:
 
 ```python
 ACT = "act"  # plan 61: an entry that asks code to press one served action; stored as a forward annotation
@@ -40,7 +42,8 @@ follows `"until"`:
 ```
 
 `SCHEMA_REMINDER` gains, before `The digest follows.`: `"An item whose block lists acts may answer do act with act
-{action, args}, action one of those ids; code checks every act again and may refuse it. "`
+{action, args}, action one of those ids; code checks every act again and may refuse it. After a second verify FAIL
+the one act offered is retry with args model opus. "`
 
 A helper before `check`:
 
@@ -71,7 +74,8 @@ def _act_shape(value) -> bool:
 ```python
         reason = ""
         if entry["do"] == ACT:
-            if _must_forward(item) or evidence(item)[1]:
+            lifted = superact.LIFT.get(item.get("always") or "") == entry["act"]["action"]  # D1 (b), README 3.6
+            if _must_forward(dict(item, always="") if lifted else item) or evidence(item)[1]:
                 trimmed.append({"key": handle, "why": "always forwarded: no act"})
             elif entry["act"]["action"] not in (item.get("acts") or []):
                 trimmed.append({"key": handle, "why": "act not offered"})
@@ -150,6 +154,9 @@ has no `order` field, and that `SCHEMA["properties"]["items"]["items"]["properti
   ""}]`.
 - `"act": {"action": "stop"}`: no act, `trimmed` has `act not offered`; the item with `"always": "Fable confirm"`:
   `always forwarded: no act`.
+- D1 (b): the item with `"always": "second verify FAIL"`, `"acts": ["retry"]` and the act `{"action": "retry", "args":
+  {"model": "opus", "note": "n"}}`: kept, its `forwarded` `second verify FAIL`; the same item answered with `"act":
+  {"action": "confirm"}`: trimmed `always forwarded: no act`.
 - `do` `forward` with an `act`, `do` `act` without one, `"act": {"action": "confirm", "args": {"x": 1}}`: each is
   dropped with `invalid act`.
 
@@ -165,6 +172,18 @@ patches `self.hub.task_lever` to `(200, {"task": ...})`. A pass runs as plan 58'
 - `test_gated_never_acts`: `supervisor_mode` `gated` for a fresh Hub and task: the prompt has no `"acts"`; the same
   answer is trimmed `act not offered`; `task_lever` never called.
 - `test_always_forwarded_never_acts`: task 2 waiting `confirm Fable`: trimmed `always forwarded: no act`; no press.
+- `test_second_fail_retries_once_on_opus` (D1 b): task 2 made `stuck` with `why` `verify failed twice: tests fail` and
+  its current step `failed` (`steps[-1]["state"] = "failed"`, then `tasks.save`); its block in the prompt holds
+  `"acts":["retry"]`; the answer `do` `act` with `act` `{"action": "retry", "args": {"model": "opus", "note": "verify
+  on opus"}}`; the patched `task_lever` was called once with `(t2, "retry", "verify on opus", "opus", "",
+  origin="super")`; the intent line has `lift` `second verify FAIL` and `step` the task's `current`. Then
+  `self.hub.super_act(t2, "retry", {"model": "opus", "note": "x"}, "super", forwarded="second verify FAIL")` is 409
+  `always forwarded: second verify FAIL: the opus retry of this step was used`.
+- `test_capped_suggestion_is_approved` (D1 b): task 3 waiting `choose next step` with a saved suggestion written as plan
+  44's `DispatchTest.pending` writes it (wake 1, status `suggest`, the decision `add_next_step`, error `3 supervisor
+  steps since Fred acted: approve the next`); `self.hub._supervisor_dispatch` patched to `(200, {"task": t3})`; its
+  block holds `"approve"` in `acts`; the answer act `{"action": "approve"}`; the patched dispatch was called once with
+  `(t3, 1, "super")`.
 - `test_stale_item`: the answer callback sets `self.hub.tasks[t1]["why"] = "replanned: x"` before it returns; after the
   pass the last audit line is `act_refused` with `the item changed`; no press.
 - `test_paused`: the answer callback calls `self.hub.super_action({"action": "pause"})`; the act is refused `the super

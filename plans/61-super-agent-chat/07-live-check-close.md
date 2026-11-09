@@ -15,8 +15,9 @@
    same. A card changed in the window before the click shows Out of date.
 5. **Dictation.** Say "end of this task" by voice: the reply reads it as Hand off, or asks.
 6. **Stop and limits.** Stop a long answer: the partial reply stays. Raise the day limit back to 3.00.
-7. **Background acts** (Task 5): one project at `auto` for a day; read every `act` and `act_refused` line; Fred
-   decides whether a second project goes to `auto`.
+7. **Background acts** (Task 5): one project at `auto` for a day; read every `act` and `act_refused` line, and each
+   lifted press against README 3.6 (an `act` line with `lift`; a super Approve, `by` `super` in the task's
+   `supervisor.jsonl`); Fred decides whether a second project goes to `auto`.
 8. **A day by talking.** One working day clearing For you mostly through the chat. Record: turns, cost per turn
    (median, p90), cost per day, presses, Confirm cards, refusals, and what Fred still clicked by hand and why.
 
@@ -28,7 +29,8 @@ Findings go to the plan's History and, for anything to fix, to a numbered list h
   card's served actions and gates; an always-yours list in `console/superact.py` needs Fred's click on a Confirm
   card); the chat is one `claude -p` per message on a resumed session with only Console's MCP tools (`POST /api/mcp`,
   a Bearer token per turn); its files are `~/.claude/console/super/chat/`; background acts only at `auto`, within
-  `super_acts_day` and `super_acts_task_hour`."
+  `super_acts_day` and `super_acts_task_hour`; a pass's Approve (`_supervisor_dispatch` by `super`) never resets
+  Fred's window and buys one step (README 3.6)."
 - `PLAN.md`: row 61's status to built, with the live numbers (stage only that hunk).
 - `BRAINSTORM.md`: D19's line gains "built (plan 61)" (stage only that hunk).
 - This README's History: the build commits and the live numbers.
