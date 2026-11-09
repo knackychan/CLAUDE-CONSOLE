@@ -380,3 +380,7 @@ the super agent's part is the accept (section 4.2).
 - 2026-11-08 - Slice 1 written as plan 58 (`plans/58-super-agent/`, plan only, its D1 to D11 open for Fred). This
   file now names `state.json` in 3.8 (it replaces `seen.json`; Since you looked reads its `looked` time). Found while
   writing it: plan 44's `supervisor.append_log` can write a line that no longer parses (plan 58 README section 2).
+- 2026-11-09 - Slice 3 redesigned with Fred as acts and chat (`2026-11-09-super-agent-chat.md`, BRAINSTORM D19): a
+  chat with Console MCP tools presses card actions on his word; at `auto` the passes may press any served action
+  except a code list kept for Fred (that file's 3.1), which replaces the four narrow acts of section 3.5. The cards
+  of section 5 stay.

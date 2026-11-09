@@ -35,6 +35,9 @@ Amended 2026-11-08 (D17, D18): worktrees are in for parallel writers, behind a p
 stages is not a task graph and its one index, advanced on the hub tick, is not a scheduler; the super agent is bounded
 passes, not a daemon or a resident agent.
 
+Amended 2026-11-09 (D19): the super agent's chat runs one `claude -p` per message on one resumed session, reset at
+`gauge_yellow_tokens`; no process stays alive between Fred's messages.
+
 ## 3. Decisions (Fred, 2026-10-10)
 
 | # | Question | Decision |
@@ -57,6 +60,7 @@ passes, not a daemon or a resident agent.
 | D16 | Board simplification (2026-10-19) | Prompt, Run supervised, Supervise (section 7.6, `plans/48-three-moments.md`): Start is supervised by default, one message box carries what comes next, per-step levers leave the screen, Hand off / Finish / Models sit behind one menu. Mock explored, not yet locked |
 | D17 | Jobs (2026-11-08) | A job is a goal split into tasks, in stages: the tasks of a stage run side by side, stages run in order, one index advanced on the hub tick (not a task graph, not a scheduler). From a typed goal (the planner splits it, Fred confirms) or a sub-plan folder (plan 53, absorbed). Parallel writers in one repo run in git worktrees behind a per-project switch, merged on Fred's click. `design/brainstorm/2026-11-08-super-agent.md` section 4 |
 | D18 | Super agent (2026-11-08) | One role over every job and task: bounded passes on events over a code-built digest, a notes file and Fred's standing orders. It filters, ranks and recommends; at `auto` it also acts within caps; what needs Fred and what is always shown to him are code. Reverses orchestration D-1 (no orchestrator agent) and plan 44's "no cross-task decisions"; still no resident session. One box follows the selection. Same file, sections 3 and 6; section 7.7 |
+| D19 | Super agent chat and acts (2026-11-09) | The cards stay as Fred's input and the super agent also presses their actions. A chat on its page, and a chip on every page, acts on Fred's word at any level through Console's own MCP tools (`POST /api/mcp`, one `claude -p` per message, one resumed session); plan 58's tool-free passes may act at `auto` only, within caps. One act layer in code checks every act against the card's served actions and gates; a code list (Fable, Delete, Drop, Finish, Stop, Accept step result, Run anyway, level changes, observed chats) stays Fred's and becomes a one-click Confirm card. Amends D18 (the chat keeps one resumed session) and widens slice 3's acts. `design/brainstorm/2026-11-09-super-agent-chat.md`; section 7.7 |
 
 ## 4. Architecture
 
@@ -323,6 +327,10 @@ task are one line each until something inside needs Fred, and steps show only un
 changes). Jobs sit between projects and tasks; one box follows the selection, its chip naming where Enter goes. Five
 slices: super agent v1 with no acts (plan 58), the window, acts at `auto`, jobs, worktrees.
 
+2026-11-09 (D19, `design/brainstorm/2026-11-09-super-agent-chat.md`): slice 3 becomes acts and chat. Fred talks to the
+super agent in a thread under the cards (and through a chip on any page); it presses card actions on his word and, in
+`auto` projects, on its own; the cards stay as his input.
+
 ## 8. Error handling
 
 - **Crash / shutdown during a run**: transcripts are written line by line, edits stay on disk, only
@@ -410,3 +418,6 @@ slices: super agent v1 with no acts (plan 58), the window, acts at `auto`, jobs,
   `design/brainstorm/2026-11-08-super-agent.md`): one super agent over every task made of bounded passes (reverses
   orchestration D-1), jobs in stages above tasks (absorbs plan 53), git worktrees for parallel writers. Slice 1 is
   plan 58; the mock moves to a later session.
+- 2026-11-09 - Super agent chat and acts with Fred (D19, `design/brainstorm/2026-11-09-super-agent-chat.md`), from
+  his Artcoustic and sticker-generator assistants: a chat with Console MCP tools that presses card actions on his
+  word, background acts at `auto`, one act layer in code; the cards stay. The plan is next.

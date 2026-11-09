@@ -15,6 +15,11 @@ OK). Nothing is implemented and no product file was touched by writing this plan
 design section 9 says each slice's plan follows the build of the one before, so **this plan is written against the
 documented contracts of plans 58 and 55, not against code** (section 2 lists every symbol it relies on).
 
+**Amended by design 2026-11-09 (BRAINSTORM D19, `design/brainstorm/2026-11-09-super-agent-chat.md`):** do not build
+section 4.9 (a message to the super agent as a note), its `message` action in Task 3, or the `◆ Super agent` box mode
+in Task 6. D4 is superseded: the chat plan (slice 3) brings the box mode as a chat that replies and presses card
+actions. Everything else in this plan stands, the cards included.
+
 **The build waits.** Do not start Task 1 until all three hold:
 
 1. Plan 58 is built, its Task 7 live check passed, and its D2, D6, D9, D10 are closed (this plan marks where each
@@ -509,3 +514,5 @@ Review notes (2026-11-08, plan review before the build; Fred decides):
   completion-merges-live-state requirement (4.9); the ledger rows of section 2 (fixtures, `policy_hash`, `incomplete`,
   `settings`, `load_super`); the honest binding statement (section 9); seven tests that could not pass as written
   (Tasks 2, 4, 5, 7, 8). Review notes under section 7 for D1 and D11. Still plan only.
+- 2026-11-09: amended by the chat design (BRAINSTORM D19): 4.9, Task 3's `message` action and Task 6's super agent
+  box mode are not built here; D4 superseded. Docs only.
