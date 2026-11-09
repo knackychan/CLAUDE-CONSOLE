@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from console import paths, server, superagent, supervisor, tasks, usage
+from tests import test_server
 
 T0 = 1_800_000_000.0
 FAKE = [sys.executable, str(Path(__file__).resolve().parent / "fake_claude.py")]
@@ -378,3 +379,156 @@ class SuperHubTest(unittest.TestCase):
         self.assertEqual(next(iter(records.values()))['status'], 'settled')
         self.make_hub(self.hub.folder)
         self.assertEqual(self.calls, [])
+
+
+class SuperRouteTest(unittest.TestCase):
+    """Reuse the HTTP fixture without repeating its unrelated inherited test cases."""
+    call = test_server.RunServerTest.call
+
+    def setUp(self):
+        test_server.RunServerTest.setUp(self)
+        self.hub.super_clock = lambda: T0
+        self.hub.super_mono = lambda: 1000.0
+        self.hub.cfg['super_debounce_s'] = 0
+        patch = mock.patch.object(server.time, 'time', return_value=T0)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def tearDown(self):
+        for thread in list(self.hub.super_threads):
+            thread.join(10)
+        test_server.RunServerTest.tearDown(self)
+
+    def task(self, n, **extra):
+        return make_task(self.hub, self.project, n, **extra)
+
+    def pass_(self):
+        self.assertTrue(self.hub._super_tick(), self.hub.super_error)
+        for thread in list(self.hub.super_threads):
+            thread.join(10)
+        self.assertFalse(self.hub.super_busy)
+
+    def test_get_fake_pass_and_new_equal_clock_item(self):
+        self.task(1)
+        self.task(2, why='confirm Fable')
+        status, before = self.call('/api/super')
+        self.assertEqual(status, 200)
+        self.assertEqual(before['state'], 'unranked')
+        self.assertEqual(before['why'], 'no pass yet')
+        self.assertEqual(before['counts'], {'queue':2,'later':0,'always':1,'new':0})
+        self.pass_()
+        status, after = self.call('/api/super')
+        self.assertEqual(after['state'], 'ranked', after['why'])
+        self.assertEqual(after['spend']['today'], .003)
+        self.assertEqual(after['coverage'], {'live':2,'last_submitted':2,'never_reviewed':0})
+        self.assertEqual(after['digest'], ['fake digest: 2 items'])
+        self.assertEqual(after['queue'][0]['items'][0]['always'], 'Fable confirm')
+        self.assertIn('fake:', after['queue'][1]['items'][0]['say'])
+        self.task(3)
+        self.assertEqual(self.call('/api/super')[1]['counts']['new'], 1)
+        self.assertGreater(after['last']['ms'], 0)
+
+    def test_pause_resume_sort_and_host_guard(self):
+        import http.client
+        conn = http.client.HTTPConnection('127.0.0.1', self.port)
+        conn.request('POST', '/api/super', body='{"action":"sort"}', headers={'Content-Type':'application/json'})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 403)
+        response.read(); conn.close()
+        for body in [{}, {'action':'nap'}, {'action':'sort','x':1}, {'action':[]}]:
+            self.assertEqual(self.call('/api/super', body)[0], 400)
+        self.assertEqual(self.call('/api/super', {'action':'pause'})[1]['why'], 'paused')
+        self.assertTrue(superagent.load_state(self.hub.folder)['paused'])
+        self.assertEqual(self.call('/api/super', {'action':'sort'})[0], 409)
+        self.assertEqual(self.call('/api/super', {'action':'resume'})[1]['due'], 0)
+        self.task(1)
+        self.pass_()
+        self.assertEqual(self.call('/api/super', {'action':'sort'})[1]['due'], 0)
+        self.pass_()
+        self.assertEqual(usage.super_spent(usage.load_super(self.hub.folder)['records'], usage.day_of(T0))[0], .006)
+
+    def test_failed_pause_or_action_log_is_503_and_blocks_admission(self):
+        self.task(1)
+        with mock.patch.object(superagent, 'save_state', side_effect=OSError('token=secret')):
+            code, data = self.call('/api/super', {'action':'pause'})
+        self.assertEqual(code, 503)
+        self.assertNotIn('secret', str(data))
+        self.assertFalse(self.hub._super_tick())
+        self.assertTrue(superagent.load_state(self.hub.folder)['paused'])
+        self.assertEqual(self.hub.super_threads, [])
+        with mock.patch.object(superagent, 'append_log', side_effect=OSError('log blocked')):
+            self.assertEqual(self.call('/api/super', {'action':'resume'})[0], 503)
+            self.assertFalse(self.hub._super_tick())
+
+    def test_get_is_pure_and_ledger_is_read_once(self):
+        self.task(1)
+        before = json.dumps(self.hub.super, sort_keys=True)
+        with mock.patch.object(superagent, 'append_log', side_effect=AssertionError('GET wrote log')), \
+             mock.patch.object(paths, 'write_text_atomic', side_effect=AssertionError('GET wrote state')), \
+             mock.patch.object(superagent, 'run', side_effect=AssertionError('GET ran a provider')), \
+             mock.patch.object(usage, 'load_super', wraps=usage.load_super) as read:
+            self.assertEqual(self.call('/api/super')[0], 200)
+            self.assertEqual(read.call_count, 1)
+        self.assertEqual(json.dumps(self.hub.super, sort_keys=True), before)
+        self.assertIsNone(self.hub.super_wake)
+        self.assertEqual(self.hub.super_threads, [])
+        self.assertFalse(superagent.folder(self.hub.folder).exists())
+
+    def test_get_hides_changed_contract_without_a_tick(self):
+        tid = self.task(1, why='asks: Which file?', decision=json.loads(json.dumps(DECISION)))
+        self.pass_()
+        before = json.dumps(self.hub.super, sort_keys=True)
+        self.hub.tasks[tid]['decision']['options'][0]['text'] = 'changed option token=secret'
+        code, data = self.call('/api/super')
+        self.assertEqual(code, 200)
+        self.assertFalse(data['queue'][0]['items'][0]['say'])
+        self.assertNotIn('secret', json.dumps(data))
+        self.assertEqual(data['digest'], [])
+        self.assertEqual(json.dumps(self.hub.super, sort_keys=True), before)
+
+    def test_unreadable_ledger_never_reports_zero_and_notes_are_masked(self):
+        self.task(1)
+        self.pass_()
+        (superagent.folder(self.hub.folder)/'notes.md').write_text('token=secret', encoding='utf-8')
+        self.assertEqual(self.call('/api/super')[1]['notes'], 'token=***\n')
+        ledger_path = self.hub.folder/usage.DAYS_FILE
+        ledger_path.unlink()
+        missing = self.call('/api/super')[1]
+        self.assertIsNone(missing['spend']['today'])
+        self.assertFalse(self.hub._super_tick())
+        (self.hub.folder/usage.DAYS_FILE).write_text('{', encoding='utf-8')
+        data = self.call('/api/super')[1]
+        self.assertEqual(data['state'], 'unranked')
+        self.assertIsNone(data['spend']['today'])
+        self.assertIn('unreadable', data['spend']['error'])
+        self.assertIsNone(self.call('/api/usage')[1]['super']['today'])
+
+    def test_fake_errors_later_and_unknown_handles(self):
+        self.task(1)
+        self.task(2)
+        superagent.ensure(self.hub.folder)
+        orders = superagent.folder(self.hub.folder)/'orders.md'
+        orders.write_text('SUPER-LATER SUPER-UNKNOWN', encoding='utf-8')
+        self.pass_()
+        data = self.call('/api/super')[1]
+        self.assertEqual(len(data['later']), 1)
+        self.assertEqual(superagent.read_log(self.hub.folder)[-1]['dropped'], [{'at':2,'why':'unknown handle I99'}])
+        orders.write_text('SUPER-ERROR', encoding='utf-8')
+        self.call('/api/super', {'action':'sort'})
+        self.pass_()
+        data = self.call('/api/super')[1]
+        self.assertEqual(data['state'], 'unranked')
+        self.assertIn('error_max_turns', data['why'])
+        self.assertEqual(data['last']['cost'], .02)
+
+    def test_http_coverage_for_65_items_and_policy_changes(self):
+        for n in range(1, 66):
+            self.task(n, why='confirm Fable' if n<=31 else 'plan ready: confirm')
+        self.pass_()
+        data = self.call('/api/super')[1]
+        self.assertEqual(data['coverage'], {'live':65,'last_submitted':30,'never_reviewed':35})
+        self.assertEqual(data['counts']['queue'], 65)
+        (superagent.folder(self.hub.folder)/'orders.md').write_text('a new priority', encoding='utf-8')
+        data = self.call('/api/super')[1]
+        self.assertEqual(data['state'], 'unranked')
+        self.assertTrue(all(not i['say'] for c in data['queue'] for i in c['items']))

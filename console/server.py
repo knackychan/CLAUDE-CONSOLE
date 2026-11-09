@@ -3,6 +3,7 @@ starts, stops and resumes window runs (phase 2), and pulls the levers (phase 3).
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -2354,7 +2355,91 @@ class Hub:
             self.super_gate = self.super_refused = self.super_error
             return False
 
+    def super_view(self):
+        """Project current advice without cleanup, wakes, writes or provider calls."""
+        now = self.super_clock()
+        error = ""
+        try:
+            context = self._super_capture(now)
+        except Exception as exc:
+            error = superagent._clip(exc, 300)
+            with self.tlock:
+                cfg, state = copy.deepcopy(self.cfg), copy.deepcopy(self.super)
+                snap, by_id = self.snapshot(), copy.deepcopy(self.tasks)
+                wake = copy.deepcopy(self.super_wake)
+            context = {"cfg": cfg, "state": state, "items": self._super_describe(
+                superagent.items(snap, by_id), snap, by_id, now, cfg),
+                "policy": {"hash": "", "orders": ""}, "busy": None, "wake": wake, "error": self.super_error}
+        state, live, cfg = context["state"], context["items"], context["cfg"]
+        ledger = usage.load_super(self.folder)  # One validated read supplies spend and status.
+        ledger["error"] = self._super_ledger_error(ledger, state)
+        day = usage.day_of(now)
+        spent = sum(usage.super_spent(ledger["records"], day)) if not ledger["error"] else None
+        limits_, errors = superagent.settings(cfg)
+        ranked, why = superagent.status(limits_, errors, state, spent or 0, bool(self.runs.exe))
+        with self.tlock:
+            bases, policy_ok = self._super_fresh(context) if not error else ({}, False)
+        valid = {k: a for k, a in state["ann"].items() if superagent._annotation(a) and bases.get(k) == a["basis"]
+                 and a.get("policy_hash", context["policy"]["hash"]) == context["policy"]["hash"]}
+        stale = len(valid) != len(state["ann"])
+        state["ann"] = valid
+        last_bases = (state.get("last") or {}).get("bases", {})
+        stale = stale or any(bases.get(k) != value for k, value in last_bases.items())
+        if state.get("policy_hash") and state["policy_hash"] != context["policy"]["hash"] or not policy_ok:
+            ranked, why = False, "super agent policy changed"
+        failure = error or context["error"] or ledger["error"]
+        if not superagent.blocked(limits_, errors, state, bool(self.runs.exe)):
+            failure = failure or self.super_refused
+        if failure:
+            ranked, why = False, failure
+        ordered = superagent.queue(live, state, now, ranked)
+        for row in [i for card in ordered["queue"] for i in card["items"]] + ordered["later"]:
+            row.pop("_stamp", None)
+        flat = [i for card in ordered["queue"] for i in card["items"]]
+        wake = context["wake"]
+        spend = {"today": spent, "passes": sum(1 for rec in ledger["records"].values() if rec["day"] == day)
+                 if not ledger["error"] else None, "day_limit": limits_["super_day_usd"], "pass_limit": limits_["super_pass_usd"]}
+        if ledger["error"]:
+            spend["error"] = ledger["error"]
+        return {"state": "ranked" if ranked else "unranked", "why": superagent._clip(why, 300),
+            "paused": state["paused"], "sorting": context["busy"],
+            "due": max(0, math.ceil(wake["due"]-self.super_mono())) if wake else None,
+            **ordered, "digest": state["digest"] if ranked and not stale else [],
+            "notes": superagent.cut_notes(superagent.read_notes(self.folder), limits_["super_notes_lines"])
+                     if not failure and not state.get("notes_blocked") else "",
+            "orders": context["policy"]["orders"], "last": superagent._masked(state.get("last")), "spend": spend,
+            "counts": {"queue": len(flat), "later": len(ordered["later"]),
+                       "always": sum(bool(i.get("always")) for i in flat), "new": sum(i["new"] for i in flat)},
+            "coverage": {"live": len(live), "last_submitted": (state.get("last") or {}).get("items", 0),
+                         "never_reviewed": sum(i["key"] not in state["reviewed"] for i in live)}}
 
+    def super_action(self, body):
+        action = body.get("action") if isinstance(body, dict) else None
+        if not isinstance(body, dict) or set(body) != {"action"} or action not in ("pause", "resume", "sort"):
+            return 400, {"error": "action: pause, resume or sort"}
+        with self.tlock:
+            if action == "sort" and self.super["paused"]:
+                return 409, {"error": "paused: resume first"}
+            if self._super_state_bad:
+                return 503, {"error": self.super_error}
+            try:
+                if action != "sort":
+                    candidate = copy.deepcopy(self.super)
+                    candidate["paused"] = action == "pause"
+                    superagent.save_state(self.folder, candidate)
+                    self.super = candidate
+                    if action == "pause":
+                        self.super_wake = None
+                superagent.append_log(self.folder, {"ts": self.super_clock(), "phase": action, "by": "fred"})
+                self.super_pending_action = None
+                if action != "pause":
+                    self._super_arm(self.super_mono(), [("asked", action)], at_once=True)
+            except Exception as exc:
+                self.super_pending_action = action
+                self.super_error = self.super_gate = superagent._clip(exc, 300)
+                return 503, {"error": self.super_error}
+        self._super_changed()
+        return 200, self.super_view()
 
     def _sup_owned(self, task: dict) -> list:
         return [s["n"] for s in task["steps"] if s["state"] == "done" and s.get("session")
@@ -4824,6 +4909,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self._config())
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())
+        if url.path == "/api/super":
+            return self._json(self.hub.super_view())
         if url.path == "/api/image":
             return self._image(query)
         if url.path == "/api/chat":
@@ -4871,6 +4958,7 @@ class Handler(BaseHTTPRequestHandler):
         routes["/api/task/message"] = self._task_message
         routes["/api/task/supervisor"] = self._task_supervisor
         routes["/api/task/supervisor/replay"] = self._task_supervisor_replay
+        routes["/api/super"] = self._super
         routes["/api/task/handoff/preview"], routes["/api/task/handoff"] = self._task_handoff_preview, self._task_handoff
         for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "accept", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
@@ -5277,6 +5365,9 @@ class Handler(BaseHTTPRequestHandler):
         status, data = self.hub.request_next(body)
         return self._json(data, status)
 
+    def _super(self, body):
+        status, data = self.hub.super_action(body)
+        return self._json(data, status)
 
     def _task_supervisor(self, body):
         status, data = self.hub.supervisor_action(body)
