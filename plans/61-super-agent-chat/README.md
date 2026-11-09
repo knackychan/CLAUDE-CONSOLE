@@ -9,8 +9,8 @@
 
 Status: **written 2026-11-09, plan only.** Baseline: master `4a0eb05` (docs) and branch `plan-58` at `d557f22` (plan 58
 Tasks 1 to 6 built, not merged). Every code fact below was read on `plan-58`; nothing is implemented and no product
-file was touched. D1 to D3 (section 5) are open for Fred; the task files are written for the recommended (a) answers
-and mark the lines another answer changes.
+file was touched. D2 and D3 closed (a) by Fred 2026-11-09; D1 (section 5) is open; the task files are written for the
+recommended (a) answers and mark the lines another answer changes.
 
 **The build waits.** Tasks 1 to 4 build after plan 58 Tasks 1 to 6 are merged to master, on scratch services only.
 Task 5 (background acts) builds after plan 58's live check (its Task 7), and runs on one real project first. Task 6
@@ -242,13 +242,13 @@ reach this route, so only the window confirms a card. `snap["chat"] = {busy, tur
 | 9 | effort "measured on a scratch turn" | `medium` now, measured in Task 7 | a measurement needs a paid turn: Fred's live check |
 | 10 | `read` also gives a chat's tail | plan, handoff, note, brief | a chat's tail is an observed session's transcript (D3) |
 
-## 5. Decisions for Fred (open; the tasks follow (a))
+## 5. Decisions for Fred (D1 open; D2, D3 closed 2026-11-09; the tasks follow (a))
 
 | # | Question | (a) recommended | (b) |
 |---|---|---|---|
 | D1 | May a background act press the task supervisor's Approve, Reject or Dismiss at `auto`? | No: the chat and the cards only. At `auto` the task supervisor already acts within its caps; what it leaves on the card is what its caps or its report-only rule kept for Fred | Yes, with the dispatch labelled the super agent's (Task 1 `superact.FRED_SUGGESTION` emptied, Task 5 test reversed) |
-| D2 | May the chat press Open in terminal and Open folder? | No: `opens in the window`; the chat says where | Yes: move `_terminal` and `_task_folder` into Hub methods and press them for `chat` only |
-| D3 | Observed VS Code and terminal chats | Not reachable in v1: the chat reads them in `overview` and sends Fred to their card | Confirm cards that fork them through `pull` |
+| D2 | May the chat press Open in terminal and Open folder? | No: `opens in the window`; the chat says where | Yes: move `_terminal` and `_task_folder` into Hub methods and press them for `chat` only. **Closed (a)**, Fred 2026-11-09: "no need" |
+| D3 | Observed VS Code and terminal chats | Not reachable in v1: the chat reads them in `overview` and sends Fred to their card | Confirm cards that fork them through `pull`. **Closed (a)**, Fred 2026-11-09 |
 
 ## 6. Failure paths and their tests
 
@@ -295,3 +295,4 @@ saved. Task 6: headless Edge at 900, 400 and 340 px, dark and light, reduced mot
 
 - 2026-11-09 - Written from the design (C1 to C5) against `plan-58` `d557f22`; CLI and env-var docs re-read; D1 to D3
   open. Plan only.
+- 2026-11-09 - D2 and D3 closed (a) with Fred ("no need", "ok"); D1 open, explained (background = plan 58's passes acting with no message from Fred).
