@@ -11,8 +11,8 @@ from . import paths
 
 SEED = Path(__file__).resolve().parent.parent / "dotclaude" / "console" / "kinds"
 NAMES = ("scout", "search", "draft", "proofread", "edit", "code", "document", "explain", "debug", "test", "design",
-         "replan", "verify", "fix", "prep", "supervisor", "planner")  # tasks.KINDS in its order (a test asserts
-# it), then Prep (plan 29), the supervisor's own pass (plan 44) and the planner pass (plan 47): none is a worker kind
+         "replan", "verify", "fix", "prep", "supervisor", "planner", "super")  # tasks.KINDS in its order (a test asserts
+# it), then Prep, supervisor, planner and super agent passes: none is a worker kind
 KIND_MAX = 32 * 1024  # bytes of one kind file the window may save
 _HEAD = re.compile(r"# ([a-z]+)\s*")
 

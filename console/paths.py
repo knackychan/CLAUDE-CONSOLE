@@ -110,6 +110,14 @@ DEFAULTS = {
     "supervisor_work_usd": 5,
     "supervisor_task_usd": 0.50,
     "supervisor_day_usd": 2,
+    "super_model": "haiku",
+    "super_judge_model": "sonnet",
+    "super_debounce_s": 20,
+    "super_sweep_s": 900,
+    "super_timeout_s": 120,
+    "super_notes_lines": 40,
+    "super_pass_usd": 0.20,
+    "super_day_usd": 1.0,
     # USD per million tokens, API list prices (claude-api skill, 2026-10-06); fast mode costs 2x.
     # Haiku's higher price for prompts over 100K tokens is left out.
     "prices": {

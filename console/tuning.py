@@ -7,7 +7,7 @@ import re
 from . import claude_cli, fills, paths, tasks
 
 # key -> (group, unit, min, max), in the Tuning tab's order. Units: a whole number for steps, s, turns, kb, parts,
-# words, tokens; a number for usd and share (a share is a fraction: 0.1 = 10 points); bool; rung (a model); text.
+# words, tokens, lines; a number for usd and share (a share is a fraction: 0.1 = 10 points); bool; rung (a model); text.
 TUNING = {
     "user_name": ("you", "text", 0, paths.NAME_MAX),  # plan 31: one line of text, "" allowed
     "task_max_steps": ("steps", "steps", 1, 12),
@@ -48,11 +48,20 @@ TUNING = {
     "supervisor_day_usd": ("supervisor", "usd", 0, 100),
     "supervisor_model": ("supervisor", "rung", None, None),
     "supervisor_stuck_model": ("supervisor", "rung", None, None),
+    # plan 58: the super agent's settings (no Models page card yet, D9; config.json by hand or this whitelist)
+    "super_debounce_s": ("super", "s", 0, 300),
+    "super_sweep_s": ("super", "s", 300, 3600),
+    "super_timeout_s": ("super", "s", 10, 600),
+    "super_notes_lines": ("super", "lines", 0, 200),
+    "super_pass_usd": ("super", "usd", 0, 1),
+    "super_day_usd": ("super", "usd", 0, 20),
+    "super_model": ("super", "rung", None, None),
+    "super_judge_model": ("super", "rung", None, None),
 }
 KEYS = tuple(TUNING) + ("kinds", "tiers", "supervisor_mode", "supervisor_projects")  # the whitelist of POST /api/config/models
 SUPERVISOR_MODES = ("off", "suggest", "gated", "auto")
-SUPERVISOR_MODELS = {"supervisor_model": "haiku", "supervisor_stuck_model": "sonnet"}  # never opus/fable/external
-WHOLE = frozenset({"steps", "s", "turns", "kb", "parts", "words", "tokens"})
+SUPERVISOR_MODELS = {"supervisor_model": "haiku", "supervisor_stuck_model": "sonnet", "super_model": "haiku", "super_judge_model": "sonnet"}  # never opus/fable/external
+WHOLE = frozenset({"steps", "s", "turns", "kb", "parts", "words", "tokens", "lines"})
 CLAUDE_ONLY = frozenset({"prep_model", "brief_model", "review_model", "planner_model"})  # their passes run on the Claude CLI
 WINDOWS = ("day_usd", "week_usd", "month_usd")
 KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
