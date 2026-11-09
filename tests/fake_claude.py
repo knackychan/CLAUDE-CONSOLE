@@ -9,6 +9,7 @@ Prep (--json-schema): reads the prompt on stdin, prints one result object.
   A request that starts with "You review the rules" is the rules review: one remove proposal and a summary.
   A schema with a `decision` property is the supervisor pass (plan 44): see supervisor() for its SUP-* modes.
   A schema with a `scope` property is the planner pass (plan 47): see planner() for its PLANNER-* modes.
+  A schema with an `items` property is the super agent pass (plan 58).
 Run (--input-format stream-json): per user message prints init / assistant / result.
   "SLOW" in the message: prints the assistant line, then waits for an interrupt or EOF.
   "DENY" in the message: the result carries one permission denial.
@@ -109,6 +110,35 @@ def planner(raw):
     return 0
 
 
+def superagent(raw):
+    """Plan 58: the super agent pass (its schema has an `items` property). Every handle (the item lines that start
+    with `I<n> `; ASCII only, since stdin is read in the locale encoding) is forwarded, ranked in reverse (the last
+    handle first), with say `fake: I<n>`. SUPER-LATER puts I1 later for an hour; SUPER-BATCH puts every entry in the
+    batch fake-batch; SUPER-UNKNOWN adds an entry for I99; SUPER-BAD answers items that are not a list; SUPER-ERROR
+    an error envelope that still reports its cost. The notes carry the digest's head line (which pass wrote them)."""
+    if "SUPER-ERROR" in raw:
+        out({"type": "result", "subtype": "error_max_turns", "is_error": True, "total_cost_usd": 0.02, "num_turns": 6})
+        return 1
+    handles = re.findall(r"^(I\d+) ", raw, re.M)
+    n = len(handles)
+    head = next((line for line in raw.splitlines() if line.startswith("# Super agent pass")), "")
+    stamp = re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", head)
+    now = time.mktime(time.strptime(stamp.group(), "%Y-%m-%d %H:%M")) if stamp else time.time()
+    entries = [{"key": h, "do": "forward", "rank": n - k, "say": f"fake: {h}"} for k, h in enumerate(handles)]
+    if "SUPER-LATER" in raw and entries:
+        entries[0].update(do="later", why="fake: it can wait",
+                          until=time.strftime("%Y-%m-%dT%H:%M", time.localtime(now + 3600)))
+    if "SUPER-BATCH" in raw:
+        for e in entries:
+            e.update(do="batch", batch="fake-batch")
+    if "SUPER-UNKNOWN" in raw:
+        entries.append({"key": "I99", "do": "forward", "rank": 1, "say": "fake: unknown"})
+    fields = {"items": "not a list" if "SUPER-BAD" in raw else entries, "digest": [f"fake digest: {n} items"],
+              "notes": f"fake notes\n{head}"}
+    out({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.003, "num_turns": 2,
+         "result": json.dumps(fields), "structured_output": fields})
+    return 0
+
 def prep():
     raw = sys.stdin.read()
     try:
@@ -117,6 +147,8 @@ def prep():
             return supervisor(raw)
         if "scope" in props:
             return planner(raw)
+        if "items" in props:
+            return superagent(raw)
     except ValueError:
         pass
     fields = {"goal": "Fix add() in calc.py", "where": "calc.py:2", "keep": "the signature",
