@@ -8,7 +8,7 @@ import threading
 import urllib.error
 import urllib.request
 
-from . import events, kinds, paths, prep, runs, server, tasks
+from . import events, kinds, paths, prep, runs, server, superagent, tasks
 
 
 def already_running(port: int) -> bool:
@@ -93,6 +93,7 @@ def main(argv=None) -> int:
     runs.prune(paths.home(), cfg["retention_days"])
     tasks.prune(paths.home(), cfg["task_retention_days"])  # plan 28: 0 (the default) keeps every task folder
     kinds.ensure(paths.home())  # plan 28: the kind files the console runs with, seeded once, then Fred's to edit
+    superagent.ensure(paths.home())  # plan 58: seed standing orders once, then Fred's to edit
     prep.prune_orphans(paths.home())  # plan 29: the folders of prompts never run, after prep.ORPHAN_DAYS
 
     httpd = None

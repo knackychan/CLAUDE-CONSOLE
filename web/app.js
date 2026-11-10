@@ -2311,19 +2311,21 @@ function usageFills(data = usage) {
     <p class="note m">Auto prefers less-used eligible models. Where USD allowances are configured, bars show allowance and pace; otherwise balancing uses today's token load. Explicit model choices and chat follow-ups keep their model.</p></div>`;
 }
 // plan 50: the supervisor's own passes (no transcript, counted in usage-days.json): today against its day limit, the month
-function usageSupervisor(data = usage) {
-  const sv = data.supervisor;
+const PASSES_WORDS = { supervisor: ["Supervisor passes", "supervisor"], super: ["Super agent passes", "super agent"] };
+function usageSupervisor(data = usage, key = "supervisor") {
+  const sv = data[key], [title, who] = PASSES_WORDS[key];
   if (!sv) return "";
   const days = Object.entries(sv.days || {}).filter(([k]) => k.slice(0, 7) === uMonth).map(([, d]) => d);
   const sum = (key) => days.reduce((n, d) => n + (Number(d[key]) || 0), 0), cost = sum("cost"), runs = sum("runs"), unknown = sum("unknown");
-  const err = sv.error ? `<p class="note r">The supervisor ledger could not be read: ${esc(sv.error)}</p>` : "";
+  const err = sv.error ? `<p class="note r">The ${who} ledger could not be read: ${esc(sv.error)}</p>` : "";
+  if (err && key === "super") return `<div class="ublk"><div class="hd"><span class="lbl">${title}</span></div>${err}</div>`;
   if (!err && !cost && !runs && !unknown) return "";
   const today = sv.today || {}, spent = Number(today.cost) || 0, limit = Number(sv.day_limit) || 0;
   const n = Math.max(1, Math.min(20, Math.ceil(limit / 0.5))), lit = Math.min(n, Math.ceil(spent / 0.5));
   const near = limit > 0 && spent >= limit * (data.warn_at || 0.8);
   const plural = (k, w) => `${k} ${w}${k === 1 ? "" : "es"}`;
-  return `<div class="ublk"><div class="hd"><span class="lbl">Supervisor passes</span><span class="m">apart from the transcripts</span></div>
-    <div class="mfills"><div class="mfill tokens" title="cells of $0.50 up to the supervisor's day limit"><span class="nm">today<small>${plural(Number(today.runs) || 0, "pass")}</small></span>
+  return `<div class="ublk"><div class="hd"><span class="lbl">${title}</span><span class="m">apart from the transcripts</span></div>
+    <div class="mfills"><div class="mfill tokens" title="cells of $0.50 up to the ${who}'s day limit"><span class="nm">today<small>${plural(Number(today.runs) || 0, "pass")}</small></span>
       <span class="rw"><span>day</span><span class="cells" aria-hidden="true">${cellsHtml(Array.from({ length: n }, (_, k) => k < lit ? (near ? "y" : "f") : ""))}</span><b class="${near ? "y" : ""}">${usd(spent)}</b></span>
       <span class="rest m">of ${usd(limit)} a day · month ${usd(cost)} · ${plural(runs, "pass")}${unknown ? ` · ${unknown} unknown` : ""}</span></div></div>${err}</div>`;
 }
@@ -2750,9 +2752,9 @@ function renderUsage() {
     return;
   }
   const since = usage.first ? dayName(usage.first) : "today";
-  setHtml($("uscroll"), usageHead() + usageFills() + usageSupervisor() + usageCalendar() + usageDay() + usageChart() + usageFails() + storageLine()
+  setHtml($("uscroll"), usageHead() + usageFills() + usageSupervisor() + usageSupervisor(usage, "super") + usageCalendar() + usageDay() + usageChart() + usageFails() + storageLine()
     + `<p class="ufoot">Estimated from the transcripts at the list prices in config.json, fast mode 2x; other harnesses' usage x
-       their price row in "prices", and runs without usage or without a price row count as unknown, never as zero. Supervisor passes are counted from usage-days.json, apart from the transcripts. Kept from ${esc(since)}:
+       their price row in "prices", and runs without usage or without a price row count as unknown, never as zero. Supervisor and super agent passes are counted from usage-days.json, apart from the transcripts. Kept from ${esc(since)}:
        Claude Code deletes transcripts after 30 days, so the service keeps each closed day in usage-days.json.</p>`);
 }
 

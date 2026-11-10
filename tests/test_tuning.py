@@ -38,7 +38,8 @@ class ViewTest(unittest.TestCase):
             "supervisor_mode", "supervisor_projects", "supervisor_model", "supervisor_stuck_model",
             "supervisor_debounce_s", "supervisor_parallel", "supervisor_timeout_s", "supervisor_stall_s",
             "supervisor_max_auto_steps", "supervisor_max_retries", "supervisor_work_usd", "supervisor_task_usd",
-            "supervisor_day_usd", "decision_timeout_s"})
+            "supervisor_day_usd", "decision_timeout_s", "super_model", "super_judge_model",
+            "super_debounce_s", "super_sweep_s", "super_timeout_s", "super_notes_lines", "super_pass_usd", "super_day_usd"})
 
 
 class NumbersTest(unittest.TestCase):
@@ -224,7 +225,7 @@ class SupervisorTuningTest(unittest.TestCase):
         self.assertNotIn("supervisor_mode", view)
         self.assertNotIn("supervisor_projects", view)
         for unit in (t["unit"] for t in view.values()):
-            self.assertIn(unit, ("bool", "rung", "text", "steps", "s", "turns", "kb", "parts", "words", "tokens", "usd", "share"))
+            self.assertIn(unit, ("bool", "rung", "text", "steps", "s", "turns", "kb", "parts", "words", "tokens", "lines", "usd", "share"))
         self.assertEqual(check(task_max_steps=8)[1], {})  # unrelated number saves remain valid
 
 

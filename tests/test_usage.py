@@ -1,5 +1,7 @@
 import json
+import os
 import tempfile
+import threading
 import unittest
 from unittest import mock
 from datetime import datetime
@@ -8,6 +10,88 @@ from pathlib import Path
 from console import paths, usage
 
 PRICES = paths.DEFAULTS["prices"]
+
+
+class SuperLedgerTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name)
+        env = mock.patch.dict(os.environ, CC_CONSOLE_HOME=str(self.folder))
+        env.start()
+        self.addCleanup(env.stop)
+        self.day = usage.day_of(1_800_000_000.0)
+
+    def reserve(self, pid='p1', pass_limit=.2, day_limit=1, day=None):
+        return usage.reserve_super(self.folder, pid, day or self.day, pass_limit, day_limit)
+
+    def test_reservations_and_settlement_are_idempotent(self):
+        self.assertEqual(self.reserve()['reserved'], .2)
+        self.assertEqual(usage.record_super(self.folder, 'p1', {'cost': .95})['status'], 'settled')
+        self.assertEqual(self.reserve('p2')['reserved'], .05)
+        self.assertEqual(self.reserve('p2')['status'], 'duplicate')
+        self.assertEqual(usage.record_super(self.folder, 'p1', {'cost': .95})['status'], 'settled')
+        self.assertEqual(usage.record_super(self.folder, 'p1', {'cost': .9})['status'], 'conflict')
+        self.assertEqual(usage.record_super(self.folder, 'p1', {'cost': None})['status'], 'conflict')
+        records = usage.load_super(self.folder)['records']
+        self.assertEqual(usage.super_spent(records, self.day), (.95, .05))
+        self.assertTrue(usage.save_days(self.folder, {'2026-01-01': {'cost': 1}}, self.day))
+        self.assertEqual(usage.load_super(self.folder)['records'], records)
+
+    def test_unknown_and_invalid_costs_keep_reservations(self):
+        for n, cost in enumerate([None, -1, True, float('nan'), float('inf')]):
+            self.assertEqual(self.reserve(str(n))['status'], 'reserved')
+            self.assertEqual(usage.record_super(self.folder, str(n), {'cost': cost})['status'], 'unknown')
+        self.assertEqual(usage.super_spent(usage.load_super(self.folder)['records'], self.day), (0, 1))
+
+    def test_cap_tiny_remainder_and_invalid_limits(self):
+        self.reserve()
+        usage.record_super(self.folder, 'p1', {'cost': .008})
+        for limit in [.008, .0080004]:
+            self.assertEqual(self.reserve('tiny', day_limit=limit),
+                             {'status': 'cap', 'error': 'super agent day limit reached', 'reserved': 0.0})
+        for limit in [True, -1, float('nan'), float('inf'), 10**400]:
+            self.assertEqual(self.reserve('bad', pass_limit=limit)['status'], 'error')
+
+    def test_every_record_is_validated_and_errors_are_not_zero(self):
+        path = self.folder / usage.DAYS_FILE
+        rec = {'day': self.day, 'kind': 'super', 'reserved': .2, 'cost': 0, 'status': 'reserved'}
+        bad = [[], {}, dict(rec, day='2027-02-30'), dict(rec, status='magic'), dict(rec, cost=-1),
+               dict(rec, reserved=True), dict(rec, cost=float('nan')), dict(rec, reserved=float('inf')),
+               dict(rec, reserved=0), dict(rec, kind='other')]
+        for row in bad:
+            path.write_text(json.dumps({'super': {'bad': row}}), encoding='utf-8')
+            with self.subTest(row=row):
+                self.assertTrue(usage.load_super(self.folder)['error'])
+                self.assertEqual(self.reserve()['status'], 'error')
+                self.assertEqual(usage.record_super(self.folder, 'bad', {'cost': .1})['status'], 'error')
+        for data in ['{', '{"super": []}', '{"super": null}']:
+            path.write_text(data, encoding='utf-8')
+            self.assertTrue(usage.load_super(self.folder)['error'])
+
+    def test_failed_settlement_retains_charge_and_day(self):
+        self.reserve()
+        with mock.patch.object(usage, '_write', side_effect=OSError('full')):
+            self.assertEqual(usage.record_super(self.folder, 'p1', {'cost': .1})['status'], 'error')
+        self.assertEqual(usage.load_super(self.folder)['records']['p1']['status'], 'reserved')
+        with mock.patch.object(usage.time, 'time', return_value=1_800_100_000.0):
+            rec = usage.record_super(self.folder, 'p1', {'cost': .3})['record']
+        self.assertEqual((rec['day'], rec['cost']), (self.day, .3))
+
+    def test_concurrent_sections_preserve_both_ledgers(self):
+        def other():
+            for n in range(5):
+                pid = 'sup' + str(n)
+                usage.reserve_supervisor(self.folder, pid, {'task': pid, 'day': self.day}, .2, 2)
+                usage.record_supervisor(self.folder, pid, {'cost': .01})
+        thread = threading.Thread(target=other)
+        thread.start()
+        for n in range(5):
+            self.reserve(str(n))
+            usage.record_super(self.folder, str(n), {'cost': .01})
+        thread.join(5)
+        self.assertEqual(len(usage.load_supervisor(self.folder)['records']), 5)
+        self.assertEqual(len(usage.load_super(self.folder)['records']), 5)
 
 
 def line(mid, model="claude-opus-5-5", ts="2026-10-10T10:00:00.000Z", side=False, **use):

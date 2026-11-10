@@ -3,6 +3,7 @@ starts, stops and resumes window runs (phase 2), and pulls the levers (phase 3).
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -14,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import (attach, brief, claude_cli, compact, events, facts, fills, guard, handoff, harness, kinds, levers, limits, paths, plan, prep, redact,
-               replan, review, routing, runs, supervisor, tasks, transcript, tuning, usage)
+               replan, review, routing, runs, superagent, supervisor, tasks, transcript, tuning, usage)
 from .state import MAX_STEPS, WRITE_TOOLS, State, norm_dir
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -23,6 +24,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/style.css": ("style.css", "text/css; charset=utf-8"),
           "/doto.woff2": ("doto.woff2", "font/woff2")}
 POLL_S = 1.0
+SUPER_POLL_S = 5.0
 TICK_S = 15.0
 HISTORY_S = 60.0  # the Usage page's scan of every transcript
 STORAGE_S = 3600.0  # the data folder's size line is recomputed this often
@@ -103,6 +105,21 @@ class Hub:
         self.sup_threads = []  # the bounded pass threads (tests join them)
         self.sup_auto = True  # plan 44 Task 8: auto mode may dispatch its allowed table by itself
         self.sup_unsettled = {}  # pass id -> reported cost a ledger write refused: no launch until it settles
+        self.super_clock, self.super_mono = time.time, time.monotonic
+        self.super_wake, self.super_busy, self.super_error = None, None, ""
+        self.super_threads, self.super_pending_results = [], {}
+        self.super_running, self.super_gate = None, None
+        self.super_swept, self.super_pass_mono = self.super_mono(), self.super_mono()
+        self.super_samples, self.super_idle = {}, {}
+        self.super_refused, self.super_day = "", None
+        self.super_pending_action = None
+        try:
+            self.super = superagent.load_state(self.folder)
+        except (ValueError, OSError, OverflowError) as exc:
+            self.super = superagent.blank_state()
+            self.super_error = superagent._clip(exc, 300)
+        self._super_state_bad = bool(self.super_error)
+        self._super_reconcile()
         self.probing = threading.Thread(target=self.probe, name="probe", daemon=True)
         self.probing.start()
 
@@ -421,6 +438,8 @@ class Hub:
             hours = fills.fail_hours(self.tasks, self.cfg, now)
         ledger = usage.load_supervisor(self.folder)
         spend = supervisor.spend_view(ledger["records"])
+        super_ledger = usage.load_super(self.folder)
+        super_days = supervisor.spend_view(super_ledger["records"])["days"]
         return {"ready": ready, "today": today, "first": min(days) if days else "",
                 "limit": self.cfg["daily_budget_usd"], "days": days,
                 "weeks": usage.weeks(days, today), "months": usage.months(days, today),
@@ -431,7 +450,12 @@ class Hub:
                 "supervisor": {"days": spend["days"],
                                "today": spend["days"].get(today, {"cost": 0.0, "runs": 0, "unknown": 0, "reserved": 0.0}),
                                "task_limit": self.cfg["supervisor_task_usd"],
-                               "day_limit": self.cfg["supervisor_day_usd"], "error": ledger["error"]}}
+                               "day_limit": self.cfg["supervisor_day_usd"], "error": ledger["error"]},
+                "super": {"days": super_days,
+                          "today": None if super_ledger["error"] else super_days.get(today,
+                              {"cost": 0.0, "runs": 0, "unknown": 0, "reserved": 0.0}),
+                          "day_limit": self.cfg.get("super_day_usd", 0),
+                          "pass_limit": self.cfg.get("super_pass_usd", 0), "error": super_ledger["error"]}}
 
     def history_loop(self) -> None:
         while not self._stop.is_set():
@@ -530,12 +554,16 @@ class Hub:
         self.runs.reconcile()
         self.reconcile_next_steps()
         last_tick = time.monotonic()
+        last_super = float("-inf")
         while not self._stop.is_set():
             self.poll_once()
             self.auto_steps()
             self.advance()
             self.read_costs()
             self.tick()
+            if self.super_mono() - last_super >= SUPER_POLL_S:
+                self._super_tick()
+                last_super = self.super_mono()
             if time.monotonic() - last_tick >= TICK_S:
                 self.runs.reconcile()
                 last_tick = time.monotonic()
@@ -1853,6 +1881,565 @@ class Hub:
         self.wakes.pop(task["id"], None)
         self._commit(task, [{"ts": time.time(), "step": task.get("current") or 0, "from": task["state"],
                              "to": task["state"], "why": f"supervisor: no decision ({why})", "session": ""}])
+
+    # -- plan 58: one advisory pass across the Needs you set -------------------------------
+    def _super_changed(self):
+        with self.changed:
+            self.version += 1
+            self.changed.notify_all()
+
+    @staticmethod
+    def _super_policy_cfg(cfg):
+        return {k: v for k, v in cfg.items() if k.startswith("super_") or k in
+                ("user_name", "decision_timeout_s", "supervisor_mode", "supervisor_projects")}
+
+    @staticmethod
+    def _super_file_stamp(path):
+        try:
+            stat = path.stat()
+            return [stat.st_size, stat.st_mtime_ns]
+        except FileNotFoundError:
+            return None
+
+    def _super_policy(self, cfg):
+        orders = superagent.read_orders(self.folder)
+        role = redact.mask(kinds.text(self.folder, "super"))
+        superagent.build_prompt(role, "", paths.you(cfg), cfg["super_notes_lines"])
+        stamp = [self._super_file_stamp(superagent.folder(self.folder) / "orders.md"),
+                 self._super_file_stamp(kinds.folder(self.folder) / "super.md")]
+        raw = [orders, role, self._super_policy_cfg(cfg)]
+        digest = hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return {"orders": orders, "role": role, "hash": digest, "stamp": stamp}
+
+    def _super_brief_stamp(self, task):
+        return [[s["n"], self._super_file_stamp(tasks.folder(self.folder, task["id"]) / tasks.brief_file(task, s))]
+                for s in task.get("steps", [])[:12] if s.get("state") in ("done", "failed")]
+
+    def _super_describe(self, live, snap, by_id, now, cfg=None, read_keys=()):
+        cfg = cfg or self.cfg
+        task_rows = {r["id"]: r for r in snap["tasks"]}
+        sessions = {r["id"]: r for r in snap["sessions"]}
+        out = []
+        for item in live:
+            task = by_id.get(item["id"]) if item["type"] == "task" else None
+            row = (task_rows if task else sessions)[item["id"]]
+            level = supervisor.policy(cfg, task, now)["mode"] if task else "observed"
+            view = self.actions(task) if task else {}
+            desc = superagent.describe(item, task, row, view, level, cfg["decision_timeout_s"], now)
+            if task:
+                desc["verify"] = superagent._masked([{k: s.get(k) for k in ("n", "verdict", "verdict_detail")}
+                    for s in task.get("steps", []) if s.get("kind") == "verify" and s.get("state") in ("done", "failed")][-2:])
+                if item["key"] in read_keys:
+                    before = self._super_brief_stamp(task)
+                    briefs = {}
+                    for n, stamp in before:
+                        if stamp is None or stamp[0] > 64 * 1024:
+                            desc["incomplete"] = True
+                            continue
+                        text = tasks.read_brief(self.folder, task, n)
+                        if not text:
+                            desc["incomplete"] = True
+                        briefs[n] = text
+                    desc["questions"] = [redact.mask(q["q"]) for q in tasks.open_questions(task, briefs) if not q["closed"]]
+                    desc["_stamp"] = self._super_brief_stamp(task)
+                    if before != desc["_stamp"] or len(task.get("steps", [])) > 12:
+                        desc["incomplete"] = True
+            desc["incomplete"] = desc["incomplete"] or superagent.evidence(desc)[1]
+            out.append(desc)
+        return out
+
+    def _super_capture(self, now=None, extra_keys=()):
+        now = self.super_clock() if now is None else now
+        with self.tlock:
+            cfg, state = copy.deepcopy(self.cfg), copy.deepcopy(self.super)
+            snap, by_id = self.snapshot(), copy.deepcopy(self.tasks)
+            busy = ({"n": self.super_busy["n"], "items": len(self.super_busy["handles"]), "since": self.super_busy["at"]}
+                    if self.super_busy else None)
+            wake, error = copy.deepcopy(self.super_wake), self.super_error
+        live = superagent.items(snap, by_id)
+        selected = superagent.select_items(live, state)[:superagent.ITEMS_MAX]
+        keys = {i["key"] for i in selected} | set(state["ann"]) | set(extra_keys)
+        descriptions = self._super_describe(live, snap, by_id, now, cfg, keys)
+        return {"cfg": cfg, "state": state, "snap": snap, "tasks": by_id, "items": descriptions,
+                "policy": self._super_policy(cfg), "now": now, "busy": busy, "wake": wake, "error": error}
+
+    def _super_fresh(self, context):
+        """Rebuild live decision bases under tlock; file contents were read outside it."""
+        now = self.super_clock()
+        snap = self.snapshot()
+        live = superagent.items(snap, self.tasks)
+        rows = self._super_describe(live, snap, self.tasks, now, self.cfg)
+        prepared = {i["key"]: i for i in context["items"]}
+        bases = {}
+        for row in rows:
+            previous = prepared.get(row["key"])
+            if previous is None:
+                continue
+            if row["type"] == "task":
+                task = self.tasks.get(row["id"])
+                if previous.get("_stamp") != self._super_brief_stamp(task):
+                    continue
+                row["questions"] = previous.get("questions", [])
+                row["incomplete"] = row["incomplete"] or previous.get("incomplete", False)
+            bases[row["key"]] = superagent.basis(row)
+        stamp = [self._super_file_stamp(superagent.folder(self.folder) / "orders.md"),
+                 self._super_file_stamp(kinds.folder(self.folder) / "super.md")]
+        policy_ok = (self._super_policy_cfg(self.cfg) == self._super_policy_cfg(context["cfg"])
+                     and stamp == context["policy"]["stamp"])
+        return bases, policy_ok
+
+    def _super_arm(self, mono, events, at_once=False):
+        limits_, _ = superagent.settings(self.cfg)
+        with self.tlock:
+            wake = self.super_wake
+            if wake is None:
+                wake = {"first": mono, "due": mono, "events": []}
+            for event in events:
+                if event not in wake["events"]:
+                    wake["events"].append(event)
+            due = mono if at_once else min(mono + limits_["super_debounce_s"], wake["first"] + superagent.MAX_WAIT_S)
+            wake["due"] = min(wake["due"], due) if wake.get("immediate") else due
+            wake["immediate"] = wake.get("immediate", False) or at_once
+            self.super_wake = wake
+
+    @staticmethod
+    def _super_ledger_error(ledger, state):
+        if ledger["error"]:
+            return ledger["error"]
+        for record in (state.get("claimed"), state.get("last")):
+            if record and record.get("pid") and record["pid"] not in ledger["records"]:
+                return "super state has no ledger reservation"
+        return ""
+
+    def _super_reconcile(self):
+        if self.super_busy:
+            return
+        try:
+            if self._super_state_bad:
+                recovered = superagent.load_state(self.folder)
+                with self.tlock:
+                    self.super = recovered
+                    self._super_state_bad = False
+            with self.tlock:
+                if self.super_pending_action:
+                    action = self.super_pending_action
+                    candidate = copy.deepcopy(self.super)
+                    if action != "sort":
+                        candidate["paused"] = action == "pause"
+                        superagent.save_state(self.folder, candidate)
+                        self.super = candidate
+                    superagent.append_log(self.folder, {"ts": self.super_clock(), "phase": action, "by": "fred"})
+                    self.super_pending_action = None
+                    if action == "pause":
+                        self.super_wake = None
+                    else:
+                        self._super_arm(self.super_mono(), [("asked", action)], at_once=True)
+            ledger = usage.load_super(self.folder)
+            if ledger["error"]:
+                raise ValueError(ledger["error"])
+            logs = superagent.read_log(self.folder)
+            results, jobs = {}, {}
+            for record in logs:
+                pid = record.get("pid")
+                if not pid:
+                    continue
+                if record.get("job"):
+                    if pid in jobs and any(jobs[pid].get(k) != record["job"].get(k)
+                            for k in ("pid", "handles", "bases", "policy_hash")):
+                        raise ValueError("conflicting super agent claims")
+                    jobs[pid] = record["job"]
+                if record.get("phase") == "result":
+                    if pid in results and any(results[pid].get(k) != record.get(k) for k in ("cost", "out")):
+                        raise ValueError("conflicting super agent results")
+                    results[pid] = record
+            for pid, (job, result) in list(self.super_pending_results.items()):
+                jobs[pid] = job
+                if pid not in results:
+                    record = self._super_result_record(job, result)
+                    superagent.append_log(self.folder, record)
+                    results[pid] = record
+                if pid not in ledger["records"] and result.get("cost") == 0 and not job.get("invoked"):
+                    self.super_pending_results.pop(pid, None)
+            for pid, job in jobs.items():
+                if pid not in ledger["records"]:
+                    result = results.get(pid)
+                    if not result or result.get("cost") != 0 or job.get("invoked"):
+                        raise ValueError("super audit has no ledger reservation")
+            claim = self.super.get("claimed")
+            if claim and claim["pid"] not in ledger["records"]:
+                raise ValueError("super claim has no ledger reservation")
+            if claim and claim["pid"] not in jobs:
+                jobs[claim["pid"]] = dict(claim, cfg=copy.deepcopy(self.cfg), items=[], fingerprint="")
+            for pid, rec in ledger["records"].items():
+                result = results.get(pid)
+                if result is not None:
+                    cost = result.get("cost")
+                    if rec["status"] == "settled":
+                        if usage._super_money(cost) and round(cost, 6) != rec["cost"]:
+                            raise ValueError("conflicting super agent settlement")
+                    else:
+                        settled = usage.record_super(self.folder, pid, {"cost": cost})
+                        if settled["status"] not in ("settled", "unknown"):
+                            raise ValueError(settled["error"])
+                elif rec["status"] == "reserved":
+                    settled = usage.record_super(self.folder, pid, {"cost": None})
+                    if settled["status"] != "unknown":
+                        raise ValueError(settled["error"])
+                job = jobs.get(pid)
+                if job and ((claim and claim["pid"] == pid) or job["n"] > self.super["n"] or pid in self.super_pending_results):
+                    result = result or {"out": None, "cost": None, "error": "the service restarted during the pass", "turns": 0, "ms": 0}
+                    if pid not in results:
+                        superagent.append_log(self.folder, self._super_result_record(job, result))
+                    self._super_publish(job, result)
+                    self.super_pending_results.pop(pid, None)
+            with self.tlock:
+                if self.super_error:
+                    superagent.save_state(self.folder, self.super)
+                if not self.super_pending_action:
+                    self.super_error = ""
+        except Exception as exc:
+            self.super_error = superagent._clip(exc, 300)
+
+    @staticmethod
+    def _super_result_record(job, result):
+        cost = result.get("cost")
+        out = result.get("out")
+        if result.get("error") or not isinstance(out, dict):
+            out = None
+        else:
+            entries = []
+            for entry in out["items"][:len(job["handles"])]:
+                if (not isinstance(entry, dict) or set(entry)-{"key", "do", "rank", "say", "why", "batch", "until"}
+                        or not isinstance(entry.get("key"), str) or entry["key"] not in job["handles"]
+                        or "say" not in entry or entry.get("do") not in superagent.DO
+                        or not superagent._whole(entry.get("rank")) or entry["rank"] < 1
+                        or any(not isinstance(entry.get(k, ""), str) for k in ("say", "why", "batch", "until"))):
+                    entries.append(None)
+                    continue
+                value = dict(entry, say=superagent._clip(entry.get("say"), superagent.SAY_MAX),
+                             why=superagent._clip(entry.get("why"), superagent.WHY_MAX))
+                if "until" in value and len(value["until"]) > 16:
+                    value["until"] = ""
+                if "batch" in value and not superagent.BATCH_RE.fullmatch(value["batch"]):
+                    value["batch"] = ""
+                entries.append(value)
+            out = {"items": entries, "digest": [superagent._clip(line, superagent.LINE_MAX) for line in out["digest"][:3]],
+                   "notes": superagent.cut_notes(out["notes"], job["cfg"]["super_notes_lines"])}
+        return {"ts": result.get("at", job["at"]), "phase": "result", "pid": job["pid"], "n": job["n"],
+                "job": job, **{k: result.get(k) for k in ("error", "turns", "ms", "ok", "kept")}, "out": out,
+                "dropped": (result.get("dropped") or [])[:superagent.ITEMS_MAX+1],
+                "trimmed": (result.get("trimmed") or [])[:superagent.ITEMS_MAX*2],
+                "cost": cost if usage._super_money(cost) else None}
+
+    def _super_publish(self, job, result):
+        context = self._super_capture(extra_keys=job["handles"].values())
+        checked, error = None, result.get("error") or ""
+        if not error:
+            try:
+                checked = superagent.check(result.get("out"), job["handles"], job["items"], self.super_clock(), job["cfg"]["super_notes_lines"])
+            except ValueError as exc:
+                error = str(exc)
+        with self.tlock:
+            bases, policy_ok = self._super_fresh(context)
+            policy_ok = policy_ok and context["policy"]["hash"] == job["policy_hash"]
+            current = {key for key, value in job["bases"].items() if bases.get(key) == value}
+            candidate = copy.deepcopy(self.super)  # Fred may have written while the pass was running.
+            candidate["ann"] = {k: a for k, a in candidate["ann"].items() if bases.get(k) == a.get("basis")
+                                and a.get("policy_hash", context["policy"]["hash"]) == context["policy"]["hash"]}
+            if checked and policy_ok:
+                for key, a in checked["ann"].items():
+                    if key in current:
+                        a = dict(a, policy_hash=job["policy_hash"])
+                        if a["batch"]:
+                            a["batch"] = job["pid"] + ":" + a["batch"]
+                        candidate["ann"][key] = a
+                for key in current:
+                    candidate["reviewed"][key] = job["n"]
+            ok = bool(checked and policy_ok and current & checked["ann"].keys())
+            if not ok and not error:
+                error = "super agent policy changed" if not policy_ok else "pass input became stale"
+            complete = ok and len(current) == len(job["handles"])
+            if checked:
+                candidate["notes_blocked"] = not complete
+            candidate["digest"] = checked["digest"] if complete else []
+            candidate["n"] = max(candidate["n"], job["n"])
+            candidate["last"] = {"n": job["n"], "pid": job["pid"], "at": job["at"], "ok": ok,
+                "error": superagent._clip(error, 300), "model": job["model"],
+                "cost": result.get("cost") if usage._super_money(result.get("cost")) else None,
+                "turns": result.get("turns") if superagent._whole(result.get("turns")) else 0,
+                "ms": result.get("ms") if superagent._whole(result.get("ms")) else 0, "items": len(job["handles"]),
+                "trigger": job["trigger"], "fingerprint": job["fingerprint"]}
+            candidate["last"]["bases"] = job["bases"]
+            if complete:
+                superagent.save_notes(self.folder, checked["notes"])
+            candidate["claimed"] = None
+            superagent.save_state(self.folder, candidate)
+            self.super = candidate
+        self._super_changed()
+
+    def _super_complete(self, job, result):
+        try:
+            result = dict(result, at=self.super_clock())
+            try:
+                checked = superagent.check(result.get("out"), job["handles"], job["items"], self.super_clock(), job["cfg"]["super_notes_lines"]) if not result.get("error") else None
+                result.update(ok=bool(checked), kept=len(checked["ann"]) if checked else 0,
+                              dropped=checked["dropped"] if checked else [], trimmed=checked["trimmed"] if checked else [])
+            except ValueError as exc:
+                result.update(ok=False, error=str(exc), kept=0, dropped=[], trimmed=[])
+            self.super_pending_results[job["pid"]] = (job, result)
+            superagent.append_log(self.folder, self._super_result_record(job, result))
+            settled = usage.record_super(self.folder, job["pid"], {"cost": result.get("cost")})
+            if settled["status"] not in ("settled", "unknown"):
+                raise ValueError(settled["error"])
+            self._super_publish(job, result)
+            self.super_pending_results.pop(job["pid"], None)
+        except Exception as exc:
+            self.super_error = superagent._clip(exc, 300)
+            self.super_gate = self.super_error
+        finally:
+            with self.tlock:
+                self.super_busy = None
+            self._super_changed()
+
+    def _super_job(self, job):
+        result = {"out": None, "cost": 0.0, "error": "paused before invocation", "turns": 0, "ms": 0}
+        try:
+            with self.tlock:
+                limits_, errors = superagent.settings(self.cfg)
+                blocked = self.super_error or superagent.blocked(limits_, errors, self.super, bool(self.runs.exe))
+                if not blocked:
+                    job["invoked"] = True
+            if not blocked:
+                result = superagent.run(job["cfg"], job["exe"], str(superagent.folder(self.folder)), job["prompt"],
+                                        job["model"], job["reserved"])
+        except Exception as exc:
+            result.update(cost=None, error="the pass failed: " + superagent._clip(exc, 200))
+        finally:
+            self._super_complete(job, result)
+
+    def _super_admit(self, context, wake, ledger):
+        state, cfg, now = context["state"], context["cfg"], context["now"]
+        limits_, _ = superagent.settings(cfg)
+        selected = superagent.select_items(context["items"], state)
+        spent = sum(usage.super_spent(ledger["records"], usage.day_of(now)))
+        sigs = superagent.signals(context["tasks"], now, self.super_idle)
+        head = {"n": state["n"]+1, "trigger": superagent.trigger_words(wake["events"]), "spent": spent,
+                "day_usd": limits_["super_day_usd"], "levels": superagent.levels(cfg)}
+        text, handles = superagent.digest(head, selected, context["policy"]["orders"],
+            "" if state.get("notes_blocked") else superagent.read_notes(self.folder),
+            [superagent.task_line(t, supervisor.policy(cfg, t, now)["mode"], now)
+                for t in superagent.live_tasks(context["tasks"])[:superagent.LIVE_MAX]], sigs, paths.you(cfg), now)
+        if not handles:
+            raise ValueError("no whole item fits the digest")
+        prompt = superagent.build_prompt(context["policy"]["role"], text, paths.you(cfg), limits_["super_notes_lines"])
+        submitted = [i for i in selected if i["key"] in handles.values()]
+        job = {"pid": str(uuid.uuid4()), "n": head["n"], "at": now, "cfg": cfg, "exe": self.runs.exe,
+               "handles": handles, "items": submitted, "bases": {i["key"]: superagent.basis(i) for i in submitted},
+               "policy_hash": context["policy"]["hash"], "trigger": head["trigger"], "prompt": prompt,
+               "day": usage.day_of(now), "model": superagent.pass_model(limits_, submitted),
+               "fingerprint": superagent.fingerprint(context["items"], context["tasks"], sigs)}
+        with self.tlock:
+            bases, policy_ok = self._super_fresh(context)
+            if not policy_ok or any(bases.get(k) != v for k, v in job["bases"].items()):
+                return False
+            if self.super_busy or self.super_error or superagent.blocked(limits_, [], self.super, bool(self.runs.exe)):
+                return False
+            got = usage.reserve_super(self.folder, job["pid"], usage.day_of(now), limits_["super_pass_usd"], limits_["super_day_usd"])
+            if got["status"] != "reserved":
+                self.super_refused = got["error"]
+                superagent.append_log(self.folder, {"ts": now, "phase": "refused", "pid": job["pid"], **got})
+                if got["status"] == "error":
+                    recorded = usage.load_super(self.folder)
+                    if recorded["error"] or job["pid"] in recorded["records"]:
+                        self._super_complete(job, {"out": None, "cost": 0.0, "error": got["error"], "turns": 0, "ms": 0})
+                    self.super_error = self.super_gate = got["error"]
+                return False
+            job.update(day=got["day"], reserved=got["reserved"])
+            self.super_busy = job
+            candidate = copy.deepcopy(self.super)
+            candidate.update(n=job["n"], claimed={k: job[k] for k in ("n", "pid", "at", "model", "handles", "bases", "policy_hash", "trigger")})
+            self.super = candidate
+            try:
+                superagent.save_prompt(self.folder, prompt)
+                superagent.save_state(self.folder, candidate)
+                superagent.append_log(self.folder, {"ts": now, "phase": "claimed", "n": job["n"], "pid": job["pid"],
+                    "job": job, "handles": handles, "bases": job["bases"], "policy_hash": job["policy_hash"],
+                    "bytes": len(prompt.encode("utf-8")), "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                    "model": job["model"], "trigger": job["trigger"], "reserved": job["reserved"]})
+            except Exception as exc:
+                error = superagent._clip(exc, 300)
+                self._super_complete(job, {"out": None, "cost": 0.0, "turns": 0, "ms": 0, "error": error})
+                self.super_error = self.super_gate = error
+                return False
+            self.super_refused = ""
+        try:
+            thread = threading.Thread(target=self._super_job, args=(job,), name="super-agent", daemon=True)
+            thread.start()
+            if thread.is_alive():
+                self.super_threads.append(thread)
+        except Exception as exc:
+            error = superagent._clip(exc, 300)
+            self._super_complete(job, {"out": None, "cost": 0.0, "turns": 0, "ms": 0, "error": error})
+            self.super_error = self.super_gate = error
+            return False
+        self.super_pass_mono = self.super_mono()
+        return True
+
+    def _super_tick(self):
+        try:
+            self.super_threads = [t for t in self.super_threads if t.is_alive()]
+            if self.super_error and not self.super_busy:
+                self._super_reconcile()
+            if self._super_state_bad:
+                return False
+            now, mono = self.super_clock(), self.super_mono()
+            context = self._super_capture(now)
+            limits_, errors = superagent.settings(context["cfg"])
+            ledger = usage.load_super(self.folder)
+            day = usage.day_of(now)
+            ledger["error"] = self._super_ledger_error(ledger, context["state"])
+            gate = self.super_error or ledger["error"] or superagent.blocked(limits_, errors, self.super, bool(self.runs.exe))
+            if not gate and sum(usage.super_spent(ledger["records"], day)) >= limits_["super_day_usd"]:
+                gate = "super agent day limit reached"
+            with self.tlock:
+                state = copy.deepcopy(self.super)
+                new, back, changed = superagent.sync(state, context["items"], now)
+                inputs = {i["key"]: superagent._event([i["key"], i["level"], i["deadline"], i["contract"]]) for i in context["items"]}
+                events = [("new", k) for k in new] + [("back", k) for k in back]
+                events += [("changed", k) for k, value in inputs.items() if k in state.get("inputs", {}) and state["inputs"][k] != value]
+                if state.get("policy_hash") and state["policy_hash"] != context["policy"]["hash"]:
+                    events.append(("changed", "policy"))
+                    state["ann"], state["digest"] = {}, []
+                stale = [k for k, a in state["ann"].items() if k not in inputs or
+                         a["basis"] != next((superagent.basis(i) for i in context["items"] if i["key"] == k), None)]
+                for key in stale:
+                    del state["ann"][key]
+                    events.append(("changed", key))
+                running = {tid for tid, t in context["tasks"].items() if t.get("state") == "running"}
+                if self.super_running is not None:
+                    events += [("ended", tid) for tid in self.super_running-running if context["tasks"].get(tid, {}).get("state") in ("done", "stopped", "stuck", "handed")]
+                else:
+                    self.super_swept = self.super_pass_mono = mono
+                if context["items"] and ((self.super_gate and not gate) or self.super_day and self.super_day != day):
+                    events.append(("eligible", day))
+                self.super_gate, self.super_day, self.super_running = gate, day, running
+                if changed or events or state.get("inputs", {}) != inputs:
+                    state.update(inputs=inputs, policy_hash=context["policy"]["hash"])
+                    superagent.save_state(self.folder, state)
+                    self.super = state
+                if events:
+                    self._super_arm(mono, events)
+                sweep = bool(not self.super_wake and not self.super_busy and running and context["items"] and
+                             mono-max(self.super_swept, self.super_pass_mono) >= limits_["super_sweep_s"])
+            if sweep:
+                self.super_swept = mono
+                self.super_idle = superagent.watch_git(context["tasks"], self.super_samples, now)
+                fp = superagent.fingerprint(context["items"], context["tasks"], superagent.signals(context["tasks"], now, self.super_idle))
+                if fp != (self.super.get("last") or {}).get("fingerprint"):
+                    self._super_arm(mono, [("sweep", "")])
+            if gate:
+                with self.tlock:
+                    if self.super_wake:
+                        superagent.append_log(self.folder, {"ts": now, "phase": "refused", "status": "blocked", "error": gate})
+                        self.super_refused, self.super_wake = gate, None
+                return False
+            with self.tlock:
+                if self.super_busy or not self.super_wake or self.super_wake["due"] > mono:
+                    return False
+                wake, self.super_wake = self.super_wake, None
+            if not context["items"]:
+                return False
+            return self._super_admit(context, wake, ledger)
+        except Exception as exc:
+            self.super_error = superagent._clip(exc, 300)
+            self.super_gate = self.super_refused = self.super_error
+            return False
+
+    def super_view(self):
+        """Project current advice without cleanup, wakes, writes or provider calls."""
+        now = self.super_clock()
+        error = ""
+        try:
+            context = self._super_capture(now)
+        except Exception as exc:
+            error = superagent._clip(exc, 300)
+            with self.tlock:
+                cfg, state = copy.deepcopy(self.cfg), copy.deepcopy(self.super)
+                snap, by_id = self.snapshot(), copy.deepcopy(self.tasks)
+                wake = copy.deepcopy(self.super_wake)
+            context = {"cfg": cfg, "state": state, "items": self._super_describe(
+                superagent.items(snap, by_id), snap, by_id, now, cfg),
+                "policy": {"hash": "", "orders": ""}, "busy": None, "wake": wake, "error": self.super_error}
+        state, live, cfg = context["state"], context["items"], context["cfg"]
+        ledger = usage.load_super(self.folder)  # One validated read supplies spend and status.
+        ledger["error"] = self._super_ledger_error(ledger, state)
+        day = usage.day_of(now)
+        spent = sum(usage.super_spent(ledger["records"], day)) if not ledger["error"] else None
+        limits_, errors = superagent.settings(cfg)
+        ranked, why = superagent.status(limits_, errors, state, spent or 0, bool(self.runs.exe))
+        with self.tlock:
+            bases, policy_ok = self._super_fresh(context) if not error else ({}, False)
+        valid = {k: a for k, a in state["ann"].items() if superagent._annotation(a) and bases.get(k) == a["basis"]
+                 and a.get("policy_hash", context["policy"]["hash"]) == context["policy"]["hash"]}
+        stale = len(valid) != len(state["ann"])
+        state["ann"] = valid
+        last_bases = (state.get("last") or {}).get("bases", {})
+        stale = stale or any(bases.get(k) != value for k, value in last_bases.items())
+        if state.get("policy_hash") and state["policy_hash"] != context["policy"]["hash"] or not policy_ok:
+            ranked, why = False, "super agent policy changed"
+        failure = error or context["error"] or ledger["error"]
+        if not superagent.blocked(limits_, errors, state, bool(self.runs.exe)):
+            failure = failure or self.super_refused
+        if failure:
+            ranked, why = False, failure
+        ordered = superagent.queue(live, state, now, ranked)
+        for row in [i for card in ordered["queue"] for i in card["items"]] + ordered["later"]:
+            row.pop("_stamp", None)
+        flat = [i for card in ordered["queue"] for i in card["items"]]
+        wake = context["wake"]
+        spend = {"today": spent, "passes": sum(1 for rec in ledger["records"].values() if rec["day"] == day)
+                 if not ledger["error"] else None, "day_limit": limits_["super_day_usd"], "pass_limit": limits_["super_pass_usd"]}
+        if ledger["error"]:
+            spend["error"] = ledger["error"]
+        return {"state": "ranked" if ranked else "unranked", "why": superagent._clip(why, 300),
+            "paused": state["paused"], "sorting": context["busy"],
+            "due": max(0, math.ceil(wake["due"]-self.super_mono())) if wake else None,
+            **ordered, "digest": state["digest"] if ranked and not stale else [],
+            "notes": superagent.cut_notes(superagent.read_notes(self.folder), limits_["super_notes_lines"])
+                     if not failure and not state.get("notes_blocked") else "",
+            "orders": context["policy"]["orders"], "last": superagent._masked(state.get("last")), "spend": spend,
+            "counts": {"queue": len(flat), "later": len(ordered["later"]),
+                       "always": sum(bool(i.get("always")) for i in flat), "new": sum(i["new"] for i in flat)},
+            "coverage": {"live": len(live), "last_submitted": (state.get("last") or {}).get("items", 0),
+                         "never_reviewed": sum(i["key"] not in state["reviewed"] for i in live)}}
+
+    def super_action(self, body):
+        action = body.get("action") if isinstance(body, dict) else None
+        if not isinstance(body, dict) or set(body) != {"action"} or action not in ("pause", "resume", "sort"):
+            return 400, {"error": "action: pause, resume or sort"}
+        with self.tlock:
+            if action == "sort" and self.super["paused"]:
+                return 409, {"error": "paused: resume first"}
+            if self._super_state_bad:
+                return 503, {"error": self.super_error}
+            try:
+                if action != "sort":
+                    candidate = copy.deepcopy(self.super)
+                    candidate["paused"] = action == "pause"
+                    superagent.save_state(self.folder, candidate)
+                    self.super = candidate
+                    if action == "pause":
+                        self.super_wake = None
+                superagent.append_log(self.folder, {"ts": self.super_clock(), "phase": action, "by": "fred"})
+                self.super_pending_action = None
+                if action != "pause":
+                    self._super_arm(self.super_mono(), [("asked", action)], at_once=True)
+            except Exception as exc:
+                self.super_pending_action = action
+                self.super_error = self.super_gate = superagent._clip(exc, 300)
+                return 503, {"error": self.super_error}
+        self._super_changed()
+        return 200, self.super_view()
 
     def _sup_owned(self, task: dict) -> list:
         return [s["n"] for s in task["steps"] if s["state"] == "done" and s.get("session")
@@ -4322,6 +4909,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self._config())
         if url.path == "/api/usage":
             return self._json(self.hub.usage_report())
+        if url.path == "/api/super":
+            return self._json(self.hub.super_view())
         if url.path == "/api/image":
             return self._image(query)
         if url.path == "/api/chat":
@@ -4369,6 +4958,7 @@ class Handler(BaseHTTPRequestHandler):
         routes["/api/task/message"] = self._task_message
         routes["/api/task/supervisor"] = self._task_supervisor
         routes["/api/task/supervisor/replay"] = self._task_supervisor_replay
+        routes["/api/super"] = self._super
         routes["/api/task/handoff/preview"], routes["/api/task/handoff"] = self._task_handoff_preview, self._task_handoff
         for lever in ("stop", "pause", "resume", "retry", "stepdone", "confirm", "clear", "done", "accept", "redo", "keep"):
             routes[f"/api/task/{lever}"] = lambda body, lever=lever: self._task_lever(body, lever)
@@ -4773,6 +5363,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _task_next(self, body):
         status, data = self.hub.request_next(body)
+        return self._json(data, status)
+
+    def _super(self, body):
+        status, data = self.hub.super_action(body)
         return self._json(data, status)
 
     def _task_supervisor(self, body):
