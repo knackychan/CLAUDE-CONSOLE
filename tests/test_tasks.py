@@ -254,6 +254,25 @@ class HandoffTest(unittest.TestCase):
             self.assertEqual(tasks.lesson_of(none), "", none)
         self.assertEqual(tasks.lesson_of("a lesson: not a line start"), "")
 
+    def test_blocked_of(self):
+        """Plan 57 D2: only an explicit `Status: blocked` line in the Next section blocks; an open question, a
+        worked-round error or a Status line elsewhere does not."""
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked: codex-code-mode-host.exe is missing"),
+                         "codex-code-mode-host.exe is missing")
+        self.assertEqual(tasks.blocked_of(GOOD + "\n**Status:** Blocked - no test runner"), "no test runner")
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked"), "the step could not do its work")
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked: key sk-abcdefghijklmnop"), "key ***")
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked: first\nStatus: blocked: the last one wins"),
+                         "the last one wins")
+        self.assertEqual(tasks.blocked_of(GOOD + "\nStatus: blocked\nLesson: not the reason"),
+                         "the step could not do its work")  # a bare line does not take the next line as its reason
+        self.assertEqual(len(tasks.blocked_of(GOOD + "\nStatus: blocked: " + "x" * 400)), 200)
+        luna = GOOD.replace("- (none)\n## Next", "- Restore the host so the tests can run?\n## Next")
+        for fine in ("", GOOD, luna, GOOD + "\nStatus: done", GOOD + "\nStatus: blockedness unknown",
+                     GOOD.replace("- (none)", "- the first rg call failed; Grep worked"), "the status: blocked here",
+                     GOOD.replace("- (none)\n## Open questions", "- Status: blocked: not in Next\n## Open questions")):
+            self.assertEqual(tasks.blocked_of(fine), "", fine)
+
     def test_verdict_and_question_of_a_reply(self):
         # the Stop hook is async and may land after run_ended: the chain reads them in the reply too
         reply = f"HANDOFF\n{GOOD}\nEND HANDOFF\n**VERDICT: FAIL** test_add - 3 != 4"
@@ -1177,6 +1196,8 @@ class ChainTest(unittest.TestCase):
         self.assertTrue(code.rstrip().endswith("END HANDOFF"))
         self.assertIn("`Lesson: <one sentence>`", code)
         self.assertIn("most steps have none", code)
+        self.assertIn("`Status: blocked: <why>`", code)  # plan 57 D2
+        self.assertIn("an open question or a DECISION is not blocked", code)
         self.assertIn("do not run /session-handoff", code)
         self.assertNotIn("STOP:", code)
         self.assertNotIn("$", code)

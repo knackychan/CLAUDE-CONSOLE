@@ -28,13 +28,15 @@ the writing in a later one. Kinds and their models:
 | edit | a 1-2 file edit with a clear spec, a rename, a copy | haiku |
 | code | a feature or fix with a clear spec, and its tests | sonnet |
 | document | an important document: a plan, a spec, user-facing docs | sonnet |
-| explain | an in-depth explanation across many files | sonnet |
+| explain | an in-depth explanation, audit or review across many files: findings only, no plan | sonnet |
 | debug | a failing test or a bug with no known cause | sonnet |
 | test | run the checks and report, no edits | haiku |
-| design | architecture, a novel problem, a critical decision, deep research; writes the plan the code steps follow | opus |
+| design | architecture, a novel problem, a critical decision; writes the implementation plan the code steps follow | opus |
 | replan | after a scout or a design: re-plan the steps that follow, from what it found | haiku |
 
 Rules for the list:
+- A read-only audit or review that ends in findings is explain (scout for a quick one), never design: a design step
+  must write an implementation plan.
 - A hard task (route reasoning high) starts with its reads, then one design step, then its code steps: the design
   step thinks on the top model and writes the plan, a code step writes what it decided on a cheaper one. Never put
   a code step before the design step of a hard task, and never add a second design step.
