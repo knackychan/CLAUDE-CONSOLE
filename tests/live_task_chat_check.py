@@ -103,18 +103,8 @@ def main():
             page.get_by_role("button", name="Resume", exact=True).click()
             page.wait_for_function("id => snap.tasks.find(t => t.id === id)?.current === 2", arg=paused)
 
-            # Plan 48: the task menu's Add step on a model opens its form in the opened task; Cancel starts nothing.
-            one = fixture.make_task(steps=[{"kind": "scout", "goal": "find add() HANDOFF-OK"}])
-            fixture.until(one, lambda t: t["state"] == "done", "the one-step task ends")
-            page.evaluate("id => openTask(id)", one)
-            page.wait_for_function("id => boardData?.id === id && boardData.data.levers.add_next === ''", arg=one)
-            page.locator("details.action-more summary").click()
-            page.locator('[data-tact="nextopen"][data-at="task"]').click()
-            page.wait_for_selector("#b-ninstr")
-            assert page.evaluate("boardPick") == "t"
-            page.locator('[data-tact="nextcancel"]').click()
-            page.wait_for_function("!document.querySelector('#b-ninstr')")
-            assert len(fixture.hub.tasks[one]["steps"]) == 1
+            # D3: this fixture has no rejected supervisor, so actions does not serve Add step.
+            # Its preview/start form remains covered by the Node and server tests.
 
             # Chat-task handoff: a saved plain reply, no HANDOFF block, still hands off through the task menu.
             chat_step = tasks.chat_step(1, "answer it", "fake-chat", "haiku", "low", time.time())
@@ -129,8 +119,7 @@ def main():
             page.wait_for_function("id => snap.tasks.some(t => t.id === id)", arg=chat["id"])
             page.evaluate("id => openTask(id)", chat["id"])
             page.wait_for_function("id => document.querySelector('#b-tcont')?.dataset.tid === id", arg=chat["id"])
-            page.locator("details.action-more summary").click()
-            page.get_by_role("button", name="Hand off task", exact=True).click()
+            page.locator('.p-bar [data-aid="handoff"]').click()
             page.locator('[data-tact="handoffpreview"]').click()
             page.wait_for_function("id => handoffDraft[id]?.preview", arg=chat["id"])
             page.get_by_role("button", name="Save document", exact=True).click()
@@ -158,7 +147,7 @@ def main():
             page.wait_for_function("id => snap.tasks.some(t => t.id === id)", arg=replan["id"])
             page.evaluate("id => openTask(id)", replan["id"])
             page.wait_for_function("id => document.querySelector('#b-tcont')?.dataset.tid === id", arg=replan["id"])
-            assert page.get_by_role("button", name="Confirm plan", exact=True).count() == 1
+            assert page.locator('.p-card [data-aid="confirm"]').count() == 1
             assert page.get_by_role("button", name="Keep old plan", exact=True).count() == 1
 
             # The route lists every step, a planned one included.
@@ -197,15 +186,14 @@ def main():
             box.fill('guidance for explicit retry HANDOFF-OK')
             page.get_by_role('button', name='Send', exact=True).click()
             page.wait_for_function("boardData?.data?.task?.messages?.[0]?.status === 'queued'")
-            page.locator("details.action-more summary").click()  # plan 48: Retry on a model is in the task menu
-            page.locator('[data-tact="retryopen"]').click()
+            page.locator('.p-card [data-aid="retry"]').click()
             retry = page.get_by_role('button', name='Retry', exact=True)
             retry.click()
             page.get_by_role('button', name='Retry and carry queued guidance? Click again', exact=True).click()
             page.wait_for_function("boardData?.data?.task?.messages?.[0]?.status === 'dispatched'")
             assert not failures, failures
             browser.close()
-        print("Task chat browser checks passed: queued correction, progression, drafts, attachments, selection, tabs, history, question, explicit retry after a cap, Resume, chat-task handoff preview/save/create, replan approval, route and Add step on a model from the menu; 900/400/340 px, dark/light, reduced motion.")
+        print("Task chat browser checks passed: queued correction, progression, drafts, attachments, selection, tabs, history, question, explicit retry after a cap, Resume, chat-task handoff preview/save/create, replan approval, route; Add step remains covered by Node/server tests (D3); 900/400/340 px, dark/light, reduced motion.")
     finally:
         stop.set()
         if worker.is_alive():

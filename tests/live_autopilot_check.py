@@ -279,7 +279,7 @@ def check_gated_chain(ctx):
         rig.wait_says(tid, "plan ready: confirm")
         # Moment 3: one Confirm on the opened task, then nothing of Fred's until the finish.
         rig.open(tid)
-        confirm = page.get_by_role("button", name="Confirm plan", exact=True)
+        confirm = page.locator('.p-card [data-aid="confirm"]')
         confirm.wait_for()
         assert rig.find(rig.get(tid)["actions"], "confirm")["post"] == "/api/task/confirm"
         confirm.click()
@@ -508,12 +508,10 @@ def check_models_card(ctx):
             for scheme in ("dark", "light"):
                 page.set_viewport_size({"width": width, "height": 760})
                 page.emulate_media(color_scheme=scheme, reduced_motion="reduce")
-                buttons = page.locator('[data-tact="supmode"]')
-                if not buttons.first.is_visible():
-                    page.locator("details.action-more summary").click()
+                buttons = page.locator('.p-seg [data-aid^="level_"]')
                 buttons.first.wait_for()
-                assert buttons.all_inner_texts() == MODES
-                assert [b.get_attribute("aria-pressed") for b in buttons.all()] == ["false", "false", "true", "false"]
+                assert buttons.all_inner_texts() == ["gated", "auto"]
+                assert [b.get_attribute("aria-pressed") for b in buttons.all()] == ["true", "false"]
                 for button in buttons.all():
                     box = button.bounding_box()
                     assert box and box["x"] >= 0 and box["x"] + box["width"] <= width, (width, scheme, box)

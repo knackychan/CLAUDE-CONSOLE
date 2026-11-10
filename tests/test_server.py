@@ -4353,6 +4353,21 @@ class FinishServerTest(TaskServerTest):
 
 
 class ActionsServerTest(TaskServerTest):
+    def test_task_get_serves_the_typed_prompt(self):
+        task = self.saved_task("running")
+        tasks.save(self.folder, task)
+        (self.folder / "tasks" / task["id"] / "prompt.md").write_text("fix the 340 px overflow\n", encoding="utf-8")
+        self.assertEqual(self.task(task["id"])[1]["prompt"], "fix the 340 px overflow")
+        prompt = self.folder / "tasks" / task["id"] / "prompt.md"
+        prompt.write_text("key sk-abcdefgh12345678", encoding="utf-8")
+        before = (prompt.read_bytes(), (prompt.parent / "task.json").read_bytes())
+        self.assertNotIn("sk-abcdefgh12345678", self.task(task["id"])[1]["prompt"])
+        self.assertEqual(before, (prompt.read_bytes(), (prompt.parent / "task.json").read_bytes()))
+        prompt.write_bytes(b"\xff")
+        self.assertEqual(self.task(task["id"])[1]["prompt"], "")
+        (self.folder / "tasks" / task["id"] / "prompt.md").unlink()
+        self.assertEqual(self.task(task["id"])[1]["prompt"], "")
+
     def saved_task(self, state="running", why="", owner="service"):
         task = tasks.new_task(str(self.project), "proj", "Actions", "saved goal", tasks.plan_steps(
             [{"kind": "design", "goal": "plan"}, {"kind": "code", "goal": "implement"}], 6),
