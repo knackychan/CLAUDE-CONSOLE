@@ -6,9 +6,11 @@
 > Lands on plans 17 (tasks), 44 (the supervisor pass, its ledger and `compact._ask`), 50 (the Usage block), 52 (the
 > levels, the decision card, `Hub.actions`), 54 (`paths.write_text_atomic`).
 
-Status: **reviewed 2026-11-08, plan only, decisions closed 2026-11-08** (section 5: D4 b, the rest a; written for each recommended option
+Status: **reviewed 2026-11-08, plan only, decisions closed 2026-11-08; D1 corrected 2026-11-09** (section 5: D1 and D4 b, the rest a; written for each recommended option
 (a), the task files mark the lines another answer changes). Baseline `84b9260` (docs only since `9b6f988`, 1167 tests
-OK). Nothing is implemented and no product file was touched by writing this plan. Building waits for D1.
+OK). Nothing is implemented and no product file was touched by writing this plan. D1 (b) permits a scratch-only
+build now; plan 52's live check remains open and precedes Task 7. No production restart or paid acceptance is
+authorized by this build exception.
 
 Review baseline: `7c5e149`. Read [the review contract and JEV assessment](08-review-and-jev.md) before implementing
 any task. It fixes coverage, expiry, stale advice, persistence/accounting, evidence and scheduling gaps; its R1-R9
@@ -462,7 +464,7 @@ did not.
 
 | # | Question | (a) recommended | (b) | Taken |
 |---|---|---|---|---|
-| D1 | When to build | after plan 52's live check, as design section 9 says: the queue stands on plan 52's levels, decision card and finish card, and a pass ranks what those produce | now: this plan reads `Hub.actions` and changes no plan 52 path, so it could be built and checked on scratch services first | (a) |
+| D1 | When to build | after plan 52's live check, as design section 9 says: the queue stands on plan 52's levels, decision card and finish card, and a pass ranks what those produce | now: this plan reads `Hub.actions` and changes no plan 52 path, so it could be built and checked on scratch services first | (b), corrected 2026-11-09 |
 | D2 | Passes at the upgrade | on: `super_pass_usd` $0.20, `super_day_usd` $1.00 admission allowance; Haiku or Sonnet by submitted work; actual capacity must be measured in Task 7; `super_day_usd: 0` turns them off | off (`super_day_usd` 0) until you set a limit by hand | (a) |
 | D3 | The pass's folder (cwd) | `<home>/super`: no project of yours is the cwd of a pass that reads every project, and safe mode loads no CLAUDE.md anyway | the first project in `config.json` `projects` | (a) |
 | D4 | Watchdog signals in slice 1 | two, from data the service keeps: a running step in it for more than twice the median of its kind's ended steps (3 or more), and the same verify failure twice. Spend with no file changed needs per-step git timing the service does not keep; it comes with the pause act (slice 3) | all of design 3.6 now, adding a timed git read per running task to every sweep | (b) |
@@ -480,7 +482,7 @@ project's transport cannot be copied unchanged. JEV does not produce the prose t
 
 Decided by Fred, 2026-11-08:
 
-- D1: (a) after plan 52's live check.
+- D1: originally (a) after plan 52's live check; superseded by the 2026-11-09 correction below.
 - D2: (a) passes on at the upgrade, $0.20 a pass, $1.00 a day.
 - D3: (a) the pass runs in <home>/super.
 - D4: (b) all of design 3.6's watchdog signals now, with a timed git read per running task each sweep; the task file's code is for (a), so the build writes the two added signals test first.
@@ -492,6 +494,10 @@ Decided by Fred, 2026-11-08:
 - D10: (a) a STOP question without options is always forwarded.
 - D11: (a) no act or order in the answer until slice 3.
 - D12: (a) slice 1 first, then a separately enabled Command Code shadow evaluation as its own later plan.
+
+Correction by Fred, 2026-11-09: D1 (b), build and test Tasks 1 to 6 on scratch services before plan 52's live check.
+The live check remains open and precedes Task 7. D2 to D12 are unchanged; this exception authorizes no production
+restart or paid acceptance.
 
 ## 6. Verification at the end of every task
 
@@ -507,6 +513,10 @@ Decided by Fred, 2026-11-08:
    and stale-input checks. Do not treat old exact-value examples as permission to omit the review contract.
 
 ## 7. Status and history
+
+- 2026-11-09: D1 corrected to (b), permitting Tasks 1 to 6 on scratch services before plan 52's live check.
+  The live check stays open and precedes Task 7; D2 to D12 are unchanged. Prompt A now carries the actual choices.
+  Docs only; no product code, service restart or paid pass.
 
 - 2026-11-08: reviewed against `7c5e149`; R1-R9 correct expiry, overflow, stale advice, persistence, spend,
   model selection, evidence, batching and scheduling. JEV assessed from sticker-generator-simple `7d80561`

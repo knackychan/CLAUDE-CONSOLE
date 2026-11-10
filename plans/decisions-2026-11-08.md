@@ -32,7 +32,7 @@ rule's own Claude rung. A retry should not try a second untested harness. Keep F
 
 | Decision | Choice | Reason |
 |---|---|---|
-| D1 when to build | (a) after plan 52's live check | |
+| D1 when to build | (b) build now on scratch services before plan 52's live check | corrected 2026-11-09; supersedes (a); live check remains open |
 | D2 passes at the upgrade | (a) on, $0.20 a pass, $1.00 a day | |
 | D3 pass folder | (a) <home>/super | |
 | D4 watchdog signals | (b) all of design 3.6 now (git read per sweep); build writes the added signals | |
@@ -44,6 +44,10 @@ rule's own Claude rung. A retry should not try a second untested harness. Keep F
 | D10 STOP without options | (a) always forwarded | |
 | D11 act and order | (a) slice 3 | |
 | D12 JEV | (a) shadow evaluation later, own plan | |
+
+Correction, 2026-11-09: D1 (b) permits plan 58 Tasks 1 to 6 to build and test on scratch services now. Plan 52's
+live check remains open and precedes plan 58 Task 7. No production restart or paid acceptance is authorized by
+this build exception. D2 to D12 are unchanged.
 
 ## Plan 55
 
