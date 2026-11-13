@@ -1,0 +1,6 @@
+Initial disposition: fix two transcript issues; no rebuild.
+Visual distinction between task overview and classic step chat is clear.
+Verdict passes: user instruction attribution resolved; guidance chronology resolved; answer/receipt/same-tick guidance order resolved.
+Disposition: ship the isolated design exploration for review.
+Limits: source, supplied screenshots and passing checks reviewed; no browser execution, measured contrast or live-worker validation.
+Direction unapproved; Plan 55 Stop 1 open.

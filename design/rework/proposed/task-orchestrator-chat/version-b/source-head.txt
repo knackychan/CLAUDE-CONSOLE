@@ -1,0 +1,5 @@
+HEAD c8434dcea218f21c6aea0069e4f2923b6648c30b
+D:\MY DOCS\MY TOOLS\CLAUDE CONSOLE\design\rework\explored\52-b-projects-dock.html SHA256 7416c2077228fcb757f02f6ea600dd7da8152a95baf57f8ad1c2b641bf00aaaf
+D:\MY DOCS\MY TOOLS\CLAUDE CONSOLE\design\rework\proposed\task-orchestrator-chat\index.html SHA256 036ffb1f8317d9f7d5054541c1b4977283f5393003d6b41629f2cdcfbb2d6455
+D:\MY DOCS\MY TOOLS\CLAUDE CONSOLE\design\rework\proposed\task-orchestrator-chat\app.js SHA256 0524ece76301c4acff223689ee4622dfb8fcb5226b02de2d77ad2787c78fe5bd
+D:\MY DOCS\MY TOOLS\CLAUDE CONSOLE\design\rework\proposed\task-orchestrator-chat\style.css SHA256 5d8e266a12c2a6f537c2a12998f267584ce44c4e4fc2df3533ebf271aef5bb60

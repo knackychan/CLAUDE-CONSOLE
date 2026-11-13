@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; base-uri 'none'">
+<title>Version B · Design decisions and state map</title>
+<link rel="stylesheet" href="../reference-tokens.css">
+<style>
+*{box-sizing:border-box}html{overflow-x:clip}body{margin:0;background:var(--page);color:var(--ink);font:14px/1.75 var(--ui);overflow-x:clip}main{max-width:1080px;margin:auto;padding:32px 24px 72px}nav{display:flex;gap:18px;flex-wrap:wrap}a{color:var(--ink);text-underline-offset:4px}h1{font-size:30px;line-height:1.25;margin:30px 0 12px}h2{font-size:20px;margin:38px 0 12px}h3{font-size:15px;margin:24px 0 8px}p{max-width:78ch;color:var(--mut)}strong{color:var(--ink)}.label{font:11px/1.6 var(--mono);color:var(--you);margin-top:24px}section{border-top:1px solid var(--line);margin-top:30px}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;vertical-align:top;padding:12px 14px;border-bottom:1px solid var(--line);min-width:140px}th{color:var(--mut);font-weight:500}td:first-child{padding-left:0}th:first-child{padding-left:0}td a{display:inline-block;margin-top:5px}code{font:11px/1.6 var(--mono);overflow-wrap:anywhere}.diagram{border-block:1px solid var(--line);padding:16px 0;font:12px/1.8 var(--mono);white-space:pre-wrap;color:var(--mut)}.screens{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}figure{margin:0}figure a{display:block}figure img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:4px}figcaption{font-size:11px;color:var(--mut);padding-top:8px}li{margin:8px 0;color:var(--mut)}li strong{font-weight:600}.notice{padding:14px 0;color:var(--you)}@media(max-width:600px){main{padding:20px 16px 48px}h1{font-size:25px}.screens{grid-template-columns:minmax(0,1fr)}th,td{padding:10px;font-size:11px}}
+</style>
+</head>
+<body><main>
+<nav><a href="index.html">Open Version B</a><a href="../index.html">Version A</a><a href="../../../explored/52-b-projects-dock.html">52-B reference</a><a href="check-results.json">Browser results</a></nav>
+<p class="label">Proposed, not approved · interactive design prototype</p>
+<h1>The project dock around a task-scoped conversation.</h1>
+<p>52-B is strongest at <strong>navigation and acting on a task</strong>. The current task-orchestrator mockup is strongest at <strong>conversation, ownership, context and evidence</strong>. Version B combines those responsibilities without introducing a global model or changing the assigned orchestrator when you inspect a worker.</p>
+<div class="diagram">All tasks: project filter + live task grid + code-built Needs you queue
+Selected task, wide:
+  Project navigator  |  This task's orchestrator  |  Overview / Step chat / Context
+                     |  One message composer     |  Task evidence and step artifacts
+                     +  Persistent decision dock + task action bar
+Narrow: project drawer + one task panel at a time + the same decision dock</div>
+<p>The navigator can close when you need more room. At 1050 px and below it becomes a drawer; below 760 px the four task panels become peers. The persistent decision remains visible whichever panel is selected.</p>
+<section><h2>Keep these parts of 52-B</h2>
+<ul>
+<li><strong>Projects, with Needs you pinned across projects.</strong> Every decision is listed once in the pinned queue. Its project keeps a small pointer, and each selected task exposes its steps underneath.</li>
+<li><strong>Source and autonomy are visible.</strong> Console-driven tasks carry a run tag. External sessions carry the source app and a dashed rule. Gated, suggest and auto controls live in the task header; project labels summarize their tasks rather than pretending a new project-default setting was saved.</li>
+<li><strong>The decision dock.</strong> One compact question, approval, hold or acceptance surface sits immediately above the action bar. Scrolling a long plan never hides the decision. The dock has no second message input.</li>
+<li><strong>Prompt, brief and step timeline.</strong> Prompt and brief expand in place. Step rows show status and route; a compact orchestrator entry explains why work was chosen. These are current steps, not a required scout/design/code/verify ritual.</li>
+<li><strong>Step inspection.</strong> Previous/next and Chat, Received, Handoff, Files share one inspector. Planned assignments are labelled undelivered, running steps have no completed handoff, and sample file references do not masquerade as a live diff.</li>
+<li><strong>One action bar.</strong> Folder, terminal, handoff and protected deletion remain in sight, with task spend and explicitly labelled orchestrator context. State actions use words. No overflow menu hides Stop.</li>
+</ul></section>
+<section><h2>Every earlier state, mapped</h2>
+<p>The links are reproducible review scenarios. Use Review controls to inspect the original 24 orchestrator scenarios as well.</p>
+<div class="table-wrap"><table><thead><tr><th>52-B state</th><th>Version B treatment</th><th>Review</th></tr></thead><tbody>
+<tr><td>Plan ready to start</td><td>Editable proposed steps. No assigned owner or worker until Start. First assignment uses the connected eligible routes and saved effort default.</td><td><a href="index.html?scenario=planned">Open ready-to-start</a></td></tr>
+<tr><td>Running</td><td>Task-scoped orchestrator beside evidence; project step links, live read-only worker chat, guidance, Pause and Stop.</td><td><a href="index.html?scenario=worker-running">Open running</a></td></tr>
+<tr><td>Plan confirm, gated</td><td>Read, redo or confirm the current plan. Confirmation starts the waiting worker. Changing autonomy does not confirm a pending plan.</td><td><a href="index.html?scenario=plan-approval">Open plan approval</a></td></tr>
+<tr><td>Needs you: decision</td><td>Append/replace presets submit to this task's orchestrator. Custom answers use the sole composer. Queued, received and delivered are separate.</td><td><a href="index.html?scenario=question">Open question</a></td></tr>
+<tr><td>Supervisor suggests</td><td>The task's existing orchestrator proposes a focused repair with evidence and limits. Approve, inspect reason or reject; no second decision owner.</td><td><a href="index.html?scenario=proposal">Open proposal</a></td></tr>
+<tr><td>Held: confirm Fable</td><td>A scarce worker route requires its own approval. Unavailable Fable cannot be launched; eligible Opus is an explicit worker alternative. The Astra owner is retained.</td><td><a href="index.html?scenario=model-approval">Open worker-model hold</a></td></tr>
+<tr><td>Failed twice</td><td>Failure after repair remains visible, with source-step inspection and handoff. The sample cap is exhausted, so stronger-model retry is unavailable.</td><td><a href="index.html?scenario=failed-twice">Open failed repair</a></td></tr>
+<tr><td>Done</td><td>Split into Ready for acceptance and Accepted. Current passing evidence enables explicit acceptance. Reopen keeps the assigned owner.</td><td><a href="index.html?scenario=ready">Open ready</a><br><a href="index.html?scenario=accepted">Open accepted</a></td></tr>
+<tr><td>Observed chat</td><td>Read-only external session, no orchestrator composer. Continue/verify/escalate prepare a new-task draft; Start makes its own fixed assignment.</td><td><a href="index.html?view=observed">Open observed</a></td></tr>
+</tbody></table></div></section>
+<section><h2>Pages and options</h2>
+<div class="table-wrap"><table><thead><tr><th>Surface or control</th><th>What works locally</th><th>Boundary</th></tr></thead><tbody>
+<tr><td><a href="index.html?view=tasks">All tasks</a></td><td>Live six-task grid, project filtering, Needs you filter, counts, per-task spend and context, expandable tools and stream playback.</td><td>No global composer or cross-project model conversation.</td></tr>
+<tr><td>Task overview</td><td>Expandable prompt/brief, acceptance evidence, step timeline, decision explanation, saved task drafts.</td><td>Changes are confined to the selected task.</td></tr>
+<tr><td><a href="index.html?view=task&amp;task=thumbnails&amp;panel=step">Step inspector</a></td><td>Chat, Received, Handoff and Files; previous/next; task/project step links; inline tool expansion.</td><td>Worker transcripts stay read-only. Context, handoff and file artifacts are labelled sample evidence.</td></tr>
+<tr><td><a href="index.html?view=task&amp;task=thumbnails&amp;panel=context">Context</a></td><td>Bounded source inspection, checkpoint, selected evidence and byte budgets. Renewal retains the owner and counts its usage once.</td><td>Viewing an artifact does not include it in model context. Bytes, estimated tokens and archived history stay distinct.</td></tr>
+<tr><td><a href="index.html?view=new">New task</a></td><td>Goal, criteria, project, eligible route preview, explicit route choice and local Start. No eligible CLI gives a precise refusal.</td><td>New assignments only. No mid-task reassignment.</td></tr>
+<tr><td><a href="index.html?view=settings">Settings</a></td><td>Global effort default, capability and connection explanation.</td><td>Saved efforts on existing tasks remain unchanged.</td></tr>
+<tr><td><a href="index.html?view=usage">Global usage</a></td><td>Reconciled sample ledger: 400,000 processed tokens / $3.18 initially; role and task subsets; unknown usage and renewal scenarios.</td><td>Shared totals include orchestration. Role breakdowns are not additional costs or quotas.</td></tr>
+<tr><td>Gated / suggest / auto</td><td>Task mode changes are recorded in that task's conversation and reflected in the navigator.</td><td>Pending decisions remain explicit. No timed default, silent approval, cap increase or model swap.</td></tr>
+<tr><td>Edit steps / edit prompt / review rules</td><td>Proposed steps and prompt are editable before Start; autonomy rules are inspectable. Once assigned, changes are task guidance.</td><td>No rewrite of a running worker's received assignment.</td></tr>
+<tr><td>Drop / Delete</td><td>Local deletion requires confirmation and an inactive task without unresolved guidance. Reset restores the fixtures.</td><td>Active execution and unresolved guidance block deletion. Shared historical usage is retained.</td></tr>
+<tr><td>Folder / terminal</td><td>Controls display the selected project and the precise desktop-bridge requirement.</td><td>File-only prototype cannot open local applications or resume a session.</td></tr>
+<tr><td>Hand off / follow-up</td><td>Six-section document preview, with findings, failures and unmet criteria preserved. Observed-session actions prepare new-task drafts.</td><td>Export and linked follow-up creation require the runtime endpoint; no synthetic write or hidden launch.</td></tr>
+<tr><td>Retry stronger / accept failed step / Finish</td><td>Failure diagnostics and handoff remain available. Exhausted-cap retry is visibly unavailable.</td><td>No cap override or accepting unmet criteria. A failed process cannot make the task Ready or Accepted.</td></tr>
+</tbody></table></div></section>
+<section><h2>What deliberately changes</h2>
+<p><strong>The project dock is optional.</strong> The earlier plan-62 default avoided a third sidebar. This requested variant adds one at wide sizes, with a close control and a drawer at smaller widths. The conversation and evidence remain usable at 900 px.</p>
+<p><strong>The decision moves out of the conversation.</strong> Chat preserves chronology; the dock shows the current actionable state. Changing Step chat or Context never changes the composer recipient. On narrow screens the dock remains accessible even when Orchestrator is hidden.</p>
+<p><strong>Autonomy and consent stay separate.</strong> 52-B's “confirm and auto accept” compound buttons are replaced by the task-level mode control plus a single explicit decision. This keeps the chosen mode visible without approving future scarce-model holds or already-pending questions as a side effect.</p>
+<p><strong>One decision owner.</strong> The earlier “supervisor suggests” becomes a task-orchestrator proposal. Observed sessions have no owner until a new task is started. Worker route changes never imply orchestrator rotation.</p>
+</section>
+<section><h2>Implementation handoff</h2>
+<p>This is a comprehensive <strong>reviewable design</strong>, not a claim that its backend is shipped. Version B reuses Version A's fixture engine, usage ledger, delivery phases, source inspector, new-task form and settings. Its local CSS and JavaScript add the project navigator, decision dock and missing 52-B inspection states.</p>
+<ol>
+<li><strong>Keep one task state and action contract.</strong> The service should return status, primary/secondary actions, availability and refusal reasons. Render those in the header, dock and navigator rather than re-deriving gates in three places.</li>
+<li><strong>Persist identity and receipts before effects.</strong> Save the assigned model/CLI/effort at first Start. Keep task drafts and ordered guidance separate from worker transcript inspection.</li>
+<li><strong>Back every displayed artifact with its real source.</strong> Prompt, plan, received assignment, handoff, files and verdict need task/step IDs, revision and coverage. Current verification must match the reviewed result.</li>
+<li><strong>Use existing runtime operations.</strong> Task actions, handoff preview, desktop bridge, global usage and bounded context must use their existing owners and validation. Production UI integration is a separate step after review.</li>
+</ol>
+<p class="notice">Still requires runtime integration: desktop launches, real file/diff inspection, handoff export/follow-up linking, proven scarce-model capability, live recovery and persistence. Refresh resets local changes. Version B depends on the adjacent Version A assets.</p>
+</section>
+<section><h2>Verification and screenshots</h2>
+<p><strong>Final browser run: 19 / 19 checks passed.</strong> No browser errors, network requests or broken local links. The independent visual review scored the narrow-conversation and unavailable-worker fixes resolved. That verdict covers those fixes; this prototype remains proposed, not approved.</p>
+<p>Run <code>python design/rework/proposed/task-orchestrator-chat/version-b/verify.py</code>. The <a href="check-results.json">generated result file</a> records the actual check status, browser errors, network requests, screenshots and source fingerprints. Tests cover ownership, accounting, delivery, action gates, keyboard navigation, tools, focus, drafts, all review scenarios and both themes from 320 px to desktop.</p>
+<p>At 340 × 760 the question view reserves 167 px for readable conversation while retaining the composer and decision dock. The regex design detector ran with optional parser dependencies unavailable; its empty result is not a full accessibility audit. See <a href="visual-review.txt">visual review evidence and limits</a>.</p>
+<div class="screens"><figure><a href="screenshots/workspace-desktop-dark.png"><img src="screenshots/workspace-desktop-dark.png" alt="Version B desktop workspace with project navigator, orchestrator, evidence and persistent action bar"></a><figcaption>Wide task workspace · dark</figcaption></figure><figure><a href="screenshots/question-375-light.png"><img src="screenshots/question-375-light.png" alt="Narrow light theme task question with one orchestrator composer and a pinned decision dock"></a><figcaption>Narrow question and decision dock · light</figcaption></figure></div>
+</section>
+</main></body></html>

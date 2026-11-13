@@ -1,0 +1,7 @@
+HEAD: c8434dcea218f21c6aea0069e4f2923b6648c30b
+Visual base, latest user instruction: design/rework/proposed/supervision-operator/index.html
+Reference SHA-256: 4ad1605ec35973086bd4f36767f0c4737c8cca4a1f3e4ea79552b52cdf6b03a8
+Earlier visual reference: design/rework/proposed/supervision-chat/index.html
+Earlier reference SHA-256: e22b0616dd8230e746e62756965702854515774e76b5c6488dd88a5afa6d8122
+Uncommitted reference bytes included. Both reference folders were untracked at build time.
+Only the task-orchestrator-chat folder was modified.

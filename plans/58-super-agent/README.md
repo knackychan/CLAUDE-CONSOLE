@@ -1,5 +1,10 @@
 # Plan 58: Super agent v1. One pass at a time sorts what needs Fred across every task; no acts. Guided implementation plan
 
+> Direction update 2026-11-11: the global model role is superseded by BRAINSTORM D20 and
+> [plan 62](../62-task-orchestrators.md), one fixed-model orchestrator per task with shared global usage.
+> This file remains the historical implementation contract; built code/data are not removed by this update.
+> Do not extend global passes as the new architecture target.
+
 > Design: [../../design/brainstorm/2026-11-08-super-agent.md](../../design/brainstorm/2026-11-08-super-agent.md),
 > slice 1 of section 9 (sections 3.1 to 3.4, 3.6 to 3.8; D4, D5, D-b, D-c, D-e, D-f, approved by Fred 2026-11-08).
 > BRAINSTORM D18 and 7.7. Master: [../../PLAN.md](../../PLAN.md). Rules: [../../CLAUDE.md](../../CLAUDE.md).

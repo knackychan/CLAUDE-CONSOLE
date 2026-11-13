@@ -1,0 +1,906 @@
+{
+  "executed_at_utc": "2026-11-11T14:39:38.975990+00:00",
+  "scope": "Local mockup only; M-checks are not runtime B-check evidence.",
+  "browser": "Installed Microsoft Edge / Playwright, headless file://",
+  "head": "c8434dcea218f21c6aea0069e4f2923b6648c30b",
+  "reference_sha256": "4ad1605ec35973086bd4f36767f0c4737c8cca4a1f3e4ea79552b52cdf6b03a8",
+  "visual_base": "supervision-operator/index.html, latest user instruction",
+  "source_sha256": {
+    "index.html": "ead4264364df0dbd890d1d14410b048e7118b528fd4ea587e525ea56053dd308",
+    "app.js": "0524ece76301c4acff223689ee4622dfb8fcb5226b02de2d77ad2787c78fe5bd",
+    "style.css": "5d8e266a12c2a6f537c2a12998f267584ce44c4e4fc2df3533ebf271aef5bb60",
+    "reference-tokens.css": "f24918339da5cd5b10edf9fa2833f4d638116cdf0ab6e6cb3cd5025a2ea8e77e",
+    "verify.py": "d69023e6d5d6eee74f3b74a4b2135620317911543c7793fbe485ac121f8cfa4d"
+  },
+  "header_measurements": [
+    {
+      "viewport": "1510x1080",
+      "header_before_px": 123.1875,
+      "header_after_px": 81.5,
+      "chat_before_px": 172.84375,
+      "chat_after_px": 214.53125
+    }
+  ],
+  "checks": [
+    {
+      "id": "M01",
+      "status": "pass",
+      "procedure": "Operator usage strip, project rail, six live tiles, working filters, no global composer",
+      "evidence": [
+        "screenshots/header-details-desktop-dark.png"
+      ]
+    },
+    {
+      "id": "M02",
+      "status": "pass",
+      "procedure": "Task identities and conversations differ; fixed ownership across views",
+      "evidence": [
+        "verify.py: m02"
+      ]
+    },
+    {
+      "id": "M03",
+      "status": "pass",
+      "procedure": "Per-task drafts and recipients survive task/tab/step navigation",
+      "evidence": [
+        "verify.py: m03"
+      ]
+    },
+    {
+      "id": "M04",
+      "status": "pass",
+      "procedure": "Disconnected/limited owners wait; renewal retains model, CLI and effort",
+      "evidence": [
+        "verify.py: m04"
+      ]
+    },
+    {
+      "id": "M05",
+      "status": "pass",
+      "procedure": "Eligible routes, explicit pick refusal, no-route draft, Start revalidation",
+      "evidence": [
+        "verify.py: m05"
+      ]
+    },
+    {
+      "id": "M06",
+      "status": "pass",
+      "procedure": "Global usage balances equal load; idle preference wins differing activity",
+      "evidence": [
+        "verify.py: m06"
+      ]
+    },
+    {
+      "id": "M07",
+      "status": "pass",
+      "procedure": "New global effort affects future assignments and fixture adapter mappings only",
+      "evidence": [
+        "verify.py: m07"
+      ]
+    },
+    {
+      "id": "M08",
+      "status": "pass",
+      "procedure": "Exact global/model/task/role ledger reconciliation and duplicate identity",
+      "evidence": [
+        "verify.py: m08"
+      ]
+    },
+    {
+      "id": "M09",
+      "status": "pass",
+      "procedure": "Renewal settles once with exact increments; unknown remains explicit",
+      "evidence": [
+        "screenshots/renewal-usage-confirmation-dark.png"
+      ]
+    },
+    {
+      "id": "M10",
+      "status": "pass",
+      "procedure": "Repair approval starts one within-cap worker; later verify starts separately; reject holds",
+      "evidence": [
+        "screenshots/repair-step-actions-confirmation-dark.png"
+      ]
+    },
+    {
+      "id": "M11",
+      "status": "pass",
+      "procedure": "Current evidence awaits explicit acceptance; stale evidence cannot be accepted",
+      "evidence": [
+        "verify.py: m11"
+      ]
+    },
+    {
+      "id": "M12",
+      "status": "pass",
+      "procedure": "Scoped source manifest, inspection-only artifacts, KiB and separate token telemetry",
+      "evidence": [
+        "screenshots/source-inspection-confirmation-dark.png"
+      ]
+    },
+    {
+      "id": "M13",
+      "status": "pass",
+      "procedure": "Checkpoint failure, required overflow and uncertain effects preserve holds/evidence",
+      "evidence": [
+        "verify.py: m13"
+      ]
+    },
+    {
+      "id": "M14",
+      "status": "pass",
+      "procedure": "Question identity, queued submission, separate ordered receipt and worker delivery",
+      "evidence": [
+        "verify.py: m14"
+      ]
+    },
+    {
+      "id": "M15",
+      "status": "pass",
+      "procedure": "Read-only worker inspection links to the sole unchanged orchestrator composer",
+      "evidence": [
+        "verify.py: m15"
+      ]
+    },
+    {
+      "id": "M16",
+      "status": "pass",
+      "procedure": "Stream patches retain DOM focus, open tools, drafts and scroll; explicit follow/playback",
+      "evidence": [
+        "verify.py: m16"
+      ]
+    },
+    {
+      "id": "M17",
+      "status": "pass",
+      "procedure": "Pause keeps queue/running worker; Stop ends activity; capacity/caps/reopen are explicit",
+      "evidence": [
+        "verify.py: m17"
+      ]
+    },
+    {
+      "id": "M18",
+      "status": "pass",
+      "procedure": "All 24 scenarios in both themes at desktop/340; full required capture and short-height matrix",
+      "evidence": [
+        "screenshots/tasks-1510-dark.png",
+        "screenshots/overview-1510-dark.png",
+        "screenshots/step-1510-dark.png",
+        "screenshots/context-1510-dark.png",
+        "screenshots/new-1510-dark.png",
+        "screenshots/settings-1510-dark.png",
+        "screenshots/usage-1510-dark.png",
+        "screenshots/orchestrator-340-dark.png",
+        "screenshots/step-340-dark.png",
+        "screenshots/new-340-dark.png",
+        "screenshots/settings-340-dark.png",
+        "screenshots/usage-340-dark.png",
+        "screenshots/tasks-1510-light.png",
+        "screenshots/overview-1510-light.png",
+        "screenshots/step-1510-light.png",
+        "screenshots/context-1510-light.png",
+        "screenshots/new-1510-light.png",
+        "screenshots/settings-1510-light.png",
+        "screenshots/usage-1510-light.png",
+        "screenshots/orchestrator-340-light.png",
+        "screenshots/step-340-light.png",
+        "screenshots/new-340-light.png",
+        "screenshots/settings-340-light.png",
+        "screenshots/usage-340-light.png",
+        "screenshots/overview-900-dark.png",
+        "screenshots/orchestrator-400-dark.png",
+        "screenshots/step-400-dark.png",
+        "screenshots/overview-900-light.png",
+        "screenshots/orchestrator-400-light.png",
+        "screenshots/step-400-light.png",
+        "screenshots/question-desktop-dark.png",
+        "screenshots/proposal-desktop-dark.png",
+        "screenshots/ready-desktop-dark.png",
+        "screenshots/cli-unavailable-desktop-dark.png",
+        "screenshots/renewal-desktop-dark.png",
+        "screenshots/checkpoint-error-desktop-dark.png",
+        "screenshots/question-340-dark.png",
+        "screenshots/checkpoint-error-340-dark.png"
+      ]
+    },
+    {
+      "id": "M19",
+      "status": "pass",
+      "procedure": "Tab keys, focus trap/return, Escape/newline semantics, reduced motion and 130% text",
+      "evidence": [
+        "screenshots/header-details-340-dark.png",
+        "screenshots/header-details-340-light.png",
+        "screenshots/text130-orchestrator-1510-dark.png",
+        "screenshots/text130-overview-1510-dark.png",
+        "screenshots/text130-step-1510-dark.png",
+        "screenshots/text130-context-1510-dark.png",
+        "screenshots/text130-orchestrator-340-dark.png",
+        "screenshots/text130-overview-340-dark.png",
+        "screenshots/text130-step-340-dark.png",
+        "screenshots/text130-context-340-dark.png"
+      ]
+    },
+    {
+      "id": "M20",
+      "status": "pass",
+      "procedure": "File-only browser, no HTTP/API/process actions or browser errors; escaped supplied text",
+      "evidence": [
+        "verify.py: m20"
+      ]
+    },
+    {
+      "id": "M21",
+      "status": "pass",
+      "procedure": "Reset fixtures/defaults/drafts, deterministic validated deep links and Tasks scroll/focus",
+      "evidence": [
+        "verify.py: m21"
+      ]
+    },
+    {
+      "id": "M22",
+      "status": "pass",
+      "procedure": "Observed session remains read-only and its known usage contributes once",
+      "evidence": [
+        "screenshots/observed-desktop-dark.png"
+      ]
+    }
+  ],
+  "page_errors": [],
+  "console_errors": [],
+  "network_requests": [],
+  "viewports": [
+    "1510x1080",
+    "340x760",
+    "400x760",
+    "900x760",
+    "900x900"
+  ],
+  "scenario_coverage": [
+    {
+      "scenario": "default",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "worker-running",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "question",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "proposal",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "ready",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "accepted",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "cli-unavailable",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "rate-limited",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "renewal",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "checkpoint-error",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "context-overflow",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "uncertain",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "budget-hold",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "paused",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "stopped",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "capacity",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown-usage",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "no-eligible-cli",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "empty",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "loading",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "offline",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "long-content",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale-verification",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "delivery-uncertain",
+      "theme": "dark",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "default",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "worker-running",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "question",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "proposal",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "ready",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "accepted",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "cli-unavailable",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "rate-limited",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "renewal",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "checkpoint-error",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "context-overflow",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "uncertain",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "budget-hold",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "paused",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "stopped",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "capacity",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown-usage",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "no-eligible-cli",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "empty",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "loading",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "offline",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "long-content",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale-verification",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "delivery-uncertain",
+      "theme": "dark",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "default",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "worker-running",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "question",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "proposal",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "ready",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "accepted",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "cli-unavailable",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "rate-limited",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "renewal",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "checkpoint-error",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "context-overflow",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "uncertain",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "budget-hold",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "paused",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "stopped",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "capacity",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown-usage",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "no-eligible-cli",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "empty",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "loading",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "offline",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "long-content",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale-verification",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "delivery-uncertain",
+      "theme": "light",
+      "viewport": "1510x1080",
+      "status": "pass"
+    },
+    {
+      "scenario": "default",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "worker-running",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "question",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "proposal",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "ready",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "accepted",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "cli-unavailable",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "rate-limited",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "renewal",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "checkpoint-error",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "context-overflow",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "uncertain",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "budget-hold",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "paused",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "stopped",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "capacity",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "unknown-usage",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "no-eligible-cli",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "empty",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "loading",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "offline",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "long-content",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "stale-verification",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    },
+    {
+      "scenario": "delivery-uncertain",
+      "theme": "light",
+      "viewport": "340x760",
+      "status": "pass"
+    }
+  ],
+  "screenshots": [
+    "screenshots/header-details-desktop-dark.png",
+    "screenshots/renewal-usage-confirmation-dark.png",
+    "screenshots/repair-step-actions-confirmation-dark.png",
+    "screenshots/source-inspection-confirmation-dark.png",
+    "screenshots/tasks-1510-dark.png",
+    "screenshots/overview-1510-dark.png",
+    "screenshots/step-1510-dark.png",
+    "screenshots/context-1510-dark.png",
+    "screenshots/new-1510-dark.png",
+    "screenshots/settings-1510-dark.png",
+    "screenshots/usage-1510-dark.png",
+    "screenshots/orchestrator-340-dark.png",
+    "screenshots/step-340-dark.png",
+    "screenshots/new-340-dark.png",
+    "screenshots/settings-340-dark.png",
+    "screenshots/usage-340-dark.png",
+    "screenshots/tasks-1510-light.png",
+    "screenshots/overview-1510-light.png",
+    "screenshots/step-1510-light.png",
+    "screenshots/context-1510-light.png",
+    "screenshots/new-1510-light.png",
+    "screenshots/settings-1510-light.png",
+    "screenshots/usage-1510-light.png",
+    "screenshots/orchestrator-340-light.png",
+    "screenshots/step-340-light.png",
+    "screenshots/new-340-light.png",
+    "screenshots/settings-340-light.png",
+    "screenshots/usage-340-light.png",
+    "screenshots/overview-900-dark.png",
+    "screenshots/orchestrator-400-dark.png",
+    "screenshots/step-400-dark.png",
+    "screenshots/overview-900-light.png",
+    "screenshots/orchestrator-400-light.png",
+    "screenshots/step-400-light.png",
+    "screenshots/question-desktop-dark.png",
+    "screenshots/proposal-desktop-dark.png",
+    "screenshots/ready-desktop-dark.png",
+    "screenshots/cli-unavailable-desktop-dark.png",
+    "screenshots/renewal-desktop-dark.png",
+    "screenshots/checkpoint-error-desktop-dark.png",
+    "screenshots/question-340-dark.png",
+    "screenshots/checkpoint-error-340-dark.png",
+    "screenshots/header-details-340-dark.png",
+    "screenshots/header-details-340-light.png",
+    "screenshots/text130-orchestrator-1510-dark.png",
+    "screenshots/text130-overview-1510-dark.png",
+    "screenshots/text130-step-1510-dark.png",
+    "screenshots/text130-context-1510-dark.png",
+    "screenshots/text130-orchestrator-340-dark.png",
+    "screenshots/text130-overview-340-dark.png",
+    "screenshots/text130-step-340-dark.png",
+    "screenshots/text130-context-340-dark.png",
+    "screenshots/observed-desktop-dark.png"
+  ],
+  "summary": {
+    "pass": 22,
+    "fail": 0,
+    "not-run": 0
+  },
+  "limitations": [
+    "No real CLI, provider, Console API, runtime persistence or native-window checks.",
+    "Visual approval remains with the user."
+  ],
+  "context_scope": "15-cell gauge and visible figure use orchestrator context. Sample 300k handoff scale inherited from operator reference.",
+  "gauge_evidence": [
+    "screenshots/context-gauge-desktop-dark.png",
+    "screenshots/context-gauge-mobile-light.png",
+    "screenshots/task-telemetry-unknown-mobile-dark.png"
+  ]
+}

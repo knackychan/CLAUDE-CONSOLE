@@ -1,5 +1,8 @@
 # Brainstorm: talk to the super agent, and let it press the buttons (2026-11-09)
 
+> Historical design: [D20's task-orchestrator direction](2026-11-11-task-orchestrators.md) supersedes the
+> shared conversation and cross-task tool scope as of 2026-11-11. Action gates and audit remain reuse points.
+
 - Asked by Fred: "instead of having to have all these buttons to have to interact with, because it can be confusing
   and it can also take time and can make my brain a bit exhausted [...] I would prefer to have like kind of a prompt
   windows where I can directly prompt with the supervisor of my task, and he will automatically, as using an MCP,

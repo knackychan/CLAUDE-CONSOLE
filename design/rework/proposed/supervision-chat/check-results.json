@@ -1,0 +1,23 @@
+{
+  "checks": [
+    "PASS: explicit task overview and step chat; no stacked duplicate conversations; per-step recipient; current/historical/planned states; separate drafts across tabs and steps",
+    "PASS: chronological streamed messages and inline command/results; active spinner transfer; pause/reduced motion; tool expansion, keyboard focus, reader scroll and drafts survive updates",
+    "PASS: local step guidance and question answer append to the same thread; fixed recipients; question draft survives overview; global draft unchanged; back focus and dashboard position restored",
+    "PASS: user briefs contain user instructions; guidance sent between fixture events keeps its chronological position after later output, tab changes and a second send",
+    "PASS: nonzero-tick question answer precedes its receipt, which precedes same-tick follow-up guidance after tab reconstruction",
+    "PASS: supervisor recommendation stays in overview; failed/finished step chats read-only; simulated approve/dismiss/accept and result destination; observed external chat read-only",
+    "PASS: 1510px dark overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: 900px dark overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: 400px dark overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: 340px dark overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: 1510px light overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: 900px light overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: 400px light overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: 340px light overview/chat/dashboard; no horizontal overflow; >=24px button targets; narrow view separation",
+    "PASS: quiet process exposes elapsed time and output age; shared dashboard preview/current-step chat; 130% computed-text desktop smoke check",
+    "PASS: 400/340 x 760px window retains >=100px transcript and visible scoped composer",
+    "PASS: no JavaScript page errors or HTTP(S) requests"
+  ],
+  "page_errors": [],
+  "network_requests": []
+}

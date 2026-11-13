@@ -1,0 +1,12 @@
+Mode: Operate. Local proposed design; not approved for runtime integration.
+
+Direction contract
+THESIS: Join 52-B's project navigation and persistent decision dock to the existing task-scoped orchestrator and evidence layout.
+OWN-WORLD: Preserve Console's dark/light tokens, Segoe reading type, mono measurements, restrained Doto accent, cell motif and thin rules.
+STORY: Locate a task, inspect its evidence, decide without losing the action, and send guidance only to its fixed orchestrator.
+FIRST VIEWPORT: Optional 232px project navigator, 300px conversation with one composer, flexible evidence panel, decision dock above utility/state action bar.
+FORM: User-directed combination of two supplied local mockups; no catalog or generated comp. Below 1050px use a project drawer; below 760px use peer panels.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+Scope: only this version-b directory, plus one comparison link in the parent index.html. Existing fixture engine, production code, plans and locked design are preserved.
+Screenshots are browser captures of authored sample UI, not generated product assets. The 52-B reference screenshot blocks remote font requests and may use fallback fonts; its layout and controls are the comparison evidence.

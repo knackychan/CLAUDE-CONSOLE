@@ -1,5 +1,8 @@
 # Brainstorm: a super agent over every task, and jobs above tasks (2026-11-08)
 
+> Historical design: [D20's task-orchestrator direction](2026-11-11-task-orchestrators.md) supersedes the
+> global reasoning role as of 2026-11-11. Jobs/worktrees remain separate; no runtime migration is implied.
+
 - Asked by Fred, from a video report on DeepSeek's write-up "Exploring Super-agent Design: Towards a More Autonomous
   Agent System" (2026-11-01): one Router talks to the developer and never executes, isolated Workers run one task each,
   a watchdog checks that each Worker progresses. The video's claim: one person can follow only 3 to 5 agent sessions

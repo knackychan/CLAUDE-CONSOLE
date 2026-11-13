@@ -1,0 +1,102 @@
+Proposed, not approved. Local mockup only.
+
+Latest visual authority: supervision-operator/index.html, per the user's correction.
+Reference SHA-256: 4ad1605ec35973086bd4f36767f0c4737c8cca4a1f3e4ea79552b52cdf6b03a8
+Inspected the supplied user screenshot, operator HTML/CSS and its supplied
+usage-1510-dark.png and usage-375-light.png before revising.
+
+Restored the operator header, persistent shared-usage ribbon, project rail,
+six dense live tiles, expandable inline worker tools and shared footer.
+Copied the operator's exact embedded font and theme tokens locally.
+Kept task ownership, messages, read-only workers and the exact plan 62 ledger.
+Latest user authority changes the earlier overview defaults: live previews are
+visible; running tasks precede decision cards in the All tasks grid.
+
+Inspected the first revised desktop and mobile captures, then fixed tile row
+height so all six cards fit on desktop. Made header metadata denser, retained
+sample Bash output in active tiles, and freed mobile question space by hiding
+optional answer suggestions and the keyboard shortcut hint.
+
+Final visual confirmation inspected:
+- tasks-1510-dark.png and tasks-1510-light.png
+- question-340-dark.png and step-340-light.png
+The final matrix also includes desktop task panels, 900px layouts, 400/340px
+panels, new task/settings/usage, key states and enlarged-text captures.
+An independent reviewer inspected the operator comparison, narrow views and
+900px task view and found no material visual mismatch. Its one functional
+finding, stale hidden-task membership/counts including empty filters, was
+fixed and independently scored resolved.
+
+Actual final evidence: M01-M22 all pass; 96 scenario/theme/viewport rows;
+50 screenshots; no browser page errors, console errors or network requests.
+M01 checks usage, rail, filtering and six-card fit. M16 tests inline preview
+focus, tools and scroll. M17 covers state/count updates with hidden tasks and
+zero matching tiles. Reference and production files remain unchanged.
+
+Follow-up design suggestion is pending, not implemented: show orchestrator
+chat in grid tiles; focus a task to inspect a collapsible worker chat.
+No runtime, provider, persistence or native-window checks were performed.
+
+Latest header-layout correction:
+The user identified cramped headers that reduce readable chat space.
+Replaced stacked route/effort/worker/cost/step lines with three quiet rows:
+project + ID; task title + Details; orchestrator model + status.
+Moved secondary metadata into a native, keyboard-accessible Details overlay.
+The overlay preserves header and chat dimensions; Escape and outside clicks close it.
+
+Measured at 1510x1080: header 123.1875 -> 81.5 px; chat 172.84375 -> 214.53125 px.
+Inspected headers-desktop-dark.png, header-details-desktop-dark.png and
+headers-mobile-light.png during the first pass. Confirmed tasks-1510-light.png,
+header-details-340-dark.png and header-details-340-light.png after verification.
+All default tiles retain their task title, project, ID, orchestrator model and state.
+No unrelated product layout, fixture ownership, messaging or runtime changes.
+
+Independent header review: ship at this component's scope; no material issue found.
+All 22 final checks passed, including header dimensions and non-resizing metadata,
+keyboard access, dismissal, mobile containment and the existing stream checks.
+The final result has no browser/page/network errors. Visual approval remains open.
+
+Visible per-task context and spending:
+Each tile footer now shows Worker ctx and Task total. Inactive work uses Last
+worker ctx; unavailable readings stay explicit. The independent sample context
+readings are copied from the operator reference onto the matching initial step,
+not derived from task spend or cumulative processed tokens. New worker steps
+start with unavailable context; no previous step reading is inherited.
+Task totals use the existing global ledger and include workers and orchestration.
+Renewal updates the visible amount once. Unknown cost is not replaced by zero.
+The compact 81.5px desktop headers and about 214.5px preview area are retained.
+The redundant Following latest label is replaced by context/spend; Jump to latest
+appears above the footer only when the reader scrolls away.
+
+Inspected task-telemetry-desktop-dark.png and task-telemetry-mobile-light.png in
+the first pass. Final confirmation inspected tasks-1510-light.png,
+task-telemetry-mobile-light.png and task-telemetry-unknown-mobile-dark.png.
+Metrics wrap within narrow footers. Independent review: no material issue found
+in this addition. Final regression M01-M22: all pass, including known/unknown
+measurements, exact task totals, renewal, fresh-worker context and stream focus.
+No browser/page/network errors. Reference hash unchanged. No live runtime checks.
+
+Orchestrator-context correction:
+The user clarified that the visible reading must describe the orchestrator.
+Footer now explicitly reads Orch ctx, using task.orchestratorContextTokens.
+Footer, Context view and Details use the same estimate. T-031 changes from
+6.4k to 4.1k on renewal; its 72k worker reading stays separate under Details.
+The remaining per-task sample estimates are documented in review.html;
+unavailable readings remain explicit. Task totals and slim header are retained.
+Confirmed desktop dark and mobile light telemetry screenshots after the change.
+All 22 final checks pass, including distinct owner/worker values and renewal.
+No browser or network errors; reference and production files remain unchanged.
+
+Orchestrator context cell gauge:
+Added the operator reference's familiar 15 cells, 59px wide and 6px tall,
+beside Orch ctx. Partial cell fill tracks the estimate on the inherited sample
+300k handoff scale. No model capacity or runtime limit is asserted.
+Unavailable readings use outlined cells with no numeric meter value.
+Task spending stays visible; its compact label is Task. The header and desktop
+chat dimensions remain unchanged. Gauge and number update together on renewal.
+Inspected context-gauge-desktop-dark.png and context-gauge-mobile-light.png in
+the first pass, then confirmed the same views after restoring reference cell
+size and shortening the spending label to keep the footer compact.
+All22 final checks pass, including 15 cells, correct scale/ARIA values, unknown
+state, renewal fill, responsive overflow, keyboard behavior and retained chat
+space. No browser/network errors; reference fingerprint unchanged.

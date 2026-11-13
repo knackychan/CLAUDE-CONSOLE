@@ -1,0 +1,471 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-12T00:21:31.829Z",
+  "title": "Design System: Console Task Orchestrator — Version B",
+  "extensions": {
+    "colorMeta": {
+      "page": {
+        "role": "neutral",
+        "displayName": "Page",
+        "canonical": "#0b0c0e",
+        "tonalRamp": [
+          "oklch(15.00% 0.0046 264.43)",
+          "oklch(26.43% 0.0046 264.43)",
+          "oklch(37.86% 0.0046 264.43)",
+          "oklch(49.29% 0.0046 264.43)",
+          "oklch(60.71% 0.0046 264.43)",
+          "oklch(72.14% 0.0046 264.43)",
+          "oklch(83.57% 0.0046 264.43)",
+          "oklch(95.00% 0.0046 264.43)"
+        ]
+      },
+      "win": {
+        "role": "neutral",
+        "displayName": "Window",
+        "canonical": "#121315",
+        "tonalRamp": [
+          "oklch(15.00% 0.0044 264.46)",
+          "oklch(26.43% 0.0044 264.46)",
+          "oklch(37.86% 0.0044 264.46)",
+          "oklch(49.29% 0.0044 264.46)",
+          "oklch(60.71% 0.0044 264.46)",
+          "oklch(72.14% 0.0044 264.46)",
+          "oklch(83.57% 0.0044 264.46)",
+          "oklch(95.00% 0.0044 264.46)"
+        ]
+      },
+      "raise": {
+        "role": "neutral",
+        "displayName": "Raised",
+        "canonical": "#1a1c1f",
+        "tonalRamp": [
+          "oklch(15.00% 0.0066 258.36)",
+          "oklch(26.43% 0.0066 258.36)",
+          "oklch(37.86% 0.0066 258.36)",
+          "oklch(49.29% 0.0066 258.36)",
+          "oklch(60.71% 0.0066 258.36)",
+          "oklch(72.14% 0.0066 258.36)",
+          "oklch(83.57% 0.0066 258.36)",
+          "oklch(95.00% 0.0066 258.36)"
+        ]
+      },
+      "off": {
+        "role": "neutral",
+        "displayName": "Off",
+        "canonical": "#24272b",
+        "tonalRamp": [
+          "oklch(15.00% 0.0086 255.58)",
+          "oklch(26.43% 0.0086 255.58)",
+          "oklch(37.86% 0.0086 255.58)",
+          "oklch(49.29% 0.0086 255.58)",
+          "oklch(60.71% 0.0086 255.58)",
+          "oklch(72.14% 0.0086 255.58)",
+          "oklch(83.57% 0.0086 255.58)",
+          "oklch(95.00% 0.0086 255.58)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Reading ink",
+        "canonical": "#ebe8e1",
+        "tonalRamp": [
+          "oklch(15.00% 0.0099 87.47)",
+          "oklch(26.43% 0.0099 87.47)",
+          "oklch(37.86% 0.0099 87.47)",
+          "oklch(49.29% 0.0099 87.47)",
+          "oklch(60.71% 0.0099 87.47)",
+          "oklch(72.14% 0.0099 87.47)",
+          "oklch(83.57% 0.0099 87.47)",
+          "oklch(95.00% 0.0099 87.47)"
+        ]
+      },
+      "mut": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#9a9993",
+        "tonalRamp": [
+          "oklch(15.00% 0.0087 98.94)",
+          "oklch(26.43% 0.0087 98.94)",
+          "oklch(37.86% 0.0087 98.94)",
+          "oklch(49.29% 0.0087 98.94)",
+          "oklch(60.71% 0.0087 98.94)",
+          "oklch(72.14% 0.0087 98.94)",
+          "oklch(83.57% 0.0087 98.94)",
+          "oklch(95.00% 0.0087 98.94)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "canonical": "#26292d",
+        "tonalRamp": [
+          "oklch(15.00% 0.0085 255.57)",
+          "oklch(26.43% 0.0085 255.57)",
+          "oklch(37.86% 0.0085 255.57)",
+          "oklch(49.29% 0.0085 255.57)",
+          "oklch(60.71% 0.0085 255.57)",
+          "oklch(72.14% 0.0085 255.57)",
+          "oklch(83.57% 0.0085 255.57)",
+          "oklch(95.00% 0.0085 255.57)"
+        ]
+      },
+      "you": {
+        "role": "primary",
+        "displayName": "Needs-you orange",
+        "canonical": "#ff8a3d",
+        "tonalRamp": [
+          "oklch(15.00% 0.1668 50.54)",
+          "oklch(26.43% 0.1668 50.54)",
+          "oklch(37.86% 0.1668 50.54)",
+          "oklch(49.29% 0.1668 50.54)",
+          "oklch(60.71% 0.1668 50.54)",
+          "oklch(72.14% 0.1668 50.54)",
+          "oklch(83.57% 0.1668 50.54)",
+          "oklch(95.00% 0.1668 50.54)"
+        ]
+      },
+      "bad": {
+        "role": "secondary",
+        "displayName": "Failure red",
+        "canonical": "#ff5a4e",
+        "tonalRamp": [
+          "oklch(15.00% 0.2026 27.79)",
+          "oklch(26.43% 0.2026 27.79)",
+          "oklch(37.86% 0.2026 27.79)",
+          "oklch(49.29% 0.2026 27.79)",
+          "oklch(60.71% 0.2026 27.79)",
+          "oklch(72.14% 0.2026 27.79)",
+          "oklch(83.57% 0.2026 27.79)",
+          "oklch(95.00% 0.2026 27.79)"
+        ]
+      },
+      "ok": {
+        "role": "secondary",
+        "displayName": "Verified green",
+        "canonical": "#5ed39a",
+        "tonalRamp": [
+          "oklch(15.00% 0.1352 159.66)",
+          "oklch(26.43% 0.1352 159.66)",
+          "oklch(37.86% 0.1352 159.66)",
+          "oklch(49.29% 0.1352 159.66)",
+          "oklch(60.71% 0.1352 159.66)",
+          "oklch(72.14% 0.1352 159.66)",
+          "oklch(83.57% 0.1352 159.66)",
+          "oklch(95.00% 0.1352 159.66)"
+        ]
+      },
+      "page-light": {
+        "role": "neutral",
+        "displayName": "Page — light",
+        "canonical": "#dedcd6",
+        "tonalRamp": [
+          "oklch(15.00% 0.0084 91.49)",
+          "oklch(26.43% 0.0084 91.49)",
+          "oklch(37.86% 0.0084 91.49)",
+          "oklch(49.29% 0.0084 91.49)",
+          "oklch(60.71% 0.0084 91.49)",
+          "oklch(72.14% 0.0084 91.49)",
+          "oklch(83.57% 0.0084 91.49)",
+          "oklch(95.00% 0.0084 91.49)"
+        ]
+      },
+      "win-light": {
+        "role": "neutral",
+        "displayName": "Window — light",
+        "canonical": "#f4f3ef",
+        "tonalRamp": [
+          "oklch(15.00% 0.0054 95.10)",
+          "oklch(26.43% 0.0054 95.10)",
+          "oklch(37.86% 0.0054 95.10)",
+          "oklch(49.29% 0.0054 95.10)",
+          "oklch(60.71% 0.0054 95.10)",
+          "oklch(72.14% 0.0054 95.10)",
+          "oklch(83.57% 0.0054 95.10)",
+          "oklch(95.00% 0.0054 95.10)"
+        ]
+      },
+      "raise-light": {
+        "role": "neutral",
+        "displayName": "Raised — light",
+        "canonical": "#e7e5e0",
+        "tonalRamp": [
+          "oklch(15.00% 0.0071 88.65)",
+          "oklch(26.43% 0.0071 88.65)",
+          "oklch(37.86% 0.0071 88.65)",
+          "oklch(49.29% 0.0071 88.65)",
+          "oklch(60.71% 0.0071 88.65)",
+          "oklch(72.14% 0.0071 88.65)",
+          "oklch(83.57% 0.0071 88.65)",
+          "oklch(95.00% 0.0071 88.65)"
+        ]
+      },
+      "off-light": {
+        "role": "neutral",
+        "displayName": "Off — light",
+        "canonical": "#d6d4ce",
+        "tonalRamp": [
+          "oklch(15.00% 0.0085 91.49)",
+          "oklch(26.43% 0.0085 91.49)",
+          "oklch(37.86% 0.0085 91.49)",
+          "oklch(49.29% 0.0085 91.49)",
+          "oklch(60.71% 0.0085 91.49)",
+          "oklch(72.14% 0.0085 91.49)",
+          "oklch(83.57% 0.0085 91.49)",
+          "oklch(95.00% 0.0085 91.49)"
+        ]
+      },
+      "ink-light": {
+        "role": "neutral",
+        "displayName": "Reading ink — light",
+        "canonical": "#17181b",
+        "tonalRamp": [
+          "oklch(15.00% 0.0061 271.12)",
+          "oklch(26.43% 0.0061 271.12)",
+          "oklch(37.86% 0.0061 271.12)",
+          "oklch(49.29% 0.0061 271.12)",
+          "oklch(60.71% 0.0061 271.12)",
+          "oklch(72.14% 0.0061 271.12)",
+          "oklch(83.57% 0.0061 271.12)",
+          "oklch(95.00% 0.0061 271.12)"
+        ]
+      },
+      "mut-light": {
+        "role": "neutral",
+        "displayName": "Muted — light",
+        "canonical": "#5f5e59",
+        "tonalRamp": [
+          "oklch(15.00% 0.0080 97.48)",
+          "oklch(26.43% 0.0080 97.48)",
+          "oklch(37.86% 0.0080 97.48)",
+          "oklch(49.29% 0.0080 97.48)",
+          "oklch(60.71% 0.0080 97.48)",
+          "oklch(72.14% 0.0080 97.48)",
+          "oklch(83.57% 0.0080 97.48)",
+          "oklch(95.00% 0.0080 97.48)"
+        ]
+      },
+      "line-light": {
+        "role": "neutral",
+        "displayName": "Rule — light",
+        "canonical": "#d2d0ca",
+        "tonalRamp": [
+          "oklch(15.00% 0.0085 91.49)",
+          "oklch(26.43% 0.0085 91.49)",
+          "oklch(37.86% 0.0085 91.49)",
+          "oklch(49.29% 0.0085 91.49)",
+          "oklch(60.71% 0.0085 91.49)",
+          "oklch(72.14% 0.0085 91.49)",
+          "oklch(83.57% 0.0085 91.49)",
+          "oklch(95.00% 0.0085 91.49)"
+        ]
+      },
+      "you-light": {
+        "role": "primary",
+        "displayName": "Needs-you orange — light",
+        "canonical": "#943d00",
+        "tonalRamp": [
+          "oklch(15.00% 0.1318 46.30)",
+          "oklch(26.43% 0.1318 46.30)",
+          "oklch(37.86% 0.1318 46.30)",
+          "oklch(49.29% 0.1318 46.30)",
+          "oklch(60.71% 0.1318 46.30)",
+          "oklch(72.14% 0.1318 46.30)",
+          "oklch(83.57% 0.1318 46.30)",
+          "oklch(95.00% 0.1318 46.30)"
+        ]
+      },
+      "bad-light": {
+        "role": "secondary",
+        "displayName": "Failure red — light",
+        "canonical": "#c0352b",
+        "tonalRamp": [
+          "oklch(15.00% 0.1775 28.60)",
+          "oklch(26.43% 0.1775 28.60)",
+          "oklch(37.86% 0.1775 28.60)",
+          "oklch(49.29% 0.1775 28.60)",
+          "oklch(60.71% 0.1775 28.60)",
+          "oklch(72.14% 0.1775 28.60)",
+          "oklch(83.57% 0.1775 28.60)",
+          "oklch(95.00% 0.1775 28.60)"
+        ]
+      },
+      "ok-light": {
+        "role": "secondary",
+        "displayName": "Verified green — light",
+        "canonical": "#17683f",
+        "tonalRamp": [
+          "oklch(15.00% 0.1011 155.94)",
+          "oklch(26.43% 0.1011 155.94)",
+          "oklch(37.86% 0.1011 155.94)",
+          "oklch(49.29% 0.1011 155.94)",
+          "oklch(60.71% 0.1011 155.94)",
+          "oklch(72.14% 0.1011 155.94)",
+          "oklch(83.57% 0.1011 155.94)",
+          "oklch(95.00% 0.1011 155.94)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Usage figure",
+        "purpose": "Doto accent on shared estimated cost; not task prose."
+      },
+      "headline": {
+        "displayName": "Task heading",
+        "purpose": "Orient the task; compact mobile is 15px."
+      },
+      "title": {
+        "displayName": "Orchestrator heading",
+        "purpose": "Desktop owner panel; redundant mobile heading is hidden."
+      },
+      "body": {
+        "displayName": "Conversation body",
+        "purpose": "Readable task guidance and orchestrator prose."
+      },
+      "label": {
+        "displayName": "Source and measurement",
+        "purpose": "Mono speaker, source and usage metadata."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "press",
+        "value": "translateY(1px)",
+        "purpose": "Enabled on button active state only when reduced motion is not requested."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation: none; transition: none; scroll-behavior: auto",
+        "purpose": "Global reduced-motion preference in B."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "frame-condensed",
+        "value": "1180px"
+      },
+      {
+        "name": "project-drawer",
+        "value": "1050px"
+      },
+      {
+        "name": "peer-panels",
+        "value": "760px"
+      },
+      {
+        "name": "review-chrome-viewport",
+        "value": "600px"
+      },
+      {
+        "name": "compact-height-viewport",
+        "value": "760px"
+      }
+    ],
+    "layoutNotes": "The first three breakpoints are max-width container queries on the app window. Review chrome is a max-width viewport query; compact height is a max-height viewport query. Shared overview also has 1100px and 900px container rules.",
+    "depthNotes": "No drop-shadow vocabulary. Native dialog backdrop is #0009; the drawer uses an overlay stacking level and muted edge.",
+    "colorRampNotes": "Tonal ramps are synthesized OKLCH inspection metadata, not additional shipped CSS palette tokens."
+  },
+  "components": [
+    {
+      "name": "Ink action",
+      "kind": "button",
+      "refersTo": "button-ink",
+      "description": "Strong neutral action, including the composer Send control.",
+      "html": "<button class=\"ds-btn ds-ink\">Send</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;font:600 11px/1.5 var(--ui,\"Segoe UI\",sans-serif);min-height:28px;padding:4px 12px;border:1px solid var(--line,#26292d);border-radius:4px;cursor:pointer;background:transparent;color:var(--ink,#ebe8e1)}.ds-btn:hover{background:var(--raise,#1a1c1f);border-color:var(--mut,#9a9993)}.ds-btn:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:2px}.ds-btn:disabled{opacity:.6;cursor:default}.ds-ink{background:var(--ink,#ebe8e1);color:var(--win,#121315);border-color:var(--ink,#ebe8e1)}"
+    },
+    {
+      "name": "Quiet action",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Secondary or utility action with visible border and focus.",
+      "html": "<button class=\"ds-btn\">Review task</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;font:600 11px/1.5 var(--ui,\"Segoe UI\",sans-serif);min-height:28px;padding:4px 12px;border:1px solid var(--line,#26292d);border-radius:4px;cursor:pointer;background:transparent;color:var(--ink,#ebe8e1)}.ds-btn:hover{background:var(--raise,#1a1c1f);border-color:var(--mut,#9a9993)}.ds-btn:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:2px}.ds-btn:disabled{opacity:.6;cursor:default}"
+    },
+    {
+      "name": "Task state",
+      "kind": "chip",
+      "refersTo": "task-badge",
+      "description": "Readable state paired with the recurring square cell.",
+      "html": "<span class=\"ds-badge\"><span class=\"ds-cell\" aria-hidden=\"true\"></span>Needs your reply</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 7px;border:1px solid color-mix(in srgb,var(--you,#ff8a3d) 45%,var(--line,#26292d));border-radius:4px;color:var(--you,#ff8a3d);font:10px/1.6 var(--mono,\"Cascadia Mono\",monospace)}.ds-cell{width:7px;height:7px;border-radius:1px;background:currentColor}"
+    },
+    {
+      "name": "Current project task",
+      "kind": "nav",
+      "refersTo": "project-task-current",
+      "description": "A selected task in the project navigator with source metadata.",
+      "html": "<button class=\"ds-project\" aria-current=\"true\"><span class=\"ds-project-title\">Cache product thumbnails</span><span class=\"ds-project-meta\">T-031 · Worker running</span></button>",
+      "css": ".ds-project{display:block;width:100%;text-align:left;padding:8px 7px;border:1px solid var(--line,#26292d);border-radius:4px;background:var(--raise,#1a1c1f);color:var(--ink,#ebe8e1);cursor:pointer}.ds-project-title{display:block;font:12px/1.5 var(--ui,\"Segoe UI\",sans-serif)}.ds-project-meta{display:block;margin-top:3px;font:9px/1.7 var(--mono,\"Cascadia Mono\",monospace);color:var(--mut,#9a9993)}.ds-project:hover{background:var(--raise,#1a1c1f)}.ds-project:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:2px}"
+    },
+    {
+      "name": "Orchestrator composer",
+      "kind": "input",
+      "refersTo": "composer-field",
+      "description": "The sole task recipient, with the compact textarea and adjacent Send action.",
+      "html": "<form class=\"ds-composer\"><label class=\"ds-recipient\" for=\"ds-guidance\">To: T-031 orchestrator</label><textarea id=\"ds-guidance\" class=\"ds-field\" aria-label=\"Guidance to task orchestrator\"></textarea><button type=\"button\" class=\"ds-btn ds-send\">Send</button></form>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;font:600 11px/1.5 var(--ui,\"Segoe UI\",sans-serif);min-height:28px;padding:4px 12px;border:1px solid var(--line,#26292d);border-radius:4px;cursor:pointer;background:transparent;color:var(--ink,#ebe8e1)}.ds-btn:hover{background:var(--raise,#1a1c1f);border-color:var(--mut,#9a9993)}.ds-btn:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:2px}.ds-btn:disabled{opacity:.6;cursor:default}.ds-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 7px;padding:7px 13px;background:var(--win,#121315);color:var(--ink,#ebe8e1);border-top:1px solid var(--line,#26292d)}.ds-recipient{grid-column:1/-1;font:600 10px/1.5 var(--ui,\"Segoe UI\",sans-serif)}.ds-field{min-width:0;min-height:42px;height:42px;padding:8px 10px;resize:vertical;border:1px solid var(--line,#26292d);border-radius:6px;background:var(--win,#121315);color:var(--ink,#ebe8e1);font:12px/1.5 var(--ui,\"Segoe UI\",sans-serif)}.ds-field:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:2px}.ds-send{background:var(--ink,#ebe8e1);color:var(--win,#121315);border-color:var(--ink,#ebe8e1);min-height:42px}"
+    },
+    {
+      "name": "Evidence disclosure",
+      "kind": "card",
+      "description": "Flat source evidence that expands in place.",
+      "html": "<details class=\"ds-evidence\"><summary>Read selected evidence</summary><pre class=\"ds-evidence-body\">Illustrative verification output. No repository read.</pre></details>",
+      "css": ".ds-evidence{border:1px solid var(--line,#26292d);border-radius:7px;background:var(--win,#121315);color:var(--ink,#ebe8e1);font:12px/1.5 var(--ui,\"Segoe UI\",sans-serif);overflow:hidden}.ds-evidence summary{cursor:pointer;min-height:32px;padding:10px 12px}.ds-evidence summary:hover{background:var(--raise,#1a1c1f)}.ds-evidence summary:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:-2px}.ds-evidence-body{padding:8px 12px 12px;margin:0;color:var(--mut,#9a9993);font:11px/1.6 var(--mono,\"Cascadia Mono\",monospace);white-space:pre-wrap}"
+    },
+    {
+      "name": "Evidence tab selection",
+      "kind": "nav",
+      "description": "Read-only evidence navigation uses an underline instead of a filled card.",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"Evidence\"><button class=\"ds-tab\" aria-pressed=\"true\">Overview</button><button class=\"ds-tab\" aria-pressed=\"false\">Step chat</button><button class=\"ds-tab\" aria-pressed=\"false\">Context</button></nav>",
+      "css": ".ds-tabs{display:flex;gap:20px;padding:0 18px;border-bottom:1px solid var(--line,#26292d)}.ds-tab{border:0;border-bottom:2px solid transparent;background:none;color:var(--mut,#9a9993);font:600 12px/1.5 var(--ui,\"Segoe UI\",sans-serif);min-height:39px;padding:9px 0;cursor:pointer}.ds-tab[aria-pressed=true]{border-bottom-color:var(--ink,#ebe8e1);color:var(--ink,#ebe8e1)}.ds-tab:hover{color:var(--ink,#ebe8e1)}.ds-tab:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:2px}"
+    },
+    {
+      "name": "Decision dock",
+      "kind": "custom",
+      "description": "The current decision is separate from transcript chronology and persists during evidence inspection.",
+      "html": "<section class=\"ds-decision\"><div class=\"ds-decision-tag\">Your decision · step 03</div><div><h2 class=\"ds-decision-title\">Should the imported notes be appended or replaced?</h2><p class=\"ds-decision-copy\">No notes changed. Choose an answer or write your own.</p></div><div class=\"ds-decision-actions\"><button class=\"ds-btn\">Append notes</button><button class=\"ds-btn\">Replace notes</button></div></section>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;font:600 11px/1.5 var(--ui,\"Segoe UI\",sans-serif);min-height:28px;padding:4px 12px;border:1px solid var(--line,#26292d);border-radius:4px;cursor:pointer;background:transparent;color:var(--ink,#ebe8e1)}.ds-btn:hover{background:var(--raise,#1a1c1f);border-color:var(--mut,#9a9993)}.ds-btn:focus-visible{outline:2px solid var(--ink,#ebe8e1);outline-offset:2px}.ds-btn:disabled{opacity:.6;cursor:default}.ds-decision{padding:11px 18px 12px;border-top:1px solid var(--line,#26292d);border-bottom:1px solid var(--line,#26292d);background:color-mix(in srgb,var(--you,#ff8a3d) 4%,var(--win,#121315));color:var(--ink,#ebe8e1);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 18px;align-items:center}.ds-decision-tag{grid-column:1/-1;font:10px/1.5 var(--mono,\"Cascadia Mono\",monospace);color:var(--you,#ff8a3d)}.ds-decision-title{font:500 13px/1.5 var(--ui,\"Segoe UI\",sans-serif);margin:0}.ds-decision-copy{font:11px/1.6 var(--ui,\"Segoe UI\",sans-serif);color:var(--mut,#9a9993);margin:3px 0 0}.ds-decision-actions{display:flex;gap:6px;flex-wrap:wrap}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Console workbench",
+    "overview": "A dense operator workspace uses quiet surfaces, thin rules and small square cells to keep task identity, conversation, evidence and decisions distinct. The project navigator and persistent decision dock extend the existing task workspace. Reading type stays ordinary; Doto gives shared usage figures their established instrument-like accent.\n\nThis document describes the finished local Version B artifact, not the production application or a new global product identity. Its authority is the implemented source plus the local surface brief; product constraints remain in CLAUDE.md, plans/62-task-orchestrators.md and its 03-mockup-contract.md. All sample tasks and measurements are fictional.",
+    "keyCharacteristics": [
+      "Dark and light themes share the same semantic surface and status roles.",
+      "Conversation and evidence scroll independently; the decision and action dock stays outside those scroll regions.",
+      "One task has one assigned orchestrator and one composer recipient.",
+      "Small cells, mono measurements and restrained Doto figures carry the Console identity."
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Pair Rule",
+        "body": "Theme changes replace each role in place; preserve the role rather than copying a dark-theme color into a new component.",
+        "section": "colors"
+      },
+      {
+        "name": "The Reading First Rule",
+        "body": "Keep Doto on the established usage accent and ancillary page display; task prose and task headings use the UI stack.",
+        "section": "typography"
+      },
+      {
+        "name": "The Quiet Depth Rule",
+        "body": "Use surface role and border changes for workbench depth; keep the transcript and evidence flat.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do preserve one composer addressed to the assigned task orchestrator.",
+      "Do keep current decisions accessible while switching evidence views.",
+      "Do pair status color with readable state text and preserve visible keyboard focus.",
+      "Do use the adjacent shared assets and local B overrides together when reviewing this variant."
+    ],
+    "donts": [
+      "Don't infer acceptance from worker exit or replace current verification with stale evidence.",
+      "Don't enable a worker route without proven availability.",
+      "Don't present simulated receipts, files, estimates or utility previews as live runtime results.",
+      "Don't treat this local artifact or the two resolved review findings as production approval."
+    ]
+  }
+}

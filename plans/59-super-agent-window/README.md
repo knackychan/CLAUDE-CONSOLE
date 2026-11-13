@@ -1,5 +1,9 @@
 # Plan 59: The super agent window. The row, its page, cards answered in place and one box, reading plan 58's data. Guided implementation plan
 
+> Direction update 2026-11-11: BRAINSTORM D20 and [plan 62](../62-task-orchestrators.md) supersede this plan's
+> global agent page/conversation. Reuse the task overview and existing actions with a conversation per task.
+> The earlier lock and build instructions below do not authorize building the superseded global role.
+
 > Design: [../../design/brainstorm/2026-11-08-super-agent.md](../../design/brainstorm/2026-11-08-super-agent.md),
 > slice 2 of section 9 (sections 5, 6, 9, 11). Locked target (Fred, 2026-11-08):
 > [../../design/rework/locked/super-agent.html](../../design/rework/locked/super-agent.html); its "Design read" and

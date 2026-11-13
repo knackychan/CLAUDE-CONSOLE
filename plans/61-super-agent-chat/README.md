@@ -1,5 +1,9 @@
 # Plan 61: Super agent acts and chat. Fred talks; the super agent presses the card actions. Guided implementation plan
 
+> Direction update 2026-11-11: BRAINSTORM D20 and [plan 62](../62-task-orchestrators.md) supersede the global
+> chat and cross-task tool scope below. Reuse the gated action/audit design for one fixed-model orchestrator
+> per task, selected from connected CLIs and counted in shared global usage. Re-scope before implementation.
+
 > Design: [../../design/brainstorm/2026-11-09-super-agent-chat.md](../../design/brainstorm/2026-11-09-super-agent-chat.md)
 > (sections 0 to 14; C1 to C5 decided by Fred 2026-11-09). BRAINSTORM D19 and 7.7. Slice 3 of
 > [../../design/brainstorm/2026-11-08-super-agent.md](../../design/brainstorm/2026-11-08-super-agent.md) section 9.

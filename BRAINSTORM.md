@@ -38,6 +38,10 @@ passes, not a daemon or a resident agent.
 Amended 2026-11-09 (D19): the super agent's chat runs one `claude -p` per message on one resumed session, reset at
 `gauge_yellow_tokens`; no process stays alive between Fred's messages.
 
+Amended 2026-11-11 (D20, planned): each task has its own orchestrator and bounded file context. The assigned
+model stays fixed for that task. Global usage, limits and the overview remain shared service responsibilities.
+This replaces the global model role in D18/D19; implementation is tracked in plan 62.
+
 ## 3. Decisions (Fred, 2026-10-10)
 
 | # | Question | Decision |
@@ -61,6 +65,7 @@ Amended 2026-11-09 (D19): the super agent's chat runs one `claude -p` per messag
 | D17 | Jobs (2026-11-08) | A job is a goal split into tasks, in stages: the tasks of a stage run side by side, stages run in order, one index advanced on the hub tick (not a task graph, not a scheduler). From a typed goal (the planner splits it, Fred confirms) or a sub-plan folder (plan 53, absorbed). Parallel writers in one repo run in git worktrees behind a per-project switch, merged on Fred's click. `design/brainstorm/2026-11-08-super-agent.md` section 4 |
 | D18 | Super agent (2026-11-08) | One role over every job and task: bounded passes on events over a code-built digest, a notes file and Fred's standing orders. It filters, ranks and recommends; at `auto` it also acts within caps; what needs Fred and what is always shown to him are code. Reverses orchestration D-1 (no orchestrator agent) and plan 44's "no cross-task decisions"; still no resident session. One box follows the selection. Same file, sections 3 and 6; section 7.7 |
 | D19 | Super agent chat and acts (2026-11-09) | The cards stay as Fred's input and the super agent also presses their actions. A chat on its page, and a chip on every page, acts on Fred's word at any level through Console's own MCP tools (`POST /api/mcp`, one `claude -p` per message, one resumed session); plan 58's tool-free passes may act at `auto` only, within caps. One act layer in code checks every act against the card's served actions and gates; a code list (Fable, Delete, Drop, Finish, Stop, Accept step result, Run anyway, level changes, observed chats) stays Fred's and becomes a one-click Confirm card. Amends D18 (the chat keeps one resumed session) and widens slice 3's acts. `design/brainstorm/2026-11-09-super-agent-chat.md`; section 7.7 |
+| D20 | Task orchestrators (2026-11-11) | One orchestrator per task, with tools to assign worker steps and check the goal. Keep its model for the whole task; rotate assignments across eligible models on connected CLIs for new tasks only. Global orchestrator effort default; every orchestrator/worker turn contributes to existing global model usage. Task folders, bounded checkpoints and selected evidence isolate context. Supersedes D18/D19's shared reasoning role. [Design](design/brainstorm/2026-11-11-task-orchestrators.md), [plan 62](plans/62-task-orchestrators.md); not implemented. |
 
 ## 4. Architecture
 
@@ -319,6 +324,11 @@ Plan 52 (decided 2026-10-20, built 2026-11-07): the chain is the run loop; the s
 
 ### 7.7 Super agent and jobs (decided by Fred, 2026-11-08)
 
+**Superseded direction, 2026-11-11:** D20 replaces this section's global agent and global conversation with
+one fixed-model orchestrator per task. The task overview is assembled by code; model usage remains global.
+See [the task-orchestrator design](design/brainstorm/2026-11-11-task-orchestrators.md) and plan 62. The text
+below records the previous direction. Jobs/worktrees remain separate; this does not claim a runtime migration.
+
 Design: `design/brainstorm/2026-11-08-super-agent.md` (D17, D18); the mock is made in a later session. Fred stops being
 the router and the filter between tasks. The super agent row replaces the Needs you pin, and its page is the home
 pane: one queue of what needs Fred, ranked, batched and recommended by the super agent, each card answered in place
@@ -330,6 +340,18 @@ slices: super agent v1 with no acts (plan 58), the window, acts at `auto`, jobs,
 2026-11-09 (D19, `design/brainstorm/2026-11-09-super-agent-chat.md`): slice 3 becomes acts and chat. Fred talks to the
 super agent in a thread under the cards (and through a chip on any page); it presses card actions on his word and, in
 `auto` projects, on its own; the cards stay as his input.
+
+### 7.8 Task orchestrators (direction requested by Fred, 2026-11-11)
+
+Each task owns an orchestrator conversation and memory. The orchestrator chooses worker steps and checks
+acceptance evidence; the service applies existing action gates, limits and recovery. Assignment uses eligible
+models on connected CLIs and existing global usage balancing, then retains the selected model for the task's
+lifetime. A global effort default applies to new orchestrators. Fresh sessions reload the same task checkpoint
+on the same model; worker transcripts are not inherited. Orchestrator and worker usage both count in shared
+model totals. The global view shows task status and Needs you without a cross-project model conversation.
+
+Contract and context strategy: [design](design/brainstorm/2026-11-11-task-orchestrators.md). Implementation:
+[plan 62](plans/62-task-orchestrators.md). This is planned behavior; the current backend has not been changed.
 
 ## 8. Error handling
 
@@ -421,3 +443,6 @@ super agent in a thread under the cards (and through a chip on any page); it pre
 - 2026-11-09 - Super agent chat and acts with Fred (D19, `design/brainstorm/2026-11-09-super-agent-chat.md`), from
   his Artcoustic and sticker-generator assistants: a chat with Console MCP tools that presses card actions on his
   word, background acts at `auto`, one act layer in code; the cards stay. The plan is next.
+- 2026-11-11 - Fred replaces the shared super agent with one orchestrator per task (D20). He corrected rotation
+  to keep the same model throughout a task; new assignments depend on connected CLIs, and all orchestrator usage
+  counts toward global model usage. File-based bounded context design and plan 62 recorded; no runtime change.

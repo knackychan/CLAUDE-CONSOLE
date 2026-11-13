@@ -1,0 +1,119 @@
+{
+  "timestamp_utc": "2026-11-12T00:17:44.787548+00:00",
+  "entry": "index.html",
+  "checks": [
+    {
+      "check": "B01 \u00b7 Project dock, pinned Needs you, single composer and shared accounting",
+      "status": "pass"
+    },
+    {
+      "check": "B02 \u00b7 Draft isolation and worker inspection never retargets messages",
+      "status": "pass"
+    },
+    {
+      "check": "B03 \u00b7 Answer, orchestrator receipt and worker delivery remain separate",
+      "status": "pass"
+    },
+    {
+      "check": "B04 \u00b7 Proposal approval, rejection and fresh verification gates",
+      "status": "pass"
+    },
+    {
+      "check": "B05 \u00b7 Proposed plan editing, first assignment and explicit plan confirmation",
+      "status": "pass"
+    },
+    {
+      "check": "B06 \u00b7 Scarce-model hold, worker-only alternative and bounded failure recovery",
+      "status": "pass"
+    },
+    {
+      "check": "B07 \u00b7 Ready, accepted, explicit reopening and stale-evidence refusal",
+      "status": "pass"
+    },
+    {
+      "check": "B08 \u00b7 Pause keeps the worker; Stop ends it and retains history",
+      "status": "pass"
+    },
+    {
+      "check": "B09 \u00b7 Chat, Received, Handoff, Files and previous/next step inspection",
+      "status": "pass"
+    },
+    {
+      "check": "B10 \u00b7 Autonomy does not approve pending decisions; effort defaults are prospective",
+      "status": "pass"
+    },
+    {
+      "check": "B11 \u00b7 Observed session is read-only; a fork starts as a separate task draft",
+      "status": "pass"
+    },
+    {
+      "check": "B12 \u00b7 Utility previews, protected deletion and retained usage ledger",
+      "status": "pass"
+    },
+    {
+      "check": "B13 \u00b7 Context renewal retains owner and counts once; unknown usage stays unknown",
+      "status": "pass"
+    },
+    {
+      "check": "B14 \u00b7 Stream updates preserve draft, focus, expanded tools and artifact view",
+      "status": "pass"
+    },
+    {
+      "check": "B15 \u00b7 Keyboard tabs, step escape, dialog focus return and reduced motion",
+      "status": "pass"
+    },
+    {
+      "check": "B19 \u00b7 Project drawer opens, switches tasks and closes with Escape",
+      "status": "pass"
+    },
+    {
+      "check": "B16 \u00b7 All scenarios; both themes at 320/340/375/400/414/768/900/1510; short window",
+      "status": "pass"
+    },
+    {
+      "check": "B17 \u00b7 State and page evidence captures",
+      "status": "pass"
+    },
+    {
+      "check": "B18 \u00b7 No browser errors or network requests",
+      "status": "pass"
+    }
+  ],
+  "browser_errors": [],
+  "network_requests": [],
+  "screenshots": [
+    "screenshots\\workspace-desktop-dark.png",
+    "screenshots\\question-340-dark.png",
+    "screenshots\\step-340-dark.png",
+    "screenshots\\question-340-light.png",
+    "screenshots\\step-340-light.png",
+    "screenshots\\question-375-dark.png",
+    "screenshots\\step-375-dark.png",
+    "screenshots\\question-375-light.png",
+    "screenshots\\step-375-light.png",
+    "screenshots\\question-900-dark.png",
+    "screenshots\\step-900-dark.png",
+    "screenshots\\question-900-light.png",
+    "screenshots\\step-900-light.png",
+    "screenshots\\question-1510-dark.png",
+    "screenshots\\step-1510-dark.png",
+    "screenshots\\question-1510-light.png",
+    "screenshots\\step-1510-light.png",
+    "screenshots\\planned-desktop-dark.png",
+    "screenshots\\plan-approval-desktop-dark.png",
+    "screenshots\\model-approval-desktop-dark.png",
+    "screenshots\\failed-twice-desktop-dark.png",
+    "screenshots\\proposal-desktop-dark.png",
+    "screenshots\\ready-desktop-dark.png",
+    "screenshots\\observed-desktop-dark.png",
+    "screenshots\\workspace-desktop-light.png",
+    "screenshots\\tasks-desktop-dark.png",
+    "screenshots\\context-desktop-dark.png"
+  ],
+  "source_sha256": {
+    "app.js": "0524ece76301c4acff223689ee4622dfb8fcb5226b02de2d77ad2787c78fe5bd",
+    "style.css": "5d8e266a12c2a6f537c2a12998f267584ce44c4e4fc2df3533ebf271aef5bb60",
+    "version-b\\version-b.js": "c14da456e54f2b716c46ba043737e2055445fc574a43466e2d5ed93d5ceceea5",
+    "version-b\\version-b.css": "e6c1204ac3a4783f344972224f2fe48b7c2fbf23f18cc7ad9de9250b57d1435b"
+  }
+}

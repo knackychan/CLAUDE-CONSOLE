@@ -56,6 +56,15 @@ POST /api/task/supervisor/replay ({task, wake}, accounting only, never dispatche
 --supervisor-replay TASK WAKE`), POST /api/task with `supervised: true`, and the `supervisor` fields of GET
 /api/task and /api/usage. Contract: plans/44-supervisor/README.md.
 
+## Active architecture direction (2026-11-11, not implemented)
+
+Read BRAINSTORM D20, `design/brainstorm/2026-11-11-task-orchestrators.md` and `plans/62-task-orchestrators.md`
+before extending orchestration. Fred replaced plans 58/59/61's global model role with one orchestrator per task.
+Keep the same assigned model throughout a task; new assignments use eligible models on connected CLIs and
+shared global usage. Orchestrator turns count toward that same usage. Use a global effort default and bounded
+task-file context instead of worker transcripts. The existing supervisor contract above still describes
+shipped behavior; do not run legacy and new decision owners together on one task during migration.
+
 ## Commands
 
 ```bat

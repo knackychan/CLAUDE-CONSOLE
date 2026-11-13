@@ -1,0 +1,20 @@
+{
+  "checks": [
+    "Usage totals reconcile by model and task; global spend survives project filtering; unknown cost/context and retry readings stay explicit; breakdown opens from the keyboard.",
+    "Project filters and scoped counts work; all-project decisions stay reachable; global chat streams alongside the grid without mixing drafts.",
+    "Three simultaneous chat panes; independent follow/scroll, pause, filters and return-to-grid state work.",
+    "Task answers, step guidance and global drafts stay separate; browser Back retains drafts.",
+    "Completed and future steps are read-only.",
+    "Answer, dismiss/revisit, approve and accept update the queue and global summary.",
+    "Search, empty-state recovery, observed read-only chat and Reset sample work.",
+    "User-authored text is escaped in conversations.",
+    "Explicit stream playback preserves drafts, keyboard focus and expanded evidence.",
+    "Dark theme: primary/secondary/status text contrast >= 4.5:1; layouts fit 320\u20131920 px.",
+    "Light theme: primary/secondary/status text contrast >= 4.5:1; layouts fit 320\u20131920 px.",
+    "The mobile chat panel preserves the hidden grid reading position and its global draft.",
+    "Streams play together by default; reduced motion starts paused; the finite sample can be replayed.",
+    "No JavaScript errors or HTTP requests; reduced viewport and 130% text fit without horizontal overflow."
+  ],
+  "javascript_errors": [],
+  "network_requests": []
+}

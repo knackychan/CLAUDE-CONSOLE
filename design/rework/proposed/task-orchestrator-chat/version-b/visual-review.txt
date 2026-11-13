@@ -1,0 +1,62 @@
+Proposed, not approved. Local interactive design only.
+
+Visual authority: the user-requested combination of 52-b-projects-dock.html
+and the existing task-orchestrator-chat design. Preserve Console identity;
+do not change fixed task ownership, shared accounting or message recipients.
+
+Inspected references:
+- Parent screenshots/overview-1510-dark.png.
+- screenshots/reference-52b.png, a browser capture of the earlier HTML.
+  Remote font requests were blocked for that reference capture; fallback
+  font metrics may differ. The original source file was not changed.
+
+Inspected Version B desktop, 900px and mobile captures in both themes,
+including prompt/brief, timeline, step navigation, failure and plan approval.
+contact-sheet.png is a labelled QA overview of captured states, not an asset
+for the product. Every screenshot is an actual local browser capture of
+authored fictional fixtures; none is an AI-generated product image.
+
+Independent finish review required these material fixes:
+1. Mobile chrome left only about 40px for conversation at 340x760.
+   Compact header/owner information and an inline composer now leave
+   166.75px at 340x760 and 200.75px at 375x812 for the question scenario.
+   Sole task composer and the persistent decision dock remain visible.
+2. Fable was presented as a primary confirmation even though unavailable.
+   The dock now states that Fable is unavailable, offers its precise reason,
+   and makes the eligible Opus worker the primary action. Owner unchanged.
+
+Final review captures:
+- screenshots/review-desktop-dark.png
+- screenshots/review-desktop-light.png
+- screenshots/review-mobile-dark.png (340x760)
+- screenshots/review-mobile-light.png (375x812)
+- screenshots/review-step-900-light.png
+- screenshots/review-failed-desktop.png
+- screenshots/review-model-hold-desktop.png
+
+The independent verdict scored both requested fixes resolved, with no
+visible regressions from that batch. Its ship disposition covers those
+scored fixes, not whole-surface approval. Runtime was not independently run.
+The reviewer checked the supplied text/state tokens in both themes and
+reported contrast of at least 4.99:1 for muted, attention and error text.
+
+Actual final browser run: 19/19 checks passed. All 29 review scenarios;
+both themes at 320,340,375,400,414,768,900,1510px, plus 340x760. Additional
+checks cover task drafts, staged delivery, approvals, acceptance, worker
+inspection, context renewal, accounting, keyboard/focus, streams, project
+drawer, unavailable actions and protected deletion. No browser errors or
+network requests. Local href/src targets also checked: no missing links.
+See check-results.json and verify.py for executable evidence.
+
+Detector ran once in degraded regex mode: optional HTML parser dependencies
+were unavailable. It returned no regex findings but did not measure computed
+contrast or selector matches. Do not treat that as a full accessibility audit.
+
+Process-only gap recorded by the reviewer: no PRODUCT.md or separate quality
+bar card exists. CLAUDE.md and plan 62 remain canonical product authority;
+the supplied incumbent designs are the visual authority. Scoped DESIGN.md
+documents this variant without changing the production or locked design.
+
+Boundaries: in-memory samples; reload resets changes. Desktop launches,
+real file/diff reads, handoff export/linking, provider capability and live
+recovery require runtime integration. Version B shares adjacent A assets.
